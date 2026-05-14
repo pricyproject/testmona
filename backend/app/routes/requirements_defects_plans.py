@@ -317,7 +317,18 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", test_plan.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_test_plan = create_test_plan(db=db, test_plan=test_plan)
+        # Validate milestone belongs to the same project
+        if test_plan.milestone_id is not None:
+            from ..models import Milestone as _MS
+            ms = db.query(_MS).filter(_MS.id == test_plan.milestone_id).first()
+            if ms is None:
+                raise HTTPException(status_code=404, detail="Milestone not found")
+            if ms.project_id != test_plan.project_id:
+                raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
+
+        # Always set created_by from the authenticated user (security: ignore client-supplied value)
+        test_plan_data = test_plan.model_copy(update={"created_by": current_user.id})
+        db_test_plan = create_test_plan(db=db, test_plan=test_plan_data)
         
         # Create audit trail
         try:
@@ -343,17 +354,46 @@ def register_requirements_defects_plans_routes(app):
     def read_test_plans(
         project_id: Optional[int] = None,
         milestone_id: Optional[int] = None,
-        skip: int = 0,
-        limit: int = 100,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = "created_at",
+        sort_order: Optional[str] = "desc",
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        test_plans = get_test_plans(db, project_id=project_id, skip=skip, limit=limit)
-        if milestone_id is not None:
-            test_plans = [tp for tp in test_plans if tp.milestone_id == milestone_id]
+        test_plans = get_test_plans(
+            db,
+            project_id=project_id,
+            milestone_id=milestone_id,
+            status=status,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            skip=skip,
+            limit=limit,
+        )
+
+        from ..models import TestRun as TR, Milestone as MS
+        from sqlalchemy import func as sqlfunc
+
+        # Build test_run counts in a single query for performance
+        plan_ids = [tp.id for tp in test_plans]
+        if plan_ids:
+            counts_q = (
+                db.query(TR.test_plan_id, sqlfunc.count(TR.id).label("cnt"))
+                .filter(TR.test_plan_id.in_(plan_ids))
+                .group_by(TR.test_plan_id)
+                .all()
+            )
+            run_counts = {row.test_plan_id: row.cnt for row in counts_q}
+        else:
+            run_counts = {}
+
         return [
             {
                 "id": tp.id,
@@ -361,6 +401,7 @@ def register_requirements_defects_plans_routes(app):
                 "description": tp.description,
                 "project_id": tp.project_id,
                 "milestone_id": tp.milestone_id,
+                "milestone_title": tp.milestone.title if tp.milestone else None,
                 "created_by": tp.created_by,
                 "status": tp.status.value if tp.status else None,
                 "target_start_date": tp.target_start_date,
@@ -374,8 +415,9 @@ def register_requirements_defects_plans_routes(app):
                 "entry_criteria": tp.entry_criteria,
                 "exit_criteria": tp.exit_criteria,
                 "risks_assumptions": tp.risks_assumptions,
+                "test_run_count": run_counts.get(tp.id, 0),
                 "created_at": tp.created_at,
-                "updated_at": tp.updated_at
+                "updated_at": tp.updated_at,
             }
             for tp in test_plans
         ]
@@ -393,12 +435,22 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        from ..models import TestRun as TR
+        from sqlalchemy import func as sqlfunc
+
+        run_count = (
+            db.query(sqlfunc.count(TR.id))
+            .filter(TR.test_plan_id == test_plan.id)
+            .scalar()
+        ) or 0
+
         return {
             "id": test_plan.id,
             "title": test_plan.title,
             "description": test_plan.description,
             "project_id": test_plan.project_id,
             "milestone_id": test_plan.milestone_id,
+            "milestone_title": test_plan.milestone.title if test_plan.milestone else None,
             "created_by": test_plan.created_by,
             "status": test_plan.status.value if test_plan.status else None,
             "target_start_date": test_plan.target_start_date,
@@ -412,8 +464,9 @@ def register_requirements_defects_plans_routes(app):
             "entry_criteria": test_plan.entry_criteria,
             "exit_criteria": test_plan.exit_criteria,
             "risks_assumptions": test_plan.risks_assumptions,
+            "test_run_count": run_count,
             "created_at": test_plan.created_at,
-            "updated_at": test_plan.updated_at
+            "updated_at": test_plan.updated_at,
         }
 
     @app.put("/test-plans/{test_plan_id}", response_model=schemas.TestPlan)
@@ -429,6 +482,15 @@ def register_requirements_defects_plans_routes(app):
 
         if not rbac.has_permission(current_user, "write", db_test_plan.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # Validate milestone belongs to the same project
+        if test_plan.milestone_id is not None:
+            from ..models import Milestone as _MS
+            ms = db.query(_MS).filter(_MS.id == test_plan.milestone_id).first()
+            if ms is None:
+                raise HTTPException(status_code=404, detail="Milestone not found")
+            if ms.project_id != db_test_plan.project_id:
+                raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
 
         db_test_plan = update_test_plan(db, test_plan_id=test_plan_id, test_plan=test_plan)
         
@@ -469,7 +531,11 @@ def register_requirements_defects_plans_routes(app):
         plan_id = db_test_plan.id
         plan_title = db_test_plan.title
         project_id = db_test_plan.project_id
-        
+
+        # Nullify test_plan_id on linked test runs so they are not orphaned
+        from ..models import TestRun as _TR
+        db.query(_TR).filter(_TR.test_plan_id == plan_id).update({"test_plan_id": None})
+
         delete_test_plan(db, test_plan_id=test_plan_id)
         
         # Create audit trail

@@ -183,8 +183,8 @@ export function TestRunPieChart({ data, title, onChartClick }: TestRunChartProps
 
 export function TestRunBarChart({ data, title, onChartClick }: { data: SectionData[]; title: string; onChartClick?: (data: any) => void }) {
   const { t } = useTranslation();
-  const visibleData = [...data].sort((a, b) => b.total - a.total).slice(0, 8);
-  const largestSection = visibleData[0];
+  const allSections = [...data].sort((a, b) => b.total - a.total);
+  const visibleData = allSections.slice(0, 8);
 
   const handleBarClick = (entry: any) => {
     if (onChartClick && entry?.name) {
@@ -198,11 +198,13 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle className="text-base text-slate-950 dark:text-slate-50">{title}</CardTitle>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t('stackedOutcomesBySection')}</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {allSections.length > 8 ? t('showingTopOf', { shown: 8, total: allSections.length }) : t('stackedOutcomesBySection')}
+            </p>
           </div>
-          {largestSection && (
+          {allSections.length > 0 && (
             <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300">
-              {t('sectionsCount', { count: visibleData.length })}
+              {t('sectionsCount', { count: allSections.length })}
             </Badge>
           )}
         </div>
@@ -212,10 +214,10 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
           <EmptyChart />
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={visibleData} margin={{ top: 12, right: 8, left: -16, bottom: 0 }} barCategoryGap={18}>
                 <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} interval={0} tickFormatter={(value) => String(value).slice(0, 12)} />
+                <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} interval={0} tickFormatter={(value) => String(value).slice(0, 10)} />
                 <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
                 <Tooltip content={<ChartTooltip />} />
                 <Bar dataKey="pass" stackId="results" fill={COLORS.pass} name={t('passed')} radius={[8, 8, 0, 0]} onClick={handleBarClick} cursor="pointer" />
@@ -225,12 +227,24 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
                 <Bar dataKey="not_tested" stackId="results" fill={COLORS.not_tested} name={t('notTested')} radius={[8, 8, 0, 0]} onClick={handleBarClick} cursor="pointer" />
               </BarChart>
             </ResponsiveContainer>
-            <div className="grid gap-2">
-              {visibleData.slice(0, 3).map((section) => (
-                <div key={section.name} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs dark:bg-slate-900/60">
-                  <span className="truncate font-medium text-slate-700 dark:text-slate-200">{section.name}</span>
+
+            {/* All sections scrollable list */}
+            <div className="max-h-[180px] overflow-y-auto space-y-1 pr-1">
+              {allSections.map((section) => (
+                <div key={section.name} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-1.5 text-xs dark:bg-slate-900/60">
+                  <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200" title={section.name}>
+                    {section.name}
+                  </span>
+                  {/* Mini stacked progress bar */}
+                  <div className="flex h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                    {section.pass > 0 && <div style={{ width: `${(section.pass / section.total) * 100}%`, backgroundColor: COLORS.pass }} />}
+                    {section.fail > 0 && <div style={{ width: `${(section.fail / section.total) * 100}%`, backgroundColor: COLORS.fail }} />}
+                    {section.block > 0 && <div style={{ width: `${(section.block / section.total) * 100}%`, backgroundColor: COLORS.block }} />}
+                    {section.skip > 0 && <div style={{ width: `${(section.skip / section.total) * 100}%`, backgroundColor: COLORS.skip }} />}
+                    {section.not_tested > 0 && <div style={{ width: `${(section.not_tested / section.total) * 100}%`, backgroundColor: COLORS.not_tested }} />}
+                  </div>
                   <span className="shrink-0 text-slate-500 dark:text-slate-400">
-                    {t('sectionPassRateSummary', { passRate: section.passRate, total: section.total })}
+                    {section.passRate}% · {section.total}
                   </span>
                 </div>
               ))}

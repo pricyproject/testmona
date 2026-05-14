@@ -19,7 +19,8 @@ import {
   Sparkles,
   Database,
   Layers,
-  Wrench
+  Wrench,
+  ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
@@ -31,7 +32,6 @@ interface NavigationItem {
   name: string;
   href: string;
   icon: any;
-  subsections?: NavigationItem[];
   group?: string;
   disabled?: boolean;
   disabledReason?: string;
@@ -132,10 +132,16 @@ export function Sidebar({
         ]
       },
       {
+        name: t('planning'),
+        items: [
+          { name: t('milestones'), href: `/projects/${projectId}/milestones`, icon: Flag },
+          { name: t('testPlans'), href: `/projects/${projectId}/test-plans`, icon: ClipboardList },
+        ]
+      },
+      {
         name: t('management'),
         items: [
           { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug },
-          { name: t('milestones'), href: `/projects/${projectId}/milestones`, icon: Flag },
           { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3 },
         ]
       },
@@ -223,16 +229,21 @@ export function Sidebar({
           }`}>
             {navigation.map((group, groupIndex) => (
               <div key={group.name}>
-                {/* Group Items with inline grouping */}
+                {/* Group Header */}
+                {!showCollapsed && (
+                  <div className={`px-3 pt-2 pb-1 ${isRTL ? 'text-right' : 'text-left'}`}>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                      {group.name}
+                    </span>
+                  </div>
+                )}
+
+                {/* Group Items */}
                 <div className="space-y-1">
-                  {group.items.map((item, itemIndex) => {
+                  {group.items.map((item) => {
                     const Icon = item.icon;
-                    const hasSubsections = item.subsections && item.subsections.length > 0;
                     const isItemActive = isActive(item.href);
-                    const isSubsectionActive = item.subsections?.some(sub => isActive(sub.href));
-                    const isFirstInGroup = itemIndex === 0;
-                    const isLastInGroup = itemIndex === group.items.length - 1;
-                    
+
                     return (
                       <div key={item.name}>
                         {item.disabled ? (
@@ -241,8 +252,6 @@ export function Sidebar({
                               group flex items-center py-2.5 text-sm font-medium rounded-lg transition-all duration-300 ease-in-out relative overflow-hidden
                               text-gray-400 cursor-not-allowed opacity-60
                               ${showCollapsed ? 'justify-center px-1' : 'px-3'}
-                              ${!showCollapsed && isFirstInGroup ? 'mt-2' : ''}
-                              ${!showCollapsed && isLastInGroup && groupIndex < navigation.length - 1 ? 'mb-2' : ''}
                             `}
                             title={showCollapsed ? item.disabledReason || item.name : item.disabledReason}
                           >
@@ -252,25 +261,17 @@ export function Sidebar({
                             }`}>
                               {item.name}
                             </span>
-                            {!showCollapsed && isFirstInGroup && (
-                              <span className={`${isRTL ? 'mr-auto' : 'ml-auto'} flex items-center text-xs text-gray-400 dark:text-gray-500 font-medium`}>
-                                <span className="mx-2 text-gray-300 dark:text-gray-600">|</span>
-                                {group.name}
-                              </span>
-                            )}
                           </div>
                         ) : (
                           <Link
                             to={item.href}
                             className={`
                               group flex items-center py-2.5 text-sm font-medium rounded-lg transition-all duration-300 ease-in-out relative overflow-hidden
-                              ${isItemActive || isSubsectionActive
+                              ${isItemActive
                                 ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700 shadow-sm dark:bg-blue-900/20 dark:text-blue-400'
                                 : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
                               }
                               ${showCollapsed ? 'justify-center px-1' : 'px-3'}
-                              ${!showCollapsed && isFirstInGroup ? 'mt-2' : ''}
-                              ${!showCollapsed && isLastInGroup && groupIndex < navigation.length - 1 ? 'mb-2' : ''}
                             `}
                             title={showCollapsed ? item.name : undefined}
                           >
@@ -280,43 +281,7 @@ export function Sidebar({
                             }`}>
                               {item.name}
                             </span>
-                            {!showCollapsed && isFirstInGroup && (
-                              <span className={`${isRTL ? 'mr-auto' : 'ml-auto'} flex items-center text-xs text-gray-400 dark:text-gray-500 font-medium`}>
-                                <span className="mx-2 text-gray-300 dark:text-gray-600">|</span>
-                                {group.name}
-                              </span>
-                            )}
                           </Link>
-                        )}
-                        
-                        {/* Render subsections if they exist and sidebar is not collapsed */}
-                        {hasSubsections && !showCollapsed && (
-                          <div className={`${isRTL ? 'mr-8' : 'ml-8'} mt-1 space-y-1`}>
-                            {item.subsections.map((subsection) => {
-                              const SubIcon = subsection.icon;
-                              return (
-                                <Link
-                                  key={subsection.name}
-                                  to={subsection.href}
-                                  className={`
-                                    group flex items-center py-2 text-sm font-medium rounded-md transition-all duration-200 relative overflow-hidden
-                                    ${isActive(subsection.href)
-                                      ? 'bg-blue-100 text-blue-600 border-r-2 border-blue-600 shadow-sm dark:bg-blue-900/30 dark:text-blue-400'
-                                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700 hover:shadow-sm dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200'
-                                    }
-                                    before:absolute before:inset-0 before:bg-gradient-to-r before:from-transparent before:via-white/5 before:to-transparent
-                                    before:translate-x-[-100%] hover:before:translate-x-[100%] before:transition-transform before:duration-500
-                                  `}
-                                  title={subsection.name}
-                                >
-                                  <SubIcon className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 transition-all duration-200 group-hover:scale-110 flex-shrink-0`} />
-                                  <span className="transition-all duration-200 whitespace-nowrap">
-                                    {subsection.name}
-                                  </span>
-                                </Link>
-                              );
-                            })}
-                          </div>
                         )}
                       </div>
                     );

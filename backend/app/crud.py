@@ -1218,10 +1218,42 @@ def get_test_plan(db: Session, test_plan_id: int):
     return db.query(TestPlan).filter(TestPlan.id == test_plan_id).first()
 
 
-def get_test_plans(db: Session, project_id: int = None, skip: int = 0, limit: int = 100):
-    query = db.query(TestPlan)
+def get_test_plans(
+    db: Session,
+    project_id: int = None,
+    milestone_id: int = None,
+    status: str = None,
+    search: str = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    skip: int = 0,
+    limit: int = 100,
+):
+    from .models import TestStatus as TS
+
+    query = db.query(TestPlan).options(joinedload(TestPlan.milestone))
     if project_id:
         query = query.filter(TestPlan.project_id == project_id)
+    if milestone_id is not None:
+        query = query.filter(TestPlan.milestone_id == milestone_id)
+    if status:
+        try:
+            query = query.filter(TestPlan.status == TS(status))
+        except ValueError:
+            pass
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            or_(
+                TestPlan.title.ilike(term),
+                TestPlan.description.ilike(term),
+                TestPlan.test_objectives.ilike(term),
+            )
+        )
+    _allowed_sorts = {"title", "created_at", "updated_at", "status", "target_start_date", "target_end_date"}
+    col_name = sort_by if sort_by in _allowed_sorts else "created_at"
+    col = getattr(TestPlan, col_name)
+    query = query.order_by(col.asc() if sort_order == "asc" else col.desc())
     return query.offset(skip).limit(limit).all()
 
 

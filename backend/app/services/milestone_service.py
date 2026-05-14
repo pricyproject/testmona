@@ -64,13 +64,14 @@ def _derive_health(
     critical_defects: int,
     failed_results: int,
     blocked_results: int,
+    blocked_plans: int,
     progress: int,
 ) -> str:
     if milestone.status == MilestoneStatus.CANCELLED:
         return "cancelled"
     if milestone.status == MilestoneStatus.COMPLETED or progress >= 100:
         return "completed"
-    if critical_defects > 0 or blocked_results > 0:
+    if critical_defects > 0 or blocked_results > 0 or blocked_plans > 0:
         return "blocked"
     if _is_overdue(milestone) or failed_results > 0 or open_defects >= 5:
         return "at_risk"
@@ -132,6 +133,8 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
     requirements: List[Requirement] = db.query(Requirement).filter(Requirement.project_id == milestone.project_id).all()
     verified_requirements = len([requirement for requirement in requirements if requirement.status == RequirementStatus.VERIFIED])
 
+    blocked_plans = len([plan for plan in test_plans if _normalize_status(plan.status) == "blocked"])
+
     execution_progress = _percentage(executed_results, total_results) if total_results else int(milestone.progress_percentage or 0)
     pass_rate = _percentage(passed_results, executed_results) if executed_results else 0
 
@@ -157,6 +160,7 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
         critical_defects=critical_defects,
         failed_results=failed_results,
         blocked_results=blocked_results,
+        blocked_plans=blocked_plans,
         progress=execution_progress,
     )
     milestone.linked_test_plans = [

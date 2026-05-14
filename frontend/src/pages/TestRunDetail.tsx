@@ -7,13 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { 
-  ArrowLeft, 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  Clock, 
-  User, 
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Clock,
+  User,
   Calendar,
   BarChart3,
   Download,
@@ -26,8 +26,18 @@ import {
   Edit,
   Save,
   X,
-  RotateCcw
+  RotateCcw,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  Columns3,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { TestRunPieChart, TestRunBarChart, TestRunTrendChart } from '@/components/ui/chart';
 import { useTranslation } from '@/hooks/useTranslation';
 import { testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
@@ -72,6 +82,22 @@ export function TestRunDetail() {
   const [searchTestCases, setSearchTestCases] = useState('');
   const [sections, setSections] = useState<any[]>([]);
   const [isResettingTime, setIsResettingTime] = useState(false);
+
+  // Column sorting
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // Column visibility (optional columns only; checkbox/testCase/status/actions are always visible)
+  type OptionalCol = 'section' | 'priority' | 'executedBy' | 'executedAt' | 'duration' | 'comments';
+  const [hiddenCols, setHiddenCols] = useState<Set<OptionalCol>>(new Set());
+  const isVisible = (col: OptionalCol) => !hiddenCols.has(col);
+  const toggleCol = (col: OptionalCol) => {
+    setHiddenCols(prev => {
+      const next = new Set(prev);
+      next.has(col) ? next.delete(col) : next.add(col);
+      return next;
+    });
+  };
 
   // Prepare chart data
   const prepareChartData = () => {
@@ -459,6 +485,17 @@ export function TestRunDetail() {
     return variants[priority] || 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
   };
 
+  const PRIORITY_ORDER: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+
+  const handleSort = (col: string) => {
+    if (sortColumn === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(col);
+      setSortDir('asc');
+    }
+  };
+
   const filteredResults = testResults.filter(result => {
     const resultStatus = normalizeRunStatus(result.status) || 'not_tested';
     const selectedStatus = normalizeRunStatus(filter);
@@ -482,6 +519,33 @@ export function TestRunDetail() {
       String(field || '').toLowerCase().includes(normalizedQuery)
     );
   });
+
+  const sortedFilteredResults = sortColumn
+    ? [...filteredResults].sort((a, b) => {
+        const dir = sortDir === 'asc' ? 1 : -1;
+        switch (sortColumn) {
+          case 'testCase':
+            return dir * (a.test_case?.title || '').localeCompare(b.test_case?.title || '');
+          case 'section':
+            return dir * (a.test_case?.section?.name || '').localeCompare(b.test_case?.section?.name || '');
+          case 'priority': {
+            const pa = PRIORITY_ORDER[a.test_case?.priority || 'medium'] ?? 1;
+            const pb = PRIORITY_ORDER[b.test_case?.priority || 'medium'] ?? 1;
+            return dir * (pa - pb);
+          }
+          case 'status':
+            return dir * (a.status || '').localeCompare(b.status || '');
+          case 'executedBy':
+            return dir * (a.executor?.full_name || a.executor?.username || '').localeCompare(b.executor?.full_name || b.executor?.username || '');
+          case 'executedAt':
+            return dir * (new Date(a.executed_at || 0).getTime() - new Date(b.executed_at || 0).getTime());
+          case 'duration':
+            return dir * ((Number(a.execution_time) || 0) - (Number(b.execution_time) || 0));
+          default:
+            return 0;
+        }
+      })
+    : filteredResults;
 
   const statusCounts = testResults.reduce((acc: any, result) => {
     const normalizedStatus = normalizeRunStatus(result.status) || 'not_tested';
@@ -1046,19 +1110,47 @@ export function TestRunDetail() {
                   className={isRTL ? 'pr-9' : 'pl-9'}
                 />
               </div>
-              <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('allTestsCount', { count: totalTests })}</SelectItem>
-                  <SelectItem value="pass">{t('passedCount', { count: passedTests })}</SelectItem>
-                  <SelectItem value="fail">{t('failedCount', { count: failedTests })}</SelectItem>
-                  <SelectItem value="block">{t('blockedCount', { count: blockedTests })}</SelectItem>
-                  <SelectItem value="skip">{t('skippedCount', { count: skippedTests })}</SelectItem>
-                  <SelectItem value="not_tested">{t('notTestedCount', { count: notTestedTests })}</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2">
+                <Select value={filter} onValueChange={setFilter}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('allTestsCount', { count: totalTests })}</SelectItem>
+                    <SelectItem value="pass">{t('passedCount', { count: passedTests })}</SelectItem>
+                    <SelectItem value="fail">{t('failedCount', { count: failedTests })}</SelectItem>
+                    <SelectItem value="block">{t('blockedCount', { count: blockedTests })}</SelectItem>
+                    <SelectItem value="skip">{t('skippedCount', { count: skippedTests })}</SelectItem>
+                    <SelectItem value="not_tested">{t('notTestedCount', { count: notTestedTests })}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="shrink-0 gap-1.5 px-3">
+                      <Columns3 className="h-4 w-4" />
+                      <span className="hidden sm:inline">{t('columns')}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    {([
+                      { key: 'section', label: t('section') },
+                      { key: 'priority', label: t('priority') },
+                      { key: 'executedBy', label: t('executedBy') },
+                      { key: 'executedAt', label: t('executedAt') },
+                      { key: 'duration', label: t('duration') },
+                      { key: 'comments', label: t('comments') },
+                    ] as { key: OptionalCol; label: string }[]).map(({ key, label }) => (
+                      <DropdownMenuCheckboxItem
+                        key={key}
+                        checked={isVisible(key)}
+                        onCheckedChange={() => toggleCol(key)}
+                      >
+                        {label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -1087,19 +1179,40 @@ export function TestRunDetail() {
                         aria-label="Select all visible test results"
                       />
                     </TableHead>
-                    <TableHead className="min-w-[280px]">{t('testCase')}</TableHead>
-                    <TableHead className="min-w-[150px]">{t('section')}</TableHead>
-                    <TableHead>{t('priority')}</TableHead>
-                    <TableHead className="min-w-[170px]">{t('status')}</TableHead>
-                    <TableHead className="min-w-[180px]">{t('executedBy')}</TableHead>
-                    <TableHead className="min-w-[170px]">{t('executedAt')}</TableHead>
-                    <TableHead>{t('duration')}</TableHead>
-                    <TableHead className="min-w-[220px]">{t('comments')}</TableHead>
-                    <TableHead className="min-w-[180px] text-right">{t('actions')}</TableHead>
+                    {/* Sortable helper rendered inline */}
+                    {(() => {
+                      const SortIcon = ({ col }: { col: string }) => {
+                        if (sortColumn !== col) return <ChevronsUpDown className="h-3 w-3 text-slate-300 shrink-0" />;
+                        return sortDir === 'asc'
+                          ? <ChevronUp className="h-3 w-3 shrink-0" />
+                          : <ChevronDown className="h-3 w-3 shrink-0" />;
+                      };
+                      const SortHead = ({ col, className, children }: { col: string; className?: string; children: React.ReactNode }) => (
+                        <TableHead
+                          className={`cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-800 ${className || ''}`}
+                          onClick={() => handleSort(col)}
+                        >
+                          <div className="flex items-center gap-1">{children}<SortIcon col={col} /></div>
+                        </TableHead>
+                      );
+                      return (
+                        <>
+                          <SortHead col="testCase" className="min-w-[260px]">{t('testCase')}</SortHead>
+                          {isVisible('section') && <SortHead col="section" className="min-w-[130px]">{t('section')}</SortHead>}
+                          {isVisible('priority') && <SortHead col="priority">{t('priority')}</SortHead>}
+                          <SortHead col="status" className="min-w-[150px]">{t('status')}</SortHead>
+                          {isVisible('executedBy') && <SortHead col="executedBy" className="min-w-[160px]">{t('executedBy')}</SortHead>}
+                          {isVisible('executedAt') && <SortHead col="executedAt" className="min-w-[150px]">{t('executedAt')}</SortHead>}
+                          {isVisible('duration') && <SortHead col="duration">{t('duration')}</SortHead>}
+                          {isVisible('comments') && <TableHead className="min-w-[180px]">{t('comments')}</TableHead>}
+                          <TableHead className="min-w-[160px] text-right">{t('actions')}</TableHead>
+                        </>
+                      );
+                    })()}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredResults.map((result) => {
+                  {sortedFilteredResults.map((result) => {
                     const isEditing = editingResult === result.id;
                     const testCaseTitle = result.test_case?.title || t('unknownTestCase');
                     const sectionName = result.test_case?.section?.name || t('noSection');
@@ -1136,16 +1249,20 @@ export function TestRunDetail() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="align-top">
-                          <span className="inline-flex max-w-[170px] items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300" title={sectionName}>
-                            <span className="truncate">{sectionName}</span>
-                          </span>
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <Badge className={getPriorityBadge(result.test_case?.priority || 'medium')}>
-                            {result.test_case?.priority || 'medium'}
-                          </Badge>
-                        </TableCell>
+                        {isVisible('section') && (
+                          <TableCell className="align-top">
+                            <span className="inline-flex max-w-[150px] items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300" title={sectionName}>
+                              <span className="truncate">{sectionName}</span>
+                            </span>
+                          </TableCell>
+                        )}
+                        {isVisible('priority') && (
+                          <TableCell className="align-top">
+                            <Badge className={getPriorityBadge(result.test_case?.priority || 'medium')}>
+                              {result.test_case?.priority || 'medium'}
+                            </Badge>
+                          </TableCell>
+                        )}
                         <TableCell className="align-top">
                           {isEditing ? (
                             <Select
@@ -1172,49 +1289,57 @@ export function TestRunDetail() {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="align-top">
-                          {isEditing ? (
-                            <Select
-                              value={editValues[result.id]?.executed_by || result.executed_by?.toString() || ''}
-                              onValueChange={(value) => handleEdit(result.id, 'executed_by', value)}
-                            >
-                              <SelectTrigger className="w-44">
-                                <SelectValue placeholder={t('selectUser')} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {users.map((user) => (
-                                  <SelectItem key={user.id} value={user.id.toString()}>
-                                    {user.full_name || user.username}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                              <User className="h-4 w-4 shrink-0 text-slate-400" />
-                              <span className="max-w-[150px] truncate" title={executedBy}>{executedBy}</span>
+                        {isVisible('executedBy') && (
+                          <TableCell className="align-top">
+                            {isEditing ? (
+                              <Select
+                                value={editValues[result.id]?.executed_by || result.executed_by?.toString() || ''}
+                                onValueChange={(value) => handleEdit(result.id, 'executed_by', value)}
+                              >
+                                <SelectTrigger className="w-40">
+                                  <SelectValue placeholder={t('selectUser')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {users.map((user) => (
+                                    <SelectItem key={user.id} value={user.id.toString()}>
+                                      {user.full_name || user.username}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                                <User className="h-4 w-4 shrink-0 text-slate-400" />
+                                <span className="max-w-[130px] truncate" title={executedBy}>{executedBy}</span>
+                              </div>
+                            )}
+                          </TableCell>
+                        )}
+                        {isVisible('executedAt') && (
+                          <TableCell className="align-top">
+                            <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                              <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
+                              <span className="max-w-[130px] truncate" title={result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notExecuted')}>
+                                {result.executed_at ? new Date(result.executed_at).toLocaleDateString() : t('notExecuted')}
+                              </span>
                             </div>
-                          )}
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                            <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
-                            <span className="max-w-[160px] truncate" title={result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notExecuted')}>
-                              {result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notExecuted')}
+                          </TableCell>
+                        )}
+                        {isVisible('duration') && (
+                          <TableCell className="align-top">
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                              {formatDurationSeconds(result.execution_time, t)}
                             </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                            {formatDurationSeconds(result.execution_time, t)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <div className="flex max-w-[240px] items-start gap-2 text-sm text-slate-600 dark:text-slate-300" title={result.comments || ''}>
-                            <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                            <span className="line-clamp-2">{result.comments || '-'}</span>
-                          </div>
-                        </TableCell>
+                          </TableCell>
+                        )}
+                        {isVisible('comments') && (
+                          <TableCell className="align-top">
+                            <div className="flex max-w-[200px] items-start gap-2 text-sm text-slate-600 dark:text-slate-300" title={result.comments || ''}>
+                              <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                              <span className="line-clamp-2">{result.comments || '-'}</span>
+                            </div>
+                          </TableCell>
+                        )}
                         <TableCell className="align-top text-right">
                           <div className="flex justify-end gap-2">
                             <Button

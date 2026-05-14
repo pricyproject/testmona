@@ -885,9 +885,24 @@ export const enumsAPI = {
 
 // Test Plans API
 export const testPlansAPI = {
-  getAll: async (projectId?: number, skip = 0, limit = 100) => {
-    const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
+  getAll: async (
+    projectId?: number,
+    options: {
+      milestoneId?: number;
+      status?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: string;
+      skip?: number;
+      limit?: number;
+    } = {}
+  ) => {
+    const { milestoneId, status, search, sortBy = 'created_at', sortOrder = 'desc', skip = 0, limit = 100 } = options;
+    const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString(), sort_by: sortBy, sort_order: sortOrder });
     if (projectId) params.append('project_id', projectId.toString());
+    if (milestoneId) params.append('milestone_id', milestoneId.toString());
+    if (status) params.append('status', status);
+    if (search) params.append('search', search);
     const response = await api.get(`/test-plans?${params}`);
     return response.data;
   },

@@ -2195,12 +2195,43 @@ class TestPlanBase(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['status']:
                     data[key] = html.escape(value)
         return data
+
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError('Title cannot be empty')
+        if len(stripped) > 255:
+            raise ValueError('Title cannot exceed 255 characters')
+        return stripped
+
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 1000:
+            raise ValueError('Description cannot exceed 1000 characters')
+        return v
+
+    @field_validator('test_objectives', 'scope_inclusions', 'scope_exclusions',
+                     'test_environment', 'entry_criteria', 'exit_criteria', 'risks_assumptions')
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 2000:
+            raise ValueError('Field cannot exceed 2000 characters')
+        return v
+
+    @model_validator(mode='after')
+    def validate_date_range(self) -> 'TestPlanBase':
+        if self.target_start_date and self.target_end_date:
+            if self.target_end_date < self.target_start_date:
+                raise ValueError('target_end_date must be on or after target_start_date')
+        return self
 
 
 class TestPlanCreate(TestPlanBase):
@@ -2228,12 +2259,45 @@ class TestPlanUpdate(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['status']:
                     data[key] = html.escape(value)
         return data
+
+    @field_validator('title')
+    @classmethod
+    def validate_title(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError('Title cannot be empty')
+            if len(stripped) > 255:
+                raise ValueError('Title cannot exceed 255 characters')
+            return stripped
+        return v
+
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 1000:
+            raise ValueError('Description cannot exceed 1000 characters')
+        return v
+
+    @field_validator('test_objectives', 'scope_inclusions', 'scope_exclusions',
+                     'test_environment', 'entry_criteria', 'exit_criteria', 'risks_assumptions')
+    @classmethod
+    def validate_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 2000:
+            raise ValueError('Field cannot exceed 2000 characters')
+        return v
+
+    @model_validator(mode='after')
+    def validate_date_range(self) -> 'TestPlanUpdate':
+        if self.target_start_date and self.target_end_date:
+            if self.target_end_date < self.target_start_date:
+                raise ValueError('target_end_date must be on or after target_start_date')
+        return self
 
 
 class TestPlan(TestPlanBase):

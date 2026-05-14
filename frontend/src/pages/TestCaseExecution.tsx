@@ -41,7 +41,9 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  Link
+  Link,
+  PlayCircle,
+  Pause,
 } from 'lucide-react';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
@@ -147,7 +149,7 @@ export function TestCaseExecution() {
   };
 
   useEffect(() => {
-    if (!executionStartedAt || isPaused || executionState === 'completed' || executionState === 'paused') return;
+    if (!executionStartedAt || isPaused || executionState === 'idle' || executionState === 'completed' || executionState === 'paused') return;
 
     let secondsSinceLastSync = 0;
     const intervalId = window.setInterval(() => {
@@ -396,7 +398,8 @@ export function TestCaseExecution() {
             setExecutionState('completed');
             setIsPaused(true);
           } else {
-            setExecutionState('running');
+            // No stored execution state — don't auto-start; user must click Start
+            setExecutionState('idle');
             setIsPaused(false);
           }
           
@@ -417,8 +420,7 @@ export function TestCaseExecution() {
           setExecutionStatus('pending');
           setExecutionNotes('');
           setAssignee('');
-          await ensureExecutionTimerStarted();
-          setExecutionState('running');
+          setExecutionState('idle');
           setIsPaused(false);
         }
       } finally {
@@ -918,6 +920,14 @@ export function TestCaseExecution() {
   };
 
   // Pause/Resume functionality
+  const handleStartTimer = () => {
+    const now = new Date().toISOString();
+    setExecutionStartedAt(now);
+    setExecutionStartedAtRef(now);
+    setExecutionState('running');
+    setIsPaused(false);
+  };
+
   const handlePauseExecution = async () => {
     if (!testRunId || !testCaseId) return;
     
@@ -933,8 +943,9 @@ export function TestCaseExecution() {
       }
       
       const result = existingResults[0];
-      
-      if (isPaused) {
+      const isCurrentlyPaused = executionState === 'paused';
+
+      if (isCurrentlyPaused) {
         // Resume
         const resumeResponse = await fetch(`${API_BASE_URL}/test-results/${result.id}/resume`, {
           method: 'PUT',
@@ -943,37 +954,27 @@ export function TestCaseExecution() {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
-        
+
         if (resumeResponse.ok) {
-          // Set recently paused flag to prevent sync interference
           setIsRecentlyPaused(true);
-          setTimeout(() => setIsRecentlyPaused(false), 5000); // Reset after 5 seconds
-          
-          // Backend handles pause duration calculation, just update UI state
+          setTimeout(() => setIsRecentlyPaused(false), 5000);
+
           setIsPaused(false);
           setPausedAt(null);
           setExecutionState('running');
-          
-          // Refresh data to get updated pause duration from backend
+
           const refreshedResults = await testResultsAPI.getAll(
-            parseInt(testRunId || '0'), 
+            parseInt(testRunId || '0'),
             parseInt(testCaseId || '0')
           );
           if (refreshedResults.length > 0) {
-            const result = refreshedResults[0];
-            const totalTime = result.execution_time || 0;
-            const manualAdjustment = result.manual_time_adjustment || 0;
-            setElapsedSeconds(totalTime);
-            setManualTimeAdjustment(manualAdjustment);
-            // Update totalPausedTime from backend to stay in sync
-            setTotalPausedTime(result.total_paused_time || 0);
+            const r = refreshedResults[0];
+            setElapsedSeconds(r.execution_time || 0);
+            setManualTimeAdjustment(r.manual_time_adjustment || 0);
+            setTotalPausedTime(r.total_paused_time || 0);
           }
-          
-          toast({
-            title: 'Execution Resumed',
-            description: 'Test execution has been resumed',
-            variant: 'success',
-          });
+
+          toast({ title: 'Execution Resumed', description: 'Test execution has been resumed', variant: 'success' });
         }
       } else {
         // Pause
@@ -984,34 +985,28 @@ export function TestCaseExecution() {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
         });
-        
+
         if (pauseResponse.ok) {
-          // Set recently paused flag to prevent sync interference
           setIsRecentlyPaused(true);
-          setTimeout(() => setIsRecentlyPaused(false), 5000); // Reset after 5 seconds
-          
-          // Refresh data to get updated timing from backend
+          setTimeout(() => setIsRecentlyPaused(false), 5000);
+
           const refreshedResults = await testResultsAPI.getAll(
-            parseInt(testRunId || '0'), 
+            parseInt(testRunId || '0'),
             parseInt(testCaseId || '0')
           );
           if (refreshedResults.length > 0) {
-            const result = refreshedResults[0];
-            setPausedAt(result.paused_at || new Date().toISOString());
-            setExecutionState('paused');
-            // Update timing fields to stay in sync with backend
-            const totalTime = result.execution_time || 0;
-            const manualAdjustment = result.manual_time_adjustment || 0;
-            setElapsedSeconds(totalTime);
-            setManualTimeAdjustment(manualAdjustment);
-            setTotalPausedTime(result.total_paused_time || 0);
+            const r = refreshedResults[0];
+            setPausedAt(r.paused_at || new Date().toISOString());
+            setElapsedSeconds(r.execution_time || 0);
+            setManualTimeAdjustment(r.manual_time_adjustment || 0);
+            setTotalPausedTime(r.total_paused_time || 0);
           }
-          
-          toast({
-            title: 'Execution Paused',
-            description: 'Test execution has been paused',
-            variant: 'success',
-          });
+
+          // Set both in lockstep so they are always consistent
+          setExecutionState('paused');
+          setIsPaused(true);
+
+          toast({ title: 'Execution Paused', description: 'Test execution has been paused', variant: 'success' });
         }
       }
     } catch (error) {
@@ -1135,14 +1130,15 @@ export function TestCaseExecution() {
       // Reset time for individual test result
       await testResultsAPI.resetTime(currentResults[0].id);
       
-      // Reset local state
+      // Reset local state — go back to idle so user must explicitly restart
       setElapsedSeconds(0);
       setTotalPausedTime(0);
       setPausedAt(null);
       setManualTimeAdjustment(0);
-      const now = new Date().toISOString();
-      setExecutionStartedAt(now);
-      setExecutionStartedAtRef(now);
+      setExecutionStartedAt(null);
+      setExecutionStartedAtRef(null);
+      setExecutionState('idle');
+      setIsPaused(false);
       setShowResetTimerDialog(false);
       
       toast({
@@ -1151,26 +1147,7 @@ export function TestCaseExecution() {
         variant: 'success',
       });
       
-      // Refresh execution data to get updated time from backend
-      const refreshedResults = await testResultsAPI.getAll(
-        parseInt(testRunId || '0'), 
-        parseInt(testCaseId || '0')
-      );
-      
-      if (refreshedResults.length > 0) {
-        const result = refreshedResults[0];
-        // Update local state with backend data
-        // Don't overwrite executionStartedAt if it was reset to None
-        if (result.execution_started_at) {
-          setExecutionStartedAt(result.execution_started_at);
-          setExecutionStartedAtRef(result.execution_started_at);
-        }
-        // Keep the current executionStartedAt (now) since backend has None
-        setElapsedSeconds(0);
-        setManualTimeAdjustment(0);
-        setTotalPausedTime(0);
-        setPausedAt(null);
-      }
+      // Timer is now idle — don't re-apply any start time from backend
     } catch (error) {
       console.error('Failed to reset test result time:', error);
       toast({
@@ -1522,26 +1499,37 @@ export function TestCaseExecution() {
                 <p className="mt-1 text-xs text-cyan-700/80 dark:text-cyan-200/80">
                   {t('executionStartedLabel')}: {executionStartedAt ? new Date(executionStartedAt).toLocaleString() : t('nA')}
                 </p>
-                
+
                 {/* Timer Controls */}
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handlePauseExecution}
-                    disabled={executionState === 'completed'}
-                    className="h-8 text-xs"
-                  >
-                    {isPaused || executionState === 'paused' ? (
-                      <><CheckCircle className="h-3 w-3 mr-1" /> Resume</>
-                    ) : (
-                      <><AlertTriangle className="h-3 w-3 mr-1" /> Pause</>
-                    )}
-                  </Button>
+                  {executionState === 'idle' ? (
+                    <Button
+                      size="sm"
+                      onClick={handleStartTimer}
+                      className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      <PlayCircle className="h-3 w-3 mr-1" /> Start
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePauseExecution}
+                      disabled={executionState === 'completed'}
+                      className="h-8 text-xs"
+                    >
+                      {executionState === 'paused' ? (
+                        <><PlayCircle className="h-3 w-3 mr-1" /> Resume</>
+                      ) : (
+                        <><Pause className="h-3 w-3 mr-1" /> Pause</>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setShowManualTimeDialog(true)}
+                    disabled={executionState === 'idle'}
                     className="h-8 text-xs"
                   >
                     <Clock className="h-3 w-3 mr-1" />
@@ -1551,26 +1539,27 @@ export function TestCaseExecution() {
                     variant="outline"
                     size="sm"
                     onClick={handleResetTimer}
+                    disabled={executionState === 'idle'}
                     className="h-8 text-xs"
                   >
                     <ArrowLeft className="h-3 w-3 mr-1 rotate-180" />
                     Reset
                   </Button>
                 </div>
-                
+
                 {/* Status Indicator */}
                 <div className="mt-2 flex items-center gap-2">
                   <div className={`h-2 w-2 rounded-full ${
-                    executionState === 'running' ? 'bg-green-500' :
-                    executionState === 'paused' ? 'bg-yellow-500' :
+                    executionState === 'running' ? 'animate-pulse bg-green-500' :
+                    executionState === 'paused'  ? 'bg-yellow-500' :
                     executionState === 'completed' ? 'bg-blue-500' :
-                    'bg-gray-400'
+                    'bg-gray-300'
                   }`} />
                   <span className="text-xs text-gray-600 dark:text-gray-400">
-                    {executionState === 'running' ? 'Running' :
-                     executionState === 'paused' ? 'Paused' :
+                    {executionState === 'running'   ? 'Running' :
+                     executionState === 'paused'    ? 'Paused' :
                      executionState === 'completed' ? 'Completed' :
-                     'Idle'}
+                     'Not started'}
                   </span>
                 </div>
               </div>

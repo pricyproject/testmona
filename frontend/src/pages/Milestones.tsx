@@ -54,7 +54,6 @@ interface MilestoneFormState {
   description: string;
   targetDate: string;
   status: MilestoneStatus;
-  progress: number;
 }
 
 const emptyStats: MilestoneStats = {
@@ -77,7 +76,6 @@ const defaultForm: MilestoneFormState = {
   description: '',
   targetDate: '',
   status: 'planned',
-  progress: 0,
 };
 
 const statusOptions: MilestoneStatus[] = ['planned', 'in_progress', 'completed', 'cancelled'];
@@ -176,7 +174,6 @@ export function Milestones() {
       description: milestone.description || '',
       targetDate: milestone.target_date ? milestone.target_date.slice(0, 10) : '',
       status: milestone.status,
-      progress: milestone.progress_percentage || milestone.execution_progress || 0,
     });
     setIsDialogOpen(true);
   };
@@ -199,7 +196,6 @@ export function Milestones() {
         description: form.description.trim() || undefined,
         target_date: form.targetDate ? new Date(form.targetDate).toISOString() : undefined,
         status: form.status,
-        progress_percentage: form.progress,
       };
 
       if (editingMilestone) {
@@ -325,7 +321,7 @@ export function Milestones() {
                       onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
                     />
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="milestone-target">{t('targetDate')}</Label>
                       <Input
@@ -347,20 +343,6 @@ export function Milestones() {
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="milestone-progress">{t('manualProgress')}</Label>
-                      <Input
-                        id="milestone-progress"
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={form.progress}
-                        onChange={(event) => setForm((current) => ({
-                          ...current,
-                          progress: Math.max(0, Math.min(100, Number(event.target.value) || 0)),
-                        }))}
-                      />
                     </div>
                   </div>
                 </div>
@@ -551,7 +533,7 @@ export function Milestones() {
                   )}
 
                   <div className="flex flex-wrap gap-2 border-t pt-4">
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}`)}>
+                    <Button size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}`)}>
                       {t('viewTestPlans')}
                       <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
                     </Button>
