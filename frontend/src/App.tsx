@@ -67,11 +67,8 @@ function AppWithRouter() {
 
   // Apply compact mode on mount and when it changes
   useEffect(() => {
-    if (compactMode) {
-      document.documentElement.classList.add('compact-mode');
-    } else {
-      document.documentElement.classList.remove('compact-mode');
-    }
+    document.documentElement.classList.toggle('compact-mode', compactMode);
+    document.documentElement.dataset.uiDensity = compactMode ? 'compact' : 'comfortable';
   }, [compactMode]);
 
   // Initialize development auto-login

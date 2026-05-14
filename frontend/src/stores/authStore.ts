@@ -100,6 +100,14 @@ interface AuthState {
   _loginPromise: Promise<boolean> | null;
 }
 
+const applyCompactModeToDocument = (compactMode: boolean) => {
+  if (typeof document === 'undefined') return;
+
+  const root = document.documentElement;
+  root.classList.toggle('compact-mode', compactMode);
+  root.dataset.uiDensity = compactMode ? 'compact' : 'comfortable';
+};
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -193,12 +201,7 @@ export const useAuthStore = create<AuthState>()(
 
       setCompactMode: (compactMode: boolean) => {
         set({ compactMode });
-        // Apply compact mode class to document
-        if (compactMode) {
-          document.documentElement.classList.add('compact-mode');
-        } else {
-          document.documentElement.classList.remove('compact-mode');
-        }
+        applyCompactModeToDocument(compactMode);
       },
 
       setAppName: (appName: string) => {

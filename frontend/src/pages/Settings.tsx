@@ -44,7 +44,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle } from 'lucide-react';
+import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -1293,6 +1293,11 @@ export function Settings() {
     showSuccessToast(t('preferencesReset'));
   };
 
+  const handleCompactModeChange = (enabled: boolean) => {
+    setCompactMode(enabled);
+    showSuccessToast(enabled ? t('compactModeEnabled') : t('compactModeDisabled'));
+  };
+
   // Test Management Handlers
   const handleCreateTestType = async () => {
     if (isEditMode) {
@@ -1777,6 +1782,14 @@ export function Settings() {
     }
   };
 
+  const compactModeEffects = [
+    t('compactAppliesNavigation'),
+    t('compactAppliesCards'),
+    t('compactAppliesTables'),
+    t('compactAppliesForms'),
+    t('compactAppliesDialogs'),
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1815,48 +1828,108 @@ export function Settings() {
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
-          <Card>
-            <CardHeader className="border-b border-gray-100 dark:border-gray-800">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label className="text-base">{t('compactMode')}</Label>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{t('compactModeDesc')}</p>
+          <Card className="settings-density-card overflow-hidden border-slate-200/80 shadow-sm dark:border-slate-800">
+            <CardHeader className="border-b border-slate-100 bg-gradient-to-br from-slate-50 via-white to-cyan-50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-cyan-950/30">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-200">
+                      {compactMode ? t('compactModeOn') : t('compactModeOff')}
+                    </Badge>
+                    <CardTitle className="text-xl">{t('interfaceDensity')}</CardTitle>
+                  </div>
+                  <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-300">{t('compactModeDesc')}</p>
                 </div>
-                <Switch
-                  checked={compactMode}
-                  onCheckedChange={(checked) => {
-                    setCompactMode(checked);
-                    showSuccessToast(checked ? t('compactModeEnabled') : t('compactModeDisabled'));
-                  }}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label className="text-base">{t('language')}</Label>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{t('languageDesc')}</p>
+                <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                  <Button
+                    type="button"
+                    variant={!compactMode ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleCompactModeChange(false)}
+                    className="gap-2 rounded-xl"
+                    aria-pressed={!compactMode}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                    {t('comfortableMode')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={compactMode ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleCompactModeChange(true)}
+                    className="gap-2 rounded-xl"
+                    aria-pressed={compactMode}
+                  >
+                    <Rows3 className="h-4 w-4" />
+                    {t('compactMode')}
+                  </Button>
                 </div>
-                <Select
-                  value={language}
-                  onValueChange={(value) => {
-                    setLanguage(value as 'en' | 'fa' | 'ar');
-                    showSuccessToast(t('languageUpdated'));
-                  }}
-                >
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="fa">فارسی</SelectItem>
-                    <SelectItem value="ar">العربية</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6 pt-6">
-              <div className="text-sm text-gray-500 dark:text-gray-400">
-	                <p>{t('generalSettingsApplyImmediately')}</p>
+            <CardContent className="space-y-5 pt-5">
+              <div className={`settings-density-preview ${compactMode ? 'is-compact' : ''}`}>
+                <div className="preview-panel">
+                  <div className="preview-topline">
+                    <span>{t('densityPreview')}</span>
+                    <span>{compactMode ? t('moreRowsVisible') : t('comfortableSpacing')}</span>
+                  </div>
+                  <div className="preview-row">
+                    <span className="preview-dot bg-emerald-500" />
+                    <span>{t('sampleTestRun')}</span>
+                    <strong>{compactMode ? '86%' : '72%'}</strong>
+                  </div>
+                  <div className="preview-row">
+                    <span className="preview-dot bg-blue-500" />
+                    <span>{t('sampleRequirement')}</span>
+                    <strong>{compactMode ? '12' : '8'}</strong>
+                  </div>
+                  <div className="preview-row">
+                    <span className="preview-dot bg-amber-500" />
+                    <span>{t('sampleDefect')}</span>
+                    <strong>{compactMode ? '4' : '3'}</strong>
+                  </div>
+                </div>
+                <div className="preview-copy">
+                  <h3>{compactMode ? t('compactModePreviewTitle') : t('comfortableModePreviewTitle')}</h3>
+                  <p>{compactMode ? t('compactModePreviewDesc') : t('comfortableModePreviewDesc')}</p>
+                </div>
               </div>
+
+              <div className="grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40 sm:grid-cols-2 lg:grid-cols-5">
+                {compactModeEffects.map((effect) => (
+                  <div key={effect} className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+                    <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                    <span>{effect}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">{t('language')}</Label>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('languageDesc')}</p>
+                  </div>
+                  <Select
+                    value={language}
+                    onValueChange={(value) => {
+                      setLanguage(value as 'en' | 'fa' | 'ar');
+                      showSuccessToast(t('languageUpdated'));
+                    }}
+                  >
+                    <SelectTrigger className="w-full sm:w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="fa">فارسی</SelectItem>
+                      <SelectItem value="ar">العربية</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('generalSettingsApplyImmediately')}</p>
             </CardContent>
           </Card>
 
