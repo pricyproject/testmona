@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Milestones",
-    "description": "Milestone management endpoints",
+    "description": "Milestone endpoints with test-process metrics, linked test plans, execution progress, quality risk, and requirement context.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -97,7 +97,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Milestone 1\",\n  \"description\": \"First milestone\",\n  \"project_id\": {{testProjectId}},\n  \"target_date\": \"2024-01-31\",\n  \"created_by\": 1\n}"
+          "raw": "{\n  \"title\": \"Regression sign-off v2.4\",\n  \"description\": \"Release milestone for requirements, linked test plans, execution results, and defect triage.\",\n  \"project_id\": {{testProjectId}},\n  \"target_date\": \"2026-06-30T00:00:00Z\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/milestones",
@@ -108,7 +108,7 @@
             "milestones"
           ]
         },
-        "description": "Create a new milestone"
+        "description": "Create a new milestone. The authenticated user is used as created_by."
       },
       "event": [
         {
@@ -128,7 +128,7 @@
               "    ",
               "    pm.test(\"Response has required fields\", function () {",
               "        var jsonData = pm.response.json();",
-              "        pm.expect(jsonData).to.have.property('name');",
+              "        pm.expect(jsonData).to.have.property('title');",
               "        pm.expect(jsonData).to.have.property('project_id');",
               "    });",
               "} else {",
@@ -161,7 +161,7 @@
             }
           ]
         },
-        "description": "Get all milestones for a project"
+        "description": "Get milestones for a project, including process metrics such as linked test plan count, execution progress, pass rate, open defects, and health."
       },
       "event": [
         {
@@ -175,6 +175,15 @@
               "pm.test(\"Response is array\", function () {",
               "    var jsonData = pm.response.json();",
               "    pm.expect(jsonData).to.be.an('array');",
+              "});",
+              "",
+              "pm.test(\"Milestone process metrics are present when items exist\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    if (jsonData.length > 0) {",
+              "        pm.expect(jsonData[0]).to.have.property('execution_progress');",
+              "        pm.expect(jsonData[0]).to.have.property('health');",
+              "        pm.expect(jsonData[0]).to.have.property('linked_test_plans');",
+              "    }",
               "});"
             ],
             "type": "text/javascript"
@@ -194,7 +203,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"status\": \"completed\"\n}"
+          "raw": "{\n  \"status\": \"in_progress\",\n  \"progress_percentage\": 35\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/milestones/{{milestoneId}}",
@@ -206,7 +215,7 @@
             "{{milestoneId}}"
           ]
         },
-        "description": "Update a milestone"
+        "description": "Update milestone status and manual progress. Completed milestones are returned with process metrics."
       },
       "event": [
         {
@@ -229,6 +238,81 @@
               "}"
             ],
             "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Milestone Stats",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/milestones/stats/{{testProjectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "milestones",
+            "stats",
+            "{{testProjectId}}"
+          ]
+        },
+        "description": "Get aggregated milestone process statistics for a project."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Stats include process totals\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('total');",
+              "    pm.expect(jsonData).to.have.property('testPlans');",
+              "    pm.expect(jsonData).to.have.property('averageExecutionProgress');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Milestone Test Plans",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/milestones/{{milestoneId}}/test-plans",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "milestones",
+            "{{milestoneId}}",
+            "test-plans"
+          ]
+        },
+        "description": "Get test plans linked to a milestone."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200 or 404\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    pm.test(\"Response is array\", function () {",
+              "        pm.expect(pm.response.json()).to.be.an('array');",
+              "    });",
+              "}"
+            ]
           }
         }
       ]

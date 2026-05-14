@@ -6962,6 +6962,42 @@
               "title": "Assigned To"
             },
             "description": "Filter by assigned user ID"
+          },
+          {
+            "name": "test_plan_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by linked test plan ID",
+              "title": "Test Plan Id"
+            },
+            "description": "Filter by linked test plan ID"
+          },
+          {
+            "name": "milestone_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by linked milestone ID",
+              "title": "Milestone Id"
+            },
+            "description": "Filter by linked milestone ID"
           }
         ],
         "responses": {
@@ -9497,6 +9533,22 @@
             }
           },
           {
+            "name": "milestone_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Milestone Id"
+            }
+          },
+          {
             "name": "skip",
             "in": "query",
             "required": false,
@@ -9727,7 +9779,7 @@
           {
             "name": "project_id",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "integer",
               "title": "Project Id"
@@ -9739,6 +9791,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 0,
               "default": 0,
               "title": "Skip"
             }
@@ -9749,6 +9802,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
               "default": 100,
               "title": "Limit"
             }
@@ -21326,6 +21381,99 @@
               }
             ],
             "title": "Updated At"
+          },
+          "test_plan_count": {
+            "type": "integer",
+            "title": "Test Plan Count",
+            "default": 0
+          },
+          "test_run_count": {
+            "type": "integer",
+            "title": "Test Run Count",
+            "default": 0
+          },
+          "test_case_count": {
+            "type": "integer",
+            "title": "Test Case Count",
+            "default": 0
+          },
+          "result_count": {
+            "type": "integer",
+            "title": "Result Count",
+            "default": 0
+          },
+          "passed_count": {
+            "type": "integer",
+            "title": "Passed Count",
+            "default": 0
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count",
+            "default": 0
+          },
+          "blocked_count": {
+            "type": "integer",
+            "title": "Blocked Count",
+            "default": 0
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count",
+            "default": 0
+          },
+          "not_tested_count": {
+            "type": "integer",
+            "title": "Not Tested Count",
+            "default": 0
+          },
+          "execution_progress": {
+            "type": "integer",
+            "title": "Execution Progress",
+            "default": 0
+          },
+          "pass_rate": {
+            "type": "integer",
+            "title": "Pass Rate",
+            "default": 0
+          },
+          "open_defect_count": {
+            "type": "integer",
+            "title": "Open Defect Count",
+            "default": 0
+          },
+          "critical_defect_count": {
+            "type": "integer",
+            "title": "Critical Defect Count",
+            "default": 0
+          },
+          "requirement_count": {
+            "type": "integer",
+            "title": "Requirement Count",
+            "default": 0
+          },
+          "verified_requirement_count": {
+            "type": "integer",
+            "title": "Verified Requirement Count",
+            "default": 0
+          },
+          "is_overdue": {
+            "type": "boolean",
+            "title": "Is Overdue",
+            "default": false
+          },
+          "health": {
+            "type": "string",
+            "title": "Health",
+            "default": "planned"
+          },
+          "linked_test_plans": {
+            "items": {
+              "$ref": "#/components/schemas/MilestoneLinkedTestPlan"
+            },
+            "type": "array",
+            "title": "Linked Test Plans",
+            "default": []
           }
         },
         "type": "object",
@@ -21409,6 +21557,59 @@
           "project_id"
         ],
         "title": "MilestoneCreate"
+      },
+      "MilestoneLinkedTestPlan": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "target_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Start Date"
+          },
+          "target_end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target End Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "MilestoneLinkedTestPlan"
       },
       "MilestoneStatus": {
         "type": "string",
@@ -26618,6 +26819,17 @@
             "title": "Status",
             "default": "pending"
           },
+          "test_plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Plan Id"
+          },
           "schedule_id": {
             "anyOf": [
               {
@@ -26628,6 +26840,17 @@
               }
             ],
             "title": "Schedule Id"
+          },
+          "environment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment Id"
           },
           "assigned_to": {
             "anyOf": [
@@ -26744,6 +26967,17 @@
             "title": "Status",
             "default": "pending"
           },
+          "test_plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Plan Id"
+          },
           "schedule_id": {
             "anyOf": [
               {
@@ -26754,6 +26988,17 @@
               }
             ],
             "title": "Schedule Id"
+          },
+          "environment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment Id"
           },
           "assigned_to": {
             "anyOf": [
@@ -26885,6 +27130,17 @@
             ],
             "title": "Status"
           },
+          "test_plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Plan Id"
+          },
           "schedule_id": {
             "anyOf": [
               {
@@ -26895,6 +27151,17 @@
               }
             ],
             "title": "Schedule Id"
+          },
+          "environment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment Id"
           },
           "assigned_to": {
             "anyOf": [
@@ -27458,6 +27725,17 @@
             "title": "Status",
             "default": "pending"
           },
+          "test_plan_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Plan Id"
+          },
           "schedule_id": {
             "anyOf": [
               {
@@ -27468,6 +27746,17 @@
               }
             ],
             "title": "Schedule Id"
+          },
+          "environment_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment Id"
           },
           "assigned_to": {
             "anyOf": [

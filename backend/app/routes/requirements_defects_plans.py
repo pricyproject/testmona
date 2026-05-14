@@ -2,14 +2,16 @@
 Requirements, defects, test plans, and milestones routes for test planning and quality management.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
+from datetime import datetime, timezone
 
 from .. import crud, schemas, auth, rbac
 from ..database import get_db
 from ..auth import get_current_active_user
+from ..services.milestone_service import enrich_milestone, enrich_milestones, get_project_milestone_stats
 from ..crud import (
     create_requirement, get_requirements, get_requirement, update_requirement, delete_requirement,
     create_defect, get_defects, get_defect, update_defect, delete_defect,
@@ -340,6 +342,7 @@ def register_requirements_defects_plans_routes(app):
     @app.get("/test-plans")
     def read_test_plans(
         project_id: Optional[int] = None,
+        milestone_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
@@ -349,6 +352,8 @@ def register_requirements_defects_plans_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         test_plans = get_test_plans(db, project_id=project_id, skip=skip, limit=limit)
+        if milestone_id is not None:
+            test_plans = [tp for tp in test_plans if tp.milestone_id == milestone_id]
         return [
             {
                 "id": tp.id,
@@ -494,12 +499,15 @@ def register_requirements_defects_plans_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
+        if milestone.project_id <= 0:
+            raise HTTPException(status_code=400, detail="Invalid project_id")
+
         if not rbac.has_permission(current_user, "write", milestone.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_milestone = create_milestone(db=db, milestone=milestone)
-        
-        # Create audit trail
+        milestone_data = milestone.model_copy(update={"created_by": current_user.id})
+        db_milestone = create_milestone(db=db, milestone=milestone_data)
+
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
@@ -511,26 +519,27 @@ def register_requirements_defects_plans_routes(app):
                 entity_type=EntityType.MILESTONE.value,
                 entity_id=db_milestone.id,
                 project_id=db_milestone.project_id,
-                description=f"Milestone created: {db_milestone.name or 'Untitled'}",
+                description=f"Milestone created: {db_milestone.title or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             print(f"Failed to create audit trail for milestone creation: {e}")
-        
-        return db_milestone
+
+        return enrich_milestone(db, db_milestone)
 
     @app.get("/milestones", response_model=List[schemas.Milestone])
     def read_milestones(
-        project_id: int = None,
-        skip: int = 0,
-        limit: int = 100,
+        project_id: int,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
+        if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        return get_milestones(db, project_id=project_id, skip=skip, limit=limit)
+        milestones = get_milestones(db, project_id=project_id, skip=skip, limit=limit)
+        return enrich_milestones(db, milestones)
 
     @app.get("/milestones/{milestone_id}", response_model=schemas.Milestone)
     def read_milestone_endpoint(
@@ -545,7 +554,7 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "read", milestone.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        return milestone
+        return enrich_milestone(db, milestone)
 
     @app.put("/milestones/{milestone_id}", response_model=schemas.Milestone)
     def update_milestone_endpoint(
@@ -561,9 +570,17 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", db_milestone.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_milestone = update_milestone(db, milestone_id=milestone_id, milestone=milestone)
-        
-        # Create audit trail
+        update_data = milestone.model_dump(exclude_unset=True)
+        if update_data.get("status") == schemas.MilestoneStatus.COMPLETED:
+            update_data.setdefault("progress_percentage", 100)
+            if not update_data.get("actual_date") and not db_milestone.actual_date:
+                update_data["actual_date"] = datetime.now(timezone.utc)
+        db_milestone = update_milestone(
+            db,
+            milestone_id=milestone_id,
+            milestone=schemas.MilestoneUpdate(**update_data),
+        )
+
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
@@ -575,13 +592,13 @@ def register_requirements_defects_plans_routes(app):
                 entity_type=EntityType.MILESTONE.value,
                 entity_id=db_milestone.id,
                 project_id=db_milestone.project_id,
-                description=f"Milestone updated: {db_milestone.name or 'Untitled'}",
+                description=f"Milestone updated: {db_milestone.title or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             print(f"Failed to create audit trail for milestone update: {e}")
-        
-        return db_milestone
+
+        return enrich_milestone(db, db_milestone)
 
     @app.delete("/milestones/{milestone_id}")
     def delete_milestone_endpoint(
@@ -596,14 +613,18 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "delete", db_milestone.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        # Store data for audit trail before deletion
+        if db_milestone.test_plans:
+            raise HTTPException(
+                status_code=409,
+                detail="Milestone has linked test plans. Unlink or move those plans before deleting it.",
+            )
+
         milestone_id_val = db_milestone.id
-        milestone_name = db_milestone.name
+        milestone_title = db_milestone.title
         project_id = db_milestone.project_id
-        
+
         delete_milestone(db, milestone_id=milestone_id)
-        
-        # Create audit trail
+
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
@@ -615,12 +636,12 @@ def register_requirements_defects_plans_routes(app):
                 entity_type=EntityType.MILESTONE.value,
                 entity_id=milestone_id_val,
                 project_id=project_id,
-                description=f"Milestone deleted: {milestone_name or 'Untitled'}",
+                description=f"Milestone deleted: {milestone_title or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             print(f"Failed to create audit trail for milestone deletion: {e}")
-        
+
         return {"message": "Milestone deleted successfully"}
 
     @app.get("/milestones/stats/{project_id}")
@@ -632,24 +653,7 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        from ..models import Milestone, MilestoneStatus
-        from sqlalchemy import func
-
-        milestones = db.query(Milestone).filter(Milestone.project_id == project_id).all()
-        
-        total = len(milestones)
-        completed = len([m for m in milestones if m.status == MilestoneStatus.COMPLETED])
-        in_progress = len([m for m in milestones if m.status == MilestoneStatus.IN_PROGRESS])
-        not_started = len([m for m in milestones if m.status == MilestoneStatus.NOT_STARTED])
-        delayed = len([m for m in milestones if m.status == MilestoneStatus.DELAYED])
-
-        return {
-            "total": total,
-            "completed": completed,
-            "in_progress": in_progress,
-            "not_started": not_started,
-            "delayed": delayed
-        }
+        return get_project_milestone_stats(db, project_id)
 
     @app.get("/milestones/{milestone_id}/test-plans")
     def get_milestone_test_plans(

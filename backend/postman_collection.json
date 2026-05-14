@@ -1300,7 +1300,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone 1\",\"description\":\"First milestone\",\"project_id\":1,\"due_date\":\"2024-01-31\"}"
+              "raw": "{\"title\":\"Regression sign-off v2.4\",\"description\":\"Release milestone for requirements, test plans, execution results, and defect triage.\",\"project_id\":1,\"target_date\":\"2026-06-30T00:00:00Z\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -1335,6 +1335,40 @@
           }
         },
         {
+          "name": "Get Milestone Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/milestones/stats/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "milestones",
+                "stats",
+                "1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Milestone Test Plans",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/milestones/1/test-plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "milestones",
+                "1",
+                "test-plans"
+              ]
+            }
+          }
+        },
+        {
           "name": "Update Milestone",
           "request": {
             "method": "PUT",
@@ -1346,7 +1380,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"status\":\"completed\"}"
+              "raw": "{\"status\":\"in_progress\",\"progress_percentage\":35}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones/1",
@@ -3416,7 +3450,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"\u6d4b\u8bd5\u9879\u76ee\",\"description\":\"Unicode test\"}"
+              "raw": "{\"name\":\"测试项目\",\"description\":\"Unicode test\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/projects/",
@@ -3442,7 +3476,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Test Project \ud83d\ude80\",\"description\":\"Emoji test \ud83c\udf89\"}"
+              "raw": "{\"name\":\"Test Project 🚀\",\"description\":\"Emoji test 🎉\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/projects/",
@@ -3784,7 +3818,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"invalid-date\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"invalid-date\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -3810,7 +3844,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"2020-01-01\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"2020-01-01\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -3836,7 +3870,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"2100-01-01\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"2100-01-01\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -3966,7 +4000,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"2024-12-31T23:59:59Z\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"2024-12-31T23:59:59Z\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -3992,7 +4026,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"2024-12-31T23:59:59+05:30\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"2024-12-31T23:59:59+05:30\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -4018,7 +4052,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"2024-12-31T23:59:59INVALID\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"2024-12-31T23:59:59INVALID\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -4070,7 +4104,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"name\":\"Milestone\",\"project_id\":1,\"due_date\":\"2024-12-31T23:59:59EST\"}"
+              "raw": "{\"project_id\":1,\"title\":\"Milestone\",\"target_date\":\"2024-12-31T23:59:59EST\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/milestones",
@@ -4382,7 +4416,7 @@
                 },
                 {
                   "key": "search",
-                  "value": "\ud83d\ude00"
+                  "value": "😀"
                 }
               ]
             },

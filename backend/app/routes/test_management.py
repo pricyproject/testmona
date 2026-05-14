@@ -767,6 +767,8 @@ def register_test_management_routes(app):
         status: Optional[str] = Query(None, description="Filter by test run status"),
         priority: Optional[str] = Query(None, description="Filter by priority"),
         assigned_to: Optional[int] = Query(None, description="Filter by assigned user ID"),
+        test_plan_id: Optional[int] = Query(None, description="Filter by linked test plan ID"),
+        milestone_id: Optional[int] = Query(None, description="Filter by linked milestone ID"),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
@@ -784,6 +786,8 @@ def register_test_management_routes(app):
             status=status,
             priority=priority,
             assigned_to=assigned_to,
+            test_plan_id=test_plan_id,
+            milestone_id=milestone_id,
         )
         
         # Filter test runs based on user permissions if no project_id specified

@@ -1255,11 +1255,12 @@ async def _perform_export(
                 project_data["milestones"] = [
                     {
                         "id": ms.id,
-                        "title": ms.title if hasattr(ms, 'title') else ms.name,
+                        "title": ms.title,
                         "description": ms.description or "",
-                        "status": ms.status.value if hasattr(ms.status, 'value') else str(ms.status) if ms.status else "active",
-                        "target_date": ms.target_date.isoformat() if hasattr(ms, 'target_date') and ms.target_date else None,
-                        "due_date": ms.due_date.isoformat() if hasattr(ms, 'due_date') and ms.due_date else None,
+                        "status": ms.status.value if hasattr(ms.status, 'value') else str(ms.status) if ms.status else "planned",
+                        "target_date": ms.target_date.isoformat() if ms.target_date else None,
+                        "actual_date": ms.actual_date.isoformat() if ms.actual_date else None,
+                        "progress_percentage": ms.progress_percentage or 0,
                         "created_at": ms.created_at.isoformat() if ms.created_at else None,
                     }
                     for ms in milestones
@@ -1896,20 +1897,26 @@ async def _perform_import(
                 
                 # Import milestones
                 if 'milestones' in project_data:
+                    valid_milestone_statuses = {'planned', 'in_progress', 'completed', 'cancelled'}
                     for ms_data in project_data['milestones']:
+                        milestone_title = ms_data.get('title') or ms_data.get('name') or 'Imported milestone'
+                        milestone_status = ms_data.get('status') if ms_data.get('status') in valid_milestone_statuses else 'planned'
                         try:
                             crud.create_milestone(
                                 db,
                                 milestone=schemas.MilestoneCreate(
-                                    name=ms_data['name'],
+                                    title=milestone_title,
                                     description=ms_data.get('description'),
-                                    status=ms_data.get('status', 'active'),
-                                    due_date=ms_data.get('due_date'),
-                                    project_id=project_id
+                                    status=milestone_status,
+                                    target_date=ms_data.get('target_date') or ms_data.get('due_date'),
+                                    actual_date=ms_data.get('actual_date'),
+                                    progress_percentage=ms_data.get('progress_percentage', 0),
+                                    project_id=project_id,
+                                    created_by=current_user.id
                                 )
                             )
                         except Exception as ms_error:
-                            errors.append(f"Row {row_num}: Failed to import milestone '{ms_data['name']}': {str(ms_error)}")
+                            errors.append(f"Row {row_num}: Failed to import milestone '{milestone_title}': {str(ms_error)}")
                 
                 # Import requirements
                 if 'requirements' in project_data:

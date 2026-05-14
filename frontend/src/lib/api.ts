@@ -396,6 +396,8 @@ export interface TestRunFilters {
   status?: string;
   priority?: string;
   assigned_to?: number;
+  test_plan_id?: number;
+  milestone_id?: number;
 }
 
 export const testRunsAPI = {
@@ -406,6 +408,8 @@ export const testRunsAPI = {
     if (filters.status && filters.status !== 'all') params.append('status', filters.status);
     if (filters.priority && filters.priority !== 'all') params.append('priority', filters.priority);
     if (filters.assigned_to) params.append('assigned_to', filters.assigned_to.toString());
+    if (filters.test_plan_id) params.append('test_plan_id', filters.test_plan_id.toString());
+    if (filters.milestone_id) params.append('milestone_id', filters.milestone_id.toString());
     const response = await api.get(`/test-runs?${params}`);
     return response.data;
   },
@@ -534,6 +538,14 @@ export const milestonesAPI = {
   },
   delete: async (id: number) => {
     const response = await api.delete(`/milestones/${id}`);
+    return response.data;
+  },
+  getStats: async (projectId: number) => {
+    const response = await api.get(`/milestones/stats/${projectId}`);
+    return response.data;
+  },
+  getTestPlans: async (id: number) => {
+    const response = await api.get(`/milestones/${id}/test-plans`);
     return response.data;
   },
 };
