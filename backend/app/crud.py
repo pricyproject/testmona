@@ -359,7 +359,7 @@ def get_test_case_with_steps(db: Session, test_case_id: int):
 
 
 def get_test_run(db: Session, test_run_id: int):
-    return db.query(TestRun).filter(TestRun.id == test_run_id).first()
+    return db.query(TestRun).options(joinedload(TestRun.assignee)).filter(TestRun.id == test_run_id).first()
 
 
 def get_test_runs(
@@ -374,7 +374,7 @@ def get_test_runs(
     test_plan_id: Optional[int] = None,
     milestone_id: Optional[int] = None,
 ):
-    query = db.query(TestRun)
+    query = db.query(TestRun).options(joinedload(TestRun.assignee))
     if project_id:
         query = query.filter(TestRun.project_id == project_id)
     if search:
@@ -484,7 +484,10 @@ def delete_test_run(db: Session, test_run_id: int):
 
 
 def get_test_result(db: Session, test_result_id: int):
-    return db.query(TestResult).filter(TestResult.id == test_result_id).first()
+    return db.query(TestResult).options(
+        joinedload(TestResult.test_case).joinedload(TestCase.section),
+        joinedload(TestResult.executor),
+    ).filter(TestResult.id == test_result_id).first()
 
 
 def get_test_results(db: Session, test_run_id: Optional[int] = None, test_case_id: Optional[int] = None, skip: int = 0, limit: int = 100):
