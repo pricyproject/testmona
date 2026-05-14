@@ -249,10 +249,10 @@ export function Milestones() {
 
   const statusMeta = (status: MilestoneStatus) => {
     const map = {
-      planned: { label: t('milestoneStatusPlanned'), className: 'bg-slate-100 text-slate-700 border-slate-200', icon: CircleDashed },
-      in_progress: { label: t('milestoneStatusInProgress'), className: 'bg-blue-100 text-blue-700 border-blue-200', icon: PlayCircle },
-      completed: { label: t('milestoneStatusCompleted'), className: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
-      cancelled: { label: t('milestoneStatusCancelled'), className: 'bg-zinc-100 text-zinc-700 border-zinc-200', icon: Ban },
+      planned: { label: t('milestoneStatusPlanned'), className: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700', icon: CircleDashed },
+      in_progress: { label: t('milestoneStatusInProgress'), className: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800', icon: PlayCircle },
+      completed: { label: t('milestoneStatusCompleted'), className: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-800', icon: CheckCircle2 },
+      cancelled: { label: t('milestoneStatusCancelled'), className: 'bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800/50 dark:text-zinc-400 dark:border-zinc-700', icon: Ban },
     } satisfies Record<MilestoneStatus, { label: string; className: string; icon: typeof CircleDashed }>;
 
     return map[status];
@@ -444,7 +444,7 @@ export function Milestones() {
             const days = getDaysRemaining(milestone.target_date);
 
             return (
-              <Card key={milestone.id} className="overflow-hidden border-slate-200 shadow-sm">
+              <Card key={milestone.id} className="overflow-hidden border-slate-200 dark:border-slate-700 shadow-sm">
                 <div className={`h-1.5 ${getHealthBarClass(milestone.health)}`} />
                 <CardHeader className="space-y-4">
                   <div className="flex items-start justify-between gap-3">
@@ -478,19 +478,19 @@ export function Milestones() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl bg-slate-50 p-4">
+                  <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/50 p-4">
                     <div className="mb-2 flex items-center justify-between text-sm">
-                      <span className="font-medium text-slate-700">{t('executionProgress')}</span>
-                      <span className="font-semibold text-slate-900">{milestone.execution_progress}%</span>
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{t('executionProgress')}</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">{milestone.execution_progress}%</span>
                     </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
                       <div className={`h-full rounded-full ${getProgressClass(milestone.execution_progress)}`} style={{ width: `${milestone.execution_progress}%` }} />
                     </div>
                     <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
-                      <ResultPill label={t('passed')} value={milestone.passed_count} className="bg-emerald-100 text-emerald-700" />
-                      <ResultPill label={t('failed')} value={milestone.failed_count} className="bg-red-100 text-red-700" />
-                      <ResultPill label={t('blocked')} value={milestone.blocked_count} className="bg-orange-100 text-orange-700" />
-                      <ResultPill label={t('notTested')} value={milestone.not_tested_count} className="bg-slate-100 text-slate-700" />
+                      <ResultPill label={t('passed')} value={milestone.passed_count} className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" />
+                      <ResultPill label={t('failed')} value={milestone.failed_count} className="bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" />
+                      <ResultPill label={t('blocked')} value={milestone.blocked_count} className="bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" />
+                      <ResultPill label={t('notTested')} value={milestone.not_tested_count} className="bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-300" />
                     </div>
                   </div>
                 </CardHeader>
@@ -518,7 +518,7 @@ export function Milestones() {
 
                   {milestone.linked_test_plans.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-sm font-medium text-slate-700">{t('linkedTestPlans')}</p>
+                      <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('linkedTestPlans')}</p>
                       <div className="flex flex-wrap gap-2">
                         {milestone.linked_test_plans.slice(0, 3).map((plan) => (
                           <Badge key={plan.id} variant="outline" className="max-w-full truncate">
@@ -566,7 +566,7 @@ function MetricCard({ title, value, detail, icon: Icon, tone = 'default' }: {
   tone?: 'default' | 'risk';
 }) {
   return (
-    <Card className={tone === 'risk' ? 'border-amber-200 bg-amber-50/60' : ''}>
+    <Card className={tone === 'risk' ? 'border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/30' : ''}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -574,7 +574,7 @@ function MetricCard({ title, value, detail, icon: Icon, tone = 'default' }: {
             <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-slate-100">{value}</p>
             <p className="mt-1 text-xs text-slate-500">{detail}</p>
           </div>
-          <div className={`rounded-2xl p-3 ${tone === 'risk' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+          <div className={`rounded-2xl p-3 ${tone === 'risk' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'}`}>
             <Icon className="h-5 w-5" />
           </div>
         </div>
@@ -585,7 +585,7 @@ function MetricCard({ title, value, detail, icon: Icon, tone = 'default' }: {
 
 function MiniStat({ label, value, icon: Icon, warning = false }: { label: string; value: number; icon: typeof Target; warning?: boolean }) {
   return (
-    <div className={`rounded-2xl border p-3 ${warning ? 'border-red-200 bg-red-50' : 'bg-white'}`}>
+    <div className={`rounded-2xl border p-3 ${warning ? 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30' : 'bg-white dark:bg-slate-800/50 dark:border-slate-700'}`}>
       <Icon className={`mb-2 h-4 w-4 ${warning ? 'text-red-600' : 'text-slate-500'}`} />
       <div className="text-lg font-semibold">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
