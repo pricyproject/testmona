@@ -379,6 +379,10 @@ class TestRunUpdate(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+class TestRunAssign(BaseModel):
+    assigned_to: Optional[int] = Field(None, ge=1)
+
+
 class TestRun(TestRunBase):
     id: int
     project_id: int
@@ -390,8 +394,17 @@ class TestRun(TestRunBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     assigned_to: Optional[int] = None
+    assignee: Optional['User'] = None
     priority: Optional[str] = "medium"
     estimated_duration: Optional[int] = None
+    total_tests: int = 0
+    executed_tests: int = 0
+    not_tested_tests: int = 0
+    passed_tests: int = 0
+    failed_tests: int = 0
+    blocked_tests: int = 0
+    skipped_tests: int = 0
+    progress_percent: int = 0
     # environment: Optional[str] = None  # Temporarily disabled
 
     class Config:
@@ -3026,7 +3039,7 @@ __all__ = [
     "ProjectBase", "ProjectCreate", "ProjectUpdate", "Project",
     "TestSuiteBase", "TestSuiteCreate", "TestSuiteUpdate", "TestSuite", 
     "TestCaseBase", "TestCaseCreate", "TestCaseUpdate", "TestCase",
-    "TestRunBase", "TestRunCreate", "TestRunUpdate", "TestRun", "TestSuiteRunCreate", "TestSuiteRun",
+    "TestRunBase", "TestRunCreate", "TestRunUpdate", "TestRunAssign", "TestRun", "TestSuiteRunCreate", "TestSuiteRun",
     "TestResultBase", "TestResultCreate", "TestResultUpdate", "TestResult",
     "UserBase", "UserCreate", "UserUpdate", "User",
     "ProjectAssignmentBase", "ProjectAssignmentCreate", "ProjectAssignmentUpdate", "ProjectAssignment",

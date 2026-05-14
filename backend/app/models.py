@@ -628,7 +628,7 @@ class TestRun(Base):
     schedule = relationship("TestSchedule", back_populates="test_runs")
     environment = relationship("ExecutionEnvironment", back_populates="test_runs")
     execution_engine = relationship("ExecutionEngine")
-    # assignee = relationship("User", foreign_keys=[assigned_to])  # Temporarily disabled
+    assignee = relationship("User", foreign_keys=[assigned_to])
 
 
 class TestResult(Base):
@@ -1450,4 +1450,3 @@ TestCase.current_version = relationship(
     uselist=False,
     viewonly=True
 )
-
