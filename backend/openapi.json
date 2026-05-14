@@ -7164,6 +7164,60 @@
         }
       }
     },
+    "/test-runs/{test_run_id}/assign": {
+      "put": {
+        "summary": "Assign Test Run",
+        "operationId": "assign_test_run_test_runs__test_run_id__assign_put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestRunAssign"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestRun"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/test-runs/{test_run_id}/reset-time": {
       "put": {
         "summary": "Reset Test Run Time",
@@ -8618,7 +8672,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TestResult"
+                  "$ref": "#/components/schemas/TestResultWithDetails"
                 }
               }
             }
@@ -9549,11 +9603,78 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "created_at",
+              "title": "Sort By"
+            }
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "desc",
+              "title": "Sort Order"
+            }
+          },
+          {
             "name": "skip",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 0,
               "default": 0,
               "title": "Skip"
             }
@@ -9564,6 +9685,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
               "default": 100,
               "title": "Limit"
             }
@@ -26830,6 +26953,17 @@
             ],
             "title": "Test Plan Id"
           },
+          "milestone_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Milestone Id"
+          },
           "schedule_id": {
             "anyOf": [
               {
@@ -26934,6 +27068,56 @@
               }
             ],
             "title": "Updated At"
+          },
+          "assignee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_tests": {
+            "type": "integer",
+            "title": "Total Tests",
+            "default": 0
+          },
+          "executed_tests": {
+            "type": "integer",
+            "title": "Executed Tests",
+            "default": 0
+          },
+          "not_tested_tests": {
+            "type": "integer",
+            "title": "Not Tested Tests",
+            "default": 0
+          },
+          "passed_tests": {
+            "type": "integer",
+            "title": "Passed Tests",
+            "default": 0
+          },
+          "failed_tests": {
+            "type": "integer",
+            "title": "Failed Tests",
+            "default": 0
+          },
+          "blocked_tests": {
+            "type": "integer",
+            "title": "Blocked Tests",
+            "default": 0
+          },
+          "skipped_tests": {
+            "type": "integer",
+            "title": "Skipped Tests",
+            "default": 0
+          },
+          "progress_percent": {
+            "type": "integer",
+            "title": "Progress Percent",
+            "default": 0
           }
         },
         "type": "object",
@@ -26944,6 +27128,24 @@
           "created_at"
         ],
         "title": "TestRun"
+      },
+      "TestRunAssign": {
+        "properties": {
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To"
+          }
+        },
+        "type": "object",
+        "title": "TestRunAssign"
       },
       "TestRunCreate": {
         "properties": {
@@ -26977,6 +27179,17 @@
               }
             ],
             "title": "Test Plan Id"
+          },
+          "milestone_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Milestone Id"
           },
           "schedule_id": {
             "anyOf": [
@@ -27140,6 +27353,17 @@
               }
             ],
             "title": "Test Plan Id"
+          },
+          "milestone_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Milestone Id"
           },
           "schedule_id": {
             "anyOf": [
@@ -27736,6 +27960,17 @@
             ],
             "title": "Test Plan Id"
           },
+          "milestone_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Milestone Id"
+          },
           "schedule_id": {
             "anyOf": [
               {
@@ -27840,6 +28075,56 @@
               }
             ],
             "title": "Updated At"
+          },
+          "assignee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/User"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_tests": {
+            "type": "integer",
+            "title": "Total Tests",
+            "default": 0
+          },
+          "executed_tests": {
+            "type": "integer",
+            "title": "Executed Tests",
+            "default": 0
+          },
+          "not_tested_tests": {
+            "type": "integer",
+            "title": "Not Tested Tests",
+            "default": 0
+          },
+          "passed_tests": {
+            "type": "integer",
+            "title": "Passed Tests",
+            "default": 0
+          },
+          "failed_tests": {
+            "type": "integer",
+            "title": "Failed Tests",
+            "default": 0
+          },
+          "blocked_tests": {
+            "type": "integer",
+            "title": "Blocked Tests",
+            "default": 0
+          },
+          "skipped_tests": {
+            "type": "integer",
+            "title": "Skipped Tests",
+            "default": 0
+          },
+          "progress_percent": {
+            "type": "integer",
+            "title": "Progress Percent",
+            "default": 0
           },
           "test_results": {
             "items": {

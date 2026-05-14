@@ -29,6 +29,11 @@
       "key": "testRunId",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "assigneeId",
+      "value": "1",
+      "type": "string"
     }
   ],
   "auth": {
@@ -102,7 +107,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Test Run 1\",\n  \"test_suite_id\": {{testSuiteId}},\n  \"executed_by\": 1,\n  \"status\": \"in_progress\",\n  \"project_id\": {{testProjectId}}\n}"
+          "raw": "{\n  \"name\": \"Test Run 1\",\n  \"description\": \"API-created test run\",\n  \"status\": \"pending\",\n  \"project_id\": {{testProjectId}},\n  \"assigned_to\": {{assigneeId}}\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/test-runs",
@@ -296,6 +301,52 @@
               "pm.test(\"Status updated\", function () {",
               "    var jsonData = pm.response.json();",
               "    pm.expect(jsonData.status).to.eql('completed');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Assign Test Run",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assigned_to\": {{assigneeId}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/test-runs/{{testRunId}}/assign",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-runs",
+            "{{testRunId}}",
+            "assign"
+          ]
+        },
+        "description": "Assign a test run to a user and notify the assignee"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Assignee updated\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.assigned_to.toString()).to.eql(pm.environment.get(\"assigneeId\") || pm.collectionVariables.get(\"assigneeId\"));",
               "});"
             ],
             "type": "text/javascript"

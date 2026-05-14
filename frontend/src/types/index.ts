@@ -96,8 +96,17 @@ export interface TestRun {
   completed_at?: string;
   scheduled_date?: string;
   assigned_to?: number;
+  assignee?: User;
   estimated_duration?: number;
   priority?: 'low' | 'medium' | 'high' | 'critical';
+  total_tests?: number;
+  executed_tests?: number;
+  not_tested_tests?: number;
+  passed_tests?: number;
+  failed_tests?: number;
+  blocked_tests?: number;
+  skipped_tests?: number;
+  progress_percent?: number;
   created_at: string;
   updated_at?: string;
   // Nested relationships
@@ -134,6 +143,7 @@ export interface TestResult {
   execution_time?: number;
   execution_started_at?: string;
   executed_by?: string | number;
+  executor?: User;
   executed_at: string;
   created_at: string;
   updated_at?: string;

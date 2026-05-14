@@ -425,6 +425,10 @@ export const testRunsAPI = {
     const response = await api.put(`/test-runs/${id}`, testRun);
     return response.data;
   },
+  assign: async (id: number, assignedTo?: number | null) => {
+    const response = await api.put(`/test-runs/${id}/assign`, { assigned_to: assignedTo ?? null });
+    return response.data;
+  },
   delete: async (id: number) => {
     const response = await api.delete(`/test-runs/${id}`);
     return response.data;
