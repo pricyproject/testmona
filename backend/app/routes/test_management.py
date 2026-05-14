@@ -6,12 +6,118 @@ from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import List, Optional
 from sqlalchemy import desc, case, func, cast, Date
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import logging
 
 from .. import crud, schemas, auth, rbac, models
 from ..database import get_db
 from ..auth import get_current_active_user, get_current_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus
+
+logger = logging.getLogger(__name__)
+
+
+COMPLETED_RESULT_STATUSES = {"pass", "fail", "skip", "block"}
+
+
+def _normalize_status_value(status: object) -> str:
+    return getattr(status, "value", status) or ""
+
+
+def _is_completed_result_status(status: object) -> bool:
+    return _normalize_status_value(status) in COMPLETED_RESULT_STATUSES
+
+
+def _attach_test_run_progress(db: Session, test_runs: List[TestRun]) -> List[TestRun]:
+    run_ids = [run.id for run in test_runs if run and run.id]
+    if not run_ids:
+        return test_runs
+
+    rows = db.query(
+        TestResult.test_run_id,
+        TestResult.status,
+        func.count(TestResult.id),
+    ).filter(
+        TestResult.test_run_id.in_(run_ids)
+    ).group_by(
+        TestResult.test_run_id,
+        TestResult.status,
+    ).all()
+
+    progress_by_run = {
+        run_id: {
+            "total_tests": 0,
+            "executed_tests": 0,
+            "not_tested_tests": 0,
+            "passed_tests": 0,
+            "failed_tests": 0,
+            "blocked_tests": 0,
+            "skipped_tests": 0,
+        }
+        for run_id in run_ids
+    }
+
+    status_key_map = {
+        "pass": "passed_tests",
+        "fail": "failed_tests",
+        "block": "blocked_tests",
+        "skip": "skipped_tests",
+        "not_tested": "not_tested_tests",
+        "pending": "not_tested_tests",
+    }
+
+    for run_id, status, count in rows:
+        normalized_status = _normalize_status_value(status)
+        run_progress = progress_by_run.setdefault(run_id, {})
+        run_progress["total_tests"] = run_progress.get("total_tests", 0) + count
+        if normalized_status in COMPLETED_RESULT_STATUSES:
+            run_progress["executed_tests"] = run_progress.get("executed_tests", 0) + count
+        key = status_key_map.get(normalized_status)
+        if key:
+            run_progress[key] = run_progress.get(key, 0) + count
+
+    for run in test_runs:
+        run_progress = progress_by_run.get(run.id, {})
+        total_tests = run_progress.get("total_tests", 0)
+        executed_tests = run_progress.get("executed_tests", 0)
+        for key, value in run_progress.items():
+            setattr(run, key, value)
+        setattr(run, "progress_percent", round((executed_tests / total_tests) * 100) if total_tests else 0)
+
+    return test_runs
+
+
+def _validate_test_run_assignee(db: Session, user_id: Optional[int], project_id: int) -> Optional[User]:
+    if user_id is None:
+        return None
+
+    assignee = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not assignee:
+        raise HTTPException(status_code=404, detail="Assignee not found")
+    if not rbac.has_permission(assignee, "read", project_id, db):
+        raise HTTPException(status_code=400, detail="Assignee does not have access to this project")
+    return assignee
+
+
+def _notify_test_run_assignee(db: Session, test_run: TestRun, assigned_by: User, assignee: Optional[User]) -> None:
+    if not assignee or not test_run.assigned_to:
+        return
+
+    try:
+        crud.create_notification(
+            db=db,
+            notification=schemas.NotificationCreate(
+                user_id=assignee.id,
+                title="Test run assigned",
+                message=f"{assigned_by.full_name or assigned_by.username} assigned test run {test_run.name} to you.",
+                type=models.NotificationType.INFO,
+                related_entity_type="test_run",
+                related_entity_id=test_run.id,
+            ),
+        )
+        logger.info("Created test run assignment notification", extra={"test_run_id": test_run.id, "assignee_id": assignee.id})
+    except Exception:
+        logger.exception("Failed to create test run assignment notification", extra={"test_run_id": test_run.id, "assignee_id": assignee.id})
 
 
 def register_test_management_routes(app):
@@ -736,7 +842,16 @@ def register_test_management_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
+        project = db.query(models.Project).filter(models.Project.id == test_run.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not rbac.has_permission(current_user, "write", test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to create test run in this project")
+
+        assignee = _validate_test_run_assignee(db, test_run.assigned_to, test_run.project_id)
         db_test_run = crud.create_test_run(db=db, test_run=test_run)
+        _attach_test_run_progress(db, [db_test_run])
+        _notify_test_run_assignee(db, db_test_run, current_user, assignee)
         
         # Create audit trail
         try:
@@ -797,9 +912,9 @@ def register_test_management_routes(app):
             for run in test_runs:
                 if rbac.has_permission(current_user, "read", run.project_id, db):
                     authorized_runs.append(run)
-            return authorized_runs
+            return _attach_test_run_progress(db, authorized_runs)
         
-        return test_runs
+        return _attach_test_run_progress(db, test_runs)
 
     @app.get("/test-runs/{test_run_id}", response_model=schemas.TestRun)
     def read_test_run(test_run_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
@@ -811,6 +926,7 @@ def register_test_management_routes(app):
         if not rbac.has_permission(current_user, "read", db_test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to access this test run")
         
+        _attach_test_run_progress(db, [db_test_run])
         return db_test_run
 
     @app.put("/test-runs/{test_run_id}", response_model=schemas.TestRun)
@@ -823,9 +939,24 @@ def register_test_management_routes(app):
         # Check if user has permission to update this test run's project
         if not rbac.has_permission(current_user, "write", db_test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to update this test run")
+
+        changed_fields = test_run.model_dump(exclude_unset=True)
+        old_assignee_id = db_test_run.assigned_to
+        assignee = None
+        if "assigned_to" in changed_fields:
+            assignee = _validate_test_run_assignee(db, changed_fields.get("assigned_to"), db_test_run.project_id)
+
+        if changed_fields.get("status") == "completed" and "completed_at" not in changed_fields:
+            test_run.completed_at = datetime.now(timezone.utc)
+        elif changed_fields.get("status") in {"pending", "running", "in_progress"} and "completed_at" not in changed_fields:
+            test_run.completed_at = None
         
         # Perform the update
         db_test_run = crud.update_test_run(db, test_run_id=test_run_id, test_run=test_run)
+        _attach_test_run_progress(db, [db_test_run])
+
+        if "assigned_to" in changed_fields and db_test_run.assigned_to != old_assignee_id:
+            _notify_test_run_assignee(db, db_test_run, current_user, assignee)
         
         # Create audit trail
         try:
@@ -845,6 +976,30 @@ def register_test_management_routes(app):
         except Exception as e:
             print(f"Failed to create audit trail for test run update: {e}")
         
+        return db_test_run
+
+    @app.put("/test-runs/{test_run_id}/assign", response_model=schemas.TestRun)
+    def assign_test_run(
+        test_run_id: int,
+        assignment: schemas.TestRunAssign,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        db_test_run = crud.get_test_run(db, test_run_id=test_run_id)
+        if db_test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+
+        if not rbac.has_permission(current_user, "write", db_test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to assign this test run")
+
+        assignee = _validate_test_run_assignee(db, assignment.assigned_to, db_test_run.project_id)
+        old_assignee_id = db_test_run.assigned_to
+        db_test_run = crud.update_test_run(db, test_run_id=test_run_id, test_run=schemas.TestRunUpdate(assigned_to=assignment.assigned_to))
+        _attach_test_run_progress(db, [db_test_run])
+
+        if db_test_run.assigned_to != old_assignee_id:
+            _notify_test_run_assignee(db, db_test_run, current_user, assignee)
+
         return db_test_run
 
     @app.delete("/test-runs/{test_run_id}")
@@ -1499,6 +1654,9 @@ def register_test_management_routes(app):
         if not rbac.has_permission(current_user, "write", test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to create test result in this project")
 
+        if _is_completed_result_status(test_result.status) and not test_result.executed_by:
+            test_result.executed_by = current_user.id
+
         db_test_result = crud.create_test_result(db=db, test_result=test_result)
         
         # Create audit trail
@@ -1549,7 +1707,7 @@ def register_test_management_routes(app):
         
         return db_test_result
 
-    @app.put("/test-results/{test_result_id}", response_model=schemas.TestResult)
+    @app.put("/test-results/{test_result_id}", response_model=schemas.TestResultWithDetails)
     def update_test_result(test_result_id: int, test_result: schemas.TestResultUpdate, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
         # First get the test result to check project access
         db_test_result = crud.get_test_result(db, test_result_id=test_result_id)
@@ -1562,10 +1720,18 @@ def register_test_management_routes(app):
             # Check if user has permission to update this test result's project
             if not rbac.has_permission(current_user, "write", test_run.project_id, db):
                 raise HTTPException(status_code=403, detail="Not authorized to update this test result")
+
+        if (
+            test_result.status is not None
+            and _is_completed_result_status(test_result.status)
+            and not test_result.executed_by
+            and not db_test_result.executed_by
+        ):
+            test_result.executed_by = current_user.id
         
         # Perform the update
         db_test_result = crud.update_test_result(db, test_result_id=test_result_id, test_result=test_result)
-        return db_test_result
+        return crud.get_test_result(db, test_result_id=db_test_result.id)
 
     @app.delete("/test-results/{test_result_id}")
     def delete_test_result(test_result_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
@@ -1757,6 +1923,7 @@ def register_test_management_routes(app):
 
         history = db.query(TestResult).options(
             joinedload(TestResult.test_run).joinedload(TestRun.project),
+            joinedload(TestResult.test_run).joinedload(TestRun.assignee),
             joinedload(TestResult.executor),
         ).filter(
             TestResult.test_case_id == test_case_id
@@ -1770,7 +1937,9 @@ def register_test_management_routes(app):
         result = []
         for item in history:
             test_run = item.test_run
-            executed_by_user = item.executor
+            executed_by_user = item.executor or (
+                test_run.assignee if test_run and _is_completed_result_status(item.status) else None
+            )
 
             result.append({
                 "id": item.id,
@@ -1787,7 +1956,8 @@ def register_test_management_routes(app):
                 "executed_by": executed_by_user.username if executed_by_user else None,
                 "executed_by_full_name": executed_by_user.full_name if executed_by_user else None,
                 "executed_by_email": executed_by_user.email if executed_by_user else None,
-                "executed_by_id": item.executed_by,
+                "executed_by_id": item.executed_by or (test_run.assigned_to if test_run else None),
+                "executor_source": "result" if item.executor else ("test_run_assignee" if executed_by_user else None),
                 "executed_at": item.executed_at or item.created_at,
                 "created_at": item.created_at,
                 "updated_at": item.updated_at,
