@@ -46,6 +46,7 @@ import {
 import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testResultsAPI, environmentsAPI, enumsAPI } from '@/lib/api';
 import { TestRun, TestCase } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useAuthStore } from '@/stores/authStore';
 
 // Define User interface locally since it's not in types
 interface User {
@@ -84,6 +85,7 @@ export function TestRuns() {
   const { projectId } = useParams<{ projectId?: string }>();
   const [searchParams] = useSearchParams();
   const { t, isRTL } = useTranslation();
+  const { user: currentUser } = useAuthStore();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [runName, setRunName] = useState('');
   const [runDescription, setRunDescription] = useState('');
@@ -207,6 +209,37 @@ export function TestRuns() {
     if (!assignedToId) return t('unassigned');
     const assignee = users.find((user) => user.id === assignedToId);
     return assignee?.full_name || assignee?.username || assignee?.email || t('unassigned');
+  };
+
+  const getProgressMeta = (run: TestRun) => {
+    const total = run.total_tests ?? 0;
+    const executed = run.executed_tests ?? 0;
+    const percent = total > 0 ? Math.round(run.progress_percent ?? (executed / total) * 100) : 0;
+
+    return { total, executed, percent };
+  };
+
+  const getCompletionLabel = (run: TestRun) => {
+    if (run.completed_at) {
+      return new Date(run.completed_at).toLocaleString();
+    }
+
+    return run.status === 'completed' ? t('completionTimeMissing') : t('notCompleted');
+  };
+
+  const getAssigneeFilterValue = (value?: number | 'me') => {
+    if (value === 'me') {
+      return currentUser?.id ? String(currentUser.id) : 'all';
+    }
+
+    return value ? String(value) : 'all';
+  };
+
+  const getSelectedAssigneeId = () => {
+    if (!assignedTo) return undefined;
+    if (assignedTo === 'me') return currentUser?.id;
+    const selectedId = parseInt(assignedTo, 10);
+    return Number.isInteger(selectedId) ? selectedId : undefined;
   };
 
   const formatDateTime = (date?: string) => (
@@ -379,7 +412,7 @@ export function TestRuns() {
         status: 'pending',
         environment_id: environment ? parseInt(environment) : undefined,
         scheduled_date: scheduledDate || undefined,
-        assigned_to: assignedTo ? parseInt(assignedTo) : undefined,
+        assigned_to: getSelectedAssigneeId(),
         estimated_duration: estimatedDuration ? parseInt(estimatedDuration) : undefined,
         priority: priority || undefined,
       });
@@ -1200,6 +1233,7 @@ export function TestRuns() {
                   <SelectItem value="all">{t('allStatuses')}</SelectItem>
                   <SelectItem value="pending">{t('testRunStatusPending')}</SelectItem>
                   <SelectItem value="running">{t('testRunStatusRunning')}</SelectItem>
+                  <SelectItem value="in_progress">{t('testRunStatusInProgress')}</SelectItem>
                   <SelectItem value="passed">{t('testRunStatusPassed')}</SelectItem>
                   <SelectItem value="failed">{t('testRunStatusFailed')}</SelectItem>
                   <SelectItem value="skipped">{t('testRunStatusSkipped')}</SelectItem>
@@ -1253,6 +1287,24 @@ export function TestRuns() {
               {t('clearFilters')}
             </Button>
           </div>
+
+          {currentUser?.id && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={assigneeFilter === String(currentUser.id) ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setAssigneeFilter(getAssigneeFilterValue('me'))}
+              >
+                {t('myAssignedRuns')}
+              </Button>
+              {assigneeFilter === String(currentUser.id) && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setAssigneeFilter('all')}>
+                  {t('showAllRuns')}
+                </Button>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1293,6 +1345,7 @@ export function TestRuns() {
               const statusMeta = getStatusMeta(run.status);
               const StatusIcon = statusMeta.icon;
               const startedAt = getRunStartedAt(run);
+              const progress = getProgressMeta(run);
 
               return (
                 <Card
@@ -1326,6 +1379,28 @@ export function TestRuns() {
                       </p>
                     )}
 
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          {t('executionProgress')}
+                        </p>
+                        <p className="mt-1 text-sm font-bold text-slate-900 dark:text-slate-50">
+                          {t('completedOfTotal', { completed: progress.executed, total: progress.total })}
+                        </p>
+                      </div>
+                      <div
+                        className="grid h-14 w-14 shrink-0 place-items-center rounded-full"
+                        style={{
+                          background: `conic-gradient(rgb(37 99 235) ${progress.percent * 3.6}deg, rgb(226 232 240) 0deg)`,
+                        }}
+                        aria-label={t('progressPercent', { percent: progress.percent })}
+                      >
+                        <div className="grid h-10 w-10 place-items-center rounded-full bg-white text-xs font-black text-slate-900 dark:bg-slate-950 dark:text-slate-50">
+                          {progress.percent}%
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                       <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
                         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -1339,10 +1414,10 @@ export function TestRuns() {
                       <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/70">
                         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
                           <Target className="h-3.5 w-3.5" />
-                          {t('completedLabel')}
+                          {t('completion')}
                         </div>
-                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100" title={run.completed_at ? new Date(run.completed_at).toLocaleString() : t('inProgress')}>
-                          {run.completed_at ? new Date(run.completed_at).toLocaleString() : t('inProgress')}
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100" title={getCompletionLabel(run)}>
+                          {getCompletionLabel(run)}
                         </p>
                       </div>
                     </div>

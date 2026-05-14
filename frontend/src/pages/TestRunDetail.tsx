@@ -31,6 +31,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Columns3,
+  Loader2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -82,6 +83,7 @@ export function TestRunDetail() {
   const [searchTestCases, setSearchTestCases] = useState('');
   const [sections, setSections] = useState<any[]>([]);
   const [isResettingTime, setIsResettingTime] = useState(false);
+  const [isAssigningRun, setIsAssigningRun] = useState(false);
 
   // Column sorting
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -213,6 +215,19 @@ export function TestRunDetail() {
   const isResultComplete = (status?: string | null) => {
     const normalizedStatus = normalizeRunStatus(status);
     return Boolean(normalizedStatus) && normalizedStatus !== 'not_tested' && normalizedStatus !== 'pending';
+  };
+
+  const getResultExecutorName = (result: any) => {
+    const executor = result.executor;
+    if (executor?.full_name || executor?.username || executor?.email) {
+      return executor.full_name || executor.username || executor.email;
+    }
+
+    if (isResultComplete(result.status) && testRun?.assignee) {
+      return testRun.assignee.full_name || testRun.assignee.username || testRun.assignee.email;
+    }
+
+    return t('notExecuted');
   };
 
   const getTimedResultPayload = (result: any, pendingValues: Record<string, any>) => {
@@ -510,8 +525,7 @@ export function TestRunDetail() {
       result.test_case?.section?.name,
       result.test_case?.priority,
       result.comments,
-      result.executor?.full_name,
-      result.executor?.username,
+      getResultExecutorName(result),
       formatStatusLabel(result.status),
     ];
 
@@ -536,7 +550,7 @@ export function TestRunDetail() {
           case 'status':
             return dir * (a.status || '').localeCompare(b.status || '');
           case 'executedBy':
-            return dir * (a.executor?.full_name || a.executor?.username || '').localeCompare(b.executor?.full_name || b.executor?.username || '');
+            return dir * getResultExecutorName(a).localeCompare(getResultExecutorName(b));
           case 'executedAt':
             return dir * (new Date(a.executed_at || 0).getTime() - new Date(b.executed_at || 0).getTime());
           case 'duration':
@@ -794,6 +808,28 @@ export function TestRunDetail() {
     }
   };
 
+  const getUserDisplayName = (userId?: number | null) => {
+    if (!userId) return t('unassigned');
+    const assignee = users.find((user) => Number(user.id) === Number(userId));
+    return assignee?.full_name || assignee?.username || assignee?.email || t('unknown');
+  };
+
+  const handleAssignRun = async (value: string) => {
+    if (!id) return;
+
+    try {
+      setIsAssigningRun(true);
+      const nextAssigneeId = value === 'unassigned' ? null : parseInt(value, 10);
+      const updatedRun = await testRunsAPI.assign(parseInt(id, 10), Number.isInteger(nextAssigneeId) ? nextAssigneeId : null);
+      setTestRun((prev: any) => ({ ...prev, ...updatedRun }));
+    } catch (error) {
+      console.error('Failed to assign test run:', error);
+      setError(t('failedToAssignTestRun'));
+    } finally {
+      setIsAssigningRun(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -891,6 +927,28 @@ export function TestRunDetail() {
                   <BarChart3 className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('totalTestsWithCount', { count: totalTests })}
                 </span>
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-white/10 dark:ring-white/10">
+                  <User className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
+                  <span className="shrink-0">{t('assignedToLabel')}:</span>
+                  <Select
+                    value={testRun.assigned_to ? String(testRun.assigned_to) : 'unassigned'}
+                    onValueChange={handleAssignRun}
+                    disabled={isAssigningRun}
+                  >
+                    <SelectTrigger className="h-7 w-[170px] border-0 bg-transparent px-1 py-0 text-xs font-semibold shadow-none focus:ring-0 sm:text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">{t('unassigned')}</SelectItem>
+                      {users.map((user) => (
+                        <SelectItem key={user.id} value={String(user.id)}>
+                          {user.full_name || user.username || user.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isAssigningRun && <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-600 dark:text-cyan-200" />}
+                </div>
               </div>
             </div>
           </div>
@@ -1216,7 +1274,7 @@ export function TestRunDetail() {
                     const isEditing = editingResult === result.id;
                     const testCaseTitle = result.test_case?.title || t('unknownTestCase');
                     const sectionName = result.test_case?.section?.name || t('noSection');
-                    const executedBy = result.executor?.full_name || result.executor?.username || t('notExecuted');
+                    const executedBy = getResultExecutorName(result);
 
                     return (
                       <TableRow key={result.id} className="group border-slate-100 transition-colors hover:bg-blue-50/40 dark:border-slate-800 dark:hover:bg-blue-950/20">

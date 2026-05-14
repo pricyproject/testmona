@@ -386,7 +386,12 @@ export function TestCaseExecution() {
           const mappedStatus = statusMap[result.status] || 'pending';
           setExecutionStatus(mappedStatus);
           setExecutionNotes(result.actual_result || result.comments || '');
-          setAssignee(result.executed_by?.toString() || '');
+          setAssignee(
+            result.executed_by?.toString()
+            || testRun?.assigned_to?.toString()
+            || currentUser?.id?.toString()
+            || ''
+          );
           await ensureExecutionTimerStarted(result);
           
           // Set execution state based on backend execution_state first, then fallback to status logic
@@ -419,7 +424,7 @@ export function TestCaseExecution() {
         } else {
           setExecutionStatus('pending');
           setExecutionNotes('');
-          setAssignee('');
+          setAssignee(testRun?.assigned_to?.toString() || currentUser?.id?.toString() || '');
           setExecutionState('idle');
           setIsPaused(false);
         }
@@ -429,7 +434,7 @@ export function TestCaseExecution() {
     };
     
     loadExistingExecution();
-  }, [testRunId, testCaseId]);
+  }, [testRunId, testCaseId, testRun?.assigned_to, currentUser?.id]);
 
   // Load existing defects for this test case
   useEffect(() => {
