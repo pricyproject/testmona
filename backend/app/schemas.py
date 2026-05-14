@@ -350,7 +350,10 @@ class TestRunBase(BaseModel):
     description: Optional[str] = None
     # environment: Optional[str] = None  # Temporarily disabled
     status: str = "pending"
+    test_plan_id: Optional[int] = None
+    milestone_id: Optional[int] = None
     schedule_id: Optional[int] = None
+    environment_id: Optional[int] = None
     assigned_to: Optional[int] = None
     priority: Optional[str] = "medium"
     estimated_duration: Optional[int] = None
@@ -365,7 +368,10 @@ class TestRunUpdate(BaseModel):
     description: Optional[str] = None
     # environment: Optional[str] = None  # Temporarily disabled
     status: Optional[str] = None
+    test_plan_id: Optional[int] = None
+    milestone_id: Optional[int] = None
     schedule_id: Optional[int] = None
+    environment_id: Optional[int] = None
     assigned_to: Optional[int] = None
     priority: Optional[str] = None
     estimated_duration: Optional[int] = None
@@ -376,6 +382,9 @@ class TestRunUpdate(BaseModel):
 class TestRun(TestRunBase):
     id: int
     project_id: int
+    test_plan_id: Optional[int] = None
+    milestone_id: Optional[int] = None
+    environment_id: Optional[int] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_at: datetime
@@ -2330,12 +2339,38 @@ class MilestoneUpdate(BaseModel):
         return data
 
 
+class MilestoneLinkedTestPlan(BaseModel):
+    id: int
+    title: str
+    status: Optional[str] = None
+    target_start_date: Optional[datetime] = None
+    target_end_date: Optional[datetime] = None
+
+
 class Milestone(MilestoneBase):
     id: int
     project_id: int
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    test_plan_count: int = 0
+    test_run_count: int = 0
+    test_case_count: int = 0
+    result_count: int = 0
+    passed_count: int = 0
+    failed_count: int = 0
+    blocked_count: int = 0
+    skipped_count: int = 0
+    not_tested_count: int = 0
+    execution_progress: int = 0
+    pass_rate: int = 0
+    open_defect_count: int = 0
+    critical_defect_count: int = 0
+    requirement_count: int = 0
+    verified_requirement_count: int = 0
+    is_overdue: bool = False
+    health: str = "planned"
+    linked_test_plans: List[MilestoneLinkedTestPlan] = []
 
     class Config:
         from_attributes = True
@@ -2948,7 +2983,7 @@ __all__ = [
     "RequirementBase", "RequirementCreate", "RequirementUpdate", "Requirement",
     "DefectBase", "DefectCreate", "DefectUpdate", "Defect",
     "TestPlanBase", "TestPlanCreate", "TestPlanUpdate", "TestPlan",
-    "MilestoneBase", "MilestoneCreate", "MilestoneUpdate", "Milestone",
+    "MilestoneBase", "MilestoneCreate", "MilestoneUpdate", "MilestoneLinkedTestPlan", "Milestone",
     "TraceabilityMatrixBase", "TraceabilityMatrixCreate", "TraceabilityMatrix",
     "CoverageReportBase", "CoverageReportCreate", "CoverageReport",
     "NotificationBase", "NotificationCreate", "NotificationUpdate", "Notification",

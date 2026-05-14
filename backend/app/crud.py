@@ -371,6 +371,8 @@ def get_test_runs(
     status: Optional[str] = None,
     priority: Optional[str] = None,
     assigned_to: Optional[int] = None,
+    test_plan_id: Optional[int] = None,
+    milestone_id: Optional[int] = None,
 ):
     query = db.query(TestRun)
     if project_id:
@@ -389,6 +391,12 @@ def get_test_runs(
         query = query.filter(TestRun.priority == priority)
     if assigned_to:
         query = query.filter(TestRun.assigned_to == assigned_to)
+    if test_plan_id:
+        query = query.filter(TestRun.test_plan_id == test_plan_id)
+    if milestone_id:
+        query = query.outerjoin(TestPlan, TestRun.test_plan_id == TestPlan.id).filter(
+            or_(TestRun.milestone_id == milestone_id, TestPlan.milestone_id == milestone_id)
+        )
     query = query.order_by(TestRun.created_at.desc(), TestRun.id.desc())
     return query.offset(skip).limit(limit).all()
 
@@ -404,8 +412,11 @@ def create_test_run(db: Session, test_run: TestRunCreate):
         name=test_run_data['name'],
         description=test_run_data.get('description'),
         project_id=test_run_data['project_id'],
+        test_plan_id=test_run_data.get('test_plan_id'),
+        milestone_id=test_run_data.get('milestone_id'),
         status=test_run_data.get('status', 'pending'),
         # environment=test_run_data.get('environment'),  # Temporarily disabled
+        environment_id=test_run_data.get('environment_id'),
         assigned_to=test_run_data.get('assigned_to'),
         priority=test_run_data.get('priority'),
         estimated_duration=test_run_data.get('estimated_duration'),

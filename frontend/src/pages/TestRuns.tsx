@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -82,6 +82,7 @@ interface PriorityOption {
 export function TestRuns() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
+  const [searchParams] = useSearchParams();
   const { t, isRTL } = useTranslation();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [runName, setRunName] = useState('');
@@ -120,6 +121,8 @@ export function TestRuns() {
   
   // Validate projectId from URL params
   const currentProjectId = projectId ? parseInt(projectId) : null;
+  const linkedTestPlanId = parsePositiveQueryNumber(searchParams.get('test_plan_id'));
+  const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
 
   const totalPages = Math.max(1, Math.ceil(testRuns.length / itemsPerPage));
   const hasActiveTestRunFilters =
@@ -313,7 +316,7 @@ export function TestRuns() {
     }, 250);
 
     return () => window.clearTimeout(timeoutId);
-  }, [projectId, testRunSearchQuery, statusFilter, priorityFilter, assigneeFilter]);
+  }, [projectId, testRunSearchQuery, statusFilter, priorityFilter, assigneeFilter, linkedTestPlanId, linkedMilestoneId]);
 
   const loadData = async () => {
     if (!currentProjectId || isNaN(currentProjectId) || currentProjectId <= 0) return;
@@ -328,6 +331,8 @@ export function TestRuns() {
           status: statusFilter,
           priority: priorityFilter,
           assigned_to: Number.isInteger(selectedAssigneeId) ? selectedAssigneeId : undefined,
+          test_plan_id: linkedTestPlanId,
+          milestone_id: linkedMilestoneId,
         }).catch(err => {
           if (err.response?.status === 404) {
             setError('Project not found');
@@ -369,6 +374,8 @@ export function TestRuns() {
         name: runName,
         description: runDescription || undefined,
         project_id: currentProjectId,
+        test_plan_id: linkedTestPlanId,
+        milestone_id: linkedMilestoneId,
         status: 'pending',
         environment_id: environment ? parseInt(environment) : undefined,
         scheduled_date: scheduledDate || undefined,
@@ -1499,4 +1506,9 @@ export function TestRuns() {
       </Dialog>
     </div>
   );
+}
+
+function parsePositiveQueryNumber(value: string | null) {
+  const parsed = value ? Number(value) : undefined;
+  return parsed && Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

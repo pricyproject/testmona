@@ -610,6 +610,7 @@ class TestRun(Base):
     environment_id = Column(Integer, ForeignKey("execution_environments.id"))
     execution_engine_id = Column(Integer, ForeignKey("execution_engines.id"))
     assigned_to = Column(Integer, ForeignKey("users.id"))
+    milestone_id = Column(Integer, ForeignKey("milestones.id"))
     priority = Column(String(20), default="medium")  # low, medium, high, critical
     estimated_duration = Column(Integer)  # in minutes
     # environment = Column(String(100))  # environment name (development, staging, production, etc.) - Temporarily disabled

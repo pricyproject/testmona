@@ -82,6 +82,8 @@ export interface TestRun {
   name: string;
   description?: string;
   project_id: number;
+  test_plan_id?: number;
+  milestone_id?: number;
   status: 'pending' | 'running' | 'in_progress' | 'passed' | 'failed' | 'skipped' | 'blocked' | 'completed';
   environment_id?: number;
   environment?: {
@@ -350,11 +352,22 @@ export interface RequirementUpdate {
 }
 
 // Milestone Types
+export type MilestoneStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled';
+export type MilestoneHealth = 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'blocked' | 'at_risk';
+
+export interface MilestoneLinkedTestPlan {
+  id: number;
+  title: string;
+  status?: string;
+  target_start_date?: string;
+  target_end_date?: string;
+}
+
 export interface Milestone {
   id: number;
   title: string;
   description?: string;
-  status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+  status: MilestoneStatus;
   target_date?: string;
   actual_date?: string;
   progress_percentage: number;
@@ -362,6 +375,24 @@ export interface Milestone {
   created_by?: number;
   created_at: string;
   updated_at?: string;
+  test_plan_count: number;
+  test_run_count: number;
+  test_case_count: number;
+  result_count: number;
+  passed_count: number;
+  failed_count: number;
+  blocked_count: number;
+  skipped_count: number;
+  not_tested_count: number;
+  execution_progress: number;
+  pass_rate: number;
+  open_defect_count: number;
+  critical_defect_count: number;
+  requirement_count: number;
+  verified_requirement_count: number;
+  is_overdue: boolean;
+  health: MilestoneHealth;
+  linked_test_plans: MilestoneLinkedTestPlan[];
 }
 
 export interface MilestoneCreate {
@@ -376,7 +407,7 @@ export interface MilestoneUpdate {
   title?: string;
   description?: string;
   target_date?: string;
-  status?: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+  status?: MilestoneStatus;
   actual_date?: string;
   progress_percentage?: number;
 }
@@ -388,4 +419,10 @@ export interface MilestoneStats {
   completed: number;
   cancelled: number;
   overdue: number;
+  atRisk: number;
+  testPlans: number;
+  testRuns: number;
+  testCases: number;
+  openDefects: number;
+  averageExecutionProgress: number;
 }
