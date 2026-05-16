@@ -39,6 +39,17 @@ def _drop_legacy_custom_field_entity_type_column() -> None:
     logger.info("Dropped obsolete custom_field_definitions.entity_type column")
 
 
+def _ensure_runtime_tables() -> None:
+    """Create tables added after legacy databases were first initialized."""
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    from . import models
+
+    if "import_operations" not in table_names:
+        models.ImportOperation.__table__.create(bind=engine)
+        logger.info("Created missing import_operations table")
+
+
 def init_db():
     """Initialize database tables if they don't exist and repair legacy schema drift."""
     # Import all models to ensure they're registered with Base.metadata
@@ -50,3 +61,4 @@ def init_db():
         print("✅ Database tables created successfully")
 
     _drop_legacy_custom_field_entity_type_column()
+    _ensure_runtime_tables()

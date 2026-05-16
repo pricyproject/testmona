@@ -1,10 +1,11 @@
+import { useCallback } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { translations, TranslationKey } from '@/locales/translations';
 
 export const useTranslation = () => {
   const { language } = useAuthStore();
   
-  const t = (key: TranslationKey, params?: Record<string, string | number>) => {
+  const t = useCallback((key: TranslationKey, params?: Record<string, string | number>) => {
     const translation = translations[language][key] || translations.en[key] || key;
     
     if (params) {
@@ -14,7 +15,7 @@ export const useTranslation = () => {
     }
     
     return translation;
-  };
+  }, [language]);
   
   const isRTL = language === 'fa' || language === 'ar';
   

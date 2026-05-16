@@ -19,6 +19,16 @@
       "key": "testProjectId",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "idempotencyKey",
+      "value": "test-case-import-{{$timestamp}}",
+      "type": "string"
+    },
+    {
+      "key": "importJobId",
+      "value": "",
+      "type": "string"
     }
   ],
   "auth": {
@@ -32,6 +42,57 @@
     ]
   },
   "item": [
+    {
+      "name": "Export Test Cases CSV",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/import-export/export/test-cases/?test_suite_id=1&format=csv",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "import-export",
+            "export",
+            "test-cases"
+          ],
+          "query": [
+            {
+              "key": "test_suite_id",
+              "value": "1"
+            },
+            {
+              "key": "format",
+              "value": "csv"
+            }
+          ]
+        },
+        "description": "Export test cases as CSV. The CSV includes import-compatible fields such as reference, row-level section_id, multistep data with step test data/order, timestamps, and suite custom fields when exporting a specific suite."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response includes CSV content\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property(\"content\");",
+              "    pm.expect(jsonData).to.have.property(\"truncated\");",
+              "    pm.expect(jsonData).to.have.property(\"warnings\");",
+              "    pm.expect(jsonData.content).to.include(\"title\");",
+              "    pm.expect(jsonData.content).to.include(\"section_id\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
     {
       "name": "Login - Setup",
       "request": {
@@ -139,6 +200,10 @@
           {
             "key": "Content-Type",
             "value": "multipart/form-data"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}"
           }
         ],
         "body": {
@@ -150,23 +215,29 @@
               "src": []
             },
             {
-              "key": "project_id",
-              "value": "{{testProjectId}}",
+              "key": "test_suite_id",
+              "value": "1",
+              "type": "text"
+            },
+            {
+              "key": "import_mode",
+              "value": "skip_duplicates",
               "type": "text"
             }
           ]
         },
         "url": {
-          "raw": "{{baseUrl}}/import-export/import",
+          "raw": "{{baseUrl}}/import-export/import/test-cases/",
           "host": [
             "{{baseUrl}}"
           ],
           "path": [
             "import-export",
-            "import"
+            "import",
+            "test-cases"
           ]
         },
-        "description": "Import data into the system"
+        "description": "Import test cases from CSV. Honors Idempotency-Key, supports import_mode create_only, skip_duplicates, update_existing, create_copy, and matches duplicates by id, reference, external_key, title + section, and title + suite."
       },
       "event": [
         {
@@ -189,6 +260,136 @@
               "}"
             ],
             "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Import Previewed Test Cases",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idempotencyKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"test_suite_id\": 1,\n  \"skip_duplicates\": true,\n  \"duplicate_mode\": \"skip_duplicates\",\n  \"import_mode\": \"skip_duplicates\",\n  \"filename\": \"test-cases.csv\",\n  \"dry_run\": false,\n  \"import_job_id\": \"{{importJobId}}\",\n  \"chunk_index\": 0,\n  \"total_chunks\": 1,\n  \"rows\": [\n    {\n      \"id\": 123,\n      \"row_number\": 2,\n      \"title\": \"Imported login happy path\",\n      \"description\": \"Created from the CSV preview flow\",\n      \"preconditions\": \"User exists and is active\",\n      \"steps\": \"1. Open login page\\n2. Enter valid credentials\\n3. Submit\",\n      \"expected_result\": \"User lands on the dashboard\",\n      \"reference\": \"REQ-123\",\n      \"external_key\": \"EXT-LOGIN-001\",\n      \"priority\": \"medium\",\n      \"test_type\": \"manual\",\n      \"status\": \"active\",\n      \"section_id\": 1,\n      \"order_index\": 1,\n      \"is_multistep\": true,\n      \"multistep_data\": \"[{\\\"step_number\\\":1,\\\"action\\\":\\\"Open login page\\\",\\\"expected_result\\\":\\\"Login form is visible\\\",\\\"step_type\\\":\\\"manual\\\",\\\"data\\\":{\\\"email\\\":\\\"demo@testmona.com\\\"},\\\"order_index\\\":0}]\",\n      \"created_at\": \"2026-05-16T09:00:00\",\n      \"tags\": \"csv,import\",\n      \"import_action\": \"skip_duplicates\",\n      \"duplicate_hint\": true,\n      \"custom_field_values\": []\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/import-export/import/test-cases/previewed",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "import-export",
+            "import",
+            "test-cases",
+            "previewed"
+          ]
+        },
+        "description": "Import mapped test cases. Honors Idempotency-Key, supports import_mode create_only, skip_duplicates, update_existing, create_copy, per-row import_action, chunk metadata, row_results, and duplicate matching by id/reference/external_key/title+section/title+suite."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response includes import counts\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('imported_rows');",
+              "    pm.expect(jsonData).to.have.property('total_rows');",
+              "    pm.expect(jsonData).to.have.property('errors');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Test Case Import Job",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/import-export/import-jobs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "import-export",
+            "import-jobs"
+          ]
+        },
+        "description": "Create an import job before sending chunked previewed test-case imports.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"total_rows\": 5000,\n  \"total_chunks\": 10,\n  \"filename\": \"test-cases.csv\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is successful\", function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Test Case Import Job",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/import-export/import-jobs/{{importJobId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "import-export",
+            "import-jobs",
+            "{{importJobId}}"
+          ]
+        },
+        "description": "Poll import job progress while chunked imports are running."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status code is successful\", function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "});"
+            ]
           }
         }
       ]

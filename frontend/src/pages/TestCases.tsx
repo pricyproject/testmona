@@ -2217,21 +2217,73 @@ export function TestCases() {
     }
 
     try {
-      // Get the selected test cases data
-      const selectedTestData = apiTestCases.filter(tc => selectedTestCases.includes(tc.id));
+      // Get the selected test cases data and fill relations that are not always present in list responses.
+      const selectedTestData = await Promise.all(
+        apiTestCases
+          .filter(tc => selectedTestCases.includes(tc.id))
+          .map(async (tc) => {
+            const [testSteps, customFieldValues] = await Promise.all([
+              tc.is_multistep ? testCasesAPI.getSteps(tc.id).catch(() => tc.test_steps || []) : Promise.resolve(tc.test_steps || []),
+              tc.custom_field_values?.length ? Promise.resolve(tc.custom_field_values) : customFieldsAPI.getValues(tc.id).catch(() => []),
+            ]);
+            return { ...tc, test_steps: testSteps, custom_field_values: customFieldValues };
+          })
+      );
+      const exportCustomFields = customFields.length > 0
+        ? customFields
+        : currentProjectId
+          ? await customFieldsAPI.getDefinitions(currentProjectId).catch(() => [])
+          : [];
       
-      // Create CSV content for selected test cases
-      const csvHeaders = ['ID', 'Title', 'Description', 'Test Type', 'Priority', 'Section', 'Project', 'Created Date'];
+      const csvEscape = (value: unknown) => {
+        const text = value === null || value === undefined ? '' : String(value);
+        return `"${text.replace(/"/g, '""')}"`;
+      };
+
+      // Keep selected exports compatible with the CSV import mapper and backend export.
+      const baseCsvHeaders = [
+        'id', 'title', 'description', 'test_type', 'preconditions', 'steps', 'expected_result',
+        'priority', 'status', 'reference', 'tags', 'test_suite_id', 'section_id', 'order_index',
+        'is_multistep', 'multistep_data', 'created_at', 'updated_at'
+      ];
+      const usedHeaders = new Set(baseCsvHeaders);
+      const customFieldHeaders = exportCustomFields.map((field) => {
+        let header = field.name?.trim() || field.slug || `custom_field_${field.id}`;
+        if (usedHeaders.has(header)) {
+          header = field.slug || `${header}_${field.id}`;
+        }
+        while (usedHeaders.has(header)) {
+          header = `${header}_${field.id}`;
+        }
+        usedHeaders.add(header);
+        return { field, header };
+      });
+      const csvHeaders = [...baseCsvHeaders, ...customFieldHeaders.map(({ header }) => header)];
       const csvRows = selectedTestData.map(tc => [
-        `TC-${tc.id.toString().padStart(3, '0')}`,
-        `"${tc.title.replace(/"/g, '""')}"`, // Escape quotes in CSV
-        `"${(tc.description || '').replace(/"/g, '""')}"`,
-        tc.test_type || '',
-        tc.priority || '',
-        tc.section_id ? `Section ${tc.section_id}` : 'No Section',
-        tc.test_suite?.project?.name || 'N/A',
-        new Date(tc.created_at).toLocaleDateString()
-      ]);
+        ...[
+          tc.id,
+          tc.title,
+          tc.description || '',
+          tc.test_type || 'manual',
+          tc.preconditions || '',
+          tc.steps || '',
+          tc.expected_result || '',
+          tc.priority || 'medium',
+          tc.status || 'active',
+          tc.reference || '',
+          tc.tags || '',
+          tc.test_suite_id || currentTestSuiteId || '',
+          tc.section_id || '',
+          tc.order_index || 0,
+          tc.is_multistep ? 'true' : 'false',
+          tc.test_steps?.length ? JSON.stringify(tc.test_steps) : '',
+          tc.created_at || '',
+          tc.updated_at || ''
+        ],
+        ...customFieldHeaders.map(({ field }) => (
+          tc.custom_field_values?.find((value) => value.field_definition_id === field.id)?.value || ''
+        )),
+      ].map(csvEscape));
       
       const csvContent = [csvHeaders.join(','), ...csvRows.map(row => row.join(','))].join('\n');
       
@@ -2265,9 +2317,18 @@ export function TestCases() {
   };
 
   const handleExportCSV = async () => {
+    if (!currentTestSuiteId) {
+      toast({
+        title: t('exportFailed'),
+        description: t('selectTestSuite'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       // Export test cases for the current test suite (project)
-      const result = await importExportAPI.exportTestCases(currentTestSuiteId || undefined, 'csv');
+      const result = await importExportAPI.exportTestCases(currentTestSuiteId, 'csv');
       
       // Create a blob and download the file
       const blob = new Blob([result.content], { type: 'text/csv' });
@@ -2282,7 +2343,9 @@ export function TestCases() {
       
       toast({
         title: t('exportComplete'),
-        description: t('testCasesExportedSuccessfully'),
+        description: result.truncated
+          ? t('exportLimitedToRows', { count: result.total_rows || 0 })
+          : t('testCasesExportedSuccessfully'),
       });
     } catch (error) {
       console.error('Export failed:', error);
@@ -2294,103 +2357,44 @@ export function TestCases() {
     }
   };
 
-  const handleImportClick = async () => {
-    // Set default section from URL if available
+  const handleImportClick = () => {
     if (urlSectionId) {
       setImportSectionId(urlSectionId);
     } else {
       setImportSectionId(selectedTestSuite === 'all' ? 'none' : selectedTestSuite);
     }
     setIsImportDialogOpen(true);
-    // Load custom fields for the current project
-    await loadCustomFields();
+    void loadCustomFields();
   };
 
   const handleImportFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      // Validate file type
-      if (!file.name.toLowerCase().endsWith('.csv')) {
-        toast({
-          title: t('invalidFileType'),
-          description: t('pleaseSelectCSVFile'),
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        toast({
-          title: t('fileTooLarge'),
-          description: t('pleaseSelectCSVFileSmallerThan10MB'),
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      // Use setTimeout to prevent blocking the UI
-      setTimeout(() => {
-        setImportFile(file);
-      }, 100);
+    if (!file) {
+      return;
     }
-  }, [toast]);
 
-  const handleImportCSV = async () => {
-    if (!importFile) {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      event.target.value = '';
       toast({
-        title: t('noFileSelected'),
-        description: t('pleaseSelectCSVFileToImport'),
+        title: t('invalidFileType'),
+        description: t('pleaseSelectCSVFile'),
         variant: "destructive",
       });
       return;
     }
 
-    if (!currentTestSuiteId) {
+    if (file.size > 10 * 1024 * 1024) {
+      event.target.value = '';
       toast({
-        title: t('error'),
-        description: t('noTestSuiteFoundForProject'),
+        title: t('fileTooLarge'),
+        description: t('pleaseSelectCSVFileSmallerThan10MB'),
         variant: "destructive",
       });
       return;
     }
-    
-    try {
-      const sectionId = importSectionId && importSectionId !== 'none' ? parseInt(importSectionId) : undefined;
-      const result = await importExportAPI.importTestCases(importFile, currentTestSuiteId, sectionId);
-      
-      toast({
-        title: t('importComplete'),
-        description: result.message,
-        variant: result.errors && result.errors.length > 0 ? "destructive" : "default",
-      });
-      
-      // Show detailed results if there are errors or warnings
-      if (result.errors && result.errors.length > 0) {
-        console.error('Import errors:', result.errors);
-      }
-      if (result.warnings && result.warnings.length > 0) {
-        console.warn('Import warnings:', result.warnings);
-      }
-      
-      // Refresh test cases after import
-      await loadTestCases();
-      await loadSections();
-      
-      // Close dialog and reset
-      setIsImportDialogOpen(false);
-      setImportFile(null);
-      setImportSectionId('none');
-      
-    } catch (error) {
-      console.error('Import failed:', error);
-      toast({
-        title: t('importFailed'),
-        description: t('failedToImportTestCases'),
-        variant: "destructive",
-      });
-    }
-  };
+
+    setImportFile(file);
+  }, [t, toast]);
 
   // Bulk actions
   const handleSelectAll = (checked: boolean | "indeterminate") => {
@@ -4255,107 +4259,107 @@ export function TestCases() {
         </DialogContent>
       </Dialog>
 
-      {/* Import CSV Dialog with Airtable-like Preview */}
-      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
-        <DialogContent isRTL={isRTL} className="max-w-7xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Import Test Cases from CSV</DialogTitle>
-            <DialogDescription>
-              Map your CSV columns to test case fields and preview/edit data before importing.
-            </DialogDescription>
-          </DialogHeader>
-          {importFile && (
-            <ImportPreview
-              file={importFile}
-              testSuiteId={currentTestSuiteId || 0}
-              sectionId={importSectionId && importSectionId !== 'none' ? parseInt(importSectionId) : undefined}
-              customFields={customFields}
-              sections={mockSections}
-              onConfirm={async (validatedData) => {
-                try {
-                  // Import each validated test case
-                  for (const testCase of validatedData) {
-                    await testCasesAPI.create(testCase);
+      <Dialog open={isImportDialogOpen} onOpenChange={(open) => {
+        setIsImportDialogOpen(open);
+        if (!open) {
+          setImportFile(null);
+          setImportSectionId('none');
+        }
+      }}>
+        <DialogContent isRTL={isRTL} className="max-h-[92vh] max-w-7xl overflow-y-auto border-0 bg-background p-0 text-foreground">
+          <div className="p-6">
+            <DialogHeader>
+              <DialogTitle>{t('importTestCasesFromCSV')}</DialogTitle>
+              <DialogDescription>{t('importTestCasesFromCSVDescription')}</DialogDescription>
+            </DialogHeader>
+            {importFile && currentTestSuiteId && (
+              <ImportPreview
+                file={importFile}
+                testSuiteId={currentTestSuiteId}
+                sectionId={importSectionId && importSectionId !== 'none' ? parseInt(importSectionId) : undefined}
+	                customFields={customFields}
+	                sections={mockSections}
+	                existingTestCases={apiTestCases.map((testCase) => ({ id: testCase.id, title: testCase.title }))}
+	                onConfirm={async (validatedData, options) => {
+	                  const result = await importExportAPI.importMappedTestCasesChunked(currentTestSuiteId, validatedData, {
+	                    duplicateMode: options.duplicateMode,
+	                    dryRun: options.dryRun,
+	                    filename: options.filename,
+	                    idempotencyKey: options.idempotencyKey,
+	                    chunkSize: 500,
+	                    onProgress: options.onProgress,
+	                  });
+
+	                  if (result.errors?.length) {
+	                    console.error('Import completed with errors:', result.errors);
                   }
-                  
-                  toast({
-                    title: t('importComplete'),
-                    description: t('successfullyImportedTestCases', {count: validatedData.length}),
-                  });
-                  
-                  // Refresh test cases after import
-                  await loadTestCases();
-                  await loadSections();
-                  
-                  // Close dialog and reset
+                  if (result.warnings?.length) {
+                    console.warn('Import completed with warnings:', result.warnings);
+                  }
+
+	                  if (!options.dryRun) {
+	                    options.onProgress({ phase: 'refreshing', message: t('importPhaseRefreshing') });
+	                    await loadTestCases();
+	                    await loadSections();
+	                  }
+
+	                  return result;
+	                }}
+                onCancel={() => {
                   setIsImportDialogOpen(false);
                   setImportFile(null);
                   setImportSectionId('none');
-                } catch (error) {
-                  console.error('Import failed:', error);
-                  throw error;
-                }
-              }}
-              onCancel={() => {
-                setIsImportDialogOpen(false);
-                setImportFile(null);
-                setImportSectionId('none');
-              }}
-            />
-          )}
-          {!importFile && (
-            <div className="space-y-6 py-6">
-              <div className="text-center space-y-4">
-                <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Upload className="h-8 w-8 text-blue-600" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold text-gray-900">Select CSV File</h3>
-                  <p className="text-sm text-gray-600">
-                    Choose a CSV file to import test cases. Maximum file size: 10MB
-                  </p>
-                </div>
-              </div>
-              
-              <div className="max-w-md mx-auto">
-                <Label htmlFor="import-file" className="block text-sm font-medium text-gray-700 mb-2">
-                  CSV File
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="import-file"
-                    type="file"
-                    accept=".csv"
-                    onChange={handleImportFileSelect}
-                    className="h-12 text-base cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 transition-all"
-                  />
-                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                }}
+              />
+            )}
+            {importFile && !currentTestSuiteId && (
+              <div className="py-8 text-center text-sm text-red-600">{t('noTestSuiteFoundForProject')}</div>
+            )}
+            {!importFile && (
+              <div className="mx-auto max-w-2xl py-8" dir={isRTL ? 'rtl' : 'ltr'}>
+                <div className="rounded-3xl border border-dashed bg-card p-8 text-center text-card-foreground shadow-sm">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
+                    <Upload className="h-8 w-8" />
                   </div>
-                </div>
-                <p className="mt-2 text-xs text-gray-500">
-                  Supported format: CSV (.csv) • Max size: 10MB
-                </p>
-              </div>
-              
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
-                <div className="flex items-start gap-3">
-                  <div className="p-1 bg-blue-100 rounded">
-                    <Check className="h-4 w-4 text-blue-600" />
+                  <div className="mt-5 space-y-2">
+                    <h3 className="text-lg font-semibold">{t('selectCSVFile')}</h3>
+                    <p className="text-sm text-muted-foreground">{t('selectCSVFileDescription')}</p>
                   </div>
-                  <div className="text-sm text-blue-800">
-                    <p className="font-medium">Smart Import Features:</p>
-                    <ul className="mt-1 text-blue-700 space-y-1">
-                      <li>• Automatic column mapping</li>
-                      <li>• Custom field support</li>
-                      <li>• Data validation</li>
-                      <li>• Real-time preview</li>
-                    </ul>
+
+                  <div className="mx-auto mt-6 max-w-md text-left rtl:text-right">
+                    <Label htmlFor="import-file" className="mb-2 block text-sm font-medium">{t('csvFile')} <span className="text-destructive">*</span></Label>
+                    <Input
+                      ref={fileInputRef}
+                      id="import-file"
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={handleImportFileSelect}
+                      className="sr-only"
+                    />
+                    <Button type="button" variant="outline" className="h-12 w-full justify-center" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                      {t('browseCSVFile')}
+                    </Button>
+                    <p className="mt-2 text-xs text-muted-foreground">{t('csvImportLimitHint')}</p>
+                  </div>
+
+                  <div className="mt-6 grid gap-3 text-left rtl:text-right md:grid-cols-2">
+                    {[
+                      t('csvImportFeatureMapping'),
+                      t('csvImportFeatureCustomFields'),
+                      t('csvImportFeatureValidation'),
+                      t('csvImportFeatureBulkSave'),
+                    ].map((feature) => (
+                      <div key={feature} className="flex items-center gap-2 rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">
+                        <Check className="h-4 w-4 text-primary" />
+                        {feature}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

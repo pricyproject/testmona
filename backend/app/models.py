@@ -1441,6 +1441,29 @@ class AuditTrail(Base):
     project = relationship("Project")
 
 
+class ImportOperation(Base):
+    __tablename__ = "import_operations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    idempotency_key = Column(String(255), unique=True, nullable=False, index=True)
+    operation = Column(String(100), nullable=False)
+    lock_key = Column(String(255), index=True)
+    status = Column(String(20), nullable=False, default="processing")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    test_suite_id = Column(Integer, ForeignKey("test_suites.id"))
+    filename = Column(String(255))
+    response_data = Column(JSON)
+    error_message = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True))
+
+    user = relationship("User")
+    project = relationship("Project")
+    test_suite = relationship("TestSuite")
+
+
 # Add relationships to versioning models (avoiding circular imports)
 TestCase.versions = relationship("TestCaseVersion", back_populates="test_case")
 TestCase.current_version = relationship(

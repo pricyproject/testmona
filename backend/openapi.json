@@ -20,11 +20,75 @@
         ],
         "summary": "Import Test Cases",
         "operationId": "import_test_cases_import_export_import_test_cases__post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/Body_import_test_cases_import_export_import_test_cases__post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportTestCasesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/import-export/import-jobs": {
+      "post": {
+        "tags": [
+          "Import/Export"
+        ],
+        "summary": "Create Import Job",
+        "operationId": "create_import_job_import_export_import_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportJobCreate"
               }
             }
           },
@@ -49,6 +113,121 @@
               }
             }
           }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/import-export/import-jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "Import/Export"
+        ],
+        "summary": "Get Import Job",
+        "operationId": "get_import_job_import_export_import_jobs__job_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/import-export/import/test-cases/previewed": {
+      "post": {
+        "tags": [
+          "Import/Export"
+        ],
+        "summary": "Import Previewed Test Cases",
+        "description": "Import mapped and previewed test cases from the frontend CSV workflow.",
+        "operationId": "import_previewed_test_cases_import_export_import_test_cases_previewed_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewedTestCaseImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportTestCasesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -59,11 +238,16 @@
         ],
         "summary": "Export Test Cases",
         "operationId": "export_test_cases_import_export_export_test_cases__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "test_suite_id",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "integer",
               "title": "Test Suite Id"
@@ -85,7 +269,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ExportTestCasesResponse"
+                }
               }
             }
           },
@@ -139,7 +325,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
       }
     },
     "/import-export/import/template": {
@@ -16292,6 +16483,56 @@
             "title": "Skip Duplicates",
             "default": true
           },
+          "duplicate_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "skip",
+                  "copy",
+                  "update",
+                  "rename",
+                  "create_only",
+                  "skip_duplicates",
+                  "update_existing",
+                  "create_copy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Mode"
+          },
+          "import_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "create_only",
+                  "skip_duplicates",
+                  "update_existing",
+                  "create_copy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Mode"
+          },
+          "dry_run": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dry Run",
+            "default": false
+          },
           "apply_corrections": {
             "anyOf": [
               {
@@ -19651,6 +19892,27 @@
         "type": "object",
         "title": "DefectUpdate"
       },
+      "DuplicateDetectionSummary": {
+        "properties": {
+          "duplicates_by_title": {
+            "type": "integer",
+            "title": "Duplicates By Title",
+            "default": 0
+          },
+          "duplicates_by_id": {
+            "type": "integer",
+            "title": "Duplicates By Id",
+            "default": 0
+          },
+          "potential_duplicates": {
+            "type": "integer",
+            "title": "Potential Duplicates",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "DuplicateDetectionSummary"
+      },
       "EntityCount": {
         "properties": {
           "entity_type": {
@@ -19952,6 +20214,46 @@
         },
         "type": "object",
         "title": "ExecutionEnvironmentUpdate"
+      },
+      "ExportTestCasesResponse": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "total_rows": {
+            "type": "integer",
+            "title": "Total Rows"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "content",
+          "media_type",
+          "total_rows"
+        ],
+        "title": "ExportTestCasesResponse"
       },
       "GlobalParameter": {
         "properties": {
@@ -20447,6 +20749,147 @@
         },
         "type": "object",
         "title": "ImpactAnalysisUpdate"
+      },
+      "ImportCustomFieldValuePayload": {
+        "properties": {
+          "field_definition_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Field Definition Id"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "field_definition_id"
+        ],
+        "title": "ImportCustomFieldValuePayload"
+      },
+      "ImportJobCreate": {
+        "properties": {
+          "total_rows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Rows",
+            "default": 0
+          },
+          "total_chunks": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Total Chunks",
+            "default": 1
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          }
+        },
+        "type": "object",
+        "title": "ImportJobCreate"
+      },
+      "ImportTestCasesResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "corrections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Corrections"
+          },
+          "total_rows": {
+            "type": "integer",
+            "title": "Total Rows"
+          },
+          "imported_rows": {
+            "type": "integer",
+            "title": "Imported Rows"
+          },
+          "skipped_rows": {
+            "type": "integer",
+            "title": "Skipped Rows"
+          },
+          "error_rows": {
+            "type": "integer",
+            "title": "Error Rows"
+          },
+          "correction_rows": {
+            "type": "integer",
+            "title": "Correction Rows"
+          },
+          "created_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Created Ids"
+          },
+          "duplicate_detection": {
+            "$ref": "#/components/schemas/DuplicateDetectionSummary"
+          },
+          "row_results": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Row Results"
+          },
+          "import_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Job Id"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "total_rows",
+          "imported_rows",
+          "skipped_rows",
+          "error_rows",
+          "correction_rows",
+          "duplicate_detection"
+        ],
+        "title": "ImportTestCasesResponse"
       },
       "IssueTrackerIntegration": {
         "properties": {
@@ -22145,6 +22588,376 @@
         },
         "type": "object",
         "title": "NotificationUpdate"
+      },
+      "PreviewedTestCaseImportRequest": {
+        "properties": {
+          "test_suite_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Test Suite Id"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewedTestCaseImportRow"
+            },
+            "type": "array",
+            "maxItems": 5000,
+            "minItems": 1,
+            "title": "Rows"
+          },
+          "skip_duplicates": {
+            "type": "boolean",
+            "title": "Skip Duplicates",
+            "default": true
+          },
+          "duplicate_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "skip",
+                  "copy",
+                  "update",
+                  "rename",
+                  "create_only",
+                  "skip_duplicates",
+                  "update_existing",
+                  "create_copy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Mode"
+          },
+          "import_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "create_only",
+                  "skip_duplicates",
+                  "update_existing",
+                  "create_copy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Mode"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          },
+          "import_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Job Id"
+          },
+          "chunk_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Index"
+          },
+          "total_chunks": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Chunks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "test_suite_id",
+          "rows"
+        ],
+        "title": "PreviewedTestCaseImportRequest"
+      },
+      "PreviewedTestCaseImportRow": {
+        "properties": {
+          "row_number": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Number"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "test_suite_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Suite Id"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "preconditions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preconditions"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          },
+          "expected_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Result"
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority",
+            "default": "medium"
+          },
+          "test_type": {
+            "type": "string",
+            "title": "Test Type",
+            "default": "manual"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "active"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "external_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Key"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "order_index": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Index",
+            "default": 0
+          },
+          "is_multistep": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Multistep",
+            "default": false
+          },
+          "multistep_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multistep Data"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "import_action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "skip",
+                  "copy",
+                  "update",
+                  "rename",
+                  "create_only",
+                  "skip_duplicates",
+                  "update_existing",
+                  "create_copy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Action"
+          },
+          "duplicate_hint": {
+            "type": "boolean",
+            "title": "Duplicate Hint",
+            "default": false
+          },
+          "custom_field_values": {
+            "items": {
+              "$ref": "#/components/schemas/ImportCustomFieldValuePayload"
+            },
+            "type": "array",
+            "title": "Custom Field Values"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "PreviewedTestCaseImportRow"
       },
       "Priority": {
         "type": "string",
