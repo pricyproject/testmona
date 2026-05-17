@@ -1402,7 +1402,6 @@ export function Settings() {
     }
     
     try {
-      const currentUser = useAuthStore.getState().user;
       const newSharedStep = await testManagementAPI.createSharedStepTemplate({
         name: sharedStepForm.name,
         description: sharedStepForm.description,
@@ -1411,8 +1410,7 @@ export function Settings() {
         complexity: sharedStepForm.complexity,
         estimated_time: sharedStepForm.estimated_time,
         prerequisites: sharedStepForm.prerequisites.split(',').map(prereq => prereq.trim()).filter(prereq => prereq),
-        related_steps: sharedStepForm.related_steps.split(',').map(step => step.trim()).filter(step => step),
-        created_by: currentUser?.id || 1
+        related_steps: sharedStepForm.related_steps.split(',').map(step => step.trim()).filter(step => step)
       });
       
       setSharedStepTemplates([...sharedStepTemplates, {
@@ -1702,7 +1700,6 @@ export function Settings() {
     if (!editingSharedStep) return;
     
     try {
-      const currentUser = useAuthStore.getState().user;
       const updatedStep = await testManagementAPI.updateSharedStepTemplate(parseInt(editingSharedStep.id), {
         name: sharedStepForm.name,
         description: sharedStepForm.description,

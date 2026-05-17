@@ -77,6 +77,36 @@ export interface TestCase {
   project_name?: string;
 }
 
+export interface SharedStep {
+  id: number;
+  name: string;
+  description?: string | null;
+  action: string;
+  expected_result: string;
+  project_id: number;
+  created_by: number;
+  created_at: string;
+  updated_at?: string | null;
+  is_active: boolean;
+  usage_count: number;
+}
+
+export interface SharedStepCreate {
+  name: string;
+  description?: string | null;
+  action: string;
+  expected_result: string;
+  project_id: number;
+}
+
+export interface SharedStepUpdate {
+  name?: string;
+  description?: string | null;
+  action?: string;
+  expected_result?: string;
+  is_active?: boolean;
+}
+
 export interface TestRun {
   id: number;
   name: string;

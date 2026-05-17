@@ -500,6 +500,15 @@ export function TestCaseEdit() {
     setSaving(true);
     try {
       if (id) {
+        if (formData.tags.length > 500) {
+          toast({
+            variant: 'destructive',
+            title: t('validationError'),
+            description: t('tagLengthExceeded', { max: 500 }),
+          });
+          return;
+        }
+
         const customFieldError = customFields
           .map(getCustomFieldValidationError)
           .find(Boolean);
@@ -723,8 +732,10 @@ export function TestCaseEdit() {
               value={formData.tags}
               onChange={(e) => handleInputChange('tags', e.target.value)}
               placeholder={t('enterTagsSeparatedByCommas')}
+              maxLength={500}
               className="w-full"
             />
+            <p className="mt-1 text-xs text-muted-foreground">{formData.tags.length}/500</p>
           </div>
 
           <div>

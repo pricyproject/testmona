@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -1112,6 +1112,34 @@ export const enumsAPI = {
     }
 
     return testTypesRequest;
+  },
+};
+
+export const sharedStepsAPI = {
+  getAll: async (projectId?: number, skip = 0, limit = 100): Promise<SharedStep[]> => {
+    const response = await api.get('/shared-steps/', {
+      params: {
+        ...(projectId ? { project_id: projectId } : {}),
+        skip,
+        limit,
+      },
+    });
+    return response.data;
+  },
+  create: async (sharedStep: SharedStepCreate): Promise<SharedStep> => {
+    const response = await api.post('/shared-steps/', sharedStep);
+    return response.data;
+  },
+  update: async (stepId: number, sharedStep: SharedStepUpdate): Promise<SharedStep> => {
+    const response = await api.put(`/shared-steps/${stepId}`, sharedStep);
+    return response.data;
+  },
+  delete: async (stepId: number): Promise<void> => {
+    await api.delete(`/shared-steps/${stepId}`);
+  },
+  incrementUsage: async (stepId: number): Promise<{ message: string; usage_count: number }> => {
+    const response = await api.post(`/shared-steps/${stepId}/increment-usage`);
+    return response.data;
   },
 };
 

@@ -444,13 +444,13 @@ export function TestCaseRevisions() {
                       <div>
                         <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">{t('before')}:</p>
                         <div className="flex flex-wrap gap-1">
-                          {(previousRevision.tags || '').split(',').map((tag, index) => (
+                          {(previousRevision.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean).map((tag, index) => (
                             <Badge 
-                              key={index} 
+                              key={`${tag}-${index}`} 
                               variant="secondary" 
                               className="px-2 py-1 text-xs bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
                             >
-                              {tag.trim()}
+                              {tag}
                             </Badge>
                           ))}
                         </div>
@@ -458,13 +458,13 @@ export function TestCaseRevisions() {
                       <div>
                         <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{t('after')}:</p>
                         <div className="flex flex-wrap gap-1">
-                          {(revision.tags || '').split(',').map((tag, index) => (
+                          {(revision.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean).map((tag, index) => (
                             <Badge 
-                              key={index} 
+                              key={`${tag}-${index}`} 
                               variant="secondary" 
                               className="px-2 py-1 text-xs bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
                             >
-                              {tag.trim()}
+                              {tag}
                             </Badge>
                           ))}
                         </div>
@@ -472,13 +472,13 @@ export function TestCaseRevisions() {
                     </div>
                   ) : (
                     <div className="flex flex-wrap gap-1">
-                      {(revision.tags || '').split(',').map((tag, index) => (
+                      {(revision.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean).map((tag, index) => (
                         <Badge 
-                          key={index} 
+                          key={`${tag}-${index}`} 
                           variant="secondary" 
                           className="px-2 py-1 text-xs bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
                         >
-                          {tag.trim()}
+                          {tag}
                         </Badge>
                       ))}
                     </div>

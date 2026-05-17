@@ -6990,6 +6990,60 @@
         }
       }
     },
+    "/test-cases/{test_case_id}/revisions/{revision_number}/restore": {
+      "post": {
+        "summary": "Restore Test Case Revision",
+        "description": "Restore editable test case fields from a saved revision.",
+        "operationId": "restore_test_case_revision_test_cases__test_case_id__revisions__revision_number__restore_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Case Id"
+            }
+          },
+          {
+            "name": "revision_number",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Revision Number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestCaseWithRelations"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/test-runs": {
       "post": {
         "summary": "Create Test Run",
@@ -15710,15 +15764,6 @@
         ],
         "parameters": [
           {
-            "name": "project_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          },
-          {
             "name": "skip",
             "in": "query",
             "required": false,
@@ -24210,12 +24255,15 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -24225,14 +24273,19 @@
           },
           "action": {
             "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
             "title": "Action"
           },
           "expected_result": {
             "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
             "title": "Expected Result"
           },
           "project_id": {
             "type": "integer",
+            "minimum": 1.0,
             "title": "Project Id"
           },
           "is_active": {
@@ -24287,12 +24340,15 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -24302,14 +24358,19 @@
           },
           "action": {
             "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
             "title": "Action"
           },
           "expected_result": {
             "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
             "title": "Expected Result"
           },
           "project_id": {
             "type": "integer",
+            "minimum": 1.0,
             "title": "Project Id"
           },
           "is_active": {
@@ -24321,10 +24382,6 @@
             "type": "integer",
             "title": "Usage Count",
             "default": 0
-          },
-          "created_by": {
-            "type": "integer",
-            "title": "Created By"
           }
         },
         "type": "object",
@@ -24332,8 +24389,7 @@
           "name",
           "action",
           "expected_result",
-          "project_id",
-          "created_by"
+          "project_id"
         ],
         "title": "SharedStepCreate"
       },
@@ -24341,12 +24397,15 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -24379,6 +24438,8 @@
           },
           "estimated_time": {
             "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 1.0,
             "title": "Estimated Time",
             "default": 1
           },
@@ -24463,12 +24524,15 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -24501,6 +24565,8 @@
           },
           "estimated_time": {
             "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 1.0,
             "title": "Estimated Time",
             "default": 1
           },
@@ -24538,18 +24604,13 @@
             "type": "boolean",
             "title": "Is Active",
             "default": true
-          },
-          "created_by": {
-            "type": "integer",
-            "title": "Created By"
           }
         },
         "type": "object",
         "required": [
           "name",
           "category",
-          "complexity",
-          "created_by"
+          "complexity"
         ],
         "title": "SharedStepTemplateCreate"
       },
@@ -24558,7 +24619,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -24569,7 +24632,8 @@
           "description": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -24616,7 +24680,9 @@
           "estimated_time": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 1440.0,
+                "minimum": 1.0
               },
               {
                 "type": "null"
@@ -24672,7 +24738,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -24683,7 +24751,8 @@
           "description": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -24694,7 +24763,9 @@
           "action": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -24705,7 +24776,9 @@
           "expected_result": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -24937,7 +25010,8 @@
           "tags": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -25559,7 +25633,8 @@
           "tags": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -25777,7 +25852,8 @@
           "tags": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -25953,7 +26029,8 @@
           "tags": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"

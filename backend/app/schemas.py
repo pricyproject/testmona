@@ -205,7 +205,7 @@ class TestCaseBase(BaseModel):
     priority: str = "medium"
     status: str = "active"
     reference: Optional[str] = None  # Reference field for requirements, JIRA tickets, etc.
-    tags: Optional[str] = None
+    tags: Optional[str] = Field(None, max_length=500)
     section_id: Optional[int] = None
     order_index: Optional[int] = 0
     is_multistep: Optional[bool] = False  # Flag to indicate multistep format
@@ -249,7 +249,7 @@ class TestCaseUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     reference: Optional[str] = None  # Reference field for requirements, JIRA tickets, etc.
-    tags: Optional[str] = None
+    tags: Optional[str] = Field(None, max_length=500)
     section_id: Optional[int] = None
     test_suite_id: Optional[int] = None
     order_index: Optional[int] = None
@@ -1473,29 +1473,47 @@ class PriorityDefinition(PriorityDefinitionBase):
 
 
 class SharedStepTemplateBase(BaseModel):
-    name: str
-    description: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=500)
     category: str
     tags: Optional[List[str]] = []
     complexity: str
-    estimated_time: int = 1
+    estimated_time: int = Field(1, ge=1, le=1440)
     prerequisites: Optional[List[str]] = []
     related_steps: Optional[List[str]] = []
     is_active: bool = True
 
+    @field_validator('name')
+    @classmethod
+    def validate_shared_step_template_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('Shared step template name is required')
+        return cleaned
+
 class SharedStepTemplateCreate(SharedStepTemplateBase):
-    created_by: int
+    pass
 
 class SharedStepTemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=500)
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     complexity: Optional[str] = None
-    estimated_time: Optional[int] = None
+    estimated_time: Optional[int] = Field(None, ge=1, le=1440)
     prerequisites: Optional[List[str]] = None
     related_steps: Optional[List[str]] = None
     is_active: Optional[bool] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_shared_step_template_update_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('Shared step template name is required')
+        return cleaned
 
 class SharedStepTemplate(SharedStepTemplateBase):
     id: int
@@ -1503,6 +1521,9 @@ class SharedStepTemplate(SharedStepTemplateBase):
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class TestExecutionSettingsBase(BaseModel):
@@ -1719,7 +1740,7 @@ class TestCaseRevisionBase(BaseModel):
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     priority: Optional[Priority] = None
-    tags: Optional[str] = None
+    tags: Optional[str] = Field(None, max_length=500)
     changed_fields: Optional[Dict[str, Any]] = None
     change_reason: Optional[str] = None
 
@@ -2759,25 +2780,59 @@ class ReportGenerationRequest(BaseModel):
 
 # Shared Step Schemas
 class SharedStepBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-    action: str
-    expected_result: str
-    project_id: int
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=500)
+    action: str = Field(..., min_length=1, max_length=1000)
+    expected_result: str = Field(..., min_length=1, max_length=1000)
+    project_id: int = Field(..., ge=1)
     is_active: bool = True
     usage_count: int = 0
 
+    @field_validator('name', 'action', 'expected_result')
+    @classmethod
+    def validate_shared_step_required_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('Field is required')
+        return cleaned
+
+    @field_validator('description')
+    @classmethod
+    def validate_shared_step_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
+
 
 class SharedStepCreate(SharedStepBase):
-    created_by: int
+    pass
 
 
 class SharedStepUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    action: Optional[str] = None
-    expected_result: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=500)
+    action: Optional[str] = Field(None, min_length=1, max_length=1000)
+    expected_result: Optional[str] = Field(None, min_length=1, max_length=1000)
     is_active: Optional[bool] = None
+
+    @field_validator('name', 'action', 'expected_result')
+    @classmethod
+    def validate_shared_step_update_required_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError('Field is required')
+        return cleaned
+
+    @field_validator('description')
+    @classmethod
+    def validate_shared_step_update_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class SharedStep(SharedStepBase):

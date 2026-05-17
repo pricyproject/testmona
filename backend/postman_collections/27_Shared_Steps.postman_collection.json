@@ -1,0 +1,332 @@
+{
+  "info": {
+    "name": "Shared Steps",
+    "description": "Shared step and shared step template endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "testProjectId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "sharedStepId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "sharedStepTemplateId",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Login - Setup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "token"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response contains access_token\", function () {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('access_token');",
+              "    pm.environment.set('accessToken', jsonData.access_token);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Shared Step",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Reusable login step\",\n  \"description\": \"Logs in with default demo credentials\",\n  \"action\": \"Enter demo@testmona.com and demo123, then submit the login form\",\n  \"expected_result\": \"The user is authenticated and the dashboard is shown\",\n  \"project_id\": {{testProjectId}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/shared-steps/",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-steps",
+            ""
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 201\", function () {",
+              "    pm.expect([200, 201]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if ([200, 201].includes(pm.response.code)) {",
+              "    const jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('id');",
+              "    pm.environment.set('sharedStepId', jsonData.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Shared Steps",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/shared-steps/?project_id={{testProjectId}}&skip=0&limit=100",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-steps",
+            ""
+          ],
+          "query": [
+            {
+              "key": "project_id",
+              "value": "{{testProjectId}}"
+            },
+            {
+              "key": "skip",
+              "value": "0"
+            },
+            {
+              "key": "limit",
+              "value": "100"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Shared Step",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Reusable login step updated\",\n  \"description\": \"Updated shared login flow\",\n  \"action\": \"Enter demo credentials and submit the login form\",\n  \"expected_result\": \"The dashboard is shown\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/shared-steps/{{sharedStepId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-steps",
+            "{{sharedStepId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Increment Shared Step Usage",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/shared-steps/{{sharedStepId}}/increment-usage",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-steps",
+            "{{sharedStepId}}",
+            "increment-usage"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Delete Shared Step",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/shared-steps/{{sharedStepId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-steps",
+            "{{sharedStepId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create Shared Step Template",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Login template\",\n  \"description\": \"Reusable login template\",\n  \"category\": \"authentication\",\n  \"tags\": [\"login\", \"auth\"],\n  \"complexity\": \"simple\",\n  \"estimated_time\": 2,\n  \"prerequisites\": [\"User exists\"],\n  \"related_steps\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/shared-step-templates/",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-step-templates",
+            ""
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "if ([200, 201].includes(pm.response.code)) {",
+              "    const jsonData = pm.response.json();",
+              "    pm.environment.set('sharedStepTemplateId', jsonData.id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Shared Step Templates",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/shared-step-templates/?skip=0&limit=100",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-step-templates",
+            ""
+          ],
+          "query": [
+            {
+              "key": "skip",
+              "value": "0"
+            },
+            {
+              "key": "limit",
+              "value": "100"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Shared Step Template",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Login template updated\",\n  \"description\": \"Updated reusable login template\",\n  \"category\": \"authentication\",\n  \"tags\": [\"login\", \"auth\", \"smoke\"],\n  \"complexity\": \"simple\",\n  \"estimated_time\": 3,\n  \"prerequisites\": [\"User exists\"],\n  \"related_steps\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/shared-step-templates/{{sharedStepTemplateId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-step-templates",
+            "{{sharedStepTemplateId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Delete Shared Step Template",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/shared-step-templates/{{sharedStepTemplateId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-step-templates",
+            "{{sharedStepTemplateId}}"
+          ]
+        }
+      }
+    }
+  ]
+}

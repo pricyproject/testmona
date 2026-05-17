@@ -5,10 +5,13 @@ Shared steps and shared step templates routes.
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+import logging
 
 from .. import crud, schemas, auth, rbac
 from ..database import get_db
 from ..auth import get_current_active_user
+
+logger = logging.getLogger(__name__)
 
 
 def register_shared_steps_routes(app):
@@ -24,7 +27,9 @@ def register_shared_steps_routes(app):
         if not rbac.has_permission(current_user, "write", step.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
-        db_step = crud.create_shared_step(db=db, step=step.model_dump())
+        step_data = step.model_dump()
+        step_data["created_by"] = current_user.id
+        db_step = crud.create_shared_step(db=db, step=step_data)
         
         # Create audit trail
         try:
@@ -41,8 +46,8 @@ def register_shared_steps_routes(app):
                 description=f"Shared step created: {db_step.name or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for shared step creation: {e}")
+        except Exception:
+            logger.exception("Failed to create audit trail for shared step creation")
         
         return db_step
 
@@ -54,10 +59,14 @@ def register_shared_steps_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
+        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.get_shared_steps(db, project_id=project_id, skip=skip, limit=limit)
+
+        if project_id is not None:
+            return crud.get_shared_steps(db, project_id=project_id, skip=skip, limit=limit)
+
+        accessible_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
+        return crud.get_shared_steps(db, project_ids=accessible_project_ids, skip=skip, limit=limit)
 
     @app.get("/shared-steps/{step_id}", response_model=schemas.SharedStep)
     def read_shared_step(
@@ -105,8 +114,8 @@ def register_shared_steps_routes(app):
                 description=f"Shared step updated: {db_step.name or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for shared step update: {e}")
+        except Exception:
+            logger.exception("Failed to create audit trail for shared step update")
         
         return db_step
 
@@ -145,8 +154,8 @@ def register_shared_steps_routes(app):
                 description=f"Shared step deleted: {step_name or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for shared step deletion: {e}")
+        except Exception:
+            logger.exception("Failed to create audit trail for shared step deletion")
         
         return {"message": "Shared step deleted successfully"}
 
@@ -156,6 +165,13 @@ def register_shared_steps_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
+        db_step = crud.get_shared_step(db, step_id=step_id)
+        if db_step is None:
+            raise HTTPException(status_code=404, detail="Shared step not found")
+
+        if not rbac.has_permission(current_user, "write", db_step.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
         step = crud.increment_shared_step_usage(db, step_id=step_id)
         if step is None:
             raise HTTPException(status_code=404, detail="Shared step not found")
@@ -169,10 +185,12 @@ def register_shared_steps_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "write", template.project_id, db):
+        if not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        db_template = crud.create_shared_step_template(db=db, template=template)
+
+        template_data = template.model_dump()
+        template_data["created_by"] = current_user.id
+        db_template = crud.create_shared_step_template(db=db, template=template_data)
         
         # Create audit trail
         try:
@@ -185,18 +203,17 @@ def register_shared_steps_routes(app):
                 action=AuditAction.CREATE.value,
                 entity_type=EntityType.SHARED_STEP_TEMPLATE.value,
                 entity_id=db_template.id,
-                project_id=db_template.project_id,
+                project_id=None,
                 description=f"Shared step template created: {db_template.name or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for shared step template creation: {e}")
+        except Exception:
+            logger.exception("Failed to create audit trail for shared step template creation")
         
         return db_template
 
     @app.get("/shared-step-templates/", response_model=List[schemas.SharedStepTemplate])
     def read_shared_step_templates(
-        project_id: int = None,
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
@@ -204,8 +221,8 @@ def register_shared_steps_routes(app):
     ):
         if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.get_shared_step_templates(db, project_id=project_id, skip=skip, limit=limit)
+
+        return crud.get_shared_step_templates(db, skip=skip, limit=limit)
 
     @app.get("/shared-step-templates/{template_id}", response_model=schemas.SharedStepTemplate)
     def read_shared_step_template(
@@ -217,7 +234,7 @@ def register_shared_steps_routes(app):
         if template is None:
             raise HTTPException(status_code=404, detail="Shared step template not found")
         
-        if not rbac.has_permission(current_user, "read", template.project_id, db):
+        if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         return template
@@ -233,10 +250,14 @@ def register_shared_steps_routes(app):
         if db_template is None:
             raise HTTPException(status_code=404, detail="Shared step template not found")
         
-        if not rbac.has_permission(current_user, "write", db_template.project_id, db):
+        if not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        db_template = crud.update_shared_step_template(db, template_id=template_id, template=template)
+
+        db_template = crud.update_shared_step_template(
+            db,
+            template_id=template_id,
+            template=template.model_dump(exclude_unset=True),
+        )
         
         # Create audit trail
         try:
@@ -249,12 +270,12 @@ def register_shared_steps_routes(app):
                 action=AuditAction.UPDATE.value,
                 entity_type=EntityType.SHARED_STEP_TEMPLATE.value,
                 entity_id=db_template.id,
-                project_id=db_template.project_id,
+                project_id=None,
                 description=f"Shared step template updated: {db_template.name or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for shared step template update: {e}")
+        except Exception:
+            logger.exception("Failed to create audit trail for shared step template update")
         
         return db_template
 
@@ -268,14 +289,13 @@ def register_shared_steps_routes(app):
         if db_template is None:
             raise HTTPException(status_code=404, detail="Shared step template not found")
         
-        if not rbac.has_permission(current_user, "delete", db_template.project_id, db):
+        if not rbac.has_permission(current_user, "delete"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Store data for audit trail before deletion
         template_id_val = db_template.id
         template_name = db_template.name
-        project_id = db_template.project_id
-        
+
         crud.delete_shared_step_template(db, template_id=template_id)
         
         # Create audit trail
@@ -289,11 +309,11 @@ def register_shared_steps_routes(app):
                 action=AuditAction.DELETE.value,
                 entity_type=EntityType.SHARED_STEP_TEMPLATE.value,
                 entity_id=template_id_val,
-                project_id=project_id,
+                project_id=None,
                 description=f"Shared step template deleted: {template_name or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for shared step template deletion: {e}")
+        except Exception:
+            logger.exception("Failed to create audit trail for shared step template deletion")
         
         return {"message": "Shared step template deleted successfully"}

@@ -97,7 +97,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"title\": \"Test User Login Functionality\",\n  \"description\": \"Verify that users can successfully login with valid credentials\",\n  \"test_suite_id\": \"{{testSuiteId}}\",\n  \"test_type\": \"manual\",\n  \"priority\": \"high\",\n  \"status\": \"active\",\n  \"is_multistep\": true,\n  \"test_steps\": [\n    {\n      \"step_number\": 1,\n      \"action\": \"Open the login page\",\n      \"expected_result\": \"Login page is displayed\",\n      \"step_type\": \"manual\"\n    },\n    {\n      \"step_number\": 2,\n      \"action\": \"Submit valid credentials\",\n      \"expected_result\": \"User is authenticated successfully\",\n      \"step_type\": \"manual\"\n    }\n  ]\n}"
+          "raw": "{\n  \"title\": \"Test User Login Functionality\",\n  \"description\": \"Verify that users can successfully login with valid credentials\",\n  \"test_suite_id\": \"{{testSuiteId}}\",\n  \"test_type\": \"manual\",\n  \"priority\": \"high\",\n  \"status\": \"active\",\n  \"tags\": \"login, auth, smoke\",\n  \"is_multistep\": true,\n  \"test_steps\": [\n    {\n      \"step_number\": 1,\n      \"action\": \"Open the login page\",\n      \"expected_result\": \"Login page is displayed\",\n      \"step_type\": \"manual\"\n    },\n    {\n      \"step_number\": 2,\n      \"action\": \"Submit valid credentials\",\n      \"expected_result\": \"User is authenticated successfully\",\n      \"step_type\": \"manual\"\n    }\n  ]\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/test-cases",
@@ -128,6 +128,7 @@
               "        pm.expect(jsonData).to.have.property('test_suite_id');",
               "        pm.expect(jsonData).to.have.property('priority');",
               "        pm.expect(jsonData).to.have.property('status');",
+              "        pm.expect(jsonData).to.have.property('tags');",
               "    });",
               "    ",
               "    pm.test(\"Title matches request\", function () {",
@@ -279,7 +280,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"title\": \"Updated Test Case Title {{$timestamp}}\",\n  \"priority\": \"critical\",\n  \"status\": \"active\"\n}"
+          "raw": "{\n  \"title\": \"Updated Test Case Title {{$timestamp}}\",\n  \"priority\": \"critical\",\n  \"status\": \"active\",\n  \"tags\": \"updated, regression\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/test-cases/{{testCaseId}}",
@@ -307,6 +308,7 @@
               "        var jsonData = pm.response.json();",
               "        pm.expect(jsonData).to.have.property('title');",
               "        pm.expect(jsonData).to.have.property('priority');",
+              "        pm.expect(jsonData).to.have.property('tags');",
               "    });",
               "    ",
               "    pm.test(\"Updated values match request\", function () {",
@@ -314,10 +316,52 @@
               "        var requestBody = JSON.parse(pm.request.body.raw);",
               "        pm.expect(jsonData.title).to.eql(requestBody.title);",
               "        pm.expect(jsonData.priority).to.eql(requestBody.priority);",
+              "        pm.expect(jsonData.tags).to.eql(requestBody.tags);",
               "    });",
               "} else {",
               "    pm.test(\"Test case not found - update skipped\", function () {",
               "        console.log(\"Test case ID not set or not found\");",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Restore Test Case Revision",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/test-cases/{{testCaseId}}/revisions/1/restore",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-cases",
+            "{{testCaseId}}",
+            "revisions",
+            "1",
+            "restore"
+          ]
+        },
+        "description": "Restore a test case to revision 1"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 403, or 404\", function () {",
+              "    pm.expect([200, 403, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    pm.test(\"Restored test case contains tags\", function () {",
+              "        var jsonData = pm.response.json();",
+              "        pm.expect(jsonData).to.have.property('id');",
+              "        pm.expect(jsonData).to.have.property('tags');",
               "    });",
               "}"
             ],

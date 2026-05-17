@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { sharedStepsAPI } from '@/lib/api';
+import { SharedStep, SharedStepCreate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,155 +16,252 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Search, Copy, TrendingUp, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Copy, TrendingUp, AlertCircle, Loader2 } from 'lucide-react';
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+const NAME_MAX_LENGTH = 200;
+const DESCRIPTION_MAX_LENGTH = 500;
+const STEP_TEXT_MAX_LENGTH = 1000;
+
+interface SharedStepFormData {
+  name: string;
+  description: string;
+  action: string;
+  expected_result: string;
+}
+
+const emptyFormData: SharedStepFormData = {
+  name: '',
+  description: '',
+  action: '',
+  expected_result: '',
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  const responseDetail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof responseDetail === 'string') {
+    return responseDetail;
+  }
+  if (Array.isArray(responseDetail)) {
+    return responseDetail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'msg' in item) return String(item.msg);
+        return '';
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  const message = (error as { message?: string })?.message;
+  return message || fallback;
+};
+
+const normalizeSharedStepPayload = (formData: SharedStepFormData, projectId: number): SharedStepCreate => ({
+  name: formData.name.trim(),
+  description: formData.description.trim() || null,
+  action: formData.action.trim(),
+  expected_result: formData.expected_result.trim(),
+  project_id: projectId,
+});
 
 export function SharedSteps() {
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
-  const [sharedSteps, setSharedSteps] = useState<any[]>([]);
+  const [sharedSteps, setSharedSteps] = useState<SharedStep[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedStep, setSelectedStep] = useState<any>(null);
+  const [selectedStep, setSelectedStep] = useState<SharedStep | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const stepNameInputRef = useRef<HTMLInputElement>(null);
-  
-  // Form state
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    action: '',
-    expected_result: '',
-    project_id: ''
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [touchedFields, setTouchedFields] = useState<Record<keyof SharedStepFormData, boolean>>({
+    name: false,
+    description: false,
+    action: false,
+    expected_result: false,
   });
-  const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
+  const [formData, setFormData] = useState<SharedStepFormData>(emptyFormData);
+  const stepNameInputRef = useRef<HTMLInputElement>(null);
 
-  // Load shared steps from API
-  const loadSharedSteps = async () => {
+  const numericProjectId = projectId ? Number(projectId) : undefined;
+  const isProjectIdValid = numericProjectId === undefined || Number.isInteger(numericProjectId);
+  const canSubmit = Boolean(
+    formData.name.trim() &&
+    formData.action.trim() &&
+    formData.expected_result.trim() &&
+    numericProjectId &&
+    isProjectIdValid
+  );
+
+  const resetForm = () => {
+    setFormData(emptyFormData);
+    setTouchedFields({
+      name: false,
+      description: false,
+      action: false,
+      expected_result: false,
+    });
+  };
+
+  const loadSharedSteps = useCallback(async () => {
+    if (!isProjectIdValid) {
+      setError(t('invalidProjectId'));
+      setSharedSteps([]);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
-      
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
-      const url = projectId 
-        ? `${API_BASE_URL}/shared-steps/?project_id=${projectId}`
-        : `${API_BASE_URL}/shared-steps/`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load shared steps');
-      }
-
-      const data = await response.json();
+      const data = await sharedStepsAPI.getAll(numericProjectId);
       setSharedSteps(data);
-    } catch (error) {
-      console.error('Failed to load shared steps:', error);
-      setError('Failed to load shared steps. Please try again.');
+    } catch (loadError) {
+      console.error('Failed to load shared steps:', loadError);
+      setSharedSteps([]);
+      setError(getErrorMessage(loadError, t('failedToLoadSharedSteps')));
     } finally {
       setLoading(false);
     }
-  };
+  }, [isProjectIdValid, numericProjectId, t]);
 
   useEffect(() => {
     loadSharedSteps();
-  }, [projectId]);
+  }, [loadSharedSteps]);
 
-  // Auto-focus on name input when dialog opens
   useEffect(() => {
     if (isCreateDialogOpen && stepNameInputRef.current) {
-      setTimeout(() => stepNameInputRef.current?.focus(), 100);
+      const focusTimer = window.setTimeout(() => stepNameInputRef.current?.focus(), 100);
+      return () => window.clearTimeout(focusTimer);
     }
   }, [isCreateDialogOpen]);
 
-  // Track unsaved changes
   useEffect(() => {
     setHasUnsavedChanges(
-      formData.name.trim() !== '' || 
+      formData.name.trim() !== '' ||
       formData.description.trim() !== '' ||
       formData.action.trim() !== '' ||
       formData.expected_result.trim() !== ''
     );
-  }, [formData.name, formData.description, formData.action, formData.expected_result]);
+  }, [formData]);
+
+  const updateFormField = (field: keyof SharedStepFormData, value: string) => {
+    setFormData((current) => ({ ...current, [field]: value }));
+  };
 
   const handleCreateSharedStep = async () => {
+    if (!canSubmit || !numericProjectId) {
+      setTouchedFields({
+        name: true,
+        description: true,
+        action: true,
+        expected_result: true,
+      });
+      return;
+    }
+
     try {
       setIsCreating(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
-      if (!projectId) {
-        throw new Error('Project ID is required');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/shared-steps/`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: formData.name,
-          description: formData.description,
-          action: formData.action,
-          expected_result: formData.expected_result,
-          project_id: parseInt(projectId),
-          created_by: 1
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to create shared step');
-      }
-
+      setError(null);
+      await sharedStepsAPI.create(normalizeSharedStepPayload(formData, numericProjectId));
       resetForm();
       setHasUnsavedChanges(false);
       setIsCreateDialogOpen(false);
       await loadSharedSteps();
-    } catch (error) {
-      console.error('Failed to create shared step:', error);
-      setError('Failed to create shared step. Please try again.');
+    } catch (createError) {
+      console.error('Failed to create shared step:', createError);
+      setError(getErrorMessage(createError, t('failedToCreateSharedStep')));
     } finally {
       setIsCreating(false);
     }
   };
 
-  const handleDialogClose = (open: boolean) => {
+  const handleEditSharedStep = async () => {
+    if (!selectedStep || !canSubmit || !numericProjectId) {
+      setTouchedFields({
+        name: true,
+        description: true,
+        action: true,
+        expected_result: true,
+      });
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+      setError(null);
+      const payload = normalizeSharedStepPayload(formData, numericProjectId);
+      await sharedStepsAPI.update(selectedStep.id, {
+        name: payload.name,
+        description: payload.description,
+        action: payload.action,
+        expected_result: payload.expected_result,
+      });
+      resetForm();
+      setIsEditDialogOpen(false);
+      setSelectedStep(null);
+      await loadSharedSteps();
+    } catch (updateError) {
+      console.error('Failed to update shared step:', updateError);
+      setError(getErrorMessage(updateError, t('failedToUpdateSharedStep')));
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDeleteSharedStep = async (stepId: number) => {
+    if (!window.confirm(t('confirmDeleteReusableSharedStep'))) return;
+
+    try {
+      setError(null);
+      await sharedStepsAPI.delete(stepId);
+      await loadSharedSteps();
+    } catch (deleteError) {
+      console.error('Failed to delete shared step:', deleteError);
+      setError(getErrorMessage(deleteError, t('failedToDeleteSharedStep')));
+    }
+  };
+
+  const handleDuplicateStep = async (step: SharedStep) => {
+    try {
+      setError(null);
+      await sharedStepsAPI.create({
+        name: t('sharedStepCopyName', { name: step.name }),
+        description: step.description || null,
+        action: step.action,
+        expected_result: step.expected_result,
+        project_id: step.project_id,
+      });
+      await loadSharedSteps();
+    } catch (duplicateError) {
+      console.error('Failed to duplicate shared step:', duplicateError);
+      setError(getErrorMessage(duplicateError, t('failedToDuplicateSharedStep')));
+    }
+  };
+
+  const handleCreateDialogOpenChange = (open: boolean) => {
     if (!open && hasUnsavedChanges) {
       setShowUnsavedDialog(true);
-    } else {
-      setIsCreateDialogOpen(open);
-      if (!open) {
-        resetForm();
-        setHasUnsavedChanges(false);
-        setTouchedFields({});
-      }
+      return;
+    }
+
+    setIsCreateDialogOpen(open);
+    if (!open) {
+      resetForm();
+      setHasUnsavedChanges(false);
+    }
+  };
+
+  const handleEditDialogOpenChange = (open: boolean) => {
+    setIsEditDialogOpen(open);
+    if (!open) {
+      resetForm();
+      setSelectedStep(null);
+      setHasUnsavedChanges(false);
     }
   };
 
@@ -171,349 +270,264 @@ export function SharedSteps() {
     if (discard) {
       resetForm();
       setHasUnsavedChanges(false);
-      setTouchedFields({});
       setIsCreateDialogOpen(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey && e.key === 'Enter') {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.ctrlKey && event.key === 'Enter') {
+      event.preventDefault();
       handleCreateSharedStep();
     }
   };
 
-  const handleEditSharedStep = async () => {
-    if (!selectedStep) return;
-
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/shared-steps/${selectedStep.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: formData.name,
-          description: formData.description,
-          action: formData.action,
-          expected_result: formData.expected_result
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to update shared step');
-      }
-
-      resetForm();
-      setIsEditDialogOpen(false);
-      setSelectedStep(null);
-      await loadSharedSteps();
-    } catch (error) {
-      console.error('Failed to update shared step:', error);
-      setError('Failed to update shared step. Please try again.');
-    }
-  };
-
-  const handleDeleteSharedStep = async (stepId: number) => {
-    if (!confirm('Are you sure you want to delete this shared step? This will deactivate it and remove it from all test cases that use it.')) return;
-    
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/shared-steps/${stepId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete shared step');
-      }
-
-      await loadSharedSteps();
-    } catch (error) {
-      console.error('Failed to delete shared step:', error);
-      setError('Failed to delete shared step. Please try again.');
-    }
-  };
-
-  const handleDuplicateStep = async (step: any) => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('Authentication required');
-      }
-
-      const response = await fetch(`${API_BASE_URL}/shared-steps/`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: `${step.name} (Copy)`,
-          description: step.description,
-          action: step.action,
-          expected_result: step.expected_result,
-          project_id: step.project_id,
-          created_by: 1
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to duplicate shared step');
-      }
-
-      await loadSharedSteps();
-    } catch (error) {
-      console.error('Failed to duplicate shared step:', error);
-      setError('Failed to duplicate shared step. Please try again.');
-    }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      description: '',
-      action: '',
-      expected_result: '',
-      project_id: ''
-    });
-  };
-
-  const openEditDialog = (step: any) => {
+  const openEditDialog = (step: SharedStep) => {
     setSelectedStep(step);
     setFormData({
       name: step.name,
-      description: step.description,
+      description: step.description || '',
       action: step.action,
       expected_result: step.expected_result,
-      project_id: step.project_id
+    });
+    setTouchedFields({
+      name: false,
+      description: false,
+      action: false,
+      expected_result: false,
     });
     setIsEditDialogOpen(true);
   };
 
-  const filteredSteps = sharedSteps.filter(step => {
-    const matchesSearch = step.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         step.description?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch && step.is_active;
+  const filteredSteps = sharedSteps.filter((step) => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) return step.is_active;
+
+    return (
+      step.is_active &&
+      (step.name.toLowerCase().includes(query) ||
+        (step.description || '').toLowerCase().includes(query) ||
+        step.action.toLowerCase().includes(query) ||
+        step.expected_result.toLowerCase().includes(query))
+    );
   });
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Shared Steps</h1>
-          <p className="text-gray-600">Manage reusable test steps to reduce duplication</p>
+  const renderFormFields = (mode: 'create' | 'edit') => (
+    <div className="grid gap-4 py-4">
+      <div className="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+        <Label htmlFor={`${mode}-name`} className="sm:text-right">
+          {t('sharedStepNameRequired')}
+        </Label>
+        <div className="space-y-1 sm:col-span-3">
+          <Input
+            ref={mode === 'create' ? stepNameInputRef : undefined}
+            id={`${mode}-name`}
+            value={formData.name}
+            onChange={(event) => updateFormField('name', event.target.value)}
+            onBlur={() => setTouchedFields((current) => ({ ...current, name: true }))}
+            className={touchedFields.name && formData.name.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
+            placeholder={t('sharedStepNamePlaceholder')}
+            maxLength={NAME_MAX_LENGTH}
+          />
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>{t('sharedStepNamePlaceholder')}</span>
+            <span>{t('characterCount', { count: formData.name.length, max: NAME_MAX_LENGTH })}</span>
+          </div>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={handleDialogClose}>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+        <Label htmlFor={`${mode}-description`} className="pt-2 sm:text-right">
+          {t('description')}
+        </Label>
+        <div className="space-y-1 sm:col-span-3">
+          <Textarea
+            id={`${mode}-description`}
+            value={formData.description}
+            onChange={(event) => updateFormField('description', event.target.value)}
+            placeholder={t('sharedStepDescriptionPlaceholder')}
+            rows={2}
+            maxLength={DESCRIPTION_MAX_LENGTH}
+          />
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>{t('sharedStepDescriptionPlaceholder')}</span>
+            <span>{t('characterCount', { count: formData.description.length, max: DESCRIPTION_MAX_LENGTH })}</span>
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+        <Label htmlFor={`${mode}-action`} className="pt-2 sm:text-right">
+          {t('sharedStepActionRequired')}
+        </Label>
+        <div className="space-y-1 sm:col-span-3">
+          <Textarea
+            id={`${mode}-action`}
+            value={formData.action}
+            onChange={(event) => updateFormField('action', event.target.value)}
+            onBlur={() => setTouchedFields((current) => ({ ...current, action: true }))}
+            className={touchedFields.action && formData.action.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
+            placeholder={t('sharedStepActionPlaceholder')}
+            rows={3}
+            maxLength={STEP_TEXT_MAX_LENGTH}
+          />
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>{t('sharedStepActionPlaceholder')}</span>
+            <span>{t('characterCount', { count: formData.action.length, max: STEP_TEXT_MAX_LENGTH })}</span>
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+        <Label htmlFor={`${mode}-expected-result`} className="pt-2 sm:text-right">
+          {t('sharedStepExpectedResultRequired')}
+        </Label>
+        <div className="space-y-1 sm:col-span-3">
+          <Textarea
+            id={`${mode}-expected-result`}
+            value={formData.expected_result}
+            onChange={(event) => updateFormField('expected_result', event.target.value)}
+            onBlur={() => setTouchedFields((current) => ({ ...current, expected_result: true }))}
+            className={
+              touchedFields.expected_result && formData.expected_result.trim() === ''
+                ? 'border-red-300 focus:border-red-500'
+                : ''
+            }
+            placeholder={t('sharedStepExpectedResultPlaceholder')}
+            rows={3}
+            maxLength={STEP_TEXT_MAX_LENGTH}
+          />
+          <div className="flex justify-between text-xs text-gray-500">
+            <span>{t('sharedStepExpectedResultPlaceholder')}</span>
+            <span>{t('characterCount', { count: formData.expected_result.length, max: STEP_TEXT_MAX_LENGTH })}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">{t('sharedSteps')}</h1>
+          <p className="text-gray-600">{t('sharedStepsSubtitle')}</p>
+        </div>
+        <Dialog open={isCreateDialogOpen} onOpenChange={handleCreateDialogOpenChange}>
           <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Create Shared Step
+            <Button disabled={!isProjectIdValid || !numericProjectId}>
+              <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('createSharedStep')}
             </Button>
           </DialogTrigger>
           <DialogContent isRTL={isRTL} className="sm:max-w-[600px]" onKeyDown={handleKeyDown}>
             <DialogHeader>
-              <DialogTitle>Create New Shared Step</DialogTitle>
-              <DialogDescription>
-                Create a reusable test step that can be used across multiple test cases.
-              </DialogDescription>
+              <DialogTitle>{t('createNewSharedStep')}</DialogTitle>
+              <DialogDescription>{t('createNewSharedStepDescription')}</DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="name" className="text-right">
-                  Name *
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Input
-                    ref={stepNameInputRef}
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    onBlur={() => setTouchedFields({...touchedFields, name: true})}
-                    className={touchedFields.name && formData.name.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
-                    placeholder="Enter step name"
-                    maxLength={100}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Enter step name</span>
-                    <span>{formData.name.length}/100</span>
-                  </div>
-                </div>
+            {renderFormFields('create')}
+            <DialogFooter className="flex-col gap-2 sm:flex-row">
+              <div className={`mb-2 text-xs text-gray-500 sm:mb-0 ${isRTL ? 'sm:ml-auto' : 'sm:mr-auto'}`}>
+                {t('ctrlEnterToSubmit')}
               </div>
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="description" className="text-right pt-2">
-                  Description
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
-                    placeholder="Enter step description"
-                    rows={2}
-                    maxLength={500}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Enter step description</span>
-                    <span>{formData.description.length}/500</span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="action" className="text-right pt-2">
-                  Action *
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Textarea
-                    id="action"
-                    value={formData.action}
-                    onChange={(e) => setFormData({...formData, action: e.target.value})}
-                    placeholder="Describe the action to perform"
-                    rows={3}
-                    maxLength={1000}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Describe the action to perform</span>
-                    <span>{formData.action.length}/1000</span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="expected_result" className="text-right pt-2">
-                  Expected Result *
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Textarea
-                    id="expected_result"
-                    value={formData.expected_result}
-                    onChange={(e) => setFormData({...formData, expected_result: e.target.value})}
-                    placeholder="Describe the expected result"
-                    rows={3}
-                    maxLength={1000}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Describe the expected result</span>
-                    <span>{formData.expected_result.length}/1000</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-              <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
-                Ctrl+Enter to submit
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => handleDialogClose(false)}
-              >
-                Cancel
+              <Button variant="outline" onClick={() => handleCreateDialogOpenChange(false)}>
+                {t('cancel')}
               </Button>
-              <Button
-                type="submit"
-                onClick={handleCreateSharedStep}
-                disabled={!formData.name.trim() || !formData.action.trim() || !formData.expected_result.trim() || !projectId || isCreating}
-                className="transition-all duration-200"
-              >
-                {isCreating ? 'Creating...' : 'Create Shared Step'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Unsaved Changes Confirmation Dialog */}
-        <Dialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
-          <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
-            <DialogHeader>
-              <DialogTitle>Unsaved Changes</DialogTitle>
-              <DialogDescription>
-                You have unsaved changes. Are you sure you want to close without saving?
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => handleUnsavedConfirm(false)}>
-                Keep Editing
-              </Button>
-              <Button onClick={() => handleUnsavedConfirm(true)}>
-                Discard Changes
+              <Button onClick={handleCreateSharedStep} disabled={!canSubmit || isCreating}>
+                {isCreating && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                {isCreating ? t('creating') : t('createSharedStep')}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Filters */}
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <Dialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('unsavedChanges')}</DialogTitle>
+            <DialogDescription>{t('unsavedChangesModalMessage')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleUnsavedConfirm(false)}>
+              {t('keepEditingModal')}
+            </Button>
+            <Button onClick={() => handleUnsavedConfirm(true)}>{t('discardChanges')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Search
+            className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 ${isRTL ? 'right-3' : 'left-3'}`}
+          />
           <Input
             placeholder={t('searchSharedSteps')}
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className={isRTL ? 'pr-10' : 'pl-10'}
           />
         </div>
       </div>
 
-      {/* Shared Steps List */}
+      {loading && (
+        <div className="flex items-center justify-center py-12 text-gray-600">
+          <Loader2 className={`h-6 w-6 animate-spin text-blue-600 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+          <span>{t('loadingSharedSteps')}</span>
+        </div>
+      )}
+
       {!loading && (
         <div className="grid gap-4">
           {filteredSteps.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  {searchTerm ? 'No shared steps found' : 'No shared steps yet'}
+                <h3 className="mb-2 text-lg font-semibold text-gray-900">
+                  {searchTerm ? t('noSharedStepsFound') : t('noSharedStepsYet')}
                 </h3>
-                <p className="text-gray-600 text-center mb-4">
-                  {searchTerm 
-                    ? 'Try adjusting your search terms'
-                    : projectId 
-                      ? 'Create your first shared step to reuse across test cases'
-                      : 'Select a project to view its shared steps'
-                  }
+                <p className="mb-4 text-center text-gray-600">
+                  {searchTerm
+                    ? t('tryAdjustingSearchTerms')
+                    : numericProjectId
+                      ? t('createFirstSharedStep')
+                      : t('selectProjectForSharedSteps')}
                 </p>
-                {!searchTerm && projectId && (
+                {!searchTerm && numericProjectId && (
                   <Button onClick={() => setIsCreateDialogOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Shared Step
+                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('createSharedStep')}
                   </Button>
                 )}
               </CardContent>
             </Card>
           ) : (
             filteredSteps.map((step) => (
-              <Card key={step.id} className="hover:shadow-md transition-shadow">
+              <Card key={step.id} className="transition-shadow hover:shadow-md">
                 <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0 mr-4">
-                      <CardTitle className="text-lg truncate" title={step.name}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <CardTitle className="truncate text-lg" title={step.name}>
                         {step.name}
                       </CardTitle>
-                      <p className="text-sm text-gray-600 mt-1">{step.description}</p>
-                      <div className="flex items-center gap-2 mt-2">
+                      <p className="mt-1 text-sm text-gray-600">{step.description || t('noDescription')}</p>
+                      <div className="mt-2 flex items-center gap-2">
                         <div className="flex items-center text-sm text-gray-500">
-                          <TrendingUp className="h-3 w-3 mr-1" />
-                          Used {step.usage_count || 0} times
+                          <TrendingUp className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                          {t('usedTimes', { count: step.usage_count || 0 })}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-shrink-0 items-center gap-2">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleDuplicateStep(step)}
+                        aria-label={t('duplicateSharedStep')}
+                        title={t('duplicateSharedStep')}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -521,6 +535,8 @@ export function SharedSteps() {
                         variant="outline"
                         size="sm"
                         onClick={() => openEditDialog(step)}
+                        aria-label={t('editSharedStep')}
+                        title={t('editSharedStep')}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -528,6 +544,8 @@ export function SharedSteps() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleDeleteSharedStep(step.id)}
+                        aria-label={t('deleteSharedStep')}
+                        title={t('deleteSharedStep')}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -537,15 +555,15 @@ export function SharedSteps() {
                 <CardContent>
                   <div className="space-y-2">
                     <div>
-                      <h4 className="font-medium text-sm text-gray-700">Action:</h4>
-                      <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">{step.action}</p>
+                      <h4 className="text-sm font-medium text-gray-700">{t('action')}:</h4>
+                      <p className="rounded bg-gray-50 p-2 text-sm text-gray-600">{step.action}</p>
                     </div>
                     <div>
-                      <h4 className="font-medium text-sm text-gray-700">Expected Result:</h4>
-                      <p className="text-sm text-gray-600 bg-green-50 p-2 rounded">{step.expected_result}</p>
+                      <h4 className="text-sm font-medium text-gray-700">{t('expectedResult')}:</h4>
+                      <p className="rounded bg-green-50 p-2 text-sm text-gray-600">{step.expected_result}</p>
                     </div>
                     <div className="text-xs text-gray-500">
-                      Created: {new Date(step.created_at).toLocaleString()}
+                      {t('createdDate', { date: new Date(step.created_at).toLocaleString() })}
                     </div>
                   </div>
                 </CardContent>
@@ -555,75 +573,20 @@ export function SharedSteps() {
         </div>
       )}
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+      <Dialog open={isEditDialogOpen} onOpenChange={handleEditDialogOpenChange}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[600px]">
           <DialogHeader>
-            <DialogTitle>Edit Shared Step</DialogTitle>
-            <DialogDescription>
-              Update the shared step details.
-            </DialogDescription>
+            <DialogTitle>{t('editSharedStep')}</DialogTitle>
+            <DialogDescription>{t('editSharedStepDescription')}</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="edit-name" className="text-right">
-                Name *
-              </Label>
-              <Input
-                id="edit-name"
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                className="col-span-3"
-                placeholder="Enter step name"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="edit-description" className="text-right pt-2">
-                Description
-              </Label>
-              <Textarea
-                id="edit-description"
-                value={formData.description}
-                onChange={(e) => setFormData({...formData, description: e.target.value})}
-                className="col-span-3"
-                placeholder="Enter step description"
-                rows={2}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="edit-action" className="text-right pt-2">
-                Action *
-              </Label>
-              <Textarea
-                id="edit-action"
-                value={formData.action}
-                onChange={(e) => setFormData({...formData, action: e.target.value})}
-                className="col-span-3"
-                placeholder="Describe the action to perform"
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="edit-expected_result" className="text-right pt-2">
-                Expected Result *
-              </Label>
-              <Textarea
-                id="edit-expected_result"
-                value={formData.expected_result}
-                onChange={(e) => setFormData({...formData, expected_result: e.target.value})}
-                className="col-span-3"
-                placeholder="Describe the expected result"
-                rows={3}
-              />
-            </div>
-          </div>
+          {renderFormFields('edit')}
           <DialogFooter>
-            <Button
-              type="submit"
-              onClick={handleEditSharedStep}
-              disabled={!formData.name.trim() || !formData.action.trim() || !formData.expected_result.trim()}
-            >
-              Update Shared Step
+            <Button variant="outline" onClick={() => handleEditDialogOpenChange(false)}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={handleEditSharedStep} disabled={!canSubmit || isUpdating}>
+              {isUpdating && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {isUpdating ? t('updating') : t('updateSharedStep')}
             </Button>
           </DialogFooter>
         </DialogContent>

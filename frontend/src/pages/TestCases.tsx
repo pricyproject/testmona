@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI } from '@/lib/api';
+import { api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -99,7 +99,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { customFieldsAPI } from '@/lib/api';
-import { CustomFieldDefinition, TestCase } from '@/types';
+import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
 import { ImportPreview } from '@/components/ImportPreview';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
@@ -154,11 +154,12 @@ const SortableRow = ({
 
   const { t } = useTranslation();
   const isSelected = selectedTestCases.includes(testCase.id);
+  const testCaseTags = (testCase.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean);
 
   if (isDragging) {
     return (
       <TableRow ref={setNodeRef} style={style}>
-        <TableCell colSpan={9} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+        <TableCell colSpan={10} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
           <div className="flex items-center justify-center">
             <GripVertical className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             <span className="text-sm text-gray-500">Dragging {testCase.title}...</span>
@@ -258,6 +259,20 @@ const SortableRow = ({
           {testCase.priority}
         </Badge>
       </TableCell>
+      <TableCell className="py-2 max-w-[180px]">
+        <div className="flex flex-wrap gap-1">
+          {testCaseTags.slice(0, 3).map((tag, index) => (
+            <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
+              {tag}
+            </Badge>
+          ))}
+          {testCaseTags.length > 3 && (
+            <Badge variant="outline" className="text-xs">
+              +{testCaseTags.length - 3}
+            </Badge>
+          )}
+        </div>
+      </TableCell>
       <TableCell className="text-xs text-gray-500 py-2">{new Date(testCase.created_at).toLocaleDateString()}</TableCell>
       <TableCell className="py-2">
         <DropdownMenu>
@@ -318,6 +333,7 @@ export function TestCases() {
     title: string;
     description: string;
     reference: string;
+    tags: string;
     test_type: string;
     execution_type: string;
     priority: string; // Will be constrained by API options
@@ -330,6 +346,7 @@ export function TestCases() {
     title: '',
     description: '',
     reference: '',
+    tags: '',
     test_type: '',
     execution_type: '',
     priority: '', // Will be set from database default
@@ -364,14 +381,7 @@ export function TestCases() {
   const [requirementSearchQuery, setRequirementSearchQuery] = useState('');
   
   // Shared steps state
-  const [availableSharedSteps, setAvailableSharedSteps] = useState<Array<{
-    id: number;
-    name: string;
-    description: string;
-    action: string;
-    expected_result: string;
-    usage_count: number;
-  }>>([]);
+  const [availableSharedSteps, setAvailableSharedSteps] = useState<SharedStep[]>([]);
   const [isSharedStepsDialogOpen, setIsSharedStepsDialogOpen] = useState(false);
   const [sharedStepSearchQuery, setSharedStepSearchQuery] = useState('');
   const [loadingSharedSteps, setLoadingSharedSteps] = useState(false);
@@ -1650,6 +1660,7 @@ export function TestCases() {
         testCase.title,
         testCase.description,
         testCase.reference,
+        testCase.tags,
         testCase.preconditions,
         testCase.steps,
         testCase.expected_result,
@@ -1704,6 +1715,11 @@ export function TestCases() {
           return 'Priority is required';
         }
         return '';
+      case 'tags':
+        if (value && value.length > 500) {
+          return t('tagLengthExceeded', { max: 500 });
+        }
+        return '';
       default:
         return '';
     }
@@ -1740,6 +1756,9 @@ export function TestCases() {
     
     const priorityError = validateField('priority', testCaseForm.priority);
     if (priorityError) errors.priority = priorityError;
+
+    const tagsError = validateField('tags', testCaseForm.tags);
+    if (tagsError) errors.tags = tagsError;
     
     // Validate custom fields
     customFields.forEach(field => {
@@ -1803,6 +1822,12 @@ export function TestCases() {
 
   const handleFieldChange = (field: keyof typeof testCaseForm, value: string) => {
     setTestCaseForm(prev => ({ ...prev, [field]: value }));
+    if (field === 'tags') {
+      setValidationErrors(prev => ({
+        ...prev,
+        tags: validateField('tags', value)
+      }));
+    }
   };
 
   const handleCustomFieldChange = (fieldId: number, value: any) => {
@@ -1884,27 +1909,7 @@ export function TestCases() {
   const loadAvailableSharedSteps = async () => {
     try {
       setLoadingSharedSteps(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.log('No authentication token');
-        return;
-      }
-
-      const url = projectId 
-        ? `${API_BASE_URL}/shared-steps/?project_id=${projectId}`
-        : `${API_BASE_URL}/shared-steps/`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load shared steps');
-      }
-
-      const data = await response.json();
+      const data = await sharedStepsAPI.getAll(projectId ? Number(projectId) : undefined);
       setAvailableSharedSteps(data);
     } catch (error) {
       console.error('Failed to load shared steps:', error);
@@ -1914,7 +1919,7 @@ export function TestCases() {
     }
   };
 
-  const handleInsertSharedStep = async (sharedStep: any) => {
+  const handleInsertSharedStep = async (sharedStep: SharedStep) => {
     // Add the shared step to test steps
     const newStepNumber = testSteps.length + 1;
     setTestSteps(prev => [...prev, {
@@ -1926,15 +1931,7 @@ export function TestCases() {
 
     // Increment usage count
     try {
-      const token = localStorage.getItem('token');
-      if (token) {
-        await fetch(`${API_BASE_URL}/shared-steps/${sharedStep.id}/increment-usage`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-      }
+      await sharedStepsAPI.incrementUsage(sharedStep.id);
     } catch (error) {
       console.error('Failed to increment usage count:', error);
     }
@@ -1972,6 +1969,7 @@ export function TestCases() {
       testCaseForm.title.trim() !== '' ||
       testCaseForm.description.trim() !== '' ||
       testCaseForm.reference.trim() !== '' ||
+      testCaseForm.tags.trim() !== '' ||
       testCaseForm.test_type !== '' ||
       testCaseForm.execution_type !== '' ||
       testCaseForm.preconditions.trim() !== '' ||
@@ -1997,6 +1995,7 @@ export function TestCases() {
       title: '',
       description: '',
       reference: '',
+      tags: '',
       test_type: '',
       execution_type: '',
       priority: defaultPriorityValue,
@@ -2029,6 +2028,7 @@ export function TestCases() {
         title: '',
         description: '',
         reference: '',
+        tags: '',
         test_type: '',
         execution_type: '',
         priority: defaultPriorityValue,
@@ -2093,6 +2093,7 @@ export function TestCases() {
       title: testCaseForm.title,
       description: testCaseForm.description,
       reference: testCaseForm.reference,
+      tags: testCaseForm.tags.trim(),
       preconditions: testCaseForm.preconditions,
       steps: testCaseForm.steps,
       expected_result: testCaseForm.expected_result,
@@ -2131,6 +2132,7 @@ export function TestCases() {
         title: '',
         description: '',
         reference: '',
+        tags: '',
         test_type: '',
         execution_type: '',
         priority: 'medium',
@@ -2506,7 +2508,8 @@ export function TestCases() {
     setTestCaseForm({
       title: testCase.title,
       description: testCase.description || '',
-      reference: '', // Reference not available in TestCase type yet
+      reference: testCase.reference || '',
+      tags: testCase.tags || '',
       test_type: testCase.test_type,
       execution_type: '', // execution_type not available in TestCase type yet
       priority: testCase.priority,
@@ -2559,6 +2562,7 @@ export function TestCases() {
       'steps': t('fieldSteps'),
       'expected_result': t('fieldExpectedResult'),
       'environment': t('fieldEnvironment'),
+      'tags': t('tags'),
     };
     return fieldTranslations[fieldName] || fieldName;
   };
@@ -2761,6 +2765,17 @@ export function TestCases() {
     if (!editingTestCase) return;
 
     try {
+      const tagsError = validateField('tags', testCaseForm.tags);
+      if (tagsError) {
+        setValidationErrors(prev => ({ ...prev, tags: tagsError }));
+        toast({
+          title: t('validationError'),
+          description: tagsError,
+          variant: "destructive",
+        });
+        return;
+      }
+
       // Cast the form data to match TestCase type requirements
       const updateData = {
         ...testCaseForm,
@@ -2787,6 +2802,7 @@ export function TestCases() {
         title: '',
         description: '',
         reference: '',
+        tags: '',
         test_type: '',
         execution_type: '',
         priority: 'medium',
@@ -3051,6 +3067,7 @@ export function TestCases() {
                 testCaseForm.title.trim() !== '' ||
                 testCaseForm.description.trim() !== '' ||
                 testCaseForm.reference.trim() !== '' ||
+                testCaseForm.tags.trim() !== '' ||
                 testCaseForm.test_type !== '' ||
                 testCaseForm.execution_type !== '' ||
                 testCaseForm.preconditions.trim() !== '' ||
@@ -3123,6 +3140,26 @@ export function TestCases() {
                         onChange={(value) => handleFieldChange('reference', value)}
                         projectId={currentProjectId ?? undefined}
                       />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="tags" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('tags')}</Label>
+                    <div className="col-span-3 space-y-1">
+                      <Input
+                        id="tags"
+                        value={testCaseForm.tags}
+                        onChange={(e) => handleFieldChange('tags', e.target.value)}
+                        placeholder={t('enterTagsSeparatedByCommas')}
+                        maxLength={500}
+                        className={validationErrors.tags ? 'border-red-500 focus:border-red-500' : ''}
+                      />
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>{t('tagsHelper')}</span>
+                        <span>{testCaseForm.tags.length}/500</span>
+                      </div>
+                      {validationErrors.tags && (
+                        <p className="text-red-500 text-sm mt-1">{validationErrors.tags}</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
@@ -4001,6 +4038,7 @@ export function TestCases() {
                         <TableHead>{t('section')}</TableHead>
                         <TableHead>{t('type')}</TableHead>
                         <TableHead>{t('priority')}</TableHead>
+                        <TableHead>{t('tags')}</TableHead>
                         <TableHead>
                           <Button variant="ghost" size="sm" onClick={() => { setSortField('created_at'); setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); }}>
                             {t('created')} {sortField === 'created_at' && (sortDirection === 'asc' ? <ArrowUp className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" /> : <ArrowDown className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" />)}
@@ -4113,9 +4151,9 @@ export function TestCases() {
                     {rev.change_reason && (
                       <p className="text-sm font-medium mb-1">{rev.change_reason.replace(/Updated fields/gi, t('updatedFields'))}</p>
                     )}
-                    {rev.changed_fields && rev.changed_fields.length > 0 && (
+                    {rev.changed_fields && Object.keys(rev.changed_fields).length > 0 && (
                       <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
-                        <span className="font-medium">{t('updatedFields') || 'Updated fields'}:</span> {rev.changed_fields.map(translateFieldName).join(', ')}
+                        <span className="font-medium">{t('updatedFields') || 'Updated fields'}:</span> {Object.keys(rev.changed_fields).map(translateFieldName).join(', ')}
                       </p>
                     )}
                     <div className="flex items-center text-xs text-gray-500">
@@ -4222,6 +4260,19 @@ export function TestCases() {
                 onChange={(value) => handleFieldChange('reference', value)}
                 projectId={currentProjectId ?? undefined}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-tags">{t('tags')}</Label>
+              <Input
+                id="edit-tags"
+                value={testCaseForm.tags}
+                onChange={(e) => handleFieldChange('tags', e.target.value)}
+                placeholder={t('enterTagsSeparatedByCommas')}
+                maxLength={500}
+              />
+              {validationErrors.tags && (
+                <p className="text-sm text-red-500">{validationErrors.tags}</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -4485,7 +4536,7 @@ export function TestCases() {
             {loadingSharedSteps && (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <span className="ml-3 text-gray-600">Loading shared steps...</span>
+                <span className={`${isRTL ? 'mr-3' : 'ml-3'} text-gray-600`}>{t('loadingSharedSteps')}</span>
               </div>
             )}
 
@@ -4507,7 +4558,7 @@ export function TestCases() {
                           <div className="flex items-center gap-2 mt-2">
                             <div className="flex items-center text-xs text-gray-500">
                               <TrendingUp className="h-3 w-3 mr-1" />
-                              Used {step.usage_count || 0} times
+                              {t('usedTimes', { count: step.usage_count || 0 })}
                             </div>
                           </div>
                         </div>

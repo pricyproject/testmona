@@ -2054,10 +2054,20 @@ def create_shared_step(db: Session, step: dict):
     return db_step
 
 
-def get_shared_steps(db: Session, project_id: int = None, skip: int = 0, limit: int = 100):
+def get_shared_steps(
+    db: Session,
+    project_id: Optional[int] = None,
+    project_ids: Optional[List[int]] = None,
+    skip: int = 0,
+    limit: int = 100,
+):
     query = db.query(SharedStep).filter(SharedStep.is_active == True)
-    if project_id:
+    if project_id is not None:
         query = query.filter(SharedStep.project_id == project_id)
+    elif project_ids is not None:
+        if not project_ids:
+            return []
+        query = query.filter(SharedStep.project_id.in_(project_ids))
     return query.order_by(SharedStep.usage_count.desc()).offset(skip).limit(limit).all()
 
 
@@ -2085,7 +2095,7 @@ def delete_shared_step(db: Session, step_id: int):
 
 
 def increment_shared_step_usage(db: Session, step_id: int):
-    db_step = db.query(SharedStep).filter(SharedStep.id == step_id).first()
+    db_step = db.query(SharedStep).filter(SharedStep.id == step_id, SharedStep.is_active == True).first()
     if db_step:
         db_step.usage_count += 1
         safe_commit(db)
@@ -2917,30 +2927,33 @@ def delete_priority_definition(db: Session, priority_id: int):
 
 
 # Shared Step Template CRUD
-def get_shared_step_templates(db: Session, project_id: int = None, skip: int = 0, limit: int = 100):
+def get_shared_step_templates(db: Session, skip: int = 0, limit: int = 100):
     query = db.query(SharedStepTemplate).filter(SharedStepTemplate.is_active == True)
-    if project_id:
-        query = query.filter(SharedStepTemplate.project_id == project_id)
     return query.offset(skip).limit(limit).all()
 
 
 def get_shared_step_template(db: Session, template_id: int):
-    return db.query(SharedStepTemplate).filter(SharedStepTemplate.id == template_id).first()
+    return db.query(SharedStepTemplate).filter(
+        SharedStepTemplate.id == template_id,
+        SharedStepTemplate.is_active == True
+    ).first()
 
 
-def create_shared_step_template(db: Session, template: SharedStepTemplateCreate):
-    db_template = SharedStepTemplate(**template.model_dump())
+def create_shared_step_template(db: Session, template: dict):
+    db_template = SharedStepTemplate(**template)
     db.add(db_template)
     safe_commit(db)
     db.refresh(db_template)
     return db_template
 
 
-def update_shared_step_template(db: Session, template_id: int, template: SharedStepTemplateUpdate):
-    db_template = db.query(SharedStepTemplate).filter(SharedStepTemplate.id == template_id).first()
+def update_shared_step_template(db: Session, template_id: int, template: dict):
+    db_template = db.query(SharedStepTemplate).filter(
+        SharedStepTemplate.id == template_id,
+        SharedStepTemplate.is_active == True
+    ).first()
     if db_template:
-        update_data = template.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
+        for field, value in template.items():
             setattr(db_template, field, value)
         safe_commit(db)
         db.refresh(db_template)
@@ -2948,7 +2961,10 @@ def update_shared_step_template(db: Session, template_id: int, template: SharedS
 
 
 def delete_shared_step_template(db: Session, template_id: int):
-    db_template = db.query(SharedStepTemplate).filter(SharedStepTemplate.id == template_id).first()
+    db_template = db.query(SharedStepTemplate).filter(
+        SharedStepTemplate.id == template_id,
+        SharedStepTemplate.is_active == True
+    ).first()
     if db_template:
         db_template.is_active = False
         safe_commit(db)

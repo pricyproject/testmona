@@ -515,6 +515,25 @@ def register_test_management_routes(app):
         # Test suites are already required to be in projects, so this ensures
         # all test cases are assigned to projects through their test suite
         db_test_case = crud.create_test_case(db=db, test_case=test_case, created_by=current_user.id)
+
+        try:
+            initial_revision_data = {
+                "test_case_id": db_test_case.id,
+                "title": db_test_case.title,
+                "description": db_test_case.description,
+                "test_type": db_test_case.test_type,
+                "preconditions": db_test_case.preconditions,
+                "steps": db_test_case.steps,
+                "expected_result": db_test_case.expected_result,
+                "priority": db_test_case.priority,
+                "tags": db_test_case.tags,
+                "changed_fields": {"created": "created"},
+                "change_reason": "Initial version",
+                "created_by": current_user.id,
+            }
+            crud.create_test_case_revision(db, schemas.TestCaseRevisionCreate(**initial_revision_data))
+        except Exception as e:
+            logger.error("Failed to create initial revision for test case %s: %s", db_test_case.id, e)
         
         # Create audit trail
         try:
@@ -834,6 +853,104 @@ def register_test_management_routes(app):
         ).order_by(TestCaseRevision.revision_number.desc()).all()
         
         return revisions
+
+    @app.post("/test-cases/{test_case_id}/revisions/{revision_number}/restore", response_model=schemas.TestCaseWithRelations)
+    def restore_test_case_revision(
+        test_case_id: int,
+        revision_number: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Restore editable test case fields from a saved revision."""
+        user_role = str(current_user.role).upper()
+        if user_role not in ["ADMIN", "MANAGER"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only administrators and managers can restore revision history"
+            )
+
+        db_test_case = crud.get_test_case(db, test_case_id=test_case_id)
+        if not db_test_case:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        test_suite = crud.get_test_suite(db, test_suite_id=db_test_case.test_suite_id)
+        if test_suite and not rbac.has_permission(current_user, "write", test_suite.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to restore this test case")
+
+        revision = db.query(TestCaseRevision).filter(
+            TestCaseRevision.test_case_id == test_case_id,
+            TestCaseRevision.revision_number == revision_number,
+        ).first()
+        if not revision:
+            raise HTTPException(status_code=404, detail="Test case revision not found")
+
+        def enum_value(value: object) -> object:
+            return getattr(value, "value", value)
+
+        restore_data = {
+            "title": revision.title,
+            "description": revision.description,
+            "test_type": enum_value(revision.test_type),
+            "preconditions": revision.preconditions,
+            "steps": revision.steps,
+            "expected_result": revision.expected_result,
+            "priority": enum_value(revision.priority),
+            "tags": revision.tags,
+        }
+
+        changed_fields = []
+        for field, new_value in restore_data.items():
+            old_value = getattr(db_test_case, field)
+            if str(old_value or "") != str(new_value or ""):
+                changed_fields.append(field)
+
+        if not changed_fields:
+            return db_test_case
+
+        updated_test_case = crud.update_test_case(
+            db,
+            test_case_id=test_case_id,
+            test_case=schemas.TestCaseUpdate(**restore_data),
+        )
+        if not updated_test_case:
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        try:
+            revision_data = {
+                "test_case_id": test_case_id,
+                "title": updated_test_case.title,
+                "description": updated_test_case.description,
+                "test_type": updated_test_case.test_type,
+                "preconditions": updated_test_case.preconditions,
+                "steps": updated_test_case.steps,
+                "expected_result": updated_test_case.expected_result,
+                "priority": updated_test_case.priority,
+                "tags": updated_test_case.tags,
+                "changed_fields": {field: "restored" for field in changed_fields},
+                "change_reason": f"Restored revision {revision_number}: {', '.join(changed_fields)}",
+                "created_by": current_user.id,
+            }
+            crud.create_test_case_revision(db, schemas.TestCaseRevisionCreate(**revision_data))
+        except Exception as e:
+            logger.error("Failed to create restore revision for test case %s: %s", test_case_id, e)
+
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            from ..models import AuditAction, EntityType
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=current_user.id,
+                action=AuditAction.UPDATE.value,
+                entity_type=EntityType.TEST_CASE.value,
+                entity_id=updated_test_case.id,
+                project_id=test_suite.project_id if test_suite else None,
+                description=f"Test case restored to revision {revision_number}: {updated_test_case.title or 'Untitled'}",
+            ))
+        except Exception as e:
+            logger.error("Failed to create audit trail for test case restore: %s", e)
+
+        return updated_test_case
 
     # Test Run Endpoints
     @app.post("/test-runs", response_model=schemas.TestRun)
