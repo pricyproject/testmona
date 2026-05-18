@@ -14,25 +14,31 @@ from datetime import datetime
 from pathlib import Path
 from alembic.config import Config
 from alembic import command
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.engine import make_url
 from app.config import settings
+
+BASE_DIR = Path(__file__).resolve().parent
+
 
 # Setup logging
 def setup_logging():
     """Setup logging to both file and console"""
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-    
-    log_file = log_dir / f"migration_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    
+    handlers = [logging.StreamHandler(sys.stdout)]
+
+    log_dir = BASE_DIR / "logs"
+    try:
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / f"migration_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        handlers.insert(0, logging.FileHandler(log_file))
+    except OSError:
+        print("Migration file logging is disabled because the logs directory is not writable.", file=sys.stderr)
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=handlers
     )
     return logging.getLogger(__name__)
 
@@ -42,11 +48,38 @@ def validate_env_vars(env):
     """Validate required environment variables are set"""
     if env == 'prod':
         if not os.getenv('DATABASE_URL'):
-            logger.warning("DATABASE_URL not set, using default SQLite")
+            logger.warning("DATABASE_URL not set; using configured default SQLite database")
     return True
+
+
+def normalize_database_url(db_url):
+    """Resolve relative SQLite paths from the backend directory."""
+    url = make_url(db_url)
+    if not url.drivername.startswith("sqlite"):
+        return db_url
+
+    database = url.database
+    if not database or database == ":memory:" or Path(database).is_absolute():
+        return db_url
+
+    return url.set(database=str(BASE_DIR / database)).render_as_string(hide_password=False)
+
+
+def safe_database_url(db_url):
+    """Render a database URL without exposing credentials in logs."""
+    return make_url(db_url).render_as_string(hide_password=True)
+
+
+def build_alembic_config(db_url):
+    """Build Alembic config with paths that work from any current directory."""
+    alembic_cfg = Config(str(BASE_DIR / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(BASE_DIR / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    return alembic_cfg
 
 def check_database_connection(db_url):
     """Check if database is accessible"""
+    engine = None
     try:
         engine = create_engine(db_url)
         with engine.connect() as conn:
@@ -56,21 +89,28 @@ def check_database_connection(db_url):
     except SQLAlchemyError as e:
         logger.error(f"❌ Database connection failed: {e}")
         return False
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 def backup_sqlite_database(db_url):
     """Create backup of SQLite database before migration"""
-    if not db_url.startswith('sqlite'):
+    url = make_url(db_url)
+    if not url.drivername.startswith('sqlite'):
         logger.info("Skipping backup (not SQLite)")
         return None
-    
-    # Extract database file path
-    db_path = db_url.replace('sqlite:///', '')
+
+    db_path = url.database
+    if not db_path or db_path == ":memory:":
+        logger.info("Skipping backup (SQLite in-memory database)")
+        return None
+
     if not os.path.exists(db_path):
         logger.warning(f"Database file not found: {db_path}")
         return None
     
     # Create backup
-    backup_dir = Path("backups")
+    backup_dir = BASE_DIR / "backups"
     backup_dir.mkdir(exist_ok=True)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -86,7 +126,7 @@ def backup_sqlite_database(db_url):
 
 def check_sqlite_limitations(db_url):
     """Check for SQLite-specific limitations"""
-    if not db_url.startswith('sqlite'):
+    if not make_url(db_url).drivername.startswith('sqlite'):
         return True
     
     logger.info("Checking SQLite limitations...")
@@ -102,40 +142,42 @@ def timeout_handler(signum, frame):
 
 def verify_schema(db_url):
     """Verify database schema after migration"""
-    if not db_url.startswith('sqlite'):
-        logger.info("Skipping schema verification (not SQLite)")
-        return True
-    
     logger.info("🔍 Verifying database schema...")
     
+    engine = None
     try:
+        from app.database import Base
+        from app import models, models_versioning
+
         engine = create_engine(db_url)
         with engine.connect() as conn:
-            # Get list of tables
-            result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"))
-            tables = [row[0] for row in result.fetchall()]
-            
-            # Expected core tables
-            expected_tables = [
-                'users',
-                'projects',
-                'project_assignments',
-                'test_suites',
-                'test_cases',
-                'test_case_sections',
-                'test_runs',
-                'test_results',
-                'defects',
-                'alembic_version'
-            ]
+            inspector = inspect(conn)
+            tables = set(inspector.get_table_names())
+            expected_tables = set(Base.metadata.tables.keys()) | {'alembic_version'}
             
             # Check for missing tables
             missing_tables = [t for t in expected_tables if t not in tables]
             if missing_tables:
-                logger.warning(f"⚠️  Missing tables: {missing_tables}")
-                logger.warning("Some tables may not exist yet if this is a fresh migration")
+                logger.error(f"❌ Missing tables: {sorted(missing_tables)}")
+                return False
             else:
                 logger.info("✅ All expected tables present")
+
+            for table_name, table in Base.metadata.tables.items():
+                actual_columns = {column["name"] for column in inspector.get_columns(table_name)}
+                expected_columns = {column.name for column in table.columns}
+                missing_columns = sorted(expected_columns - actual_columns)
+                if missing_columns:
+                    logger.error(f"❌ Missing columns in {table_name}: {missing_columns}")
+                    return False
+
+            if "custom_field_definitions" in tables:
+                custom_field_columns = {
+                    column["name"] for column in inspector.get_columns("custom_field_definitions")
+                }
+                if "entity_type" in custom_field_columns:
+                    logger.error("❌ Obsolete custom_field_definitions.entity_type column is still present")
+                    return False
             
             # Check alembic_version table exists (indicates migrations are tracked)
             if 'alembic_version' in tables:
@@ -150,8 +192,7 @@ def verify_schema(db_url):
             
             # Check for critical columns in users table
             if 'users' in tables:
-                result = conn.execute(text("PRAGMA table_info(users)"))
-                columns = [row[1] for row in result.fetchall()]
+                columns = [column["name"] for column in inspector.get_columns("users")]
                 critical_user_columns = ['id', 'username', 'email', 'hashed_password', 'role']
                 missing_user_columns = [c for c in critical_user_columns if c not in columns]
                 if missing_user_columns:
@@ -166,6 +207,9 @@ def verify_schema(db_url):
     except Exception as e:
         logger.error(f"❌ Schema verification failed: {e}")
         return False
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 def main():
     parser = argparse.ArgumentParser(description='Database migration utility')
@@ -223,26 +267,22 @@ def main():
         logger.error("❌ Environment validation failed")
         sys.exit(1)
     
-    # Configure Alembic
-    alembic_cfg = Config("alembic.ini")
-    
     # Override database URL based on environment or command line
     if args.url:
         db_url = args.url
-        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
     elif args.env == 'prod':
         # In production, use environment variable or default to SQLite
-        db_url = os.getenv('DATABASE_URL', 'sqlite:///./test_management.db')
-        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        db_url = os.getenv('DATABASE_URL', settings.database_url)
     elif args.env == 'test':
-        db_url = os.getenv('TEST_DATABASE_URL', 'sqlite:///./test_test.db')
-        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        db_url = os.getenv('TEST_DATABASE_URL', settings.test_database_url)
     else:
         # Dev environment
-        db_url = os.getenv('DATABASE_URL', 'sqlite:///./test_management.db')
-        alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+        db_url = os.getenv('DATABASE_URL', settings.database_url)
+
+    db_url = normalize_database_url(db_url)
+    alembic_cfg = build_alembic_config(db_url)
     
-    logger.info(f"Using database: {db_url}")
+    logger.info(f"Using database: {safe_database_url(db_url)}")
     
     # Check SQLite limitations
     if not check_sqlite_limitations(db_url):
@@ -250,17 +290,21 @@ def main():
         sys.exit(1)
     
     # Set timeout handler
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(args.timeout)
+    timeout_enabled = hasattr(signal, "SIGALRM")
+    if timeout_enabled:
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(args.timeout)
+    else:
+        logger.warning("Migration timeout is not supported on this platform")
     
-    # For upgrade/downgrade, check connection and create backup
-    if args.action in ['upgrade', 'downgrade']:
+    # For live upgrade/downgrade, check connection and create backup
+    if args.action in ['upgrade', 'downgrade'] and not getattr(args, 'dry_run', False):
         if not check_database_connection(db_url):
             logger.error("❌ Cannot proceed without database connection")
             sys.exit(1)
         
-        # Create backup unless skipped or dry-run
-        if not getattr(args, 'no_backup', False) and not getattr(args, 'dry_run', False):
+        # Create backup unless skipped
+        if not getattr(args, 'no_backup', False):
             backup_path = backup_sqlite_database(db_url)
             if backup_path:
                 logger.info(f"Backup created at: {backup_path}")
@@ -326,7 +370,8 @@ def main():
         sys.exit(1)
     finally:
         # Cancel timeout
-        signal.alarm(0)
+        if timeout_enabled:
+            signal.alarm(0)
 
 if __name__ == "__main__":
     main()

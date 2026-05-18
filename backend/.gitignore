@@ -183,10 +183,6 @@ cython_debug/
 testmona.db
 test_management.db
 
-# Alembic
-alembic/versions/*.py
-!alembic/versions/__init__.py
-
 # Logs
 *.log
 logs/
