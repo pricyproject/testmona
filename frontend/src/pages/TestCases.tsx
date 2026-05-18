@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI } from '@/lib/api';
+import { api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,13 +17,6 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -36,7 +29,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
-  TableCell,
   TableHead,
   TableHeader,
   TableRow,
@@ -63,17 +55,12 @@ import {
 } from '@dnd-kit/sortable';
 import { useDraggable } from '@dnd-kit/core';
 import {
-  useSortable,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import {
   Plus,
   Search,
   Filter,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  MoreHorizontal,
   Edit,
   Play,
   History,
@@ -82,7 +69,6 @@ import {
   FolderPlus,
   ArrowUp,
   ArrowDown,
-  GripVertical,
   Clock,
   User,
   Folder,
@@ -100,210 +86,13 @@ import { MarkdownEditor } from '@/components/ui/markdown-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { customFieldsAPI } from '@/lib/api';
 import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
+import { Section } from '@/types/testCases';
 import { ImportPreview } from '@/components/ImportPreview';
+import { SortableTestCaseRow } from '@/components/TestCases/SortableTestCaseRow';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 const CUSTOM_FIELD_FILTER_ALL = 'all';
 const CUSTOM_FIELD_FILTER_ANY_VALUE = '__any__';
-
-// Sortable Row Component
-const SortableRow = ({ 
-  testCase, 
-  onEdit, 
-  onMove, 
-  onExecute, 
-  onViewHistory, 
-  onDelete,
-  getTestCaseDetailUrl,
-  navigate,
-  selectedTestCases,
-  handleSelectTestCase,
-  sections,
-  getTypeBadge,
-  getPriorityBadge,
-  isRTL
-}: {
-  testCase: TestCase;
-  onEdit: (testCase: TestCase) => void;
-  onMove: (testCase: TestCase) => void;
-  onExecute: (testCase: TestCase) => void;
-  onViewHistory: (testCase: TestCase) => void;
-  onDelete: (id: number) => void;
-  getTestCaseDetailUrl: (id: number) => string;
-  navigate: (to: string) => void;
-  selectedTestCases: number[];
-  handleSelectTestCase: (id: number, checked: boolean) => void;
-  sections: Section[];
-  getTypeBadge: (type: string) => string | Record<string, any>;
-  getPriorityBadge: (priority: string) => string | Record<string, any>;
-  isRTL: boolean;
-}) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: testCase.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  const { t } = useTranslation();
-  const isSelected = selectedTestCases.includes(testCase.id);
-  const testCaseTags = (testCase.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean);
-
-  if (isDragging) {
-    return (
-      <TableRow ref={setNodeRef} style={style}>
-        <TableCell colSpan={10} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-          <div className="flex items-center justify-center">
-            <GripVertical className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            <span className="text-sm text-gray-500">Dragging {testCase.title}...</span>
-          </div>
-        </TableCell>
-      </TableRow>
-    );
-  }
-
-  return (
-    <TableRow ref={setNodeRef} style={style} className={`hover:bg-gray-50 dark:hover:bg-gray-800 ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
-      <TableCell className="w-12 py-2">
-        <div className="flex items-center gap-2">
-          <Checkbox 
-            checked={isSelected}
-            onCheckedChange={(checked) => handleSelectTestCase(testCase.id, checked as boolean)}
-            className="mr-2 rtl:mr-0 rtl:ml-2"
-          />
-          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
-            <GripVertical className="h-4 w-4 text-gray-400 hover:text-gray-600" />
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="font-medium w-24 py-2 text-xs">
-        <Button 
-          variant="link" 
-          className="p-0 h-auto font-medium text-xs text-blue-600 hover:text-blue-800"
-          onClick={() => navigate(getTestCaseDetailUrl(testCase.id))}
-        >
-          TC-{testCase.id.toString().padStart(3, '0')}
-        </Button>
-      </TableCell>
-      <TableCell className="font-medium py-2 text-sm">
-        <Button 
-          variant="link" 
-          className="p-0 h-auto font-medium text-sm text-left hover:text-blue-800"
-          onClick={() => navigate(getTestCaseDetailUrl(testCase.id))}
-        >
-          {testCase.title}
-        </Button>
-      </TableCell>
-      <TableCell className="text-xs py-2">
-        <div className="max-w-32">
-          <Badge 
-            variant="outline" 
-            className="text-xs truncate block"
-            title={testCase.test_suite?.project?.name || 'N/A'}
-          >
-            {testCase.test_suite?.project?.name || 'N/A'}
-          </Badge>
-        </div>
-      </TableCell>
-      <TableCell className="text-xs text-gray-500 py-2 max-w-[150px]">
-        <div className="truncate" title={testCase.section_id ? (() => {
-            const findSectionName = (sectionList: Section[], sectionId: number): string | null => {
-              for (const section of sectionList) {
-                if (parseInt(section.id) === sectionId) return section.name;
-                if (section.children) {
-                  const found = findSectionName(section.children, sectionId);
-                  if (found) return found;
-                }
-              }
-              return null;
-            };
-            return findSectionName(sections, testCase.section_id) || `Section ${testCase.section_id}`;
-          })() : t('noSection')}>
-          {testCase.section_id ? (
-            (() => {
-              const findSectionName = (sectionList: Section[], sectionId: number): string | null => {
-                for (const section of sectionList) {
-                  if (parseInt(section.id) === sectionId) return section.name;
-                  if (section.children) {
-                    const found = findSectionName(section.children, sectionId);
-                    if (found) return found;
-                  }
-                }
-                return null;
-              };
-              return findSectionName(sections, testCase.section_id) || `Section ${testCase.section_id}`;
-            })()
-          ) : t('noSection')}
-        </div>
-      </TableCell>
-      <TableCell className="py-2">
-        <Badge 
-          className={`text-xs ${typeof getTypeBadge(testCase.test_type) === 'string' ? getTypeBadge(testCase.test_type) : ''}`}
-          style={typeof getTypeBadge(testCase.test_type) === 'object' ? getTypeBadge(testCase.test_type) as any : undefined}
-        >
-          {testCase.test_type}
-        </Badge>
-      </TableCell>
-      <TableCell className="py-2">
-        <Badge 
-          className={`text-xs ${typeof getPriorityBadge(testCase.priority) === 'string' ? getPriorityBadge(testCase.priority) : ''}`}
-          style={typeof getPriorityBadge(testCase.priority) === 'object' ? getPriorityBadge(testCase.priority) as any : undefined}
-        >
-          {testCase.priority}
-        </Badge>
-      </TableCell>
-      <TableCell className="py-2 max-w-[180px]">
-        <div className="flex flex-wrap gap-1">
-          {testCaseTags.slice(0, 3).map((tag, index) => (
-            <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
-              {tag}
-            </Badge>
-          ))}
-          {testCaseTags.length > 3 && (
-            <Badge variant="outline" className="text-xs">
-              +{testCaseTags.length - 3}
-            </Badge>
-          )}
-        </div>
-      </TableCell>
-      <TableCell className="text-xs text-gray-500 py-2">{new Date(testCase.created_at).toLocaleDateString()}</TableCell>
-      <TableCell className="py-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm"><MoreHorizontal className="h-4 w-4" /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEdit(testCase)}><Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('edit')}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onMove(testCase)}><ArrowUp className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('move')}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onExecute(testCase)}><Play className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('execute')}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onViewHistory(testCase)}><History className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('viewHistory')}</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onDelete(testCase.id)} className="text-red-600"><Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('delete')}</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TableCell>
-    </TableRow>
-  );
-};
-
-interface Section {
-  id: string;
-  name: string;
-  parentId?: string;
-  children?: Section[];
-  testCaseCount: number;
-  cumulativeCount?: number;
-  expanded?: boolean;
-  test_suite_id?: number;
-  test_suite_name?: string;
-}
 
 export function TestCases() {
   const { t, isRTL } = useTranslation();
@@ -327,7 +116,7 @@ export function TestCases() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  
+
   // Consolidated form state
   const [testCaseForm, setTestCaseForm] = useState<{
     title: string;
@@ -356,7 +145,7 @@ export function TestCases() {
     environment: '',
     is_multistep: false
   });
-  
+
   // Multistep test case steps state
   const [testSteps, setTestSteps] = useState<Array<{
     step_number: number;
@@ -364,7 +153,7 @@ export function TestCases() {
     expected_result: string;
     step_type: string;
   }>>([]);
-  
+
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -373,26 +162,26 @@ export function TestCases() {
   const priorityRef = useRef<HTMLButtonElement>(null);
   const environmentRef = useRef<HTMLButtonElement>(null);
   const customFieldRefs = useRef<Record<number, HTMLInputElement | null>>({});
-  
+
   // Requirements linking state
   const [linkedRequirements, setLinkedRequirements] = useState<Array<{id: string, title: string, reference: string}>>([]);
   const [availableRequirements, setAvailableRequirements] = useState<Array<{id: string, title: string, reference: string}>>([]);
   const [isRequirementDialogOpen, setIsRequirementDialogOpen] = useState(false);
   const [requirementSearchQuery, setRequirementSearchQuery] = useState('');
-  
+
   // Shared steps state
   const [availableSharedSteps, setAvailableSharedSteps] = useState<SharedStep[]>([]);
   const [isSharedStepsDialogOpen, setIsSharedStepsDialogOpen] = useState(false);
   const [sharedStepSearchQuery, setSharedStepSearchQuery] = useState('');
   const [loadingSharedSteps, setLoadingSharedSteps] = useState(false);
-  
+
   // Environment options - fetched from API
   const [environments, setEnvironments] = useState<Array<{id: string, name: string, description: string}>>([]);
   const [isEnvironmentsLoading, setIsEnvironmentsLoading] = useState(false);
   const [isCreatingEnvironment, setIsCreatingEnvironment] = useState(false);
   const [newEnvironmentName, setNewEnvironmentName] = useState('');
   const [newEnvironmentDescription, setNewEnvironmentDescription] = useState('');
-  
+
   // Enum options - fetched from API
   const [priorityOptions, setPriorityOptions] = useState<Array<{value: string, label: string}>>([]);
   const [testTypeOptions, setTestTypeOptions] = useState<Array<{value: string, label: string}>>([]);
@@ -402,18 +191,18 @@ export function TestCases() {
   const [newTestTypeName, setNewTestTypeName] = useState('');
   const [newPriorityName, setNewPriorityName] = useState('');
   const [newPriorityValue, setNewPriorityValue] = useState(2);
-  
+
   // Store raw database data for badges with colors
   const [dbPriorities, setDbPriorities] = useState<Array<{name: string, color: string, value: number}>>([]);
   const [dbTestTypes, setDbTestTypes] = useState<Array<{name: string, color: string}>>([]);
-  
+
   // Performance optimization: Preload custom fields on component mount
   const [isCustomFieldsLoading, setIsCustomFieldsLoading] = useState(false);
   const [isModalOpening, setIsModalOpening] = useState(false);
-  
+
   // Validation state for real-time validation
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  
+
   // Test suite state
   const [currentTestSuiteId, setCurrentTestSuiteId] = useState<number | null>(null);
   const [isTestSuiteLoading, setIsTestSuiteLoading] = useState(true);
@@ -421,7 +210,7 @@ export function TestCases() {
   const [isCreatingSuite, setIsCreatingSuite] = useState(false);
   const [suiteName, setSuiteName] = useState('');
   const [suiteDescription, setSuiteDescription] = useState('');
-  
+
   // Import dialog state
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -460,12 +249,12 @@ export function TestCases() {
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionParentId, setNewSectionParentId] = useState<string>('none');
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all', '29', '30', '31', '32', '33', '34', '35']));
-  
+
   // Move test case dialog state
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [selectedTestCaseToMove, setSelectedTestCaseToMove] = useState<TestCase | null>(null);
   const [destinationSection, setDestinationSection] = useState<string>('');
-  
+
   // Drag and drop state
   const [activeDragId, setActiveDragId] = useState<number | null>(null);
   const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
@@ -489,7 +278,7 @@ export function TestCases() {
         paddingLeft: '8px'
       };
     }
-    
+
     // Fallback to static Tailwind classes if not found in database
     const variants: Record<string, string> = {
       manual: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
@@ -518,7 +307,7 @@ export function TestCases() {
         paddingLeft: '8px'
       };
     }
-    
+
     // Fallback to static Tailwind classes if not found in database
     const variants: Record<string, string> = {
       low: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400',
@@ -541,7 +330,7 @@ export function TestCases() {
   useEffect(() => {
     const startTime = performance.now();
     setIsCustomFieldsLoading(true);
-    
+
     const loadCustomFieldsOptimized = async () => {
       if (!currentProjectId) {
         setCustomFields([]);
@@ -552,7 +341,7 @@ export function TestCases() {
       try {
         const fields = await customFieldsAPI.getDefinitions(currentProjectId);
         setCustomFields(fields);
-        
+
         const loadTime = performance.now() - startTime;
         console.log(`Custom fields loaded in ${loadTime.toFixed(2)}ms`);
       } catch (error) {
@@ -584,7 +373,7 @@ export function TestCases() {
         setIsCustomFieldsLoading(false);
       }
     };
-    
+
     loadCustomFieldsOptimized();
   }, [currentProjectId]);
 
@@ -609,7 +398,7 @@ export function TestCases() {
       try {
         setIsEnumsLoading(true);
         const startTime = performance.now();
-        
+
         // Get token from localStorage
         const token = localStorage.getItem('token');
         if (!token) {
@@ -653,11 +442,11 @@ export function TestCases() {
             value: testType.name.toLowerCase(),
             label: testType.name
           }));
-        
+
         setPriorityOptions(priorityOptions);
         setTestTypeOptions(testTypeOptions);
         setTestTypes(testTypeOptions.map((option) => option.value));
-        
+
         // Set default priority from database
         const defaultPriority = prioritiesData.find((p: any) => p.is_default && p.is_active);
         if (defaultPriority) {
@@ -666,7 +455,7 @@ export function TestCases() {
           // Fallback to first priority if no default is set
           setTestCaseForm(prev => ({ ...prev, priority: priorityOptions[0].value }));
         }
-        
+
         const loadTime = performance.now() - startTime;
         console.log(`Enums loaded from database in ${loadTime.toFixed(2)}ms`);
       } catch (error) {
@@ -695,7 +484,7 @@ export function TestCases() {
         setIsEnumsLoading(false);
       }
     };
-    
+
     loadEnums();
   }, []);
 
@@ -876,16 +665,14 @@ export function TestCases() {
       });
 
       if (response.ok) {
-        // Refresh environments
-        const { environmentsAPI } = await import('@/lib/api');
         const data = await environmentsAPI.getAll(currentProjectId);
-        
+
         const transformedEnvironments = data.map((env: any) => ({
           id: env.id.toString(),
           name: env.name,
           description: env.description || `${env.name} environment`
         }));
-        
+
         setEnvironments(transformedEnvironments);
 
         // Select the newly created environment
@@ -927,20 +714,18 @@ export function TestCases() {
       try {
         setIsEnvironmentsLoading(true);
         const startTime = performance.now();
-        
-        // Import environmentsAPI dynamically to avoid circular dependencies
-        const { environmentsAPI } = await import('@/lib/api');
+
         const data = await environmentsAPI.getAll(currentProjectId);
-        
+
         // Transform environment data to match the expected format
         const transformedEnvironments = data.map((env: any) => ({
           id: env.id.toString(),
           name: env.name,
           description: env.description || `${env.name} environment`
         }));
-        
+
         setEnvironments(transformedEnvironments);
-        
+
         const loadTime = performance.now() - startTime;
         console.log(`Environments loaded in ${loadTime.toFixed(2)}ms`);
       } catch (error) {
@@ -957,7 +742,7 @@ export function TestCases() {
         setIsEnvironmentsLoading(false);
       }
     };
-    
+
     loadEnvironments();
   }, [currentProjectId]);
 
@@ -965,12 +750,12 @@ export function TestCases() {
   const handleOpenModal = () => {
     const startTime = performance.now();
     setIsModalOpening(true);
-    
+
     // Use requestAnimationFrame for smoother rendering
     requestAnimationFrame(() => {
       setIsDialogOpen(true);
       setIsModalOpening(false);
-      
+
       const openTime = performance.now() - startTime;
       console.log(`Modal opened in ${openTime.toFixed(2)}ms`);
     });
@@ -980,7 +765,7 @@ export function TestCases() {
   useEffect(() => {
     if (isDialogOpen && titleInputRef.current && !isModalOpening) {
       const focusStartTime = performance.now();
-      
+
       // Use setTimeout to ensure DOM is ready
       setTimeout(() => {
         titleInputRef.current?.focus();
@@ -1008,9 +793,9 @@ export function TestCases() {
   const getAllSectionIds = (sectionId: string, sections: Section[]): number[] => {
     const section = sections.find(s => s.id === sectionId);
     if (!section) return [parseInt(sectionId)];
-    
+
     const ids = [parseInt(sectionId)];
-    
+
     // Add all child section IDs recursively
     const addChildIds = (children: Section[]) => {
       children.forEach(child => {
@@ -1020,11 +805,11 @@ export function TestCases() {
         }
       });
     };
-    
+
     if (section.children && section.children.length > 0) {
       addChildIds(section.children);
     }
-    
+
     return ids;
   };
 
@@ -1041,7 +826,7 @@ export function TestCases() {
       // Load ALL test cases for the project to ensure accurate counts for all sections
       // Client-side filtering will handle display filtering based on selectedTestSuite
       console.log('Loading test cases for project:', currentProjectId);
-      
+
       const [testCases, count] = await Promise.all([
         testCasesAPI.getAll(
           currentProjectId,
@@ -1052,11 +837,11 @@ export function TestCases() {
         ),
         testCasesAPI.getCount(currentProjectId),
       ]);
-      
+
       console.log('Loaded test cases:', testCases.length);
       setApiTestCases(testCases);
       setTotalCount(count.count);
-      
+
       // Extract test types from loaded data
       const types = Array.from(new Set([
         ...testTypeOptions.map((option) => option.value),
@@ -1151,17 +936,17 @@ export function TestCases() {
       console.log('No project ID available, skipping sections load');
       return;
     }
-    
+
     try {
       // Use the project hierarchy API to get sections from all test suites
       const hierarchyData = await sectionsAPI.getProjectSectionHierarchy(currentProjectId);
-      
+
       console.log('Hierarchy data received:', hierarchyData);
-      
+
       if (hierarchyData && hierarchyData.hierarchy && hierarchyData.hierarchy.length > 0) {
         // Transform API data directly to our Section interface without flattening
         const allSections: Section[] = [];
-        
+
         const transformSection = (section: any, level: number = 0, parentId?: string): Section => {
           const sectionData: Section = {
             id: section.id.toString(),
@@ -1173,22 +958,22 @@ export function TestCases() {
             test_suite_id: null, // Will be set at the suite level
             test_suite_name: ''  // Will be set at the suite level
           };
-          
+
           // Transform subsections recursively
           if (section.subsections && section.subsections.length > 0) {
-            sectionData.children = section.subsections.map((subsection: any) => 
+            sectionData.children = section.subsections.map((subsection: any) =>
               transformSection(subsection, level + 1, sectionData.id)
             );
           }
-          
+
           return sectionData;
         };
-        
+
         // Process each test suite
         hierarchyData.hierarchy.forEach((suiteData: any) => {
           console.log(`Processing test suite: ${suiteData.test_suite.name} (ID: ${suiteData.test_suite.id})`);
           console.log(`  Sections count: ${suiteData.sections?.length || 0}`);
-          
+
           if (suiteData.sections && suiteData.sections.length > 0) {
             suiteData.sections.forEach((section: any) => {
               const transformedSection = transformSection(section, 0);
@@ -1205,7 +990,7 @@ export function TestCases() {
             });
           }
         });
-        
+
         console.log('Transformed sections:', allSections);
         setMockSections(allSections);
       } else {
@@ -1221,13 +1006,13 @@ export function TestCases() {
   // Calculate cumulative test case count for a section (including all subsections)
   const calculateCumulativeCount = (section: Section): number => {
     let count = apiTestCases.filter(testCase => testCase.section_id === parseInt(section.id)).length;
-    
+
     if (section.children && section.children.length > 0) {
       section.children.forEach(child => {
         count += calculateCumulativeCount(child);
       });
     }
-    
+
     return count;
   };
 
@@ -1238,7 +1023,7 @@ export function TestCases() {
   //     const updatedSections = mockSections.map(section => {
   //       const directCount = apiTestCases.filter(testCase => testCase.section_id === parseInt(section.id)).length;
   //       const cumulativeCount = calculateCumulativeCount(section);
-  //       
+  //
   //       return {
   //         ...section,
   //         testCaseCount: directCount,
@@ -1246,7 +1031,7 @@ export function TestCases() {
   //         children: section.children?.map(child => {
   //           const childDirectCount = apiTestCases.filter(testCase => testCase.section_id === parseInt(child.id)).length;
   //           const childCumulativeCount = calculateCumulativeCount(child);
-  //           
+  //
   //           return {
   //             ...child,
   //             testCaseCount: childDirectCount,
@@ -1263,12 +1048,12 @@ export function TestCases() {
       // Clear sections when project changes
       setMockSections([]);
       setCurrentTestSuiteId(null);
-      
+
       await loadTestSuite();
       await loadTestCases();
       // loadCustomFields();
     };
-    
+
     initializeData();
   }, [currentProjectId]);
 
@@ -1288,12 +1073,11 @@ export function TestCases() {
       setIsTestSuiteLoading(false);
       return;
     }
-    
+
     try {
       setIsTestSuiteLoading(true);
-      const { testSuitesAPI } = await import('@/lib/api');
       const testSuites = await testSuitesAPI.getAll(currentProjectId);
-      
+
       if (testSuites && testSuites.length > 0) {
         // Use the first test suite for this project
         setCurrentTestSuiteId(testSuites[0].id);
@@ -1329,7 +1113,7 @@ export function TestCases() {
   // Generate section options for move dialog
   const generateSectionOptions = (sections: Section[], level: number = 0): React.ReactElement[] => {
     const options: React.ReactElement[] = [];
-    
+
     sections.forEach((section) => {
       const indent = '　'.repeat(level); // Use full-width spaces for indentation
       options.push(
@@ -1337,13 +1121,13 @@ export function TestCases() {
           {indent}{section.name}
         </SelectItem>
       );
-      
+
       // Add child sections recursively
       if (section.children && section.children.length > 0) {
         options.push(...generateSectionOptions(section.children, level + 1));
       }
     });
-    
+
     return options;
   };
 
@@ -1362,16 +1146,16 @@ export function TestCases() {
     const showDropIndicator = isDraggingTestCases && isOver;
 
     return (
-      <div 
+      <div
         ref={setNodeRef}
         className={`relative transition-all ${
-          showDropIndicator 
-            ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-blue-400 ring-offset-1 rounded shadow-lg scale-[1.02]' 
-            : isDraggingTestCases 
-              ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded' 
+          showDropIndicator
+            ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-blue-400 ring-offset-1 rounded shadow-lg scale-[1.02]'
+            : isDraggingTestCases
+              ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded'
               : ''
         }`}
-        style={{ 
+        style={{
           // Ensure the droppable area covers the entire section
           minHeight: '32px',
           cursor: isDraggingTestCases ? 'copy' : 'default'
@@ -1379,17 +1163,17 @@ export function TestCases() {
       >
         {/* Make the entire area droppable by adding a transparent overlay when dragging */}
         {isDraggingTestCases && (
-          <div 
-            className="absolute inset-0 z-[5]" 
+          <div
+            className="absolute inset-0 z-[5]"
             style={{ pointerEvents: 'auto' }}
           />
         )}
-        
+
         {/* Content with lower z-index so overlay is on top when dragging */}
         <div className="relative z-[1]">
           {children}
         </div>
-        
+
         {showDropIndicator && (
           <div className="absolute top-1 right-1 pointer-events-none z-10 bg-blue-500 text-white text-xs px-2 py-0.5 rounded shadow-lg animate-pulse">
             📥 Drop to move
@@ -1405,7 +1189,7 @@ export function TestCases() {
       const isExpanded = expandedSections.has(section.id);
       const hasChildren = section.children && section.children.length > 0;
       const isRoot = level === 0;
-      
+
       // Calculate counts correctly
       const directCount = apiTestCases.filter(tc => tc.section_id === parseInt(section.id)).length;
       const calculateCumulativeCount = (sec: Section): number => {
@@ -1419,15 +1203,15 @@ export function TestCases() {
       };
       const cumulativeCount = calculateCumulativeCount(section);
       const hasSubsections = hasChildren && cumulativeCount > directCount;
-      
+
       return (
         <div key={section.id} className={level > 0 ? 'ml-3 rtl:ml-0 rtl:mr-3' : ''}>
           <DroppableSection section={section}>
             <Button
               variant={selectedTestSuite === section.id ? 'default' : 'ghost'}
               className={`w-full justify-start text-xs font-normal py-1 h-auto ${level === 0 ? 'font-semibold' : 'font-normal'} ${level > 0 ? 'text-gray-600' : ''} ${
-                selectedTestSuite === section.id 
-                  ? 'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700' 
+                selectedTestSuite === section.id
+                  ? 'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700'
                   : 'hover:bg-gray-100 dark:hover:bg-gray-700'
               }`}
               onClick={() => {
@@ -1459,17 +1243,17 @@ export function TestCases() {
             </span>
             <div className="ml-auto flex items-center gap-1 flex-shrink-0">
               {hasSubsections && (
-                <span 
-                  className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded cursor-help" 
+                <span
+                  className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded cursor-help"
                   title={`Total including subsections: ${cumulativeCount}`}
                 >
                   {cumulativeCount}
                 </span>
               )}
-              <span 
+              <span
                 className={`text-xs px-1.5 py-0.5 rounded cursor-help ${
-                  selectedTestSuite === section.id 
-                    ? 'bg-blue-100 text-blue-600 font-medium dark:bg-blue-900 dark:text-blue-300' 
+                  selectedTestSuite === section.id
+                    ? 'bg-blue-100 text-blue-600 font-medium dark:bg-blue-900 dark:text-blue-300'
                     : 'text-gray-400 bg-gray-50 dark:bg-gray-800'
                 }`}
                 title={`Direct test cases in this section: ${directCount}`}
@@ -1667,15 +1451,15 @@ export function TestCases() {
       ].filter(Boolean).join(' ').toLowerCase();
       const matchesSearch = !normalizedSearchQuery || standardSearchText.includes(normalizedSearchQuery);
       const matchesCustomField = matchesCustomFieldFilter(testCase);
-      
+
       const matchesType = filterType === 'all' || normalizeSearchValue(testCase.test_type) === normalizeSearchValue(filterType);
       const matchesPriority = filterPriority === 'all' || testCase.priority === filterPriority;
-      const matchesSuite = selectedTestSuite === 'all' || 
+      const matchesSuite = selectedTestSuite === 'all' ||
                            testCase.test_suite_id === parseInt(selectedTestSuite) ||
                            testCase.section_id === parseInt(selectedTestSuite);
-      
+
       console.log('TestCase:', testCase.title, 'suite_id:', testCase.test_suite_id, 'section_id:', testCase.section_id, 'matchesSuite:', matchesSuite);
-      
+
       return matchesSearch && matchesCustomField && matchesType && matchesPriority && matchesSuite;
     });
 
@@ -1729,49 +1513,49 @@ export function TestCases() {
     if (field.is_required && (!value || (typeof value === 'string' && !value.trim()))) {
       return `${field.name} is required`;
     }
-    
+
     if (field.field_type === 'number' && value && isNaN(Number(value))) {
       return `${field.name} must be a valid number`;
     }
-    
+
     if (field.field_type === 'select' && value && field.options) {
       const options = field.options as string[];
       if (!options.includes(value)) {
         return `${field.name} must be one of: ${options.join(', ')}`;
       }
     }
-    
+
     return '';
   };
 
   const validateAllFields = (): boolean => {
     const errors: Record<string, string> = {};
-    
+
     // Validate standard fields
     const titleError = validateField('title', testCaseForm.title);
     if (titleError) errors.title = titleError;
-    
+
     const typeError = validateField('test_type', testCaseForm.test_type);
     if (typeError) errors.test_type = typeError;
-    
+
     const priorityError = validateField('priority', testCaseForm.priority);
     if (priorityError) errors.priority = priorityError;
 
     const tagsError = validateField('tags', testCaseForm.tags);
     if (tagsError) errors.tags = tagsError;
-    
+
     // Validate custom fields
     customFields.forEach(field => {
       const error = validateCustomField(field, customFieldValues[field.id]);
       if (error) errors[`custom_${field.id}`] = error;
     });
-    
+
     setValidationErrors(errors);
-    
+
     // Focus on first field with error if validation fails
     if (Object.keys(errors).length > 0) {
       const firstErrorField = Object.keys(errors)[0];
-      
+
       setTimeout(() => {
         if (firstErrorField === 'title' && titleInputRef.current) {
           titleInputRef.current.focus();
@@ -1788,7 +1572,7 @@ export function TestCases() {
         }
       }, 100);
     }
-    
+
     return Object.keys(errors).length === 0;
   };
 
@@ -1835,7 +1619,7 @@ export function TestCases() {
       ...prev,
       [fieldId]: value
     }));
-    
+
     const field = customFields.find(f => f.id === fieldId);
     if (field) {
       const error = validateCustomField(field, value);
@@ -1882,8 +1666,8 @@ export function TestCases() {
   };
 
   const handleStepChange = (stepNumber: number, field: 'action' | 'expected_result' | 'step_type', value: string) => {
-    setTestSteps(prev => prev.map(step => 
-      step.step_number === stepNumber 
+    setTestSteps(prev => prev.map(step =>
+      step.step_number === stepNumber
         ? { ...step, [field]: value }
         : step
     ));
@@ -1965,7 +1749,7 @@ export function TestCases() {
   // Proper state cleanup when modal closes
   const handleCloseModal = () => {
     // Check for unsaved changes
-    const hasChanges = 
+    const hasChanges =
       testCaseForm.title.trim() !== '' ||
       testCaseForm.description.trim() !== '' ||
       testCaseForm.reference.trim() !== '' ||
@@ -1979,18 +1763,18 @@ export function TestCases() {
       testSteps.length > 0 ||
       linkedRequirements.length > 0 ||
       Object.keys(customFieldValues).length > 0;
-    
+
     if (hasChanges) {
       setShowUnsavedDialog(true);
       return;
     }
-    
+
     // Reset all form state with default priority from database
     const defaultPriority = dbPriorities.find((p: any) => p.is_default);
-    const defaultPriorityValue = defaultPriority 
-      ? defaultPriority.name.toLowerCase() 
+    const defaultPriorityValue = defaultPriority
+      ? defaultPriority.name.toLowerCase()
       : (priorityOptions.length > 0 ? priorityOptions[0].value : 'medium');
-    
+
     setTestCaseForm({
       title: '',
       description: '',
@@ -2010,7 +1794,7 @@ export function TestCases() {
     setValidationErrors({});
     setIsDialogOpen(false);
     setHasUnsavedChanges(false);
-    
+
     // Clear any pending timeouts or async operations
     setIsModalOpening(false);
   };
@@ -2020,10 +1804,10 @@ export function TestCases() {
     if (discard) {
       // Reset all form state with default priority from database
       const defaultPriority = dbPriorities.find((p: any) => p.is_default);
-      const defaultPriorityValue = defaultPriority 
-        ? defaultPriority.name.toLowerCase() 
+      const defaultPriorityValue = defaultPriority
+        ? defaultPriority.name.toLowerCase()
         : (priorityOptions.length > 0 ? priorityOptions[0].value : 'medium');
-      
+
       setTestCaseForm({
         title: '',
         description: '',
@@ -2126,7 +1910,7 @@ export function TestCases() {
       if (customFieldValueRequests.length > 0) {
         await Promise.all(customFieldValueRequests);
       }
-      
+
       // Reset form fields
       setTestCaseForm({
         title: '',
@@ -2149,12 +1933,12 @@ export function TestCases() {
       setIsDialogOpen(false);
       setHasUnsavedChanges(false);
       setIsModalOpening(false);
-      
+
       toast({
         title: t('success'),
         description: t('testCaseCreatedSuccessfully', {section: sectionId ? getSelectedSectionName() : t('noSection')}),
       });
-      
+
       // Refresh the test cases list and sections
       await loadTestCases();
       await loadSections();
@@ -2173,7 +1957,7 @@ export function TestCases() {
   // Helper function to get selected section name
   const getSelectedSectionName = () => {
     if (selectedTestSuite === 'all') return 'no section';
-    
+
     const findSection = (sections: Section[], sectionId: string): string | null => {
       for (const section of sections) {
         if (section.id === sectionId) return section.name;
@@ -2184,14 +1968,14 @@ export function TestCases() {
       }
       return null;
     };
-    
+
     return findSection(mockSections, selectedTestSuite) || 'unknown section';
   };
 
   // Helper function to build breadcrumb path for selected section
   const getBreadcrumbPath = (): string[] => {
     if (selectedTestSuite === 'all') return [];
-    
+
     const buildPath = (sections: Section[], targetId: string, path: string[] = []): string[] | null => {
       for (const section of sections) {
         if (section.id === targetId) {
@@ -2204,7 +1988,7 @@ export function TestCases() {
       }
       return null;
     };
-    
+
     return buildPath(mockSections, selectedTestSuite) || [];
   };
 
@@ -2236,7 +2020,7 @@ export function TestCases() {
         : currentProjectId
           ? await customFieldsAPI.getDefinitions(currentProjectId).catch(() => [])
           : [];
-      
+
       const csvEscape = (value: unknown) => {
         const text = value === null || value === undefined ? '' : String(value);
         return `"${text.replace(/"/g, '""')}"`;
@@ -2286,9 +2070,9 @@ export function TestCases() {
           tc.custom_field_values?.find((value) => value.field_definition_id === field.id)?.value || ''
         )),
       ].map(csvEscape));
-      
+
       const csvContent = [csvHeaders.join(','), ...csvRows.map(row => row.join(','))].join('\n');
-      
+
       // Create a blob and download the file
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
@@ -2299,12 +2083,12 @@ export function TestCases() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       toast({
         title: t('exportComplete'),
         description: t('successfullyExportedTestCases', {count: selectedTestCases.length}),
       });
-      
+
       // Clear selection after export
       setSelectedTestCases([]);
       setSelectAll(false);
@@ -2331,7 +2115,7 @@ export function TestCases() {
     try {
       // Export test cases for the current test suite (project)
       const result = await importExportAPI.exportTestCases(currentTestSuiteId, 'csv');
-      
+
       // Create a blob and download the file
       const blob = new Blob([result.content], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
@@ -2342,7 +2126,7 @@ export function TestCases() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       toast({
         title: t('exportComplete'),
         description: result.truncated
@@ -2420,27 +2204,27 @@ export function TestCases() {
 
   const handleBulkDelete = async () => {
     if (selectedTestCases.length === 0) return;
-    
+
     try {
       // Delete all selected test cases
-      const deletePromises = selectedTestCases.map(testCaseId => 
+      const deletePromises = selectedTestCases.map(testCaseId =>
         testCasesAPI.delete(testCaseId)
       );
-      
+
       await Promise.all(deletePromises);
-      
+
       // Remove from local state
       setApiTestCases(prev => prev.filter(tc => !selectedTestCases.includes(tc.id)));
-      
+
       toast({
         title: t('success'),
         description: t('deletedTestCasesSuccessfully', {count: selectedTestCases.length}),
       });
-      
+
       // Clear selection
       setSelectedTestCases([]);
       setSelectAll(false);
-      
+
       // Reload data to refresh counts
       await loadTestCases();
       await loadSections();
@@ -2456,7 +2240,7 @@ export function TestCases() {
 
   const handleBulkExecute = async () => {
     if (selectedTestCases.length === 0) return;
-    
+
     if (projectId) {
       try {
         // Create a new test run for the selected test cases
@@ -2571,9 +2355,8 @@ export function TestCases() {
     setSelectedTestCaseForHistory(testCase);
     setHistoryDialogOpen(true);
     setIsLoadingRevisions(true);
-    
+
     try {
-      const { api } = await import('@/lib/api');
       const response = await api.get(`/test-cases/${testCase.id}/revisions`);
       setRevisions(response.data || []);
     } catch (error) {
@@ -2595,10 +2378,9 @@ export function TestCases() {
 
   const handleRestoreRevision = async (revision: any) => {
     if (!selectedTestCaseForHistory) return;
-    
+
     if (window.confirm(t('confirmRestoreRevision') || `Are you sure you want to restore revision ${revision.revision_number}?`)) {
       try {
-        const { api } = await import('@/lib/api');
         await api.post(`/test-cases/${selectedTestCaseForHistory.id}/revisions/${revision.revision_number}/restore`);
         toast({
           title: t('success') || 'Success',
@@ -2633,30 +2415,30 @@ export function TestCases() {
         name: newSectionName,
         parent_id: newSectionParentId === 'none' ? null : newSectionParentId
       });
-      
+
       // Create the section via API
       const newSection = await sectionsAPI.create({
         name: newSectionName,
         test_suite_id: currentTestSuiteId,
         parent_section_id: newSectionParentId === 'none' ? undefined : parseInt(newSectionParentId)
       });
-      
+
       console.log('Section created successfully:', newSection);
-      
+
       // Reset form and close dialog
       setNewSectionName('');
       setNewSectionParentId('none');
       setSectionDialogOpen(false);
-      
+
       // Immediately refresh sections to show the new section
       await loadSections();
-      
+
       // Show success message
       toast({
         title: t('sectionCreated'),
         description: t('sectionCreatedSuccessfully', {name: newSection.name}),
       });
-      
+
     } catch (error) {
       console.error('Failed to create section:', error);
       toast({
@@ -2739,15 +2521,15 @@ export function TestCases() {
     try {
       // Add actual API call to delete test case
       await testCasesAPI.delete(testCaseId);
-      
+
       // Remove from local state
       setApiTestCases(prev => prev.filter(tc => tc.id !== testCaseId));
-      
+
       toast({
         title: t('success'),
         description: t('testCaseDeletedSuccessfully'),
       });
-      
+
       // Reload data to refresh counts
       await loadTestCases();
       await loadSections();
@@ -2840,7 +2622,7 @@ export function TestCases() {
 
   const handleConfirmMove = () => {
     if (!selectedTestCaseToMove || !destinationSection) return;
-    
+
     // Log the activity
     const activity = {
       id: Date.now(),
@@ -2850,15 +2632,15 @@ export function TestCases() {
       timestamp: new Date().toISOString(),
       user: 'Current User'
     };
-    
+
     const existingActivities = JSON.parse(localStorage.getItem('recentActivities') || '[]');
     existingActivities.unshift(activity);
     localStorage.setItem('recentActivities', JSON.stringify(existingActivities.slice(0, 10)));
-    
+
     setMoveDialogOpen(false);
     setSelectedTestCaseToMove(null);
     setDestinationSection('');
-    
+
     // Show success message
     alert(`Test case "${selectedTestCaseToMove.title}" moved to "${destinationSection}"`);
   };
@@ -2879,7 +2661,7 @@ export function TestCases() {
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    
+
     setActiveDragId(null);
     setDragOverSectionId(null);
 
@@ -2889,14 +2671,14 @@ export function TestCases() {
     if (over.data.current?.type === 'section') {
       const sectionId = over.data.current.sectionId;
       const sectionName = over.data.current.sectionName;
-      
+
       // Get test cases to move (either selected ones or just the dragged one)
       const testCasesToMove = selectedTestCases.length > 0 && selectedTestCases.includes(active.id as number)
         ? selectedTestCases
         : [active.id as number];
-      
+
       console.log(`Moving ${testCasesToMove.length} test case(s) to section: ${sectionName}`);
-      
+
       try {
         // Move each test case to the new section
         for (const testCaseId of testCasesToMove) {
@@ -2908,20 +2690,20 @@ export function TestCases() {
             });
           }
         }
-        
+
         toast({
           title: t('success'),
           description: t('movedTestCasesSuccessfully', {count: testCasesToMove.length, sectionName}),
         });
-        
+
         // Reload test cases and sections
         await loadTestCases();
         await loadSections();
-        
+
         // Clear selection
         setSelectedTestCases([]);
         setSelectAll(false);
-        
+
       } catch (error) {
         console.error('Failed to move test cases:', error);
         toast({
@@ -2930,7 +2712,7 @@ export function TestCases() {
           variant: "destructive",
         });
       }
-      
+
       return;
     }
 
@@ -2942,7 +2724,7 @@ export function TestCases() {
       if (oldIndex !== -1 && newIndex !== -1) {
         const movedTestCase = apiTestCases[oldIndex];
         const targetTestCase = apiTestCases[newIndex];
-        
+
         // Log the drag and drop activity
         const activity = {
           id: Date.now(),
@@ -2958,16 +2740,16 @@ export function TestCases() {
         const existingActivities = JSON.parse(localStorage.getItem('recentActivities') || '[]');
         existingActivities.unshift(activity);
         localStorage.setItem('recentActivities', JSON.stringify(existingActivities.slice(0, 10)));
-        
+
         // Reorder the array (in real app, this would be an API call)
         const reorderedTestCases = arrayMove(apiTestCases, oldIndex, newIndex);
-        
+
         // Update the test cases array
         setApiTestCases(reorderedTestCases);
-        
+
         // Force re-render by updating state
         setSelectedTestSuite(prev => prev === 'all' ? 'all' : selectedTestSuite);
-        
+
         console.log(`Test case "${movedTestCase.title}" moved from position ${oldIndex + 1} to ${newIndex + 1}`);
       }
     }
@@ -3063,7 +2845,7 @@ export function TestCases() {
             <Dialog open={isDialogOpen} onOpenChange={(open) => {
             if (!open) {
               // Check for unsaved changes before closing
-              const hasChanges = 
+              const hasChanges =
                 testCaseForm.title.trim() !== '' ||
                 testCaseForm.description.trim() !== '' ||
                 testCaseForm.reference.trim() !== '' ||
@@ -3077,12 +2859,12 @@ export function TestCases() {
                 testSteps.length > 0 ||
                 linkedRequirements.length > 0 ||
                 Object.keys(customFieldValues).length > 0;
-              
+
               if (hasChanges) {
                 setShowUnsavedDialog(true);
                 return; // Prevent dialog from closing
               }
-              
+
               handleCloseModal();
             } else {
               handleOpenModal();
@@ -3115,11 +2897,11 @@ export function TestCases() {
                   <div className="grid grid-cols-4 items-center gap-4">
                     <Label htmlFor="title" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('testCaseTitle')}</Label>
                     <div className="col-span-3 space-y-1">
-                      <Input 
-                        id="title" 
+                      <Input
+                        id="title"
                         ref={titleInputRef}
-                        value={testCaseForm.title} 
-                        onChange={(e) => handleTitleChange(e.target.value)} 
+                        value={testCaseForm.title}
+                        onChange={(e) => handleTitleChange(e.target.value)}
                         className={validationErrors.title ? 'border-red-500 focus:border-red-500' : ''}
                         maxLength={200}
                       />
@@ -3375,9 +3157,9 @@ export function TestCases() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold">{t('requirements')}</h3>
-                    <Button 
-                      type="button" 
-                      variant="outline" 
+                    <Button
+                      type="button"
+                      variant="outline"
                       size="sm"
                       onClick={() => {
                         loadAvailableRequirements();
@@ -3388,7 +3170,7 @@ export function TestCases() {
                       {t('linkRequirements')}
                     </Button>
                   </div>
-                  
+
                   {linkedRequirements.length > 0 ? (
                     <div className="space-y-2">
                       {linkedRequirements.map((requirement) => (
@@ -3749,54 +3531,54 @@ export function TestCases() {
                     <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 text-blue-500`} />
                     <span className="flex-1 truncate text-left rtl:text-right">{t('testCasesTitle')}</span>
                     <span className={`text-xs px-2 py-1 rounded ${
-                      selectedTestSuite === 'all' 
-                      ? 'bg-blue-100 text-blue-600 font-medium' 
+                      selectedTestSuite === 'all'
+                      ? 'bg-blue-100 text-blue-600 font-medium'
                       : 'text-gray-600 bg-gray-100 font-medium'
                   }`}>
                     {apiTestCases.length}
                   </span>
                 </Button>
-                
+
                 {/* Group sections by test suite */}
                 {(() => {
                   // Filter sections recursively based on search query
                   const filterSections = (sections: Section[], query: string): Section[] => {
                     if (!query.trim()) return sections;
-                    
+
                     const lowerQuery = query.toLowerCase();
-                    
+
                     return sections.reduce((filtered: Section[], section) => {
                       // Check if current section matches
                       const sectionMatches = section.name.toLowerCase().includes(lowerQuery);
-                      
+
                       // Filter children recursively
-                      const filteredChildren = section.children 
+                      const filteredChildren = section.children
                         ? filterSections(section.children, query)
                         : [];
-                      
+
                       // Include section if it matches or has matching children
                       if (sectionMatches || filteredChildren.length > 0) {
                         filtered.push({
                           ...section,
                           children: filteredChildren.length > 0 ? filteredChildren : section.children
                         });
-                        
+
                         // Auto-expand sections with matching children
                         if (filteredChildren.length > 0 && !expandedSections.has(section.id)) {
                           setExpandedSections(prev => new Set([...prev, section.id]));
                         }
                       }
-                      
+
                       return filtered;
                     }, []);
                   };
-                  
+
                   // Group sections by test suite
                   const sectionsBySuite = new Map<number, { name: string; sections: Section[] }>();
-                  
+
                   // Apply search filter first
                   const filteredSections = filterSections(mockSections, sectionSearchQuery);
-                  
+
                   filteredSections.forEach(section => {
                     if (section.test_suite_id) {
                       if (!sectionsBySuite.has(section.test_suite_id)) {
@@ -3808,7 +3590,7 @@ export function TestCases() {
                       sectionsBySuite.get(section.test_suite_id)!.sections.push(section);
                     }
                   });
-                  
+
                   // Show message if no results
                   if (sectionSearchQuery.trim() && sectionsBySuite.size === 0) {
                     return (
@@ -3819,7 +3601,7 @@ export function TestCases() {
                       </div>
                     );
                   }
-                  
+
                   return Array.from(sectionsBySuite.entries()).map(([suiteId, suiteData]) => (
                     <div key={suiteId} className="mb-3">
                       <div className="flex items-center gap-2 mb-2 px-3 py-1 bg-gray-50 dark:bg-gray-800 rounded">
@@ -3871,15 +3653,15 @@ export function TestCases() {
                             }
                             return null;
                           };
-                          
+
                           const sectionId = findSectionIdByName(mockSections, section);
                           if (sectionId) {
                             setSelectedTestSuite(sectionId);
                           }
                         }}
                         className={`hover:text-blue-600 dark:hover:text-blue-400 transition-colors ${
-                          index === breadcrumbPath.length - 1 
-                            ? 'text-blue-600 dark:text-blue-400 font-medium' 
+                          index === breadcrumbPath.length - 1
+                            ? 'text-blue-600 dark:text-blue-400 font-medium'
                             : 'hover:underline'
                         }`}
                       >
@@ -3891,7 +3673,7 @@ export function TestCases() {
               </div>
             ) : null;
           })()}
-          
+
           {/* Search Bar and Bulk Actions */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <div className="flex items-center justify-between mb-4">
@@ -4049,7 +3831,7 @@ export function TestCases() {
                     </TableHeader>
                     <TableBody>
                       {paginatedTestCases.map((testCase) => (
-                        <SortableRow
+                        <SortableTestCaseRow
                           key={testCase.id}
                           testCase={testCase}
                           onEdit={handleEdit}
@@ -4058,7 +3840,6 @@ export function TestCases() {
                           onViewHistory={handleViewHistory}
                           onDelete={handleDelete}
                           getTestCaseDetailUrl={getTestCaseDetailUrl}
-                          navigate={navigate}
                           selectedTestCases={selectedTestCases}
                           handleSelectTestCase={handleSelectTestCase}
                           sections={mockSections}
@@ -4447,8 +4228,8 @@ export function TestCases() {
                     <div
                       key={requirement.id}
                       className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
-                        isLinked 
-                          ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-700' 
+                        isLinked
+                          ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-700'
                           : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
                       onClick={() => isLinked ? handleUnlinkRequirement(requirement.id) : handleLinkRequirement(requirement)}
@@ -4590,7 +4371,7 @@ export function TestCases() {
                     <Layers className="h-12 w-12 mx-auto mb-3 text-gray-400" />
                     <p className="text-sm font-medium">{t('noSharedStepsFound')}</p>
                     <p className="text-xs mt-1">
-                      {sharedStepSearchQuery 
+                      {sharedStepSearchQuery
                         ? t('tryAdjustingSearchTerms')
                         : t('createSharedStepsToReuse')
                       }

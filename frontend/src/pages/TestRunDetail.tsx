@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TestRunPieChart, TestRunBarChart, TestRunTrendChart } from '@/components/ui/chart';
 import { useTranslation } from '@/hooks/useTranslation';
-import { testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
+import { sectionsAPI, testCasesAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
 import { TestResult } from '@/types/index';
 import { formatDurationSeconds } from '@/utils/timeFormat';
 
@@ -351,7 +351,6 @@ export function TestRunDetail() {
     const loadSections = async () => {
       if (projectId) {
         try {
-          const { sectionsAPI } = await import('@/lib/api');
           const sectionsData = await sectionsAPI.getProjectSectionHierarchy(parseInt(projectId));
           const allSections: any[] = [];
           
@@ -401,7 +400,6 @@ export function TestRunDetail() {
     const loadAvailableTestCases = async () => {
       if (isAddTestCasesOpen && projectId) {
         try {
-          const { testCasesAPI } = await import('@/lib/api');
           const allTestCases = await testCasesAPI.getAll();
           
           // Filter out test cases that are already in this test run

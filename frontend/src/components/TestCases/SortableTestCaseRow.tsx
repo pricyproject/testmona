@@ -1,0 +1,197 @@
+import { CSSProperties } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { ArrowUp, Edit, GripVertical, History, MoreHorizontal, Play, Trash2 } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { TableCell, TableRow } from '@/components/ui/table';
+import { useTranslation } from '@/hooks/useTranslation';
+import { TestCase } from '@/types';
+import { Section } from '@/types/testCases';
+
+type BadgeStyle = string | Record<string, any>;
+
+interface SortableTestCaseRowProps {
+  testCase: TestCase;
+  onEdit: (testCase: TestCase) => void;
+  onMove: (testCase: TestCase) => void;
+  onExecute: (testCase: TestCase) => void;
+  onViewHistory: (testCase: TestCase) => void;
+  onDelete: (id: number) => void;
+  getTestCaseDetailUrl: (id: number) => string;
+  selectedTestCases: number[];
+  handleSelectTestCase: (id: number, checked: boolean) => void;
+  sections: Section[];
+  getTypeBadge: (type: string) => BadgeStyle;
+  getPriorityBadge: (priority: string) => BadgeStyle;
+  isRTL: boolean;
+}
+
+const findSectionName = (sectionList: Section[], sectionId: number): string | null => {
+  for (const section of sectionList) {
+    if (parseInt(section.id) === sectionId) return section.name;
+    if (section.children) {
+      const found = findSectionName(section.children, sectionId);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+const resolveBadgeClass = (badge: BadgeStyle): string => (typeof badge === 'string' ? badge : '');
+const resolveBadgeStyle = (badge: BadgeStyle): CSSProperties | undefined => (
+  typeof badge === 'object' ? badge as CSSProperties : undefined
+);
+
+export function SortableTestCaseRow({
+  testCase,
+  onEdit,
+  onMove,
+  onExecute,
+  onViewHistory,
+  onDelete,
+  getTestCaseDetailUrl,
+  selectedTestCases,
+  handleSelectTestCase,
+  sections,
+  getTypeBadge,
+  getPriorityBadge,
+  isRTL,
+}: SortableTestCaseRowProps) {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: testCase.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  const isSelected = selectedTestCases.includes(testCase.id);
+  const testCaseTags = (testCase.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean);
+  const sectionLabel = testCase.section_id
+    ? findSectionName(sections, testCase.section_id) || `Section ${testCase.section_id}`
+    : t('noSection');
+  const typeBadge = getTypeBadge(testCase.test_type);
+  const priorityBadge = getPriorityBadge(testCase.priority);
+
+  if (isDragging) {
+    return (
+      <TableRow ref={setNodeRef} style={style}>
+        <TableCell colSpan={10} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+          <div className="flex items-center justify-center">
+            <GripVertical className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+            <span className="text-sm text-gray-500">Dragging {testCase.title}...</span>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <TableRow ref={setNodeRef} style={style} className={`hover:bg-gray-50 dark:hover:bg-gray-800 ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+      <TableCell className="w-12 py-2">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => handleSelectTestCase(testCase.id, checked as boolean)}
+            className="mr-2 rtl:mr-0 rtl:ml-2"
+          />
+          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+            <GripVertical className="h-4 w-4 text-gray-400 hover:text-gray-600" />
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="font-medium w-24 py-2 text-xs">
+        <Button
+          variant="link"
+          className="p-0 h-auto font-medium text-xs text-blue-600 hover:text-blue-800"
+          onClick={() => navigate(getTestCaseDetailUrl(testCase.id))}
+        >
+          TC-{testCase.id.toString().padStart(3, '0')}
+        </Button>
+      </TableCell>
+      <TableCell className="font-medium py-2 text-sm">
+        <Button
+          variant="link"
+          className="p-0 h-auto font-medium text-sm text-left hover:text-blue-800"
+          onClick={() => navigate(getTestCaseDetailUrl(testCase.id))}
+        >
+          {testCase.title}
+        </Button>
+      </TableCell>
+      <TableCell className="text-xs py-2">
+        <div className="max-w-32">
+          <Badge
+            variant="outline"
+            className="text-xs truncate block"
+            title={testCase.test_suite?.project?.name || 'N/A'}
+          >
+            {testCase.test_suite?.project?.name || 'N/A'}
+          </Badge>
+        </div>
+      </TableCell>
+      <TableCell className="text-xs text-gray-500 py-2 max-w-[150px]">
+        <div className="truncate" title={sectionLabel}>
+          {sectionLabel}
+        </div>
+      </TableCell>
+      <TableCell className="py-2">
+        <Badge className={`text-xs ${resolveBadgeClass(typeBadge)}`} style={resolveBadgeStyle(typeBadge)}>
+          {testCase.test_type}
+        </Badge>
+      </TableCell>
+      <TableCell className="py-2">
+        <Badge className={`text-xs ${resolveBadgeClass(priorityBadge)}`} style={resolveBadgeStyle(priorityBadge)}>
+          {testCase.priority}
+        </Badge>
+      </TableCell>
+      <TableCell className="py-2 max-w-[180px]">
+        <div className="flex flex-wrap gap-1">
+          {testCaseTags.slice(0, 3).map((tag, index) => (
+            <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
+              {tag}
+            </Badge>
+          ))}
+          {testCaseTags.length > 3 && (
+            <Badge variant="outline" className="text-xs">
+              +{testCaseTags.length - 3}
+            </Badge>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="text-xs text-gray-500 py-2">{new Date(testCase.created_at).toLocaleDateString()}</TableCell>
+      <TableCell className="py-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm"><MoreHorizontal className="h-4 w-4" /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onEdit(testCase)}><Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('edit')}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onMove(testCase)}><ArrowUp className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('move')}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExecute(testCase)}><Play className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('execute')}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onViewHistory(testCase)}><History className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('viewHistory')}</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onDelete(testCase.id)} className="text-red-600"><Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('delete')}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
+  );
+}
