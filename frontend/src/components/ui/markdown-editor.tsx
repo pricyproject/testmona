@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -33,9 +31,109 @@ import {
   Image,
   Maximize2,
   Minimize2,
+  type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
+
+type ToolbarAction =
+  | {
+      type: 'insertText';
+      before: string;
+      after?: string;
+      placeholder?: string;
+      cursorOffset?: number;
+    }
+  | { type: 'taskList' }
+  | { type: 'image' };
+
+type ToolbarButton = {
+  key: string;
+  icon: LucideIcon;
+  title: string;
+  action: ToolbarAction;
+};
+
+const FORMAT_BUTTONS: ToolbarButton[] = [
+  {
+    key: 'bold',
+    icon: Bold,
+    title: 'Bold',
+    action: { type: 'insertText', before: '**', after: '**', placeholder: 'bold text' },
+  },
+  {
+    key: 'italic',
+    icon: Italic,
+    title: 'Italic',
+    action: { type: 'insertText', before: '*', after: '*', placeholder: 'italic text' },
+  },
+  {
+    key: 'strikethrough',
+    icon: Strikethrough,
+    title: 'Strikethrough',
+    action: { type: 'insertText', before: '~~', after: '~~', placeholder: 'strikethrough' },
+  },
+  {
+    key: 'inline-code',
+    icon: Code,
+    title: 'Inline Code',
+    action: { type: 'insertText', before: '`', after: '`', placeholder: 'code' },
+  },
+];
+
+const BLOCK_BUTTONS: ToolbarButton[] = [
+  {
+    key: 'heading-2',
+    icon: Heading2,
+    title: 'Heading 2',
+    action: { type: 'insertText', before: '## ', placeholder: 'Heading' },
+  },
+  {
+    key: 'heading-3',
+    icon: Heading3,
+    title: 'Heading 3',
+    action: { type: 'insertText', before: '### ', placeholder: 'Heading' },
+  },
+  {
+    key: 'bullet-list',
+    icon: List,
+    title: 'Bullet List',
+    action: { type: 'insertText', before: '- ', placeholder: 'List item' },
+  },
+  {
+    key: 'numbered-list',
+    icon: ListOrdered,
+    title: 'Numbered List',
+    action: { type: 'insertText', before: '1. ', placeholder: 'List item' },
+  },
+  {
+    key: 'quote',
+    icon: Quote,
+    title: 'Quote',
+    action: { type: 'insertText', before: '> ', placeholder: 'Quote' },
+  },
+  {
+    key: 'task-list',
+    icon: CheckSquare,
+    title: 'Task List',
+    action: { type: 'taskList' },
+  },
+];
+
+const INSERT_BUTTONS: ToolbarButton[] = [
+  {
+    key: 'link',
+    icon: Link,
+    title: 'Link',
+    action: { type: 'insertText', before: '[', after: '](url)', placeholder: 'link text' },
+  },
+  {
+    key: 'image',
+    icon: Image,
+    title: 'Image',
+    action: { type: 'image' },
+  },
+];
 
 const CODE_LANGUAGES = [
   { value: 'plaintext', label: 'Plain' },
@@ -205,6 +303,25 @@ export function MarkdownEditor({
     insertText('![', '](image-url)', 'alt text', 0);
   };
 
+  const handleToolbarAction = (action: ToolbarAction) => {
+    if (action.type === 'insertText') {
+      insertText(
+        action.before,
+        action.after ?? '',
+        action.placeholder ?? '',
+        action.cursorOffset ?? 0
+      );
+      return;
+    }
+
+    if (action.type === 'taskList') {
+      insertTaskList();
+      return;
+    }
+
+    insertImage();
+  };
+
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
   };
@@ -283,31 +400,6 @@ export function MarkdownEditor({
   const getDirectionTitle = () =>
     textDirection === 'ltr' ? 'Left-to-Right' : textDirection === 'rtl' ? 'Right-to-Left' : 'Auto Detect';
 
-  const formatButtons = [
-    { icon: Bold, action: () => insertText('**', '**', 'bold text'), title: 'Bold' },
-    { icon: Italic, action: () => insertText('*', '*', 'italic text'), title: 'Italic' },
-    {
-      icon: Strikethrough,
-      action: () => insertText('~~', '~~', 'strikethrough'),
-      title: 'Strikethrough',
-    },
-    { icon: Code, action: () => insertText('`', '`', 'code'), title: 'Inline Code' },
-  ];
-
-  const blockButtons = [
-    { icon: Heading2, action: () => insertText('## ', '', 'Heading'), title: 'Heading 2' },
-    { icon: Heading3, action: () => insertText('### ', '', 'Heading'), title: 'Heading 3' },
-    { icon: List, action: () => insertText('- ', '', 'List item'), title: 'Bullet List' },
-    { icon: ListOrdered, action: () => insertText('1. ', '', 'List item'), title: 'Numbered List' },
-    { icon: Quote, action: () => insertText('> ', '', 'Quote'), title: 'Quote' },
-    { icon: CheckSquare, action: insertTaskList, title: 'Task List' },
-  ];
-
-  const insertButtons = [
-    { icon: Link, action: () => insertText('[', '](url)', 'link text'), title: 'Link' },
-    { icon: Image, action: insertImage, title: 'Image' },
-  ];
-
   return (
     <div
       className={cn(
@@ -370,50 +462,59 @@ export function MarkdownEditor({
           className="flex flex-wrap items-center gap-1 px-3 py-2 border-b bg-muted/30 editor-toolbar"
           dir="ltr"
         >
-          {formatButtons.map((btn, i) => (
-            <Button
-              key={i}
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={btn.action}
-              title={btn.title}
-              className="h-7 w-7 p-0"
-              disabled={disabled}
-            >
-              <btn.icon className="h-3.5 w-3" />
-            </Button>
-          ))}
+          {FORMAT_BUTTONS.map((btn) => {
+            const Icon = btn.icon;
+            return (
+              <Button
+                key={btn.key}
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleToolbarAction(btn.action)}
+                title={btn.title}
+                className="h-7 w-7 p-0"
+                disabled={disabled}
+              >
+                <Icon className="h-3.5 w-3" />
+              </Button>
+            );
+          })}
           <div className="w-px h-5 bg-border mx-1" />
-          {blockButtons.map((btn, i) => (
-            <Button
-              key={i}
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={btn.action}
-              title={btn.title}
-              className="h-7 w-7 p-0"
-              disabled={disabled}
-            >
-              <btn.icon className="h-3.5 w-3" />
-            </Button>
-          ))}
+          {BLOCK_BUTTONS.map((btn) => {
+            const Icon = btn.icon;
+            return (
+              <Button
+                key={btn.key}
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleToolbarAction(btn.action)}
+                title={btn.title}
+                className="h-7 w-7 p-0"
+                disabled={disabled}
+              >
+                <Icon className="h-3.5 w-3" />
+              </Button>
+            );
+          })}
           <div className="w-px h-5 bg-border mx-1" />
-          {insertButtons.map((btn, i) => (
-            <Button
-              key={i}
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={btn.action}
-              title={btn.title}
-              className="h-7 w-7 p-0"
-              disabled={disabled}
-            >
-              <btn.icon className="h-3.5 w-3" />
-            </Button>
-          ))}
+          {INSERT_BUTTONS.map((btn) => {
+            const Icon = btn.icon;
+            return (
+              <Button
+                key={btn.key}
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleToolbarAction(btn.action)}
+                title={btn.title}
+                className="h-7 w-7 p-0"
+                disabled={disabled}
+              >
+                <Icon className="h-3.5 w-3" />
+              </Button>
+            );
+          })}
           <Select value={codeBlockLang} onValueChange={setCodeBlockLang}>
             <SelectTrigger className="h-7 w-[100px] border-0 bg-transparent shadow-none focus:ring-0 px-2 gap-0">
               <Code className="h-3.5 w-3 shrink-0" />
@@ -492,18 +593,14 @@ export function MarkdownEditor({
                   const match = /language-(\w+)/.exec(codeClassName || '');
                   if (match) {
                     return (
-                      <SyntaxHighlighter
-                        style={oneDark}
-                        language={match[1]}
-                        PreTag="div"
-                        className="rounded-md !my-2 markdown-code-block"
-                        showLineNumbers
-                        wrapLongLines
-                        customStyle={{ margin: 0 }}
+                      <pre
+                        className="rounded-md my-2 overflow-x-auto bg-gray-950 p-3 text-sm text-gray-100 markdown-code-block"
                         dir="ltr"
                       >
-                        {String(children).replace(/\n$/, '')}
-                      </SyntaxHighlighter>
+                        <code className={`language-${match[1]}`}>
+                          {String(children).replace(/\n$/, '')}
+                        </code>
+                      </pre>
                     );
                   }
                   return (
