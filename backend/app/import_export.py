@@ -2160,8 +2160,7 @@ async def _perform_export(
     # Apply status filter
     if status_filter:
         try:
-            from .models import ProjectStatus
-            status_enum = ProjectStatus(status_filter.lower())
+            status_enum = Status(status_filter.lower())
             query = query.filter(Project.status == status_enum)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status filter: {status_filter}")
