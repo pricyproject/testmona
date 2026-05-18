@@ -33,6 +33,10 @@ class BaseClient(ABC):
             Dict with headers
         """
         pass
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        return self.get_headers()
     
     @abstractmethod
     def get_rate_limit_status_code(self) -> int:

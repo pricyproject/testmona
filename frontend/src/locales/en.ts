@@ -1556,6 +1556,18 @@ export const en = {
   emailLabelValue: 'Email: {value}',
   passwordLabelValue: 'Password: {value}',
   loginFailed: 'Login failed',
+  createYourAccount: 'Create your account',
+  enterUsername: 'Enter username',
+  enterFullName: 'Enter full name',
+  enterEmail: 'Enter email',
+  confirmPassword: 'Confirm password',
+  creatingAccount: 'Creating account...',
+  alreadyHaveAccount: 'Already have an account?',
+  allFieldsRequired: 'All fields are required',
+  passwordMinLength: 'Password must be at least {min} characters',
+  registrationFailed: 'Registration failed',
+  showPassword: 'Show password',
+  hidePassword: 'Hide password',
   
   // Test Case Edit
   editTestCase: 'Edit Test Case',

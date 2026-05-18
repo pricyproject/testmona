@@ -19,7 +19,7 @@ export function Layout({ children }: LayoutProps) {
   const [isHovering, setIsHovering] = React.useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = React.useState(false);
 
-  const isRTL = language === 'fa';
+  const isRTL = language === 'fa' || language === 'ar';
 
   React.useEffect(() => {
     document.documentElement.dir = isRTL ? 'rtl' : 'ltr';

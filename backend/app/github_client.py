@@ -27,7 +27,8 @@ class GitHubClient(BaseClient):
         self.token = api_token
         self.owner = repository_owner
         self.repo = repository_name
-        self.base_url = "https://api.github.com"
+        self.api_url = api_url.rstrip('/') if api_url else "https://api.github.com"
+        self.base_url = self.api_url
         
         # Determine full repository path
         if repository_name:

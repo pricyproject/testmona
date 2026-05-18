@@ -51,6 +51,27 @@ const api = axios.create({
   },
 });
 
+export const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail;
+    if (typeof detail === "string") {
+      return detail;
+    }
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => item?.msg || item?.message)
+        .filter(Boolean)
+        .join(", ") || fallback;
+    }
+    const message = error.response?.data?.message;
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+
+  return error instanceof Error ? error.message : fallback;
+};
+
 // Add refresh flag to prevent multiple simultaneous refresh attempts
 (api as any)._refreshing = false;
 (api as any)._refreshPromise = null;
@@ -201,8 +222,8 @@ export const authAPI = {
     return response.data;
   },
 
-  logout: async () => {
-    const response = await api.post("/logout");
+  logout: async (data?: { refresh_token?: string }) => {
+    const response = await api.post("/logout", data);
     return response.data;
   },
 

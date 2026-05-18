@@ -6,6 +6,7 @@ from ..database import get_db
 from ..services.versioning_service import VersioningService
 from ..auth import get_current_user
 from ..rbac import has_permission
+from ..models import User
 from ..schemas import (
     TestCaseVersionCreate, TestCaseVersionUpdate
 )
@@ -17,11 +18,15 @@ def get_versioning_service(db: Session = Depends(get_db)) -> VersioningService:
     return VersioningService(db)
 
 
+def get_user_id(current_user: User) -> int:
+    return current_user.id
+
+
 @router.post("/test-cases/{test_case_id}/versions")
 def create_version(
     test_case_id: int,
     version_data: TestCaseVersionCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -34,7 +39,7 @@ def create_version(
         version = versioning_service.create_version(
             test_case_id=test_case_id,
             version_data=version_data,
-            created_by=current_user["id"]
+            created_by=get_user_id(current_user)
         )
         return {"message": "Version created successfully", "version_id": version.id}
     except ValueError as e:
@@ -44,7 +49,7 @@ def create_version(
 @router.get("/test-cases/{test_case_id}/versions")
 def get_versions(
     test_case_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -70,7 +75,7 @@ def get_versions(
 @router.get("/test-cases/{test_case_id}/versions/latest")
 def get_latest_version(
     test_case_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -95,7 +100,7 @@ def get_latest_version(
 @router.post("/versions/compare")
 def compare_versions(
     compare_data: dict,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -118,7 +123,7 @@ def compare_versions(
         comparison = versioning_service.compare_versions(
             from_version_id=from_version_id,
             to_version_id=to_version_id,
-            created_by=current_user["id"]
+            created_by=get_user_id(current_user)
         )
         return {
             "id": comparison.id,
@@ -138,7 +143,7 @@ def compare_versions(
 @router.post("/versions/branch")
 def create_branch(
     branch_data: dict,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -159,7 +164,7 @@ def create_branch(
         branch = versioning_service.create_branch(
             parent_version_id=parent_version_id,
             branch_name=branch_name,
-            created_by=current_user["id"],
+            created_by=get_user_id(current_user),
             reason=reason
         )
         return {
@@ -178,7 +183,7 @@ def create_branch(
 def rollback_to_version(
     test_case_id: int,
     rollback_data: dict,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -194,7 +199,7 @@ def rollback_to_version(
         rollback_version = versioning_service.rollback_to_version(
             test_case_id=test_case_id,
             target_version_id=target_version_id,
-            rollback_by=current_user["id"],
+            rollback_by=get_user_id(current_user),
             reason=reason
         )
         return {
@@ -211,7 +216,7 @@ def rollback_to_version(
 @router.get("/test-cases/{test_case_id}/stats")
 def get_version_stats(
     test_case_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
@@ -229,9 +234,12 @@ def get_version_stats(
     
     # Get tags count
     from ..models_versioning import VersionTag
-    tags_count = db.query(VersionTag).filter(
-        VersionTag.version_id.in_([v.id for v in versions])
-    ).count()
+    version_ids = [v.id for v in versions]
+    tags_count = (
+        db.query(VersionTag).filter(VersionTag.version_id.in_(version_ids)).count()
+        if version_ids
+        else 0
+    )
     
     last_updated = versions[0].created_at if versions else None
     

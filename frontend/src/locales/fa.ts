@@ -1795,6 +1795,18 @@ export const fa = {
     emailLabelValue: 'ایمیل: {value}',
     passwordLabelValue: 'رمز عبور: {value}',
     loginFailed: 'ورود ناموفق بود',
+    createYourAccount: 'حساب کاربری خود را بسازید',
+    enterUsername: 'نام کاربری را وارد کنید',
+    enterFullName: 'نام کامل را وارد کنید',
+    enterEmail: 'ایمیل را وارد کنید',
+    confirmPassword: 'تأیید رمز عبور',
+    creatingAccount: 'در حال ایجاد حساب...',
+    alreadyHaveAccount: 'از قبل حساب دارید؟',
+    allFieldsRequired: 'همه فیلدها الزامی هستند',
+    passwordMinLength: 'رمز عبور باید حداقل {min} کاراکتر باشد',
+    registrationFailed: 'ثبت نام ناموفق بود',
+    showPassword: 'نمایش رمز عبور',
+    hidePassword: 'پنهان کردن رمز عبور',
 
     // Custom Fields Page
     customFieldsTitle: 'فیلدهای سفارشی',

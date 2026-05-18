@@ -1764,6 +1764,18 @@ export const ar = {
     emailLabelValue: 'البريد الإلكتروني: {value}',
     passwordLabelValue: 'كلمة المرور: {value}',
     loginFailed: 'فشل تسجيل الدخول',
+    createYourAccount: 'أنشئ حسابك',
+    enterUsername: 'أدخل اسم المستخدم',
+    enterFullName: 'أدخل الاسم الكامل',
+    enterEmail: 'أدخل البريد الإلكتروني',
+    confirmPassword: 'تأكيد كلمة المرور',
+    creatingAccount: 'جارٍ إنشاء الحساب...',
+    alreadyHaveAccount: 'لديك حساب بالفعل؟',
+    allFieldsRequired: 'جميع الحقول مطلوبة',
+    passwordMinLength: 'يجب أن تكون كلمة المرور {min} أحرف على الأقل',
+    registrationFailed: 'فشل التسجيل',
+    showPassword: 'إظهار كلمة المرور',
+    hidePassword: 'إخفاء كلمة المرور',
 
     // Integration Settings
     apiUrlRequired: 'رابط API مطلوب',

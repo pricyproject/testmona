@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { authAPI } from '@/lib/api';
-import { authAPI as extendedAuthAPI } from '../authAPI';
 import axios from 'axios';
 
 // Auto-login for development
@@ -173,7 +172,7 @@ export const useAuthStore = create<AuthState>()(
           // Call logout endpoint to invalidate refresh tokens
           const refreshToken = getRefreshTokenCookie();
           if (refreshToken) {
-            await extendedAuthAPI.logout({ refresh_token: refreshToken });
+            await authAPI.logout({ refresh_token: refreshToken });
           }
         } catch (error) {
           console.error('Logout API call failed:', error);
