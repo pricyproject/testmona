@@ -1,40 +1,52 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from '@/components/Layout';
 import { ProjectGuard } from '@/components/ProjectGuard';
-import { Login } from '@/pages/Login';
-import { Signup } from '@/pages/Signup';
-import { Dashboard } from '@/pages/Dashboard';
-import { Projects } from '@/pages/Projects';
-import { Requirements } from '@/pages/Requirements';
-import { TestSuites } from '@/pages/TestSuites';
-import { TestSuiteDetail } from '@/pages/TestSuiteDetail';
-import { TestCases } from '@/pages/TestCases';
-import { TestCaseDetail } from '@/pages/TestCaseDetail';
-import { TestCaseEdit } from '@/pages/TestCaseEdit';
-import { TestCaseRevisions } from '@/pages/TestCaseRevisions';
-import { TestCaseExecutionHistory } from '@/pages/TestCaseExecutionHistory';
-import { TestCaseExecute } from '@/pages/TestCaseExecute';
-import { TestCaseExecution } from '@/pages/TestCaseExecution';
-import { SectionManagement } from '@/pages/SectionManagement';
-import { Environments } from '@/pages/Environments';
-import { TestPlans } from '@/pages/TestPlans';
-import { TestRuns } from '@/pages/TestRuns';
-import { TestRunDetail } from '@/pages/TestRunDetail';
-import { TestRunReport } from '@/pages/TestRunReport';
-import { Defects } from '@/pages/Defects';
-import { Reports } from '@/pages/Reports';
-import { Milestones } from '@/pages/Milestones';
-import { CustomFields } from '@/pages/CustomFields';
-import { SharedSteps } from '@/pages/SharedSteps';
-import { GlobalParameters } from '@/pages/GlobalParameters';
-import { ActivityManagement } from '@/pages/ActivityManagement';
-import { Settings } from '@/pages/Settings';
-import { Profile } from '@/pages/Profile';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useAuthStore, initializeAuthFromLocalStorage } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAppName } from '@/hooks/useAppName';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+
+const lazyPage = (loader: () => Promise<any>, exportName: string) =>
+  lazy(() => loader().then((module) => ({ default: module[exportName] })));
+
+const Login = lazyPage(() => import('@/pages/Login'), 'Login');
+const Signup = lazyPage(() => import('@/pages/Signup'), 'Signup');
+const Dashboard = lazyPage(() => import('@/pages/Dashboard'), 'Dashboard');
+const Projects = lazyPage(() => import('@/pages/Projects'), 'Projects');
+const Requirements = lazyPage(() => import('@/pages/Requirements'), 'Requirements');
+const TestSuites = lazyPage(() => import('@/pages/TestSuites'), 'TestSuites');
+const TestSuiteDetail = lazyPage(() => import('@/pages/TestSuiteDetail'), 'TestSuiteDetail');
+const TestCases = lazyPage(() => import('@/pages/TestCases'), 'TestCases');
+const TestCaseDetail = lazyPage(() => import('@/pages/TestCaseDetail'), 'TestCaseDetail');
+const TestCaseEdit = lazyPage(() => import('@/pages/TestCaseEdit'), 'TestCaseEdit');
+const TestCaseRevisions = lazyPage(() => import('@/pages/TestCaseRevisions'), 'TestCaseRevisions');
+const TestCaseExecutionHistory = lazyPage(() => import('@/pages/TestCaseExecutionHistory'), 'TestCaseExecutionHistory');
+const TestCaseExecute = lazyPage(() => import('@/pages/TestCaseExecute'), 'TestCaseExecute');
+const TestCaseExecution = lazyPage(() => import('@/pages/TestCaseExecution'), 'TestCaseExecution');
+const SectionManagement = lazyPage(() => import('@/pages/SectionManagement'), 'SectionManagement');
+const Environments = lazyPage(() => import('@/pages/Environments'), 'Environments');
+const TestPlans = lazyPage(() => import('@/pages/TestPlans'), 'TestPlans');
+const TestRuns = lazyPage(() => import('@/pages/TestRuns'), 'TestRuns');
+const TestRunDetail = lazyPage(() => import('@/pages/TestRunDetail'), 'TestRunDetail');
+const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunReport');
+const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
+const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
+const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
+const CustomFields = lazyPage(() => import('@/pages/CustomFields'), 'CustomFields');
+const SharedSteps = lazyPage(() => import('@/pages/SharedSteps'), 'SharedSteps');
+const GlobalParameters = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParameters');
+const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 'ActivityManagement');
+const Settings = lazyPage(() => import('@/pages/Settings'), 'Settings');
+const Profile = lazyPage(() => import('@/pages/Profile'), 'Profile');
+
+function PageFallback() {
+  return (
+    <div className="min-h-[40vh] bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+  );
+}
 
 function AppWithRouter() {
   const { isAuthenticated, initializeDevAuth, compactMode } = useAuthStore();
@@ -87,17 +99,20 @@ function AppWithRouter() {
   
   if (!isAuthenticated) {
     return (
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
   
   return (
     <Layout>
-      <Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
         <Route path="/" element={<Navigate to="/projects" replace />} />
         <Route path="/login" element={<Navigate to="/projects" replace />} />
         <Route path="/signup" element={<Navigate to="/projects" replace />} />
@@ -252,7 +267,8 @@ function AppWithRouter() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }

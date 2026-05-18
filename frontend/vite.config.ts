@@ -26,6 +26,40 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/api/, '')
         }
       }
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('/src/locales/')) {
+              return 'i18n'
+            }
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/react-router-dom/') || id.includes('/zustand/') || id.includes('/@radix-ui/')) {
+              return 'vendor-react'
+            }
+            if (id.includes('/lucide-react/')) {
+              return 'vendor-icons'
+            }
+            if (id.includes('/@dnd-kit/')) {
+              return 'vendor-dnd'
+            }
+            if (id.includes('/recharts/') || id.includes('/d3-')) {
+              return 'vendor-charts'
+            }
+            if (id.includes('/react-markdown/') || id.includes('/remark-gfm/') || id.includes('/hast-util') || id.includes('/mdast-util') || id.includes('/micromark') || id.includes('/unified/') || id.includes('/vfile/') || id.includes('/unist-util') || id.includes('/property-information/') || id.includes('/space-separated-tokens/') || id.includes('/comma-separated-tokens/')) {
+              return 'vendor-markdown'
+            }
+            if (id.includes('/@tiptap/') || id.includes('/prosemirror-')) {
+              return 'vendor-editor'
+            }
+            if (id.includes('/handsontable/') || id.includes('/@handsontable/')) {
+              return 'vendor-grid'
+            }
+            return undefined
+          },
+        },
+      },
     }
   }
 })
