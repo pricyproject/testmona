@@ -269,11 +269,27 @@ export function Projects() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey && e.key === 'Enter') {
-      e.preventDefault();
-      handleCreateProject();
+  const handleSubmitOnEnter = (
+    e: React.KeyboardEvent,
+    handler: () => void,
+    canSubmit = true
+  ) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || !canSubmit) {
+      return;
     }
+
+    const target = e.target as HTMLElement;
+    const tagName = target.tagName.toLowerCase();
+    if (tagName === 'textarea' || tagName === 'button' || target.isContentEditable) {
+      return;
+    }
+
+    e.preventDefault();
+    handler();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    handleSubmitOnEnter(e, handleCreateProject, Boolean(projectName.trim()) && !isCreating);
   };
 
   const handleSelectAndNavigate = (project: Project, path: string) => {
@@ -1574,7 +1590,11 @@ export function Projects() {
 
       {/* Edit Project Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="sm:max-w-[425px]"
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleUpdateProject, Boolean(projectName.trim()) && Boolean(editingProject))}
+        >
           <DialogHeader>
             <DialogTitle>{t('editProject')}</DialogTitle>
             <DialogDescription>
@@ -1633,7 +1653,11 @@ export function Projects() {
 
       {/* Status Change Dialog */}
       <Dialog open={isStatusDialogOpen} onOpenChange={setIsStatusDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="sm:max-w-[425px]"
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleStatusChange, Boolean(newStatus) && Boolean(statusProject))}
+        >
           <DialogHeader>
             <DialogTitle>{t('changeProjectStatus')}</DialogTitle>
             <DialogDescription>
@@ -1681,7 +1705,11 @@ export function Projects() {
 
       {/* Clone Project Dialog */}
       <Dialog open={isCloneDialogOpen} onOpenChange={setIsCloneDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="sm:max-w-[425px]"
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleCloneProject, Boolean(cloneName.trim()) && Boolean(cloneProject))}
+        >
           <DialogHeader>
             <DialogTitle>{t('cloneProject')}</DialogTitle>
             <DialogDescription>
@@ -1740,7 +1768,10 @@ export function Projects() {
 
       {/* Bulk Delete Confirmation Dialog */}
       <AlertDialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
-        <AlertDialogContent isRTL={isRTL}>
+        <AlertDialogContent
+          isRTL={isRTL}
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleBulkDelete, bulkConfirmationText === `DELETE ${selectedProjects.size}`)}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
               <AlertTriangle className="h-5 w-5" />
@@ -1804,7 +1835,10 @@ export function Projects() {
 
       {/* Bulk Archive Confirmation Dialog */}
       <AlertDialog open={isBulkArchiveDialogOpen} onOpenChange={setIsBulkArchiveDialogOpen}>
-        <AlertDialogContent isRTL={isRTL}>
+        <AlertDialogContent
+          isRTL={isRTL}
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleBulkArchive, selectedProjects.size > 0)}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
               <Archive className="h-5 w-5" />
@@ -1848,7 +1882,10 @@ export function Projects() {
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent isRTL={isRTL}>
+        <AlertDialogContent
+          isRTL={isRTL}
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleDeleteProject, deleteConfirmationName === projectToDelete?.name)}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
               <AlertTriangle className="h-5 w-5" />
