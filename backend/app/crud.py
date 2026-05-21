@@ -17,7 +17,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -525,7 +525,8 @@ def get_test_results(db: Session, test_run_id: Optional[int] = None, test_case_i
     query = db.query(TestResult).options(
         joinedload(TestResult.test_case).joinedload(TestCase.section),
         joinedload(TestResult.test_case).selectinload(TestCase.custom_field_values),
-        joinedload(TestResult.executor)
+        joinedload(TestResult.executor),
+        selectinload(TestResult.defect_links).joinedload(TestResultDefectLink.defect),
     ).filter(
         TestResult.test_case_id.isnot(None),
         TestResult.test_run_id.isnot(None)
@@ -553,6 +554,10 @@ def update_test_result(db: Session, test_result_id: int, test_result: TestResult
         test_result_data = test_result.model_dump(exclude_unset=True)
         for key, value in test_result_data.items():
             setattr(db_test_result, key, value)
+        # Re-executing a result clears any pending retest flag, unless the
+        # caller set it explicitly.
+        if 'status' in test_result_data and 'retest_needed' not in test_result_data:
+            db_test_result.retest_needed = False
         apply_test_result_execution_timing(db_test_result, test_result_data)
         safe_commit(db)
         db.refresh(db_test_result)
@@ -1219,11 +1224,29 @@ def get_defect(db: Session, defect_id: int):
     return db.query(Defect).filter(Defect.id == defect_id).first()
 
 
-def get_defects(db: Session, project_id: int = None, skip: int = 0, limit: int = 100):
+def get_defects(
+    db: Session,
+    project_id: int = None,
+    skip: int = 0,
+    limit: int = 100,
+    search: str = None,
+    status: str = None,
+):
     query = db.query(Defect)
     if project_id:
         query = query.filter(Defect.project_id == project_id)
-    return query.offset(skip).limit(limit).all()
+    if status:
+        query = query.filter(Defect.status == status)
+    if search:
+        # Escape LIKE wildcards so user input is matched literally
+        escaped = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        pattern = f"%{escaped}%"
+        query = query.filter(or_(
+            Defect.title.ilike(pattern),
+            Defect.description.ilike(pattern),
+            Defect.defect_id.ilike(pattern),
+        ))
+    return query.order_by(Defect.created_at.desc()).offset(skip).limit(limit).all()
 
 
 def create_defect(db: Session, defect: DefectCreate):
@@ -1237,10 +1260,16 @@ def create_defect(db: Session, defect: DefectCreate):
 def update_defect(db: Session, defect_id: int, defect: DefectUpdate):
     db_defect = db.query(Defect).filter(Defect.id == defect_id).first()
     if db_defect:
-        for key, value in defect.model_dump(exclude_unset=True).items():
+        update_data = defect.model_dump(exclude_unset=True)
+        old_status = db_defect.status
+        for key, value in update_data.items():
             setattr(db_defect, key, value)
         safe_commit(db)
         db.refresh(db_defect)
+        # Lifecycle sync: a status change means every linked execution result
+        # should be re-verified (fix landed, or the bug is back).
+        if 'status' in update_data and db_defect.status != old_status:
+            flag_linked_results_for_retest(db, defect_id)
     return db_defect
 
 
@@ -1250,6 +1279,160 @@ def delete_defect(db: Session, defect_id: int):
         db.delete(db_defect)
         safe_commit(db)
     return db_defect
+
+
+# Test Result <-> Defect link CRUD
+
+# Test result statuses (any casing/variant) that represent a failed/blocked run
+_FAILED_BLOCKED_STATUSES = {"fail", "failed", "block", "blocked"}
+# Defect statuses still considered "open" for coverage reporting
+_OPEN_DEFECT_STATUSES = [DefectStatus.OPEN, DefectStatus.IN_PROGRESS, DefectStatus.REOPENED]
+
+
+def get_test_result_defect_links(db: Session, test_result_id: int):
+    return db.query(TestResultDefectLink).options(
+        joinedload(TestResultDefectLink.defect)
+    ).filter(
+        TestResultDefectLink.test_result_id == test_result_id
+    ).order_by(TestResultDefectLink.created_at.desc()).all()
+
+
+def get_test_result_defect_link(db: Session, link_id: int):
+    return db.query(TestResultDefectLink).options(
+        joinedload(TestResultDefectLink.defect)
+    ).filter(TestResultDefectLink.id == link_id).first()
+
+
+def link_defect_to_test_result(
+    db: Session,
+    test_result_id: int,
+    defect_id: int,
+    link_type: str = None,
+    created_by: int = None,
+):
+    """Link a defect to a test result. Idempotent on (test_result_id, defect_id)."""
+    link_type = link_type or DefectLinkType.FOUND.value
+    existing = db.query(TestResultDefectLink).filter(
+        TestResultDefectLink.test_result_id == test_result_id,
+        TestResultDefectLink.defect_id == defect_id,
+    ).first()
+    if existing:
+        if existing.link_type != link_type:
+            existing.link_type = link_type
+            safe_commit(db)
+        db.refresh(existing)
+        return existing
+    link = TestResultDefectLink(
+        test_result_id=test_result_id,
+        defect_id=defect_id,
+        link_type=link_type,
+        created_by=created_by,
+    )
+    db.add(link)
+    safe_commit(db)
+    db.refresh(link)
+    return link
+
+
+def unlink_defect_from_test_result(db: Session, link_id: int):
+    link = db.query(TestResultDefectLink).filter(TestResultDefectLink.id == link_id).first()
+    if link:
+        db.delete(link)
+        safe_commit(db)
+        return True
+    return False
+
+
+def flag_linked_results_for_retest(db: Session, defect_id: int):
+    """Mark every test result linked to this defect as needing a retest."""
+    result_ids = [
+        row[0] for row in db.query(TestResultDefectLink.test_result_id).filter(
+            TestResultDefectLink.defect_id == defect_id
+        ).all()
+    ]
+    if not result_ids:
+        return 0
+    updated = db.query(TestResult).filter(TestResult.id.in_(result_ids)).update(
+        {TestResult.retest_needed: True}, synchronize_session=False
+    )
+    safe_commit(db)
+    return updated
+
+
+def get_test_run_defect_coverage(db: Session, test_run_id: int):
+    """Return a defect-linking rollup for a test run (traceability reporting)."""
+    results = db.query(TestResult).filter(TestResult.test_run_id == test_run_id).all()
+    failed_or_blocked = [
+        r for r in results if str(r.status or "").strip().lower() in _FAILED_BLOCKED_STATUSES
+    ]
+    fb_ids = [r.id for r in failed_or_blocked]
+
+    links = []
+    if fb_ids:
+        links = db.query(TestResultDefectLink).filter(
+            TestResultDefectLink.test_result_id.in_(fb_ids)
+        ).all()
+    linked_result_ids = {link.test_result_id for link in links}
+    linked = len(linked_result_ids)
+
+    defect_ids = {link.defect_id for link in links}
+    open_defects = 0
+    if defect_ids:
+        open_defects = db.query(Defect).filter(
+            Defect.id.in_(defect_ids),
+            Defect.status.in_(_OPEN_DEFECT_STATUSES),
+        ).count()
+
+    return {
+        "test_run_id": test_run_id,
+        "total_results": len(results),
+        "failed_or_blocked": len(failed_or_blocked),
+        "linked": linked,
+        "unlinked": len(failed_or_blocked) - linked,
+        "open_defects": open_defects,
+        "retest_needed": sum(1 for r in results if r.retest_needed),
+    }
+
+
+def get_test_run_flakiness(db: Session, test_run_id: int, history: int = 10):
+    """For each test case in a run, inspect its recent results across all runs
+    and flag cases whose outcomes flip-flop between pass and fail (flaky)."""
+    case_ids = [
+        row[0] for row in db.query(TestResult.test_case_id).filter(
+            TestResult.test_run_id == test_run_id,
+            TestResult.test_case_id.isnot(None),
+        ).distinct().all()
+    ]
+    if not case_ids:
+        return {}
+
+    rows = db.query(
+        TestResult.test_case_id, TestResult.status
+    ).filter(
+        TestResult.test_case_id.in_(case_ids)
+    ).order_by(TestResult.executed_at.desc()).all()
+
+    pass_set = {"pass", "passed"}
+    fail_set = {"fail", "failed", "block", "blocked"}
+
+    by_case: dict[int, list[str]] = {}
+    for case_id, status in rows:
+        bucket = by_case.setdefault(case_id, [])
+        if len(bucket) < history:
+            bucket.append(str(status or "").strip().lower())
+
+    flakiness = {}
+    for case_id in case_ids:
+        statuses = by_case.get(case_id, [])
+        completed = [s for s in statuses if s in pass_set or s in fail_set]
+        fails = sum(1 for s in completed if s in fail_set)
+        passes = sum(1 for s in completed if s in pass_set)
+        flakiness[case_id] = {
+            "runs": len(completed),
+            "fails": fails,
+            "flaky": len(completed) >= 3 and fails > 0 and passes > 0,
+        }
+    return flakiness
 
 
 # Test Plan CRUD

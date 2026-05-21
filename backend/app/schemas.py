@@ -1,7 +1,7 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from .models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, MilestoneStatus, NotificationType
+from .models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType
 import re
 import html
 
@@ -389,6 +389,10 @@ class TestResultBase(BaseModel):
     paused_at: Optional[datetime] = None
     total_paused_time: Optional[float] = Field(0.0, description="Total time spent in paused state (seconds)")
     manual_time_adjustment: Optional[float] = Field(0.0, description="Manual time adjustments (seconds)")
+    # Failure context for failed/blocked executions
+    defect_link: Optional[str] = Field(None, max_length=500, description="URL to a defect in an external tracker")
+    custom_link: Optional[str] = Field(None, max_length=500, description="Free-form reference URL")
+    retest_needed: Optional[bool] = Field(None, description="Set when a linked defect is resolved or reopened")
 
 
 class TestResultCreate(TestResultBase):
@@ -408,6 +412,10 @@ class TestResultUpdate(BaseModel):
     paused_at: Optional[datetime] = None
     total_paused_time: Optional[float] = Field(None, ge=0, description="Total time spent in paused state (seconds)")
     manual_time_adjustment: Optional[float] = Field(None, description="Manual time adjustments (seconds)")
+    # Failure context for failed/blocked executions
+    defect_link: Optional[str] = Field(None, max_length=500, description="URL to a defect in an external tracker")
+    custom_link: Optional[str] = Field(None, max_length=500, description="Free-form reference URL")
+    retest_needed: Optional[bool] = Field(None, description="Set when a linked defect is resolved or reopened")
 
 
 class TestResult(TestResultBase):
@@ -442,6 +450,7 @@ class TestResultWithDetails(TestResultBase):
     paused_at: Optional[datetime] = None
     total_paused_time: Optional[float] = 0.0
     manual_time_adjustment: Optional[float] = 0.0
+    defect_links: List['TestResultDefectLink'] = []
 
     class Config:
         from_attributes = True
@@ -1488,6 +1497,7 @@ class TestExecutionSettingsBase(BaseModel):
     parallel_execution: bool = True
     max_parallel_threads: int = 4
     cleanup_on_failure: bool = True
+    require_defect_on_failure: bool = False
 
 class TestExecutionSettingsCreate(TestExecutionSettingsBase):
     project_id: Optional[int] = None
@@ -1502,6 +1512,7 @@ class TestExecutionSettingsUpdate(BaseModel):
     parallel_execution: Optional[bool] = None
     max_parallel_threads: Optional[int] = None
     cleanup_on_failure: Optional[bool] = None
+    require_defect_on_failure: Optional[bool] = None
 
 class TestExecutionSettings(TestExecutionSettingsBase):
     id: int
@@ -2039,6 +2050,70 @@ class Defect(DefectBase):
 
     class Config:
         from_attributes = True
+
+
+# Test Result <-> Defect link schemas
+class DefectSummary(BaseModel):
+    """Lightweight defect representation for embedding in link responses."""
+    id: int
+    defect_id: str
+    title: str
+    status: DefectStatus
+    severity: DefectSeverity
+    priority: DefectPriority
+    assigned_to: Optional[int] = None
+    external_issue_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        use_enum_values = True
+
+
+class TestResultDefectLinkCreate(BaseModel):
+    """Link a defect to a test result. Provide either an existing defect_id
+    or a new_defect payload to create and link in one call."""
+    defect_id: Optional[int] = None
+    link_type: DefectLinkType = DefectLinkType.FOUND
+    new_defect: Optional[DefectCreate] = None
+
+    @model_validator(mode='after')
+    def require_one_target(self):
+        if self.defect_id is None and self.new_defect is None:
+            raise ValueError("Provide either defect_id or new_defect")
+        if self.defect_id is not None and self.new_defect is not None:
+            raise ValueError("Provide only one of defect_id or new_defect")
+        return self
+
+
+class TestResultDefectLink(BaseModel):
+    id: int
+    test_result_id: int
+    defect_id: int
+    link_type: str
+    created_by: Optional[int] = None
+    created_at: datetime
+    defect: Optional[DefectSummary] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TestRunDefectCoverage(BaseModel):
+    """Defect-linking rollup for a test run, used for traceability reporting."""
+    test_run_id: int
+    total_results: int
+    failed_or_blocked: int
+    linked: int          # failed/blocked results with at least one defect link
+    unlinked: int        # failed/blocked results with no defect link
+    open_defects: int    # distinct linked defects still in an open-ish status
+    retest_needed: int   # results flagged for retest after a defect change
+
+
+class FlakinessEntry(BaseModel):
+    """Cross-run outcome stability for a single test case."""
+    runs: int    # number of completed (pass/fail/block) results inspected
+    fails: int   # how many of those were failed/blocked
+    flaky: bool  # outcomes flip-flop between pass and fail across recent runs
 
 
 # Enhanced Defect Management Schemas

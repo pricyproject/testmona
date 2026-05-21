@@ -133,6 +133,12 @@ class DefectPriority(enum.Enum):
     URGENT = "urgent"
 
 
+class DefectLinkType(enum.Enum):
+    FOUND = "found"          # The execution surfaced this defect (typically a failed test)
+    BLOCKED_BY = "blocked_by"  # The execution is blocked by this defect (typically a blocked test)
+    RELATED = "related"      # The defect is related but neither caused nor blocked the execution
+
+
 class AuditAction(enum.Enum):
     CREATE = "create"
     UPDATE = "update"
@@ -365,6 +371,7 @@ class TestExecutionSettings(Base):
     parallel_execution = Column(Boolean, default=True)
     max_parallel_threads = Column(Integer, default=4)
     cleanup_on_failure = Column(Boolean, default=True)
+    require_defect_on_failure = Column(Boolean, default=False)  # Require a defect link to save failed/blocked results
     created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -662,10 +669,20 @@ class TestResult(Base):
     total_paused_time = Column(Float, default=0.0)  # Total time spent in paused state
     manual_time_adjustment = Column(Float, default=0.0)  # Manual time adjustments added by user
 
+    # Failure context for failed/blocked executions
+    defect_link = Column(String(500))  # URL to a defect in an external tracker
+    custom_link = Column(String(500))  # Free-form reference URL (logs, build, etc.)
+    retest_needed = Column(Boolean, default=False)  # Set when a linked defect is resolved/reopened
+
     # Relationships
     test_case = relationship("TestCase", back_populates="test_results")
     test_run = relationship("TestRun", back_populates="test_results")
     executor = relationship("User", back_populates="test_results")
+    defect_links = relationship(
+        "TestResultDefectLink",
+        back_populates="test_result",
+        cascade="all, delete-orphan",
+    )
 
 
 class User(Base):
@@ -912,6 +929,39 @@ class Defect(Base):
     comments = relationship("DefectComment", back_populates="defect", cascade="all, delete-orphan")
     attachments_files = relationship("DefectAttachment", back_populates="defect", cascade="all, delete-orphan")
     history = relationship("DefectHistory", back_populates="defect", cascade="all, delete-orphan")
+    test_result_links = relationship(
+        "TestResultDefectLink",
+        back_populates="defect",
+        cascade="all, delete-orphan",
+    )
+
+
+class TestResultDefectLink(Base):
+    """Structured link between a single test execution result and a defect.
+
+    Unlike the loose ``Defect.test_case_id``/``test_run_id`` columns, this ties a
+    defect to the *specific* execution result and records whether the test
+    found the defect or was blocked by it.
+    """
+    __tablename__ = "test_result_defect_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_result_id", "defect_id",
+            name="uq_test_result_defect_links_result_defect",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_result_id = Column(Integer, ForeignKey("test_results.id"), nullable=False, index=True)
+    defect_id = Column(Integer, ForeignKey("defects.id"), nullable=False, index=True)
+    link_type = Column(String(20), default=DefectLinkType.FOUND.value)  # found, blocked_by, related
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    test_result = relationship("TestResult", back_populates="defect_links")
+    defect = relationship("Defect", back_populates="test_result_links")
+    creator = relationship("User", foreign_keys=[created_by])
 
 
 class TestPlan(Base):

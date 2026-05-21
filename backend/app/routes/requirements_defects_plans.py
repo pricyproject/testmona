@@ -9,7 +9,7 @@ from fastapi import Depends, HTTPException, Query
 from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime, timezone
 
 from .. import crud, schemas, auth, rbac, models
@@ -1101,13 +1101,22 @@ def register_requirements_defects_plans_routes(app):
         project_id: int,
         skip: int = 0,
         limit: int = 100,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        return get_defects(db, project_id=project_id, skip=skip, limit=limit)
+        return get_defects(
+            db,
+            project_id=project_id,
+            skip=skip,
+            limit=limit,
+            search=search,
+            status=status,
+        )
 
     @app.get("/defects/{defect_id}", response_model=schemas.Defect)
     def read_defect(
@@ -1230,6 +1239,170 @@ def register_requirements_defects_plans_routes(app):
             print(f"Failed to create audit trail for defect deletion: {e}")
         
         return {"message": "Defect deleted successfully"}
+
+    # Test Result <-> Defect Link Endpoints
+
+    def _resolve_test_result_project(db: Session, test_result):
+        """Return the project id that owns a test result (via its test run)."""
+        if test_result is None or test_result.test_run_id is None:
+            return None
+        test_run = crud.get_test_run(db, test_run_id=test_result.test_run_id)
+        return test_run.project_id if test_run else None
+
+    @app.get(
+        "/test-results/{test_result_id}/defect-links",
+        response_model=List[schemas.TestResultDefectLink],
+    )
+    def read_test_result_defect_links(
+        test_result_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_result = crud.get_test_result(db, test_result_id=test_result_id)
+        if test_result is None:
+            raise HTTPException(status_code=404, detail="Test result not found")
+
+        project_id = _resolve_test_result_project(db, test_result)
+        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        return crud.get_test_result_defect_links(db, test_result_id)
+
+    @app.post(
+        "/test-results/{test_result_id}/defect-links",
+        response_model=schemas.TestResultDefectLink,
+    )
+    def create_test_result_defect_link(
+        test_result_id: int,
+        payload: schemas.TestResultDefectLinkCreate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_result = crud.get_test_result(db, test_result_id=test_result_id)
+        if test_result is None:
+            raise HTTPException(status_code=404, detail="Test result not found")
+
+        project_id = _resolve_test_result_project(db, test_result)
+        if project_id is None:
+            raise HTTPException(status_code=400, detail="Test result is not associated with a project")
+        if not rbac.has_permission(current_user, "write", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        if payload.new_defect is not None:
+            new_defect = payload.new_defect
+            if new_defect.project_id != project_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="New defect must belong to the same project as the test result",
+                )
+            if not (new_defect.defect_id or "").strip() or not (new_defect.title or "").strip():
+                raise HTTPException(status_code=400, detail="Defect ID and title are required")
+            _validate_defect_links(
+                db,
+                project_id=project_id,
+                test_case_id=new_defect.test_case_id,
+                test_run_id=new_defect.test_run_id,
+                requirement_id=new_defect.requirement_id,
+                assigned_to=new_defect.assigned_to,
+            )
+            new_defect = new_defect.model_copy(update={
+                "reported_by": current_user.id,
+                "defect_id": new_defect.defect_id.strip(),
+                "title": new_defect.title.strip(),
+            })
+            try:
+                defect = create_defect(db=db, defect=new_defect)
+            except IntegrityError as e:
+                db.rollback()
+                if "defect_id" in str(e.orig) or "UNIQUE constraint failed" in str(e.orig):
+                    raise HTTPException(status_code=400, detail="Defect ID already exists. Please use a unique ID.")
+                raise
+        else:
+            defect = get_defect(db, defect_id=payload.defect_id)
+            if defect is None:
+                raise HTTPException(status_code=404, detail="Defect not found")
+            if defect.project_id != project_id:
+                raise HTTPException(status_code=400, detail="Defect belongs to a different project")
+
+        link_type = getattr(payload.link_type, "value", None) or str(payload.link_type)
+        link = crud.link_defect_to_test_result(
+            db,
+            test_result_id=test_result_id,
+            defect_id=defect.id,
+            link_type=link_type,
+            created_by=current_user.id,
+        )
+
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            from ..models import AuditAction, EntityType
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=current_user.id if current_user else None,
+                action=AuditAction.UPDATE.value,
+                entity_type=EntityType.TEST_RESULT.value,
+                entity_id=test_result_id,
+                project_id=project_id,
+                description=f"Defect {defect.defect_id} linked to test result ({link_type})",
+            ))
+        except Exception as e:
+            print(f"Failed to create audit trail for defect link: {e}")
+
+        return crud.get_test_result_defect_link(db, link.id)
+
+    @app.delete("/test-results/{test_result_id}/defect-links/{link_id}")
+    def delete_test_result_defect_link(
+        test_result_id: int,
+        link_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        link = crud.get_test_result_defect_link(db, link_id)
+        if link is None or link.test_result_id != test_result_id:
+            raise HTTPException(status_code=404, detail="Defect link not found")
+
+        test_result = crud.get_test_result(db, test_result_id=test_result_id)
+        project_id = _resolve_test_result_project(db, test_result)
+        if project_id is not None and not rbac.has_permission(current_user, "write", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        crud.unlink_defect_from_test_result(db, link_id)
+        return {"message": "Defect link removed"}
+
+    @app.get(
+        "/test-runs/{test_run_id}/defect-coverage",
+        response_model=schemas.TestRunDefectCoverage,
+    )
+    def read_test_run_defect_coverage(
+        test_run_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_run = crud.get_test_run(db, test_run_id=test_run_id)
+        if test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        if not rbac.has_permission(current_user, "read", test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        return crud.get_test_run_defect_coverage(db, test_run_id)
+
+    @app.get(
+        "/test-runs/{test_run_id}/flakiness",
+        response_model=Dict[int, schemas.FlakinessEntry],
+    )
+    def read_test_run_flakiness(
+        test_run_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_run = crud.get_test_run(db, test_run_id=test_run_id)
+        if test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        if not rbac.has_permission(current_user, "read", test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        return crud.get_test_run_flakiness(db, test_run_id)
 
     # Test Plans Endpoints
     @app.post("/test-plans", response_model=schemas.TestPlan)

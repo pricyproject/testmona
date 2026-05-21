@@ -197,8 +197,11 @@ def update_defect_management(
     
     # Track changes for history
     update_data = defect_update.model_dump(exclude_unset=True)
+    status_changed = False
     for field_name, new_value in update_data.items():
         old_value = getattr(db_defect, field_name)
+        if field_name == "status" and old_value != new_value:
+            status_changed = True
         
         # Only track if value actually changed
         if old_value != new_value:
@@ -230,6 +233,13 @@ def update_defect_management(
     db_defect.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(db_defect)
+
+    # Lifecycle sync: a status change means every linked execution result
+    # should be re-verified.
+    if status_changed:
+        from app import crud
+        crud.flag_linked_results_for_retest(db, defect_id)
+
     return db_defect
 
 
