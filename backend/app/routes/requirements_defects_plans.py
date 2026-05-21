@@ -78,6 +78,52 @@ def _validate_requirement_project(db: Session, requirement_id: Optional[int], pr
         raise HTTPException(status_code=400, detail="Requirement does not belong to this project")
 
 
+def _get_test_case_project_id(test_case: models.TestCase) -> Optional[int]:
+    if test_case.project_id is not None:
+        return test_case.project_id
+    if test_case.test_suite:
+        return test_case.test_suite.project_id
+    return None
+
+
+def _validate_defect_links(
+    db: Session,
+    project_id: int,
+    test_case_id: Optional[int],
+    test_run_id: Optional[int],
+    requirement_id: Optional[int],
+    assigned_to: Optional[int],
+) -> None:
+    _validate_requirement_project(db, requirement_id, project_id)
+
+    if test_case_id is not None:
+        test_case = crud.get_test_case(db, test_case_id=test_case_id)
+        if test_case is None:
+            raise HTTPException(status_code=404, detail="Test case not found")
+        if _get_test_case_project_id(test_case) != project_id:
+            raise HTTPException(status_code=400, detail="Test case does not belong to this project")
+
+    if test_run_id is not None:
+        test_run = crud.get_test_run(db, test_run_id=test_run_id)
+        if test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        if test_run.project_id != project_id:
+            raise HTTPException(status_code=400, detail="Test run does not belong to this project")
+
+    if test_case_id is not None and test_run_id is not None:
+        linked_result = db.query(models.TestResult.id).filter(
+            models.TestResult.test_case_id == test_case_id,
+            models.TestResult.test_run_id == test_run_id,
+        ).first()
+        if linked_result is None:
+            raise HTTPException(status_code=400, detail="Test case is not linked to this test run")
+
+    if assigned_to is not None:
+        assigned_user = db.query(models.User.id).filter(models.User.id == assigned_to).first()
+        if assigned_user is None:
+            raise HTTPException(status_code=404, detail="Assigned user not found")
+
+
 def _linked_requirement_test_plan_ids(db: Session, requirement_id: int) -> set[int]:
     rows = db.query(models.requirement_test_plan_links.c.test_plan_id).filter(
         models.requirement_test_plan_links.c.requirement_id == requirement_id,
@@ -1006,9 +1052,29 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", defect.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        _validate_requirement_project(db, defect.requirement_id, defect.project_id)
-        defect = defect.model_copy(update={"reported_by": current_user.id})
-        db_defect = create_defect(db=db, defect=defect)
+        if not defect.defect_id.strip() or not defect.title.strip():
+            raise HTTPException(status_code=400, detail="Defect ID and title are required")
+
+        _validate_defect_links(
+            db,
+            project_id=defect.project_id,
+            test_case_id=defect.test_case_id,
+            test_run_id=defect.test_run_id,
+            requirement_id=defect.requirement_id,
+            assigned_to=defect.assigned_to,
+        )
+        defect = defect.model_copy(update={
+            "reported_by": current_user.id,
+            "defect_id": defect.defect_id.strip(),
+            "title": defect.title.strip(),
+        })
+        try:
+            db_defect = create_defect(db=db, defect=defect)
+        except IntegrityError as e:
+            db.rollback()
+            if "defect_id" in str(e.orig) or "UNIQUE constraint failed" in str(e.orig):
+                raise HTTPException(status_code=400, detail="Defect ID already exists. Please use a unique ID.")
+            raise
         
         # Create audit trail
         try:
@@ -1072,8 +1138,38 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", db_defect.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        _validate_requirement_project(db, defect.requirement_id, db_defect.project_id)
-        db_defect = update_defect(db, defect_id=defect_id, defect=defect)
+        update_data = defect.model_dump(exclude_unset=True)
+        if "defect_id" in update_data and not str(update_data["defect_id"] or "").strip():
+            raise HTTPException(status_code=400, detail="Defect ID is required")
+        if "title" in update_data and not str(update_data["title"] or "").strip():
+            raise HTTPException(status_code=400, detail="Defect title is required")
+        normalized_update = {}
+        if "defect_id" in update_data:
+            normalized_update["defect_id"] = str(update_data["defect_id"]).strip()
+        if "title" in update_data:
+            normalized_update["title"] = str(update_data["title"]).strip()
+        if normalized_update:
+            defect = defect.model_copy(update=normalized_update)
+
+        effective_test_case_id = update_data.get("test_case_id", db_defect.test_case_id)
+        effective_test_run_id = update_data.get("test_run_id", db_defect.test_run_id)
+        effective_requirement_id = update_data.get("requirement_id", db_defect.requirement_id)
+        effective_assigned_to = update_data.get("assigned_to", db_defect.assigned_to)
+        _validate_defect_links(
+            db,
+            project_id=db_defect.project_id,
+            test_case_id=effective_test_case_id,
+            test_run_id=effective_test_run_id,
+            requirement_id=effective_requirement_id,
+            assigned_to=effective_assigned_to,
+        )
+        try:
+            db_defect = update_defect(db, defect_id=defect_id, defect=defect)
+        except IntegrityError as e:
+            db.rollback()
+            if "defect_id" in str(e.orig) or "UNIQUE constraint failed" in str(e.orig):
+                raise HTTPException(status_code=400, detail="Defect ID already exists. Please use a unique ID.")
+            raise
         
         # Create audit trail
         try:

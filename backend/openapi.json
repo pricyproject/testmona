@@ -18423,6 +18423,39 @@
             ],
             "title": "Actual Fix Time"
           },
+          "external_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Id"
+          },
+          "external_issue_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Url"
+          },
+          "external_sync_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Sync Status"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -18817,6 +18850,39 @@
               }
             ],
             "title": "Actual Fix Time"
+          },
+          "external_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Id"
+          },
+          "external_issue_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Url"
+          },
+          "external_sync_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Sync Status"
           },
           "project_id": {
             "type": "integer",
@@ -20397,6 +20463,17 @@
       },
       "DefectUpdate": {
         "properties": {
+          "defect_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Id"
+          },
           "title": {
             "anyOf": [
               {
@@ -20591,6 +20668,39 @@
               }
             ],
             "title": "Actual Fix Time"
+          },
+          "external_issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Id"
+          },
+          "external_issue_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Url"
+          },
+          "external_sync_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Sync Status"
           }
         },
         "type": "object",

@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { defectsAPI, testCasesAPI } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage, testCasesAPI } from '@/lib/api';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
+import { SearchableTestCaseSelect } from '@/components/Defects/SearchableTestCaseSelect';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAppName } from '@/hooks/useAppName';
@@ -37,7 +38,7 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Bug, Search, ChevronLeft, ChevronRight, Edit, Trash2, AlertTriangle, ExternalLink, Tag, Settings, RefreshCw, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { Plus, Bug, Search, ChevronLeft, ChevronRight, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal } from 'lucide-react';
 
 export function Defects() {
   const navigate = useNavigate();
@@ -57,7 +58,6 @@ export function Defects() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingDefect, setEditingDefect] = useState<any>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const defectTitleInputRef = useRef<HTMLInputElement>(null);
@@ -157,9 +157,61 @@ export function Defects() {
   const [defectEnvironment, setDefectEnvironment] = useState('');
   const [defectTags, setDefectTags] = useState('');
   const [defectJiraLink, setDefectJiraLink] = useState('');
-  const [defectTestCaseId, setDefectTestCaseId] = useState('');
-  const [testCaseSearchQuery, setTestCaseSearchQuery] = useState('');
+  const [defectTestCaseId, setDefectTestCaseId] = useState('none');
   const [defectTouchedFields, setDefectTouchedFields] = useState<Record<string, boolean>>({});
+  const hasUnsavedChanges = defectTitle.trim() !== '' || defectDescription.trim() !== '' || defectSteps.trim() !== '';
+  const externalIssueValue = defectJiraLink.trim();
+  const isExternalIssueUrlInvalid = externalIssueValue !== '' && !/^https?:\/\/\S+$/i.test(externalIssueValue);
+  const selectedDefectTestCase = testCases.find((testCase) => String(testCase.id) === defectTestCaseId) || null;
+  const isDuplicateDefectId = defectId.trim() !== '' && defects.some((defect) =>
+    String(defect.defect_id || '').toLowerCase() === defectId.trim().toLowerCase()
+  );
+
+  const getNextDefectId = () => {
+    const numericProjectId = Number(projectId);
+    const prefix = `P${Number.isFinite(numericProjectId) ? numericProjectId : 'X'}-DEF-`;
+    const highest = defects.reduce((max, defect) => {
+      const rawId = String(defect?.defect_id || '');
+      if (!rawId.startsWith(prefix)) return max;
+      const suffix = Number(rawId.slice(prefix.length));
+      return Number.isFinite(suffix) ? Math.max(max, suffix) : max;
+    }, 0);
+    return `${prefix}${String(highest + 1).padStart(3, '0')}`;
+  };
+
+  const resetDefectForm = () => {
+    setDefectId('');
+    setDefectTitle('');
+    setDefectDescription('');
+    setDefectStatus('open');
+    setDefectSeverity('medium');
+    setDefectPriority('medium');
+    setDefectSteps('');
+    setDefectEnvironment('');
+    setDefectTags('');
+    setDefectJiraLink('');
+    setDefectTestCaseId('none');
+    setDefectTouchedFields({});
+  };
+
+  const fetchIntegrations = useCallback(async () => {
+    if (!projectId) return;
+
+    setIsLoadingIntegrations(true);
+    try {
+      const data = await defectManagementAPI.getIssueTrackerIntegrations(parseInt(projectId));
+      setIntegrations(data);
+    } catch (error) {
+      console.error('Failed to fetch integrations:', error);
+      toast({
+        title: t('error'),
+        description: t('failedToLoadIntegrations'),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingIntegrations(false);
+    }
+  }, [projectId, t, toast]);
 
   const loadDefects = async () => {
     if (!projectId) return;
@@ -212,7 +264,7 @@ export function Defects() {
     };
 
     loadData();
-  }, [projectId]);
+  }, [projectId, fetchIntegrations, t, toast]);
 
   // Auto-focus on title input when dialog opens
   useEffect(() => {
@@ -221,34 +273,13 @@ export function Defects() {
     }
   }, [isCreateDialogOpen]);
 
-  // Track unsaved changes
-  useEffect(() => {
-    setHasUnsavedChanges(
-      defectTitle.trim() !== '' || 
-      defectDescription.trim() !== '' ||
-      defectSteps.trim() !== ''
-    );
-  }, [defectTitle, defectDescription, defectSteps]);
-
   const handleDialogClose = (open: boolean) => {
     if (!open && hasUnsavedChanges) {
       setShowUnsavedDialog(true);
     } else {
       setIsCreateDialogOpen(open);
       if (!open) {
-        setDefectId('');
-        setDefectTitle('');
-        setDefectDescription('');
-        setDefectStatus('open');
-        setDefectSeverity('medium');
-        setDefectPriority('medium');
-        setDefectSteps('');
-        setDefectEnvironment('');
-        setDefectTags('');
-        setDefectJiraLink('');
-        setDefectTestCaseId('');
-        setHasUnsavedChanges(false);
-        setDefectTouchedFields({});
+        resetDefectForm();
       }
     }
   };
@@ -256,19 +287,7 @@ export function Defects() {
   const handleUnsavedConfirm = (discard: boolean) => {
     setShowUnsavedDialog(false);
     if (discard) {
-      setDefectId('');
-      setDefectTitle('');
-      setDefectDescription('');
-      setDefectStatus('open');
-      setDefectSeverity('medium');
-      setDefectPriority('medium');
-      setDefectSteps('');
-      setDefectEnvironment('');
-      setDefectTags('');
-      setDefectJiraLink('');
-      setDefectTestCaseId('');
-      setHasUnsavedChanges(false);
-      setDefectTouchedFields({});
+      resetDefectForm();
       setIsCreateDialogOpen(false);
     }
   };
@@ -280,36 +299,12 @@ export function Defects() {
     }
   };
 
-  const fetchIntegrations = async () => {
-    if (!projectId) return;
-    
-    setIsLoadingIntegrations(true);
-    try {
-      const data = await defectManagementAPI.getIssueTrackerIntegrations(parseInt(projectId));
-      setIntegrations(data);
-    } catch (error) {
-      console.error('Failed to fetch integrations:', error);
-      toast({
-        title: t('error'),
-        description: t('failedToLoadIntegrations'),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoadingIntegrations(false);
-    }
-  };
-
-  // Filter test cases based on search query
-  const filteredTestCases = testCases.filter(testCase =>
-    testCase.title.toLowerCase().includes(testCaseSearchQuery.toLowerCase())
-  );
-
   // Filter defects based on search query
   const filteredDefects = defects.filter(defect =>
-    defect.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    defect.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    defect.defect_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (defect.tags && defect.tags.toLowerCase().includes(searchQuery.toLowerCase()))
+    String(defect.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    String(defect.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    String(defect.defect_id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    String(defect.tags || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const totalPages = Math.ceil(filteredDefects.length / itemsPerPage);
@@ -317,7 +312,11 @@ export function Defects() {
   const paginatedDefects = filteredDefects.slice(startIndex, startIndex + itemsPerPage);
 
   const handleCreateDefect = async () => {
-    if (!defectId.trim() || !defectTitle.trim() || !projectId) {
+    const trimmedDefectId = defectId.trim() || getNextDefectId();
+    const trimmedTitle = defectTitle.trim();
+    const selectedTestCaseId = defectTestCaseId && defectTestCaseId !== 'none' ? Number(defectTestCaseId) : null;
+
+    if (!trimmedDefectId || !trimmedTitle || !projectId) {
       toast({
         title: t('error'),
         description: t('defectIdAndTitleRequired'),
@@ -326,37 +325,54 @@ export function Defects() {
       return;
     }
 
+    if (defects.some((defect) => String(defect.defect_id || '').toLowerCase() === trimmedDefectId.toLowerCase())) {
+      toast({
+        title: t('validationError'),
+        description: t('defectIdAlreadyExists'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (isExternalIssueUrlInvalid) {
+      toast({
+        title: t('validationError'),
+        description: t('externalIssueUrlInvalid'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedTestCaseId !== null && !Number.isFinite(selectedTestCaseId)) {
+      toast({
+        title: t('validationError'),
+        description: t('invalidTestCaseId'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsCreating(true);
       const defectData = {
-        defect_id: defectId,
-        title: defectTitle,
-        description: defectDescription,
+        defect_id: trimmedDefectId,
+        title: trimmedTitle,
+        description: defectDescription.trim(),
         severity: defectSeverity,
         priority: defectPriority,
-        steps_to_reproduce: defectSteps,
-        environment: defectEnvironment,
-        tags: defectTags,
-        jira_link: defectJiraLink,
-        test_case_id: defectTestCaseId && defectTestCaseId !== 'none' ? parseInt(defectTestCaseId) : null,
+        steps_to_reproduce: defectSteps.trim(),
+        environment: defectEnvironment.trim(),
+        tags: defectTags.trim(),
+        external_issue_url: externalIssueValue || null,
+        test_case_id: selectedTestCaseId,
         project_id: parseInt(projectId),
       };
 
       const createdDefect = await defectsAPI.create(defectData);
-      setDefects([...defects, createdDefect]);
+      setDefects(prevDefects => [createdDefect, ...prevDefects]);
       
       // Reset form
-      setDefectId('');
-      setDefectTitle('');
-      setDefectDescription('');
-      setDefectSeverity('medium');
-      setDefectPriority('medium');
-      setDefectSteps('');
-      setDefectEnvironment('');
-      setDefectTags('');
-      setDefectJiraLink('');
-      setDefectTestCaseId('');
-      setHasUnsavedChanges(false);
+      resetDefectForm();
       setIsCreateDialogOpen(false);
 
       toast({
@@ -367,7 +383,7 @@ export function Defects() {
       console.error('Failed to create defect:', error);
       toast({
         title: t('error'),
-        description: t('failedToCreateDefect'),
+        description: getApiErrorMessage(error, t('failedToCreateDefect')),
         variant: "destructive",
       });
     } finally {
@@ -386,27 +402,49 @@ export function Defects() {
     setDefectSteps(defect.steps_to_reproduce || '');
     setDefectEnvironment(defect.environment || '');
     setDefectTags(defect.tags || '');
-    setDefectJiraLink(defect.jira_link || '');
-    setDefectTestCaseId(defect.test_case_id?.toString() || '');
+    setDefectJiraLink(defect.external_issue_url || defect.jira_link || '');
+    setDefectTestCaseId(defect.test_case_id?.toString() || 'none');
     setIsEditDialogOpen(true);
   };
 
   const handleUpdateDefect = async () => {
     if (!editingDefect || !projectId) return;
 
+    const trimmedDefectId = defectId.trim();
+    const trimmedTitle = defectTitle.trim();
+    const selectedTestCaseId = defectTestCaseId && defectTestCaseId !== 'none' ? Number(defectTestCaseId) : null;
+
+    if (!trimmedDefectId || !trimmedTitle) {
+      toast({
+        title: t('error'),
+        description: t('defectIdAndTitleRequired'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedTestCaseId !== null && !Number.isFinite(selectedTestCaseId)) {
+      toast({
+        title: t('validationError'),
+        description: t('invalidTestCaseId'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const defectData = {
-        defect_id: defectId,
-        title: defectTitle,
-        description: defectDescription,
+        defect_id: trimmedDefectId,
+        title: trimmedTitle,
+        description: defectDescription.trim(),
         status: defectStatus,
         severity: defectSeverity,
         priority: defectPriority,
-        steps_to_reproduce: defectSteps,
-        environment: defectEnvironment,
-        tags: defectTags,
-        jira_link: defectJiraLink,
-        test_case_id: defectTestCaseId && defectTestCaseId !== 'none' ? parseInt(defectTestCaseId) : null,
+        steps_to_reproduce: defectSteps.trim(),
+        environment: defectEnvironment.trim(),
+        tags: defectTags.trim(),
+        external_issue_url: defectJiraLink.trim() || null,
+        test_case_id: selectedTestCaseId,
       };
 
       const updatedDefect = await defectsAPI.update(editingDefect.id, defectData);
@@ -423,7 +461,7 @@ export function Defects() {
       console.error('Failed to update defect:', error);
       toast({
         title: t('error'),
-        description: t('failedToUpdateDefect'),
+        description: getApiErrorMessage(error, t('failedToUpdateDefect')),
         variant: "destructive",
       });
     }
@@ -444,7 +482,7 @@ export function Defects() {
       console.error('Failed to delete defect:', error);
       toast({
         title: t('error'),
-        description: t('failedToDeleteDefect'),
+        description: getApiErrorMessage(error, t('failedToDeleteDefect')),
         variant: "destructive",
       });
     }
@@ -464,8 +502,9 @@ export function Defects() {
   };
 
   const handleLinkToJira = (defect: any) => {
-    if (defect.jira_link) {
-      window.open(defect.jira_link, '_blank', 'noopener,noreferrer');
+    const externalLink = defect.external_issue_url || defect.jira_link;
+    if (externalLink) {
+      window.open(externalLink, '_blank', 'noopener,noreferrer');
     } else {
       // Navigate to Jira integration settings
       navigate(`/projects/${projectId}/custom-fields?tab=jira`);
@@ -522,6 +561,17 @@ export function Defects() {
       error: t('syncFailed')
     };
     return labels[status] || t('notSynced');
+  };
+
+  const getTriageLabel = (value: string) => {
+    const labels: Record<string, string> = {
+      low: t('low'),
+      medium: t('medium'),
+      high: t('high'),
+      critical: t('critical'),
+      urgent: t('urgent'),
+    };
+    return labels[value] || value;
   };
 
   const handleOpenSyncDialog = (defectId: number) => {
@@ -902,207 +952,274 @@ export function Defects() {
           </Dialog>
           <Dialog open={isCreateDialogOpen} onOpenChange={handleDialogClose}>
             <DialogTrigger asChild>
-              <Button>
+              <Button onClick={() => setDefectId(getNextDefectId())}>
                 <Plus className="h-4 w-4 mr-2" />
                 {t('reportDefect')}
               </Button>
             </DialogTrigger>
-          <DialogContent isRTL={isRTL} className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto" onKeyDown={handleKeyDown}>
-            <DialogHeader>
-              <DialogTitle>{t('reportNewDefect')}</DialogTitle>
-              <DialogDescription>
-                {t('reportNewDefectDesc')}
-              </DialogDescription>
+          <DialogContent isRTL={isRTL} className="max-h-[90vh] overflow-y-auto sm:max-w-[980px] p-0" onKeyDown={handleKeyDown}>
+            <DialogHeader className="border-b px-6 py-5 dark:border-gray-800">
+              <div className={`flex items-start justify-between gap-4 ${isRTL ? 'flex-row-reverse text-right' : ''}`}>
+                <div className="space-y-1">
+                  <DialogTitle className="flex items-center gap-2 text-2xl">
+                    <Bug className="h-5 w-5 text-red-600" />
+                    {t('reportNewDefect')}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {t('reportNewDefectDesc')}
+                  </DialogDescription>
+                </div>
+                <Badge variant="outline" className="mt-1 shrink-0 font-mono">
+                  {defectId || getNextDefectId()}
+                </Badge>
+              </div>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectId" className="text-right">
-                  {t('id')}
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Input
-                    id="defectId"
-                    value={defectId}
-                    onChange={(e) => setDefectId(e.target.value)}
-                    onBlur={() => setDefectTouchedFields({...defectTouchedFields, defectId: true})}
-                    className={defectTouchedFields.defectId && defectId.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
-                    placeholder={t('defectIdPlaceholder')}
-                    maxLength={50}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>{t('defectIdPlaceholder')}</span>
-                    <span>{defectId.length}/50</span>
+
+            <div className="grid gap-0 lg:grid-cols-[1fr_280px]">
+              <div className="space-y-6 px-6 py-5">
+                <section className="space-y-4">
+                  <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse text-right' : ''}`}>
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    <h3 className="text-sm font-semibold uppercase text-gray-600 dark:text-gray-300">{t('defectModalCoreDetails')}</h3>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+                    <div className="space-y-2">
+                      <Label htmlFor="defectId" className="flex items-center gap-2">
+                        {t('defectId')}
+                        <Badge variant="outline" className="text-[10px]">{t('required')}</Badge>
+                      </Label>
+                      <Input
+                        id="defectId"
+                        value={defectId}
+                        onChange={(e) => setDefectId(e.target.value)}
+                        onBlur={() => setDefectTouchedFields({...defectTouchedFields, defectId: true})}
+                        className={defectTouchedFields.defectId && (defectId.trim() === '' || isDuplicateDefectId) ? 'border-red-300 focus:border-red-500' : ''}
+                        placeholder={t('defectIdPlaceholder')}
+                        maxLength={50}
+                      />
+                      <div className="flex justify-between gap-2 text-xs text-gray-500">
+                        <span className={(isDuplicateDefectId || (defectTouchedFields.defectId && !defectId.trim())) ? 'text-red-600' : ''}>
+                          {defectTouchedFields.defectId && !defectId.trim()
+                            ? t('required')
+                            : isDuplicateDefectId ? t('defectIdAlreadyExists') : t('generatedIdHint')}
+                        </span>
+                        <span>{defectId.length}/50</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="defectTitle" className="flex items-center gap-2">
+                        {t('title')}
+                        <Badge variant="outline" className="text-[10px]">{t('required')}</Badge>
+                      </Label>
+                      <Input
+                        ref={defectTitleInputRef}
+                        id="defectTitle"
+                        value={defectTitle}
+                        onChange={(e) => setDefectTitle(e.target.value)}
+                        onBlur={() => setDefectTouchedFields({...defectTouchedFields, defectTitle: true})}
+                        className={defectTouchedFields.defectTitle && defectTitle.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
+                        placeholder={t('defectTitlePlaceholder')}
+                        maxLength={200}
+                      />
+                      <div className="flex justify-between gap-2 text-xs text-gray-500">
+                        <span>{defectTouchedFields.defectTitle && !defectTitle.trim() ? t('defectTitleRequired') : t('defectModalTitleHint')}</span>
+                        <span>{defectTitle.length}/200</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse text-right' : ''}`}>
+                    <SlidersHorizontal className="h-4 w-4 text-amber-600" />
+                    <h3 className="text-sm font-semibold uppercase text-gray-600 dark:text-gray-300">{t('defectModalTriage')}</h3>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="defectStatus">{t('status')}</Label>
+                      <div id="defectStatus" className="flex h-10 items-center rounded-md border bg-gray-50 px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                        {t('open')}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="defectSeverity">{t('defectSeverity')}</Label>
+                      <Select value={defectSeverity} onValueChange={setDefectSeverity}>
+                        <SelectTrigger id="defectSeverity">
+                          <SelectValue placeholder={t('selectSeverity')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">{t('low')}</SelectItem>
+                          <SelectItem value="medium">{t('medium')}</SelectItem>
+                          <SelectItem value="high">{t('high')}</SelectItem>
+                          <SelectItem value="critical">{t('critical')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="defectPriority">{t('defectPriority')}</Label>
+                      <Select value={defectPriority} onValueChange={setDefectPriority}>
+                        <SelectTrigger id="defectPriority">
+                          <SelectValue placeholder={t('selectPriority')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">{t('low')}</SelectItem>
+                          <SelectItem value="medium">{t('medium')}</SelectItem>
+                          <SelectItem value="high">{t('high')}</SelectItem>
+                          <SelectItem value="urgent">{t('urgent')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse text-right' : ''}`}>
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    <h3 className="text-sm font-semibold uppercase text-gray-600 dark:text-gray-300">{t('defectModalEvidence')}</h3>
+                  </div>
+                  <div className="grid gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="defectDescription">{t('description')}</Label>
+                      <Textarea
+                        id="defectDescription"
+                        value={defectDescription}
+                        onChange={(e) => setDefectDescription(e.target.value)}
+                        placeholder={t('defectDescriptionPlaceholder')}
+                        rows={4}
+                        maxLength={1000}
+                        className="resize-none"
+                      />
+                      <div className="flex justify-end text-xs text-gray-500">{defectDescription.length}/1000</div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="defectSteps">{t('stepsToReproduce')}</Label>
+                        <Textarea
+                          id="defectSteps"
+                          value={defectSteps}
+                          onChange={(e) => setDefectSteps(e.target.value)}
+                          placeholder={t('stepsToReproducePlaceholder')}
+                          rows={5}
+                          maxLength={2000}
+                          className="resize-none"
+                        />
+                        <div className="flex justify-end text-xs text-gray-500">{defectSteps.length}/2000</div>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="defectEnvironment">{t('environment')}</Label>
+                          <Input
+                            id="defectEnvironment"
+                            value={defectEnvironment}
+                            onChange={(e) => setDefectEnvironment(e.target.value)}
+                            placeholder={t('environmentPlaceholder')}
+                            maxLength={255}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="defectTags">{t('tags')}</Label>
+                          <Input
+                            id="defectTags"
+                            value={defectTags}
+                            onChange={(e) => setDefectTags(e.target.value)}
+                            placeholder={t('tagsPlaceholder')}
+                            maxLength={500}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div className={`flex items-center gap-2 ${isRTL ? 'flex-row-reverse text-right' : ''}`}>
+                    <Link2 className="h-4 w-4 text-emerald-600" />
+                    <h3 className="text-sm font-semibold uppercase text-gray-600 dark:text-gray-300">{t('defectModalLinks')}</h3>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="defectTestCase">{t('testCase')}</Label>
+                      <SearchableTestCaseSelect
+                        id="defectTestCase"
+                        value={defectTestCaseId}
+                        onChange={setDefectTestCaseId}
+                        testCases={testCases}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="defectJiraLink">{t('externalIssue')}</Label>
+                      <Input
+                        id="defectJiraLink"
+                        value={defectJiraLink}
+                        onChange={(e) => setDefectJiraLink(e.target.value)}
+                        onBlur={() => setDefectTouchedFields({...defectTouchedFields, defectJiraLink: true})}
+                        className={isExternalIssueUrlInvalid ? 'border-red-300 focus:border-red-500' : ''}
+                        placeholder={t('jiraLinkPlaceholder')}
+                        maxLength={500}
+                      />
+                      {isExternalIssueUrlInvalid && (
+                        <div className="text-xs text-red-600">{t('externalIssueUrlInvalid')}</div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <aside className="border-t bg-gray-50 px-6 py-5 dark:border-gray-800 dark:bg-gray-900/40 lg:border-l lg:border-t-0">
+                <div className="sticky top-0 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold uppercase text-gray-600 dark:text-gray-300">{t('defectModalSummary')}</h3>
+                    <p className="mt-2 break-words text-lg font-semibold text-gray-950 dark:text-gray-100">
+                      {defectTitle.trim() || t('defectModalUntitled')}
+                    </p>
+                  </div>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-500">{t('defectId')}</span>
+                      <span className="font-mono">{defectId || getNextDefectId()}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-500">{t('status')}</span>
+                      <Badge className={getStatusBadge('open')}>{t('open')}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-500">{t('defectSeverity')}</span>
+                      <Badge className={getSeverityBadge(defectSeverity)}>{getTriageLabel(defectSeverity)}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-gray-500">{t('defectPriority')}</span>
+                      <Badge className={getPriorityBadge(defectPriority)}>{getTriageLabel(defectPriority)}</Badge>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-gray-500">{t('testCase')}</span>
+                      <div className="rounded-md border bg-white p-2 text-sm dark:border-gray-700 dark:bg-gray-950">
+                        {selectedDefectTestCase?.title || t('noTestCaseLinked')}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-white p-3 text-sm dark:border-gray-700 dark:bg-gray-950">
+                    <div className="mb-2 font-medium">{defectTitle.trim() && defectId.trim() && !isDuplicateDefectId && !isExternalIssueUrlInvalid ? t('defectModalReady') : t('defectModalNeedsAttention')}</div>
+                    <div className="text-gray-500">
+                      {defectTitle.trim() && defectId.trim() && !isDuplicateDefectId && !isExternalIssueUrlInvalid
+                        ? t('defectModalReadyDesc')
+                        : t('defectModalNeedsAttentionDesc')}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectTitle" className="text-right">
-                  {t('title')}
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Input
-                    ref={defectTitleInputRef}
-                    id="defectTitle"
-                    value={defectTitle}
-                    onChange={(e) => setDefectTitle(e.target.value)}
-                    onBlur={() => setDefectTouchedFields({...defectTouchedFields, defectTitle: true})}
-                    className={defectTouchedFields.defectTitle && defectTitle.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
-                    placeholder={t('defectTitlePlaceholder')}
-                    maxLength={200}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>{t('defectTitlePlaceholder')}</span>
-                    <span>{defectTitle.length}/200</span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="defectDescription" className="text-right pt-2">
-                  {t('description')}
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Textarea
-                    id="defectDescription"
-                    value={defectDescription}
-                    onChange={(e) => setDefectDescription(e.target.value)}
-                    placeholder={t('defectDescriptionPlaceholder')}
-                    rows={3}
-                    maxLength={1000}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>{t('defectDescriptionPlaceholder')}</span>
-                    <span>{defectDescription.length}/1000</span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectSeverity" className="text-right">
-                  {t('defectSeverity')}
-                </Label>
-                <Select value={defectSeverity} onValueChange={setDefectSeverity}>
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder={t('selectSeverity')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">{t('low')}</SelectItem>
-                    <SelectItem value="medium">{t('medium')}</SelectItem>
-                    <SelectItem value="high">{t('high')}</SelectItem>
-                    <SelectItem value="critical">{t('critical')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectPriority" className="text-right">
-                  {t('defectPriority')}
-                </Label>
-                <Select value={defectPriority} onValueChange={setDefectPriority}>
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder={t('selectPriority')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">{t('low')}</SelectItem>
-                    <SelectItem value="medium">{t('medium')}</SelectItem>
-                    <SelectItem value="high">{t('high')}</SelectItem>
-                    <SelectItem value="urgent">{t('urgent')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="defectSteps" className="text-right pt-2">
-                  {t('stepsToReproduce')}
-                </Label>
-                <div className="col-span-3 space-y-1">
-                  <Textarea
-                    id="defectSteps"
-                    value={defectSteps}
-                    onChange={(e) => setDefectSteps(e.target.value)}
-                    placeholder={t('stepsToReproducePlaceholder')}
-                    rows={4}
-                    maxLength={2000}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>{t('stepsToReproducePlaceholder')}</span>
-                    <span>{defectSteps.length}/2000</span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectEnvironment" className="text-right">
-                  Environment
-                </Label>
-                <Input
-                  id="defectEnvironment"
-                  value={defectEnvironment}
-                  onChange={(e) => setDefectEnvironment(e.target.value)}
-                  className="col-span-3"
-                  placeholder={t('environmentPlaceholder')}
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectJiraLink" className="text-right">
-                  {t('jiraLink')}
-                </Label>
-                <Input
-                  id="defectJiraLink"
-                  value={defectJiraLink}
-                  onChange={(e) => setDefectJiraLink(e.target.value)}
-                  className="col-span-3"
-                  placeholder={t('jiraLinkPlaceholder')}
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectTags" className="text-right">
-                  {t('tags')}
-                </Label>
-                <Input
-                  id="defectTags"
-                  value={defectTags}
-                  onChange={(e) => setDefectTags(e.target.value)}
-                  className="col-span-3"
-                  placeholder={t('tagsPlaceholder')}
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="defectTestCase" className="text-right">
-                  {t('testCase')}
-                </Label>
-                <div className="col-span-3 space-y-2">
-                  <Input
-                    placeholder={t('searchTestCases')}
-                    value={testCaseSearchQuery}
-                    onChange={(e) => setTestCaseSearchQuery(e.target.value)}
-                    className="w-full"
-                  />
-                  <Select value={defectTestCaseId} onValueChange={setDefectTestCaseId}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={t('selectTestCaseOptional')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">{t('noTestCase')}</SelectItem>
-                      {filteredTestCases.map((testCase) => (
-                        <SelectItem key={testCase.id} value={testCase.id.toString()}>
-                          {testCase.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+              </aside>
             </div>
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-              <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
-                Ctrl+Enter to submit
-              </div>
+
+            <DialogFooter className="border-t px-6 py-4 dark:border-gray-800">
               <Button variant="outline" onClick={() => handleDialogClose(false)}>
                 {t('cancel')}
               </Button>
               <Button
                 type="submit"
                 onClick={handleCreateDefect}
-                disabled={!defectId.trim() || !defectTitle.trim() || isCreating}
-                className="transition-all duration-200"
+                disabled={!defectId.trim() || !defectTitle.trim() || isDuplicateDefectId || isExternalIssueUrlInvalid || isCreating}
+                className="min-w-36 transition-all duration-200"
               >
-                {isCreating ? 'Creating...' : t('reportDefect')}
+                {isCreating ? t('creating') : t('reportDefect')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1172,18 +1289,18 @@ export function Defects() {
                     </CardTitle>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{defect.description}</p>
                     <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                      <p><strong>Environment:</strong> {defect.environment || 'Not specified'}</p>
+                      <p><strong>{t('environment')}:</strong> {defect.environment || t('notSpecified')}</p>
                       {defect.tags && <p><strong>{t('tags')}:</strong> {defect.tags}</p>}
-                      {defect.jira_link && (
+                      {(defect.external_issue_url || defect.jira_link) && (
                         <p className="flex items-center gap-1">
-                          <strong>Jira:</strong>
+                          <strong>{t('externalIssue')}:</strong>
                           <Button 
                             variant="link" 
                             size="sm"
                             onClick={() => handleLinkToJira(defect)}
                             className="p-0 h-auto text-blue-600 hover:underline flex items-center gap-1"
                           >
-                            {defect.jira_link}
+                            {defect.external_issue_url || defect.jira_link}
                             <ExternalLink className="h-3 w-3" />
                           </Button>
                         </p>
@@ -1246,7 +1363,7 @@ export function Defects() {
                     <Edit className="h-4 w-4 mr-1" />
                     Edit
                   </Button>
-                  {defect.jira_link && (
+                  {(defect.external_issue_url || defect.jira_link) && (
                     <Button 
                       variant="outline" 
                       size="sm"
@@ -1716,27 +1833,13 @@ export function Defects() {
               <Label htmlFor="editDefectTestCase" className="text-right">
                 {t('testCase')}
               </Label>
-              <div className="col-span-3 space-y-2">
-                <Input
-                  placeholder={t('searchTestCases')}
-                  value={testCaseSearchQuery}
-                  onChange={(e) => setTestCaseSearchQuery(e.target.value)}
-                  className="w-full"
-                />
-                <Select value={defectTestCaseId} onValueChange={setDefectTestCaseId}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={t('selectTestCaseOptional')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">{t('noTestCase')}</SelectItem>
-                    {filteredTestCases.map((testCase) => (
-                      <SelectItem key={testCase.id} value={testCase.id.toString()}>
-                        {testCase.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <SearchableTestCaseSelect
+                id="editDefectTestCase"
+                value={defectTestCaseId}
+                onChange={setDefectTestCaseId}
+                testCases={testCases}
+                className="col-span-3"
+              />
             </div>
           </div>
           <DialogFooter>

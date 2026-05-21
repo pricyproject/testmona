@@ -97,7 +97,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"defect_id\": \"DEF-001\",\n  \"title\": \"Login Bug\",\n  \"description\": \"Button not working\",\n  \"project_id\": {{testProjectId}},\n  \"severity\": \"high\",\n  \"priority\": \"high\",\n  \"reported_by\": 1\n}"
+          "raw": "{\n  \"defect_id\": \"P{{testProjectId}}-DEF-001\",\n  \"title\": \"Login Bug\",\n  \"description\": \"Button not working\",\n  \"project_id\": {{testProjectId}},\n  \"severity\": \"high\",\n  \"priority\": \"high\",\n  \"external_issue_url\": \"https://your-jira.atlassian.net/browse/PROJ-123\",\n  \"reported_by\": 1\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/defects",
@@ -247,7 +247,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"status\": \"in_progress\",\n  \"assigned_to\": 2\n}"
+          "raw": "{\n  \"defect_id\": \"P{{testProjectId}}-DEF-001\",\n  \"status\": \"in_progress\",\n  \"external_issue_url\": \"https://your-jira.atlassian.net/browse/PROJ-123\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/defects/{{defectId}}",

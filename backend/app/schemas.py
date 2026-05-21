@@ -1975,6 +1975,9 @@ class DefectBase(BaseModel):
     attachments: Optional[str] = None
     estimated_fix_time: Optional[float] = None
     actual_fix_time: Optional[float] = None
+    external_issue_id: Optional[str] = None
+    external_issue_url: Optional[str] = None
+    external_sync_status: Optional[str] = None
 
     @model_validator(mode='before')
     @classmethod
@@ -1993,6 +1996,7 @@ class DefectCreate(DefectBase):
 
 
 class DefectUpdate(BaseModel):
+    defect_id: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[DefectStatus] = None
@@ -2011,6 +2015,9 @@ class DefectUpdate(BaseModel):
     attachments: Optional[str] = None
     estimated_fix_time: Optional[float] = None
     actual_fix_time: Optional[float] = None
+    external_issue_id: Optional[str] = None
+    external_issue_url: Optional[str] = None
+    external_sync_status: Optional[str] = None
 
     @model_validator(mode='before')
     @classmethod

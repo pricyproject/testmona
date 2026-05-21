@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
-import { testResultsAPI, usersAPI, testCasesAPI, testRunsAPI, defectsAPI } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -62,7 +62,6 @@ export function TestCaseExecution() {
   const [customLink, setCustomLink] = useState('');
   const [defects, setDefects] = useState<any[]>([]);
   const [isDefectDialogOpen, setIsDefectDialogOpen] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const defectTitleInputRef = useRef<HTMLInputElement>(null);
@@ -98,6 +97,19 @@ export function TestCaseExecution() {
     severity: 'medium',
     priority: 'high'
   });
+  const hasUnsavedChanges = newDefect.title.trim() !== '' || newDefect.description.trim() !== '';
+
+  const createExecutionDefectId = () => {
+    const numericProjectId = Number(projectId);
+    const prefix = `P${Number.isFinite(numericProjectId) ? numericProjectId : 'X'}-DEF-`;
+    const highest = defects.reduce((max, defect) => {
+      const rawId = String(defect?.defect_id || '');
+      if (!rawId.startsWith(prefix)) return max;
+      const suffix = Number(rawId.slice(prefix.length));
+      return Number.isFinite(suffix) ? Math.max(max, suffix) : max;
+    }, 0);
+    return `${prefix}${String(highest + 1).padStart(3, '0')}`;
+  };
 
   const completedResultStatuses = new Set(['pass', 'passed', 'fail', 'failed', 'block', 'blocked', 'skip', 'skipped']);
 
@@ -310,14 +322,6 @@ export function TestCaseExecution() {
     }
   }, [isDefectDialogOpen]);
 
-  // Track unsaved changes
-  useEffect(() => {
-    setHasUnsavedChanges(
-      newDefect.title.trim() !== '' || 
-      newDefect.description.trim() !== ''
-    );
-  }, [newDefect.title, newDefect.description]);
-
   // Load users and test cases from test run
   useEffect(() => {
     const loadInitialData = async () => {
@@ -445,9 +449,13 @@ export function TestCaseExecution() {
         const allDefects = await defectsAPI.getAll(parseInt(projectId));
         
         // Filter defects for this test case
-        const testCaseDefects = allDefects.filter(defect => 
-          defect.test_case_id === parseInt(testCaseId || '0')
-        );
+        const currentTestCaseId = Number(testCaseId);
+        const currentTestRunId = Number(testRunId);
+        const testCaseDefects = allDefects.filter(defect => {
+          const linkedTestCaseId = Number(defect.test_case_id);
+          const linkedTestRunId = defect.test_run_id == null ? null : Number(defect.test_run_id);
+          return linkedTestCaseId === currentTestCaseId && (linkedTestRunId === null || linkedTestRunId === currentTestRunId);
+        });
         
         setDefects(testCaseDefects);
       } catch (error) {
@@ -457,7 +465,7 @@ export function TestCaseExecution() {
     };
     
     loadExistingDefects();
-  }, [projectId, testCaseId]);
+  }, [projectId, testCaseId, testRunId]);
 
   // Mock saved executions (persisted data)
   const [savedExecutions, setSavedExecutions] = useState<any[]>(() => {
@@ -795,9 +803,32 @@ export function TestCaseExecution() {
   };
 
   const handleCreateDefect = async () => {
+    const currentProjectId = Number(projectId);
+    const currentTestRunId = Number(testRunId);
+    const currentTestCaseId = Number(testCaseId);
+    const trimmedTitle = newDefect.title.trim();
+
+    if ([currentProjectId, currentTestRunId, currentTestCaseId].some(value => !Number.isFinite(value) || value <= 0)) {
+      toast({
+        title: t('error'),
+        description: t('failedToCreateDefect'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!trimmedTitle) {
+      toast({
+        title: t('validationError'),
+        description: t('defectTitleRequired'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Check for duplicate title
     const isDuplicate = defects.some(d => 
-      d.title.toLowerCase().trim() === newDefect.title.toLowerCase().trim()
+      String(d.title || '').toLowerCase().trim() === trimmedTitle.toLowerCase()
     );
     
     if (isDuplicate) {
@@ -813,23 +844,22 @@ export function TestCaseExecution() {
       setIsCreating(true);
       // Create defect via API
       const defectData = {
-        defect_id: `DEF-${Date.now().toString().slice(-4)}`,
-        title: newDefect.title,
-        description: newDefect.description,
+        defect_id: createExecutionDefectId(),
+        title: trimmedTitle,
+        description: newDefect.description.trim(),
         severity: newDefect.severity,
         priority: newDefect.priority,
-        test_case_id: parseInt(testCaseId || '0'),
-        test_run_id: parseInt(testRunId || '0'),
-        project_id: parseInt(projectId || '0'),
-        reported_by: currentUser?.id || 1,
+        test_case_id: currentTestCaseId,
+        test_run_id: currentTestRunId,
+        project_id: currentProjectId,
+        reported_by: currentUser?.id,
       };
       
       const createdDefect = await defectsAPI.create(defectData);
       
       // Add to local state
-      setDefects([...defects, createdDefect]);
+      setDefects(prevDefects => [createdDefect, ...prevDefects]);
       setNewDefect({ title: '', description: '', severity: 'medium', priority: 'high' });
-      setHasUnsavedChanges(false);
       setIsDefectDialogOpen(false);
       
       toast({
@@ -840,7 +870,7 @@ export function TestCaseExecution() {
       console.error('Failed to create defect:', error);
       toast({
         title: t('error'),
-        description: t('failedToCreateDefect'),
+        description: getApiErrorMessage(error, t('failedToCreateDefect')),
         variant: "destructive",
       });
     } finally {
@@ -855,7 +885,6 @@ export function TestCaseExecution() {
       setIsDefectDialogOpen(open);
       if (!open) {
         setNewDefect({ title: '', description: '', severity: 'medium', priority: 'high' });
-        setHasUnsavedChanges(false);
         setDefectTouchedFields({});
       }
     }
@@ -865,7 +894,6 @@ export function TestCaseExecution() {
     setShowUnsavedDialog(false);
     if (discard) {
       setNewDefect({ title: '', description: '', severity: 'medium', priority: 'high' });
-      setHasUnsavedChanges(false);
       setDefectTouchedFields({});
       setIsDefectDialogOpen(false);
     }
@@ -882,9 +910,24 @@ export function TestCaseExecution() {
     navigate(`/projects/${projectId}/test-cases/${testCaseId}/edit`);
   };
 
-  const handleDeleteDefect = (defectId: number) => {
-    if (!confirm('Are you sure you want to delete this defect?')) return;
-    setDefects(defects.filter(d => d.id !== defectId));
+  const handleDeleteDefect = async (defectId: number) => {
+    if (!confirm(t('confirmDeleteDefect'))) return;
+
+    try {
+      await defectsAPI.delete(defectId);
+      setDefects(prevDefects => prevDefects.filter(d => d.id !== defectId));
+      toast({
+        title: t('success'),
+        description: t('defectDeletedSuccessfully'),
+      });
+    } catch (error) {
+      console.error('Failed to delete defect:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToDeleteDefect')),
+        variant: "destructive",
+      });
+    }
   };
 
   // Navigation functions
