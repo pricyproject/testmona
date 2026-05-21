@@ -95,7 +95,7 @@ export function TestCaseExecutionHistory() {
     return () => {
       isMounted = false;
     };
-  }, [id, language]);
+  }, [id, language, t]);
 
   const groupedRuns = useMemo(() => {
     const grouped = new Map<number, any[]>();
@@ -173,7 +173,7 @@ export function TestCaseExecutionHistory() {
                 {testCase?.title || t('testCase')} · {t('executionHistoryDescription')}
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 overflow-x-auto pb-1 text-center sm:grid-cols-4 lg:min-w-[36rem]">
               <Summary label={t('totalRuns')} value={groupedRuns.length.toString()} />
               <Summary label={t('totalExecutions')} value={history.length.toString()} />
               <Summary label={t('uniqueExecutors')} value={executorCount.toString()} />
@@ -241,9 +241,9 @@ export function TestCaseExecutionHistory() {
 
 function Summary({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-24 rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-950">
-      <p className="text-xl font-semibold text-slate-950 dark:text-white">{value}</p>
-      <p className="mt-1 text-[11px] text-slate-500">{label}</p>
+    <div className="min-w-[8.5rem] rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-950">
+      <p className="whitespace-nowrap text-xl font-semibold text-slate-950 dark:text-white">{value}</p>
+      <p className="mt-1 whitespace-nowrap text-[11px] text-slate-500">{label}</p>
     </div>
   );
 }
