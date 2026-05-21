@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
+import re
 
 from .. import crud, schemas, auth, rbac, models
 from ..database import get_db
@@ -31,6 +32,50 @@ def register_remaining_routes(app):
 
     def enum_value(value):
         return getattr(value, "value", value)
+
+    def get_reference_tokens(value: str | None) -> list[str]:
+        raw_value = value or ""
+        tokens = [
+            token.strip("()[]{}\"'.,").lower()
+            for token in re.split(r"[\s,;|]+", raw_value)
+            if token.strip("()[]{}\"'.,")
+        ]
+        tokens.extend(token.lower() for token in re.findall(r"[a-z]+-\d+", raw_value, flags=re.IGNORECASE))
+        return list(dict.fromkeys(tokens))
+
+    def add_legacy_reference_links(linked_test_case_ids: dict[int, set[int]], requirements: list, test_cases: list) -> None:
+        for requirement in requirements:
+            requirement_key = str(requirement.requirement_id or "").lower()
+            if not requirement_key:
+                continue
+            for test_case in test_cases:
+                if requirement_key in get_reference_tokens(test_case.reference):
+                    linked_test_case_ids.setdefault(requirement.id, set()).add(test_case.id)
+
+    def get_linked_requirement_test_case_ids(db: Session, requirement_ids: list[int], project_test_case_ids: list[int]) -> dict[int, set[int]]:
+        linked_test_case_ids = {requirement_id: set() for requirement_id in requirement_ids}
+        if not requirement_ids or not project_test_case_ids:
+            return linked_test_case_ids
+
+        traceability_rows = db.query(
+            models.TraceabilityMatrix.requirement_id,
+            models.TraceabilityMatrix.test_case_id,
+        ).filter(
+            models.TraceabilityMatrix.requirement_id.in_(requirement_ids),
+            models.TraceabilityMatrix.test_case_id.in_(project_test_case_ids),
+        ).all()
+        association_rows = db.query(
+            models.requirement_test_case_links.c.requirement_id,
+            models.requirement_test_case_links.c.test_case_id,
+        ).filter(
+            models.requirement_test_case_links.c.requirement_id.in_(requirement_ids),
+            models.requirement_test_case_links.c.test_case_id.in_(project_test_case_ids),
+        ).all()
+
+        for requirement_id, test_case_id in traceability_rows + association_rows:
+            linked_test_case_ids.setdefault(requirement_id, set()).add(test_case_id)
+
+        return linked_test_case_ids
 
     def build_coverage_report(db: Session, project_id: int, generated: bool = False):
         from ..models import TestCase, TestSuite, TestResult, TestRun, Requirement, TraceabilityMatrix, PriorityDefinition
@@ -63,19 +108,15 @@ def register_remaining_routes(app):
         requirements = db.query(Requirement).filter(Requirement.project_id == project_id).all()
         total_requirements = len(requirements)
         requirement_ids = [requirement.id for requirement in requirements]
-        traceability_entries = []
-        if requirement_ids and test_case_ids:
-            traceability_entries = db.query(TraceabilityMatrix).filter(
-                TraceabilityMatrix.requirement_id.in_(requirement_ids),
-                TraceabilityMatrix.test_case_id.in_(test_case_ids),
-            ).all()
-        covered_requirements = len({entry.requirement_id for entry in traceability_entries})
+        linked_test_case_ids = get_linked_requirement_test_case_ids(db, requirement_ids, test_case_ids)
+        add_legacy_reference_links(linked_test_case_ids, requirements, test_cases)
+        covered_requirements = len([requirement_id for requirement_id, linked_ids in linked_test_case_ids.items() if linked_ids])
         coverage_percentage = (covered_requirements / total_requirements * 100) if total_requirements else 0
 
         priority_definitions = db.query(PriorityDefinition).filter(PriorityDefinition.is_active == True).order_by(PriorityDefinition.value.desc()).all()
         priority_names = [priority.name.lower() for priority in priority_definitions] or ["critical", "high", "medium", "low"]
         priority_coverage = {priority_name: 0 for priority_name in priority_names}
-        linked_requirement_ids = {entry.requirement_id for entry in traceability_entries}
+        linked_requirement_ids = {requirement_id for requirement_id, linked_ids in linked_test_case_ids.items() if linked_ids}
         for priority_name in priority_names:
             priority_requirements = [
                 requirement for requirement in requirements
@@ -393,7 +434,7 @@ def register_remaining_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        """Get a detailed traceability matrix for the reports page."""
+        """Get a detailed traceability matrix for the reports page, including latest execution run IDs."""
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -418,18 +459,31 @@ def register_remaining_routes(app):
 
         entries_by_requirement = {}
         for entry in traceability_entries:
-            entries_by_requirement.setdefault(entry.requirement_id, []).append(entry)
+            entries_by_requirement.setdefault(entry.requirement_id, {})[entry.test_case_id] = entry
+
+        linked_test_case_ids = get_linked_requirement_test_case_ids(db, requirement_ids, project_test_case_ids)
+        project_test_cases_by_id = {}
+        if project_test_case_ids:
+            project_test_cases_by_id = {
+                test_case.id: test_case
+                for test_case in db.query(TestCase).filter(TestCase.id.in_(project_test_case_ids)).all()
+            }
+        add_legacy_reference_links(linked_test_case_ids, requirements, list(project_test_cases_by_id.values()))
 
         detailed_requirements = []
         covered_requirements = 0
         for requirement in requirements:
-            entries = entries_by_requirement.get(requirement.id, [])
-            if entries:
+            entries = entries_by_requirement.get(requirement.id, {})
+            linked_ids = linked_test_case_ids.get(requirement.id, set())
+            if linked_ids:
                 covered_requirements += 1
 
             test_cases = []
-            for entry in entries:
-                test_case = entry.test_case
+            for test_case_id in sorted(linked_ids):
+                test_case = project_test_cases_by_id.get(test_case_id)
+                if not test_case:
+                    continue
+                entry = entries.get(test_case_id)
                 latest_result = db.query(TestResult).filter(
                     TestResult.test_case_id == test_case.id
                 ).order_by(TestResult.executed_at.desc()).first()
@@ -438,8 +492,9 @@ def register_remaining_routes(app):
                     "id": test_case.id,
                     "title": test_case.title,
                     "status": status,
-                    "coverage_type": entry.coverage_type or "functional",
-                    "coverage_percentage": entry.coverage_percentage or 0,
+                    "test_run_id": latest_result.test_run_id if latest_result else None,
+                    "coverage_type": entry.coverage_type if entry and entry.coverage_type else "functional",
+                    "coverage_percentage": entry.coverage_percentage if entry and entry.coverage_percentage is not None else 100,
                     "last_executed": latest_result.executed_at.isoformat() if latest_result and latest_result.executed_at else None,
                 })
 

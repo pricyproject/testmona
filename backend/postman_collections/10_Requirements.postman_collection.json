@@ -24,6 +24,21 @@
       "key": "requirementId",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "testCaseId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "testSuiteId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "externalDocumentUrl",
+      "value": "https://your-domain.atlassian.net/browse/PROJ-123",
+      "type": "string"
     }
   ],
   "auth": {
@@ -190,6 +205,55 @@
       ]
     },
     {
+      "name": "Fetch External Requirement Document",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"project_id\": {{testProjectId}},\n  \"url\": \"{{externalDocumentUrl}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/requirements/fetch-external-document",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "fetch-external-document"
+          ]
+        },
+        "description": "Fetch a Jira story or Confluence page through the matching active Jira integration."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 400, 403, 404, 502, or 504\", function () {",
+              "    pm.expect([200, 400, 403, 404, 502, 504]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.test(\"Response contains document fields\", function () {",
+              "        pm.expect(jsonData).to.have.property('source_type');",
+              "        pm.expect(jsonData).to.have.property('title');",
+              "        pm.expect(jsonData).to.have.property('url');",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
       "name": "Get Requirement by ID",
       "request": {
         "method": "GET",
@@ -273,6 +337,409 @@
               "    var jsonData = pm.response.json();",
               "    pm.expect(jsonData.title).to.eql('Updated Title');",
               "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search Requirement Test Cases",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-cases?linked=true&search=&status=active&skip=0&limit=25",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-cases"
+          ],
+          "query": [
+            {
+              "key": "linked",
+              "value": "true"
+            },
+            {
+              "key": "search",
+              "value": ""
+            },
+            {
+              "key": "status",
+              "value": "active"
+            },
+            {
+              "key": "skip",
+              "value": "0"
+            },
+            {
+              "key": "limit",
+              "value": "25"
+            }
+          ]
+        },
+        "description": "Server-side search and filter for requirement test-case links."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 404\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('items');",
+              "    pm.expect(jsonData).to.have.property('summary');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk Link Requirement Test Cases",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"test_case_ids\": [{{testCaseId}}],\n  \"action\": \"link\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-cases/bulk",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-cases",
+            "bulk"
+          ]
+        },
+        "description": "Bulk link one or more test cases to a requirement."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 403, 404, or 409\", function () {",
+              "    pm.expect([200, 403, 404, 409]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk Unlink Requirement Test Cases",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"test_case_ids\": [{{testCaseId}}],\n  \"action\": \"unlink\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-cases/bulk",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-cases",
+            "bulk"
+          ]
+        },
+        "description": "Bulk unlink one or more test cases from a requirement."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 403, 404, or 409\", function () {",
+              "    pm.expect([200, 403, 404, 409]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create and Link Requirement Test Case",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Requirement coverage test case\",\n  \"test_type\": \"manual\",\n  \"preconditions\": \"No preconditions defined\",\n  \"steps\": \"No steps defined\",\n  \"expected_result\": \"Requirement is covered\",\n  \"priority\": \"medium\",\n  \"status\": \"active\",\n  \"reference\": \"REQ-001\",\n  \"test_suite_id\": {{testSuiteId}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-cases",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-cases"
+          ]
+        },
+        "description": "Create a new test case and link it to the requirement."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 400, 403, 404, or 409\", function () {",
+              "    pm.expect([200, 400, 403, 404, 409]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Requirement Test Case Link History",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-cases/history?offset=0&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-cases",
+            "history"
+          ],
+          "query": [
+            {
+              "key": "offset",
+              "value": "0"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "description": "Get audit history for requirement test-case link and unlink actions."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 404\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('items');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search Requirement Test Plans",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-plans?linked=true&search=&skip=0&limit=25",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-plans"
+          ],
+          "query": [
+            {
+              "key": "linked",
+              "value": "true"
+            },
+            {
+              "key": "search",
+              "value": ""
+            },
+            {
+              "key": "skip",
+              "value": "0"
+            },
+            {
+              "key": "limit",
+              "value": "25"
+            }
+          ]
+        },
+        "description": "Server-side search and filter for test plans scoped to a requirement."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 404\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property(\"items\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk Link Requirement Test Plans",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-plans/bulk",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-plans",
+            "bulk"
+          ]
+        },
+        "description": "Bulk link one or more test plans to a requirement scope.",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"test_plan_ids\": [{{testPlanId}}],\n  \"action\": \"link\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 403, 404, or 409\", function () {",
+              "    pm.expect([200, 403, 404, 409]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bulk Unlink Requirement Test Plans",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-plans/bulk",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "test-plans",
+            "bulk"
+          ]
+        },
+        "description": "Bulk unlink one or more test plans from a requirement scope.",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"test_plan_ids\": [{{testPlanId}}],\n  \"action\": \"unlink\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 403, 404, or 409\", function () {",
+              "    pm.expect([200, 403, 404, 409]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Requirement Relationship Summary",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/relationships",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "relationships"
+          ]
+        },
+        "description": "Get derived requirement relationships across test cases, defects, test plans, milestones, test runs, and coverage reports."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 404\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property(\"test_cases\");",
+              "    pm.expect(jsonData).to.have.property(\"defects\");",
+              "    pm.expect(jsonData).to.have.property(\"test_plans\");",
+              "}"
             ],
             "type": "text/javascript"
           }

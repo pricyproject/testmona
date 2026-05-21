@@ -187,7 +187,7 @@
             }
           ]
         },
-        "description": "Get requirement-to-test-case traceability data shaped for the reports page."
+        "description": "Get requirement-to-test-case traceability data shaped for the reports page, including latest execution run IDs."
       },
       "event": [
         {

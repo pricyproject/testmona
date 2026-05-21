@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Float, JSON, Table
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Float, JSON, Table, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -231,8 +231,17 @@ class CustomFieldValue(Base):
 
 # Association table for requirement-test case links
 requirement_test_case_links = Table('requirement_test_case_links', Base.metadata,
-    Column('requirement_id', Integer, ForeignKey('requirements.id')),
-    Column('test_case_id', Integer, ForeignKey('test_cases.id'))
+    Column('requirement_id', Integer, ForeignKey('requirements.id'), nullable=False),
+    Column('test_case_id', Integer, ForeignKey('test_cases.id'), nullable=False),
+    UniqueConstraint('requirement_id', 'test_case_id', name='uq_requirement_test_case_links_requirement_test_case')
+)
+
+
+# Association table for requirement-test plan scope links
+requirement_test_plan_links = Table('requirement_test_plan_links', Base.metadata,
+    Column('requirement_id', Integer, ForeignKey('requirements.id'), nullable=False),
+    Column('test_plan_id', Integer, ForeignKey('test_plans.id'), nullable=False),
+    UniqueConstraint('requirement_id', 'test_plan_id', name='uq_requirement_test_plan_links_requirement_test_plan')
 )
 
 
@@ -852,6 +861,7 @@ class Requirement(Base):
     parent_requirement = relationship("Requirement", remote_side=[id])
     child_requirements = relationship("Requirement", back_populates="parent_requirement")
     test_cases = relationship("TestCase", secondary="requirement_test_case_links")
+    test_plans = relationship("TestPlan", secondary="requirement_test_plan_links")
 
 
 class Defect(Base):
@@ -933,6 +943,7 @@ class TestPlan(Base):
     milestone = relationship("Milestone", back_populates="test_plans")
     creator = relationship("User")
     test_runs = relationship("TestRun", back_populates="test_plan")
+    requirements = relationship("Requirement", secondary="requirement_test_plan_links")
 
 
 class Milestone(Base):
@@ -958,6 +969,9 @@ class Milestone(Base):
 
 class TraceabilityMatrix(Base):
     __tablename__ = "traceability_matrix"
+    __table_args__ = (
+        UniqueConstraint("requirement_id", "test_case_id", name="uq_traceability_matrix_requirement_test_case"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id"), nullable=False)

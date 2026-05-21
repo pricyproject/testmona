@@ -62,7 +62,8 @@
               "path": [
                 "register"
               ]
-            }
+            },
+            "description": "Get requirement-to-test-case traceability data shaped for the reports page, including latest execution run IDs."
           }
         },
         {
@@ -1090,6 +1091,180 @@
               ]
             }
           }
+        },
+        {
+          "name": "Search Requirement Test Plans",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-plans?linked=true&search=&skip=0&limit=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "test-plans"
+              ],
+              "query": [
+                {
+                  "key": "linked",
+                  "value": "true"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "skip",
+                  "value": "0"
+                },
+                {
+                  "key": "limit",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "Server-side search and filter for test plans scoped to a requirement."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 404\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property(\"items\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bulk Link Requirement Test Plans",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-plans/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "test-plans",
+                "bulk"
+              ]
+            },
+            "description": "Bulk link one or more test plans to a requirement scope.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_plan_ids\": [{{testPlanId}}],\n  \"action\": \"link\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200, 403, 404, or 409\", function () {",
+                  "    pm.expect([200, 403, 404, 409]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bulk Unlink Requirement Test Plans",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/test-plans/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "test-plans",
+                "bulk"
+              ]
+            },
+            "description": "Bulk unlink one or more test plans from a requirement scope.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"test_plan_ids\": [{{testPlanId}}],\n  \"action\": \"unlink\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200, 403, 404, or 409\", function () {",
+                  "    pm.expect([200, 403, 404, 409]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Requirement Relationship Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/relationships",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "relationships"
+              ]
+            },
+            "description": "Get derived requirement relationships across test cases, defects, test plans, milestones, test runs, and coverage reports."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 404\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property(\"test_cases\");",
+                  "    pm.expect(jsonData).to.have.property(\"defects\");",
+                  "    pm.expect(jsonData).to.have.property(\"test_plans\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
         }
       ]
     },

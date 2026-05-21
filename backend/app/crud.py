@@ -17,7 +17,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -134,24 +134,25 @@ def delete_project(db: Session, project_id: int):
     ).filter(Project.id == project_id).first()
     if db_project:
         # Delete all related data in the correct order to avoid foreign key constraints
+        test_suites = db.query(TestSuite).filter(TestSuite.project_id == project_id).all()
+        test_suite_ids = [suite.id for suite in test_suites]
+        test_case_ids = [
+            row[0]
+            for row in db.query(TestCase.id)
+            .filter(TestCase.test_suite_id.in_(test_suite_ids))
+            .all()
+        ] if test_suite_ids else []
+        requirement_ids = [req[0] for req in db.query(Requirement.id).filter(Requirement.project_id == project_id).all()]
+        test_plan_ids = [plan[0] for plan in db.query(TestPlan.id).filter(TestPlan.project_id == project_id).all()]
         
         # Delete test results (through test runs)
-        from .models import TestResult, TestRun, TestCase, TestSuite
         test_runs = db.query(TestRun).filter(TestRun.project_id == project_id).all()
         for test_run in test_runs:
             db.query(TestResult).filter(TestResult.test_run_id == test_run.id).delete()
         
         # Delete test runs
         db.query(TestRun).filter(TestRun.project_id == project_id).delete()
-        
-        # Delete test cases (through test suites)
-        test_suites = db.query(TestSuite).filter(TestSuite.project_id == project_id).all()
-        for test_suite in test_suites:
-            db.query(TestCase).filter(TestCase.test_suite_id == test_suite.id).delete()
-        
-        # Delete test suites
-        db.query(TestSuite).filter(TestSuite.project_id == project_id).delete()
-        
+
         # Delete traceability matrix entries (through requirements and test cases)
         # TraceabilityMatrix links requirements to test cases, so we need to delete entries
         # where either the requirement or test case belongs to this project
@@ -160,27 +161,46 @@ def delete_project(db: Session, project_id: int):
             ProjectAssignment, CustomFieldDefinition, JiraIntegration,
             TraceabilityMatrix, KPIData, ShareableReport, DashboardWidget
         )
-        
-        # Get all test case IDs in this project
-        test_case_ids = []
-        for test_suite in test_suites:
-            tc_ids = db.query(TestCase.id).filter(TestCase.test_suite_id == test_suite.id).all()
-            test_case_ids.extend([tc_id[0] for tc_id in tc_ids])
-        
-        # Get all requirement IDs in this project
-        requirement_ids = [req[0] for req in db.query(Requirement.id).filter(Requirement.project_id == project_id).all()]
-        
+
         # Delete traceability matrix entries
         if test_case_ids:
             db.query(TraceabilityMatrix).filter(TraceabilityMatrix.test_case_id.in_(test_case_ids)).delete()
+            db.execute(
+                requirement_test_case_links.delete().where(
+                    requirement_test_case_links.c.test_case_id.in_(test_case_ids)
+                )
+            )
         if requirement_ids:
             db.query(TraceabilityMatrix).filter(TraceabilityMatrix.requirement_id.in_(requirement_ids)).delete()
-        
+            db.execute(
+                requirement_test_case_links.delete().where(
+                    requirement_test_case_links.c.requirement_id.in_(requirement_ids)
+                )
+            )
+            db.execute(
+                requirement_test_plan_links.delete().where(
+                    requirement_test_plan_links.c.requirement_id.in_(requirement_ids)
+                )
+            )
+        if test_plan_ids:
+            db.execute(
+                requirement_test_plan_links.delete().where(
+                    requirement_test_plan_links.c.test_plan_id.in_(test_plan_ids)
+                )
+            )
+
+        # Delete test cases (through test suites)
+        for test_suite in test_suites:
+            db.query(TestCase).filter(TestCase.test_suite_id == test_suite.id).delete()
+
+        # Delete test suites
+        db.query(TestSuite).filter(TestSuite.project_id == project_id).delete()
+
         # Delete test plans
+        db.query(Defect).filter(Defect.project_id == project_id).delete()
         db.query(TestPlan).filter(TestPlan.project_id == project_id).delete()
         db.query(Milestone).filter(Milestone.project_id == project_id).delete()
         db.query(Requirement).filter(Requirement.project_id == project_id).delete()
-        db.query(Defect).filter(Defect.project_id == project_id).delete()
         db.query(CoverageReport).filter(CoverageReport.project_id == project_id).delete()
         db.query(ProjectAssignment).filter(ProjectAssignment.project_id == project_id).delete()
         db.query(CustomFieldDefinition).filter(CustomFieldDefinition.project_id == project_id).delete()
@@ -1184,6 +1204,11 @@ def update_requirement(db: Session, requirement_id: int, requirement: Requiremen
 def delete_requirement(db: Session, requirement_id: int):
     db_requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if db_requirement:
+        db.execute(
+            requirement_test_plan_links.delete().where(
+                requirement_test_plan_links.c.requirement_id == requirement_id
+            )
+        )
         db.delete(db_requirement)
         safe_commit(db)
     return db_requirement
@@ -1292,6 +1317,11 @@ def update_test_plan(db: Session, test_plan_id: int, test_plan: TestPlanUpdate):
 def delete_test_plan(db: Session, test_plan_id: int):
     db_test_plan = db.query(TestPlan).filter(TestPlan.id == test_plan_id).first()
     if db_test_plan:
+        db.execute(
+            requirement_test_plan_links.delete().where(
+                requirement_test_plan_links.c.test_plan_id == test_plan_id
+            )
+        )
         db.delete(db_test_plan)
         safe_commit(db)
     return db_test_plan

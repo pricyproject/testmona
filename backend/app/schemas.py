@@ -1803,6 +1803,142 @@ class Requirement(RequirementBase):
         from_attributes = True
 
 
+class RequirementExternalDocumentRequest(BaseModel):
+    project_id: int
+    url: str = Field(..., min_length=8, max_length=2000)
+
+
+class RequirementExternalDocumentResponse(BaseModel):
+    source_type: str
+    title: str
+    description: Optional[str] = None
+    acceptance_criteria: Optional[str] = None
+    external_key: Optional[str] = None
+    url: str
+
+
+class RequirementTraceabilitySummary(BaseModel):
+    linked_count: int = 0
+    active_count: int = 0
+    missing_coverage: int = 1
+    failed_related_runs: int = 0
+    blocked_related_runs: int = 0
+
+
+class RequirementLinkedTestCase(BaseModel):
+    id: int
+    title: str
+    priority: str
+    status: str
+    test_suite_id: int
+    section_id: Optional[int] = None
+    reference: Optional[str] = None
+    tags: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    suite_name: Optional[str] = None
+    section_name: Optional[str] = None
+    linked: bool = False
+    link_id: Optional[int] = None
+    latest_run_status: Optional[str] = None
+    latest_run_at: Optional[datetime] = None
+
+
+class RequirementLinkedTestCaseList(BaseModel):
+    items: List[RequirementLinkedTestCase]
+    total: int
+    skip: int
+    limit: int
+    summary: RequirementTraceabilitySummary
+
+
+class RequirementLinkedTestCaseBulkRequest(BaseModel):
+    test_case_ids: List[int] = Field(..., min_length=1, max_length=500)
+    action: str = Field(..., pattern="^(link|unlink)$")
+
+
+class RequirementLinkedTestCaseBulkResponse(BaseModel):
+    linked_count: int = 0
+    unlinked_count: int = 0
+    skipped_count: int = 0
+    items: List[RequirementLinkedTestCase]
+    summary: RequirementTraceabilitySummary
+
+
+class RequirementLinkedTestCaseCreate(TestCaseCreate):
+    pass
+
+
+class RequirementLinkedTestCaseHistoryItem(BaseModel):
+    id: int
+    action: str
+    test_case_id: Optional[int] = None
+    test_case_title: Optional[str] = None
+    user_id: int
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    created_at: datetime
+    description: Optional[str] = None
+
+
+class RequirementLinkedTestCaseHistory(BaseModel):
+    items: List[RequirementLinkedTestCaseHistoryItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class RequirementLinkedTestPlan(BaseModel):
+    id: int
+    title: str
+    status: Optional[str] = None
+    milestone_id: Optional[int] = None
+    milestone_title: Optional[str] = None
+    target_start_date: Optional[datetime] = None
+    target_end_date: Optional[datetime] = None
+    linked: bool = False
+
+
+class RequirementLinkedTestPlanList(BaseModel):
+    items: List[RequirementLinkedTestPlan]
+    total: int
+    skip: int
+    limit: int
+
+
+class RequirementLinkedTestPlanBulkRequest(BaseModel):
+    test_plan_ids: List[int] = Field(..., min_length=1, max_length=200)
+    action: str = Field(..., pattern="^(link|unlink)$")
+
+    @field_validator('test_plan_ids')
+    @classmethod
+    def validate_test_plan_ids(cls, v: List[int]) -> List[int]:
+        if any(test_plan_id <= 0 for test_plan_id in v):
+            raise ValueError('test_plan_ids must contain positive integers')
+        return v
+
+
+class RequirementLinkedTestPlanBulkResponse(BaseModel):
+    linked_count: int = 0
+    unlinked_count: int = 0
+    skipped_count: int = 0
+    items: List[RequirementLinkedTestPlan]
+
+
+class RequirementRelationshipCount(BaseModel):
+    total: int = 0
+    items: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class RequirementRelationshipSummary(BaseModel):
+    test_cases: RequirementTraceabilitySummary
+    defects: RequirementRelationshipCount
+    test_plans: RequirementRelationshipCount
+    milestones: RequirementRelationshipCount
+    test_runs: RequirementRelationshipCount
+    coverage_reports: RequirementRelationshipCount
+
+
 # Defect Schemas
 class DefectBase(BaseModel):
     title: str
@@ -1813,6 +1949,7 @@ class DefectBase(BaseModel):
     priority: DefectPriority = DefectPriority.MEDIUM
     test_case_id: Optional[int] = None
     test_run_id: Optional[int] = None
+    requirement_id: Optional[int] = None
     assigned_to: Optional[int] = None
     tags: Optional[str] = None
     steps_to_reproduce: Optional[str] = None
@@ -1848,6 +1985,7 @@ class DefectUpdate(BaseModel):
     priority: Optional[DefectPriority] = None
     test_case_id: Optional[int] = None
     test_run_id: Optional[int] = None
+    requirement_id: Optional[int] = None
     assigned_to: Optional[int] = None
     tags: Optional[str] = None
     steps_to_reproduce: Optional[str] = None
@@ -3051,6 +3189,12 @@ __all__ = [
     "RecycleBinBase", "RecycleBinCreate", "RecycleBin",
     "TestCaseExport", "TestSuiteWithSections", "TestCaseSectionWithCases",
     "RequirementBase", "RequirementCreate", "RequirementUpdate", "Requirement",
+    "RequirementExternalDocumentRequest", "RequirementExternalDocumentResponse",
+    "RequirementTraceabilitySummary", "RequirementLinkedTestCase", "RequirementLinkedTestCaseList",
+    "RequirementLinkedTestCaseBulkRequest", "RequirementLinkedTestCaseBulkResponse",
+    "RequirementLinkedTestCaseCreate", "RequirementLinkedTestCaseHistoryItem", "RequirementLinkedTestCaseHistory",
+    "RequirementLinkedTestPlan", "RequirementLinkedTestPlanList", "RequirementLinkedTestPlanBulkRequest",
+    "RequirementLinkedTestPlanBulkResponse", "RequirementRelationshipCount", "RequirementRelationshipSummary",
     "DefectBase", "DefectCreate", "DefectUpdate", "Defect",
     "TestPlanBase", "TestPlanCreate", "TestPlanUpdate", "TestPlan",
     "MilestoneBase", "MilestoneCreate", "MilestoneUpdate", "MilestoneLinkedTestPlan", "Milestone",
