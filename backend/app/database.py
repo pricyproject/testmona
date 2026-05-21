@@ -18,12 +18,18 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables when the database is empty."""
+    """Initialize or repair missing database tables."""
     # Import all models to ensure they're registered with Base.metadata
     from . import models
     from . import models_versioning
     
     inspector = inspect(engine)
-    if not inspector.get_table_names():
+    existing_tables = set(inspector.get_table_names())
+    expected_tables = set(Base.metadata.tables.keys())
+    missing_tables = expected_tables - existing_tables
+    if missing_tables:
         Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created successfully")
+        if existing_tables:
+            print(f"✅ Missing database tables created: {', '.join(sorted(missing_tables))}")
+        else:
+            print("✅ Database tables created successfully")
