@@ -3128,7 +3128,7 @@ export function Settings() {
 	          </Card>
 
 	          <AlertDialog open={!!integrationToDelete} onOpenChange={(open) => !open && setIntegrationToDelete(null)}>
-	            <AlertDialogContent>
+	            <AlertDialogContent isRTL={isRTL}>
 	              <AlertDialogHeader>
 	                <AlertDialogTitle>{t('confirmDeleteIntegration')}</AlertDialogTitle>
 	                <AlertDialogDescription>
@@ -3471,7 +3471,7 @@ export function Settings() {
                   </div>
 
                   <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-                    <AlertDialogContent>
+                    <AlertDialogContent isRTL={isRTL}>
                       <AlertDialogHeader>
                         <AlertDialogTitle>{t('confirmDelete')}</AlertDialogTitle>
                         <AlertDialogDescription>

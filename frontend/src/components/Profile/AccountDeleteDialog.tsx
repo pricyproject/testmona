@@ -1,26 +1,45 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Trash2, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 
 interface AccountDeleteDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (password: string) => void;
+  onSubmit: (password: string) => void | Promise<void>;
 }
 
 export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDeleteDialogProps) {
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
   const [password, setPassword] = useState('');
   const [confirmText, setConfirmText] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState(1); // 1: warning, 2: confirmation
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (!isOpen) {
+      setPassword('');
+      setConfirmText('');
+      setShowPassword(false);
+      setError('');
+      setStep(1);
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -43,21 +62,27 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
       return;
     }
 
-    onSubmit(password);
+    try {
+      setIsSubmitting(true);
+      await onSubmit(password);
+    } catch (error: any) {
+      setError(error?.response?.data?.detail || error?.message || t('failedToDeleteAccount'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-        <div className="flex items-center mb-4">
-          <Trash2 className="h-5 w-5 mr-2 text-red-600" />
-          <h3 className="text-lg font-semibold text-red-600">{t('deleteAccountTitle')}</h3>
-        </div>
-
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent isRTL={isRTL} className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-red-600">
+            <Trash2 className="h-5 w-5" />
+            {t('deleteAccountTitle')}
+          </DialogTitle>
+        </DialogHeader>
         {step === 1 && (
-          <>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
@@ -76,27 +101,27 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                 className="text-center"
               />
               {error && (
-                <div className="text-sm text-red-500">{error}</div>
+                <div className="text-sm text-red-500" role="alert">{error}</div>
               )}
-              <div className="flex space-x-2">
+              <DialogFooter className="gap-2">
                 <Button
-                  onClick={handleSubmit}
-                  variant="destructive"
-                  className="flex-1"
-                  disabled={confirmText !== 'DELETE'}
-                >
-                  {t('continue')}
-                </Button>
-                <Button
+                  type="button"
                   variant="outline"
                   onClick={onClose}
-                  className="flex-1"
+                  disabled={isSubmitting}
                 >
                   {t('cancel')}
                 </Button>
-              </div>
+                <Button
+                  type="submit"
+                  variant="destructive"
+                  disabled={confirmText !== 'DELETE' || isSubmitting}
+                >
+                  {t('continue')}
+                </Button>
+              </DialogFooter>
             </div>
-          </>
+          </form>
         )}
 
         {step === 2 && (
@@ -121,7 +146,8 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                  className={`absolute top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 ${isRTL ? 'left-3' : 'right-3'}`}
+                  aria-label={showPassword ? t('hidePassword') : t('showPassword')}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -134,26 +160,25 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                 id="confirm"
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
-                placeholder="DELETE MY ACCOUNT"
+                placeholder={t('deleteMyAccountConfirmationText')}
                 className="text-center"
               />
             </div>
 
             {error && (
-              <div className="text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+              <div className="rounded bg-red-50 p-2 text-sm text-red-500 dark:bg-red-900/20" role="alert">
                 {error}
               </div>
             )}
 
-            <div className="flex space-x-2">
+            <DialogFooter className="gap-2">
               <Button
-                type="submit"
-                variant="destructive"
-                className="flex-1"
-                disabled={!password || confirmText !== 'DELETE MY ACCOUNT'}
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                disabled={isSubmitting}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {t('deleteAccount')}
+                {t('cancel')}
               </Button>
               <Button
                 type="button"
@@ -162,22 +187,22 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                   setStep(1);
                   setConfirmText('');
                 }}
-                className="flex-1"
+                disabled={isSubmitting}
               >
                 {t('back')}
               </Button>
               <Button
-                type="button"
-                variant="outline"
-                onClick={onClose}
-                className="flex-1"
+                type="submit"
+                variant="destructive"
+                disabled={!password || confirmText !== 'DELETE MY ACCOUNT' || isSubmitting}
               >
-                {t('cancel')}
+                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {isSubmitting ? t('deleting') : t('deleteAccount')}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

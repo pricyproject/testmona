@@ -3956,20 +3956,20 @@ export function TestCases() {
       <Dialog open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>
         <DialogContent isRTL={isRTL}>
           <DialogHeader>
-            <DialogTitle>Create New Section</DialogTitle>
-            <DialogDescription>Organize your test cases with sections and folders.</DialogDescription>
+            <DialogTitle>{t('createNewSection')}</DialogTitle>
+            <DialogDescription>{t('createNewSectionDescription')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Section Name</Label>
-              <Input value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)} placeholder="e.g. Authentication" />
+              <Label>{t('sectionName')}</Label>
+              <Input value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)} placeholder={t('sectionNamePlaceholder')} />
             </div>
             <div className="space-y-2">
-              <Label>Parent Section (Optional)</Label>
+              <Label>{t('parentSectionOptional')}</Label>
               <Select value={newSectionParentId} onValueChange={setNewSectionParentId}>
-                <SelectTrigger><SelectValue placeholder="Select parent" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t('selectParent')} /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">None (Root)</SelectItem>
+                  <SelectItem value="none">{t('noneRoot')}</SelectItem>
                   {mockSections.map((section) => (
                     <SelectItem key={section.id} value={section.id}>
                       {section.name}
@@ -3980,8 +3980,8 @@ export function TestCases() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSectionDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreateSection} disabled={!newSectionName}>Create Section</Button>
+            <Button variant="outline" onClick={() => setSectionDialogOpen(false)}>{t('cancel')}</Button>
+            <Button onClick={handleCreateSection} disabled={!newSectionName.trim()}>{t('createSection')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4006,8 +4006,8 @@ export function TestCases() {
               </Select>
             </div>
             <div className="text-sm text-gray-500">
-              <p>Current section: <span className="font-medium">{selectedTestCaseToMove?.section}</span></p>
-              <p>Available sections: <span className="font-medium">{mockSections.length} main sections</span></p>
+              <p>{t('currentSection')}: <span className="font-medium">{selectedTestCaseToMove?.section}</span></p>
+              <p>{t('availableSections')}: <span className="font-medium">{t('mainSectionsCount', { count: mockSections.length })}</span></p>
             </div>
           </div>
           <DialogFooter>
@@ -4023,19 +4023,19 @@ export function TestCases() {
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[600px]">
           <DialogHeader>
-            <DialogTitle>Edit Test Case: {editingTestCase?.title}</DialogTitle>
+            <DialogTitle>{t('editTestCaseTitle', { title: editingTestCase?.title || '' })}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Title</Label>
+              <Label>{t('title')}</Label>
               <Input value={testCaseForm.title} onChange={(e) => handleFieldChange('title', e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Description</Label>
+              <Label>{t('description')}</Label>
               <Textarea value={testCaseForm.description} onChange={(e) => handleFieldChange('description', e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="reference">Reference</Label>
+                <Label htmlFor="reference">{t('reference')}</Label>
               <ReferenceField
                 value={testCaseForm.reference}
                 onChange={(value) => handleFieldChange('reference', value)}
@@ -4057,36 +4057,36 @@ export function TestCases() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Type</Label>
+                <Label>{t('type')}</Label>
                 <Select value={testCaseForm.test_type} onValueChange={(value) => handleFieldChange('test_type', value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="automated">Automated</SelectItem>
+                    <SelectItem value="manual">{t('manual')}</SelectItem>
+                    <SelectItem value="automated">{t('automated')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Priority</Label>
+                <Label>{t('priority')}</Label>
                 <Select value={testCaseForm.priority} onValueChange={(value) => handleFieldChange('priority', value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
+                    <SelectItem value="low">{t('low')}</SelectItem>
+                    <SelectItem value="medium">{t('medium')}</SelectItem>
+                    <SelectItem value="high">{t('high')}</SelectItem>
+                    <SelectItem value="critical">{t('critical')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleUpdateTestCase}>Save Changes</Button>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>{t('cancel')}</Button>
+            <Button onClick={handleUpdateTestCase}>{t('saveChanges')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1777,6 +1777,9 @@ export function Projects() {
               <AlertTriangle className="h-5 w-5" />
               {t('bulkDeleteProjects')}
             </AlertDialogTitle>
+            <AlertDialogDescription className="sr-only">
+              {t('bulkDeleteWarning', { count: selectedProjects.size })}
+            </AlertDialogDescription>
             <div className="space-y-4">
               <div className="text-sm">
                 <p className="font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -1844,6 +1847,9 @@ export function Projects() {
               <Archive className="h-5 w-5" />
               {t('bulkArchiveProjects')}
             </AlertDialogTitle>
+            <AlertDialogDescription className="sr-only">
+              {t('bulkArchiveWarning', { count: selectedProjects.size })}
+            </AlertDialogDescription>
             <div className="space-y-4">
               <div className="text-sm">
                 <p className="font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -1891,6 +1897,9 @@ export function Projects() {
               <AlertTriangle className="h-5 w-5" />
               {t('deleteProject')}
             </AlertDialogTitle>
+            <AlertDialogDescription className="sr-only">
+              {t('deleteProjectWarning')}
+            </AlertDialogDescription>
             <div className="space-y-4">
               <div className="text-sm">
                 <p className="font-semibold text-gray-900 dark:text-gray-100 mb-2">

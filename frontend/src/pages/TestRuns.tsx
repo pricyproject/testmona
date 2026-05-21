@@ -1351,7 +1351,7 @@ export function TestRuns() {
                 <Card
                   key={run.id}
                   className="group relative cursor-pointer overflow-hidden border-slate-200/80 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl dark:border-slate-800 dark:bg-slate-950"
-                  onClick={() => navigate(`/projects/${currentProjectId}/test-runs/${run.id}`)}
+                  onClick={() => setSelectedTestRun(run)}
                 >
                   <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${statusMeta.accentClass}`} />
                   <CardHeader className="pb-3">

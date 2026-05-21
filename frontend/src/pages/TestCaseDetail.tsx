@@ -262,18 +262,22 @@ export function TestCaseDetail() {
   }, [id, projectId]);
 
   useEffect(() => {
-    if (!testCase?.reference || !testSuite) return;
+    if (!testCase?.reference || !testSuite) {
+      Promise.resolve().then(() => setLinkedRequirement(null));
+      return;
+    }
 
-    const reference = testCase.reference;
-    if (reference.includes('http') || reference.includes('jira') || /^[A-Z]+-\d+$/.test(reference)) {
-      setLinkedRequirement(null);
+    const reference = testCase.reference.trim();
+    const isInternalRequirementRef = /^REQ-\d{3,}$/i.test(reference);
+    if (!isInternalRequirementRef) {
+      Promise.resolve().then(() => setLinkedRequirement(null));
       return;
     }
 
     const fetchRequirementDetails = async () => {
       try {
-        const requirements = await requirementsAPI.getAll(Number(effectiveProjectId || testSuite.project_id), 0, 100);
-        const requirement = requirements.find((item) => item.requirement_id === reference);
+        const requirements = await requirementsAPI.getAll(Number(effectiveProjectId || testSuite.project_id), 0, 1000);
+        const requirement = requirements.find((item) => item.requirement_id?.toLowerCase() === reference.toLowerCase());
         setLinkedRequirement(requirement || null);
       } catch (error) {
         console.log('No requirement found for reference:', reference);
@@ -306,10 +310,11 @@ export function TestCaseDetail() {
       .filter(Boolean)
   ).size;
 
+  const testCaseTags = testCase?.tags;
   const tags = useMemo(() => {
-    if (!testCase?.tags) return [];
-    return testCase.tags.split(',').map((tag) => tag.trim()).filter(Boolean);
-  }, [testCase?.tags]);
+    if (!testCaseTags) return [];
+    return testCaseTags.split(',').map((tag) => tag.trim()).filter(Boolean);
+  }, [testCaseTags]);
   const hasReference = Boolean(testCase?.reference?.trim());
 
   const customFieldRows = useMemo<CustomFieldDisplayRow[]>(() => {
@@ -375,6 +380,9 @@ export function TestCaseDetail() {
 
   const revisionsPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.id}/revisions` : `/test-cases/${testCase?.id}/revisions`;
   const executionHistoryPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.id}/execution-history` : `/test-cases/${testCase?.id}/execution-history`;
+  const linkedRequirementPath = linkedRequirement && effectiveProjectId
+    ? `/projects/${effectiveProjectId}/requirements/${linkedRequirement.id}`
+    : null;
   const openRevisionsPage = () => navigate(revisionsPath);
   const openExecutionHistoryPage = () => navigate(executionHistoryPath);
 
@@ -595,7 +603,13 @@ export function TestCaseDetail() {
                     <Badge>{linkedRequirement.priority}</Badge>
                     <Badge variant="secondary">{linkedRequirement.status}</Badge>
                   </div>
-                  <h3 className="font-semibold text-slate-950 dark:text-white">{linkedRequirement.title}</h3>
+                  <h3 className="font-semibold text-slate-950 dark:text-white">
+                    {linkedRequirementPath ? (
+                      <Link to={linkedRequirementPath} className="text-blue-600 hover:underline dark:text-blue-400">
+                        {linkedRequirement.title}
+                      </Link>
+                    ) : linkedRequirement.title}
+                  </h3>
                   {linkedRequirement.description && <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{linkedRequirement.description}</p>}
                   {linkedRequirement.acceptance_criteria && (
                     <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-950">
@@ -635,7 +649,14 @@ export function TestCaseDetail() {
                 />
                 <PropertyRow label={t('testSuite')} value={testSuite?.name || `${t('suite')} ${testCase.test_suite_id}`} />
                 {hasReference && (
-                  <PropertyRow label={t('reference')} value={testCase.reference as string} />
+                  <PropertyRow
+                    label={t('reference')}
+                    value={linkedRequirementPath ? (
+                      <Link to={linkedRequirementPath} className="text-blue-600 hover:underline dark:text-blue-400">
+                        {testCase.reference as string}
+                      </Link>
+                    ) : testCase.reference as string}
+                  />
                 )}
                 <PropertyRow label={t('createdBy')} value={testCase.creator?.full_name || testCase.creator?.username || t('unknown')} />
                 <PropertyRow label={t('created')} value={formatDateTime(testCase.created_at)} />

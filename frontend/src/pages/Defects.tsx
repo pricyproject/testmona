@@ -19,6 +19,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -58,6 +68,7 @@ export function Defects() {
   const [integrations, setIntegrations] = useState<IssueTrackerIntegration[]>([]);
   const [isLoadingIntegrations, setIsLoadingIntegrations] = useState(false);
   const [editingIntegration, setEditingIntegration] = useState<IssueTrackerIntegration | null>(null);
+  const [integrationToDelete, setIntegrationToDelete] = useState<IssueTrackerIntegration | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   
@@ -717,19 +728,21 @@ export function Defects() {
     }
   };
 
-  const handleDeleteIntegration = async (integrationId: number) => {
+  const handleDeleteIntegration = (integration: IssueTrackerIntegration) => {
+    setIntegrationToDelete(integration);
+  };
+
+  const confirmDeleteIntegration = async () => {
     if (!projectId) return;
-    
-    if (!confirm(t('confirmDeleteIntegration'))) {
-      return;
-    }
+    if (!integrationToDelete) return;
 
     try {
-      await defectManagementAPI.deleteIssueTrackerIntegration(parseInt(projectId), integrationId);
+      await defectManagementAPI.deleteIssueTrackerIntegration(parseInt(projectId), integrationToDelete.id);
       toast({
         title: t('success'),
         description: t('integrationDeletedSuccessfully'),
       });
+      setIntegrationToDelete(null);
       fetchIntegrations();
     } catch (error) {
       console.error('Failed to delete integration:', error);
@@ -738,6 +751,8 @@ export function Defects() {
         description: t('failedToDeleteIntegration'),
         variant: 'destructive',
       });
+    } finally {
+      setIntegrationToDelete(null);
     }
   };
 
@@ -803,7 +818,7 @@ export function Defects() {
                     <Settings className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
                     <h3 className="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('noIntegrationsAvailable')}</h3>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      Add an integration to sync defects with external issue trackers.
+                      {t('noIntegrationsDefectsDesc')}
                     </p>
                   </div>
                 ) : (
@@ -864,7 +879,7 @@ export function Defects() {
                             <Button 
                               size="sm" 
                               variant="outline"
-                              onClick={() => handleDeleteIntegration(integration.id)}
+                              onClick={() => handleDeleteIntegration(integration)}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -969,10 +984,10 @@ export function Defects() {
                     <SelectValue placeholder={t('selectSeverity')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
+                    <SelectItem value="low">{t('low')}</SelectItem>
+                    <SelectItem value="medium">{t('medium')}</SelectItem>
+                    <SelectItem value="high">{t('high')}</SelectItem>
+                    <SelectItem value="critical">{t('critical')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -985,10 +1000,10 @@ export function Defects() {
                     <SelectValue placeholder={t('selectPriority')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="low">{t('low')}</SelectItem>
+                    <SelectItem value="medium">{t('medium')}</SelectItem>
+                    <SelectItem value="high">{t('high')}</SelectItem>
+                    <SelectItem value="urgent">{t('urgent')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1097,17 +1112,17 @@ export function Defects() {
         <Dialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
           <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
             <DialogHeader>
-              <DialogTitle>Unsaved Changes</DialogTitle>
+              <DialogTitle>{t('unsavedChangesTitle')}</DialogTitle>
               <DialogDescription>
-                You have unsaved changes. Are you sure you want to close without saving?
+                {t('unsavedChangesModalMessage')}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="outline" onClick={() => handleUnsavedConfirm(false)}>
-                Keep Editing
+                {t('keepEditingModal')}
               </Button>
               <Button onClick={() => handleUnsavedConfirm(true)}>
-                Discard Changes
+                {t('discardChangesModal')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1318,7 +1333,7 @@ export function Defects() {
 
       {/* Integration Form Dialog */}
       <Dialog open={isIntegrationFormOpen} onOpenChange={setIsIntegrationFormOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+        <DialogContent isRTL={isRTL} className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingIntegration ? t('editIntegration') : t('addIntegrationTitle')}
@@ -1395,7 +1410,7 @@ export function Defects() {
                 <Label htmlFor="username">{t('usernameEmail')}</Label>
                 <Input
                   id="username"
-                  placeholder="your-email@example.com"
+                  placeholder={t('usernameEmailPlaceholder')}
                   value={integrationForm.username}
                   onChange={(e) => setIntegrationForm({...integrationForm, username: e.target.value})}
                 />
@@ -1406,7 +1421,7 @@ export function Defects() {
                   id="api-token"
                   ref={tokenInputRef}
                   type="password"
-                  placeholder={editingIntegration ? 'Leave blank to keep existing' : 'Enter your API token'}
+                  placeholder={editingIntegration ? t('leaveBlankToKeepExistingToken') : t('enterApiToken')}
                   value={integrationForm.api_token}
                   onChange={(e) => setIntegrationForm({...integrationForm, api_token: e.target.value})}
                   onBlur={() => setTouchedFields({...touchedFields, api_token: true})}
@@ -1416,7 +1431,7 @@ export function Defects() {
                   <p className="text-xs text-red-600 dark:text-red-400">{validationErrors.api_token}</p>
                 )}
                 <p className="text-xs text-gray-500">
-                  Token will be encrypted and stored securely
+                  {t('tokenEncryptedSecurely')}
                 </p>
               </div>
             </div>
@@ -1465,14 +1480,14 @@ export function Defects() {
                 onChange={(e) => setIntegrationForm({...integrationForm, is_active: e.target.checked})}
                 className="h-4 w-4"
               />
-              <Label htmlFor="is-active">Enable this integration</Label>
+              <Label htmlFor="is-active">{t('enableThisIntegration')}</Label>
             </div>
 
             {editingIntegration && (
               <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded p-3">
                 <p className="text-sm text-yellow-800 dark:text-yellow-200">
                   <AlertCircle className="h-4 w-4 inline mr-2" />
-                  Leave the API token blank to keep the existing token. Only enter a new token if you want to change it.
+                  {t('leaveApiTokenBlank')}
                 </p>
               </div>
             )}
@@ -1482,7 +1497,7 @@ export function Defects() {
               {t('cancel')}
             </Button>
             <Button onClick={handleSaveIntegration}>
-              {editingIntegration ? 'Update Integration' : 'Create Integration'}
+              {editingIntegration ? t('updateIntegration') : t('createIntegration')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1554,41 +1569,41 @@ export function Defects() {
 
       {/* Edit Defect Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
+        <DialogContent isRTL={isRTL} className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Defect: {editingDefect?.defect_id}</DialogTitle>
+            <DialogTitle>{t('editDefectTitle', { id: editingDefect?.defect_id || '' })}</DialogTitle>
             <DialogDescription>
-              Update the defect information.
+              {t('editDefectDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectId" className="text-right">
-                Defect ID
+                {t('defectId')}
               </Label>
               <Input
                 id="editDefectId"
                 value={defectId}
                 onChange={(e) => setDefectId(e.target.value)}
                 className="col-span-3"
-                placeholder="DEF-001"
+                placeholder={t('defectIdPlaceholder')}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectTitle" className="text-right">
-                Title
+                {t('title')}
               </Label>
               <Input
                 id="editDefectTitle"
                 value={defectTitle}
                 onChange={(e) => setDefectTitle(e.target.value)}
                 className="col-span-3"
-                placeholder="Enter defect title"
+                placeholder={t('defectTitlePlaceholder')}
               />
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="editDefectDescription" className="text-right pt-2">
-                Description
+                {t('description')}
               </Label>
               <Textarea
                 id="editDefectDescription"
@@ -1608,49 +1623,49 @@ export function Defects() {
                   <SelectValue placeholder={t('defectSelectStatus')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="in_progress">In Progress</SelectItem>
-                  <SelectItem value="fixed">Fixed</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="open">{t('open')}</SelectItem>
+                  <SelectItem value="in_progress">{t('inProgress')}</SelectItem>
+                  <SelectItem value="fixed">{t('fixed')}</SelectItem>
+                  <SelectItem value="closed">{t('closed')}</SelectItem>
+                  <SelectItem value="rejected">{t('rejected')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectSeverity" className="text-right">
-                Severity
+                {t('defectSeverity')}
               </Label>
               <Select value={defectSeverity} onValueChange={setDefectSeverity}>
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select severity" />
+                  <SelectValue placeholder={t('selectSeverity')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="low">{t('low')}</SelectItem>
+                  <SelectItem value="medium">{t('medium')}</SelectItem>
+                  <SelectItem value="high">{t('high')}</SelectItem>
+                  <SelectItem value="critical">{t('critical')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectPriority" className="text-right">
-                Priority
+                {t('defectPriority')}
               </Label>
               <Select value={defectPriority} onValueChange={setDefectPriority}>
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select priority" />
+                  <SelectValue placeholder={t('selectPriority')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
+                  <SelectItem value="low">{t('low')}</SelectItem>
+                  <SelectItem value="medium">{t('medium')}</SelectItem>
+                  <SelectItem value="high">{t('high')}</SelectItem>
+                  <SelectItem value="urgent">{t('urgent')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="editDefectSteps" className="text-right pt-2">
-                Steps to Reproduce
+                {t('stepsToReproduce')}
               </Label>
               <Textarea
                 id="editDefectSteps"
@@ -1663,7 +1678,7 @@ export function Defects() {
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectEnvironment" className="text-right">
-                Environment
+                {t('environmentLabel')}
               </Label>
               <Input
                 id="editDefectEnvironment"
@@ -1675,7 +1690,7 @@ export function Defects() {
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectJiraLink" className="text-right">
-                Jira Link
+                {t('jiraLink')}
               </Label>
               <Input
                 id="editDefectJiraLink"
@@ -1687,7 +1702,7 @@ export function Defects() {
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectTags" className="text-right">
-                Tags
+                {t('tags')}
               </Label>
               <Input
                 id="editDefectTags"
@@ -1699,7 +1714,7 @@ export function Defects() {
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="editDefectTestCase" className="text-right">
-                Test Case
+                {t('testCase')}
               </Label>
               <div className="col-span-3 space-y-2">
                 <Input
@@ -1713,7 +1728,7 @@ export function Defects() {
                     <SelectValue placeholder={t('selectTestCaseOptional')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No test case</SelectItem>
+                    <SelectItem value="none">{t('noTestCase')}</SelectItem>
                     {filteredTestCases.map((testCase) => (
                       <SelectItem key={testCase.id} value={testCase.id.toString()}>
                         {testCase.title}
@@ -1733,11 +1748,28 @@ export function Defects() {
               onClick={handleUpdateDefect}
               disabled={!defectId.trim() || !defectTitle.trim()}
             >
-              Update Defect
+              {t('updateDefect')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!integrationToDelete} onOpenChange={(open) => !open && setIntegrationToDelete(null)}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('confirmDeleteIntegration')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('confirmDeleteIntegrationDesc', { name: integrationToDelete?.name || '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteIntegration} className="bg-red-600 hover:bg-red-700">
+              {t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

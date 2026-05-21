@@ -293,20 +293,20 @@ export function Environments() {
           <DialogTrigger asChild>
             <Button disabled={!currentProjectId}>
               <Plus className="h-4 w-4 mr-2" />
-              Add Environment
+              {t('addEnvironment')}
             </Button>
           </DialogTrigger>
           <DialogContent isRTL={isRTL} className="sm:max-w-[600px]" onKeyDown={handleKeyDown}>
             <DialogHeader>
-              <DialogTitle>{isEditing ? 'Edit Environment' : 'Create New Environment'}</DialogTitle>
+              <DialogTitle>{isEditing ? t('editEnvironment') : t('createNewEnvironment')}</DialogTitle>
               <DialogDescription>
-                {isEditing ? 'Update the test environment configuration.' : 'Add a new test environment with configuration and build information.'}
+                {isEditing ? t('updateEnvironmentConfiguration') : t('addEnvironmentDesc')}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="envName" className="text-right">
-                  Name
+                  {t('name')}
                 </Label>
                 <div className="col-span-3 space-y-1">
                   <Input
@@ -315,53 +315,53 @@ export function Environments() {
                     value={envName}
                     onChange={(e) => setEnvName(e.target.value)}
                     className={envName.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
-                    placeholder="Enter environment name"
+                    placeholder={t('enterEnvironmentName')}
                     maxLength={100}
                   />
                   <div className="flex justify-between text-xs text-gray-500">
-                    <span>Enter environment name</span>
+                    <span>{t('enterEnvironmentName')}</span>
                     <span>{envName.length}/100</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-start gap-4">
                 <Label htmlFor="envDescription" className="text-right pt-2">
-                  Description
+                  {t('description')}
                 </Label>
                 <div className="col-span-3 space-y-1">
                   <Textarea
                     id="envDescription"
                     value={envDescription}
                     onChange={(e) => setEnvDescription(e.target.value)}
-                    placeholder="Describe the environment"
+                    placeholder={t('describeEnvironment')}
                     rows={2}
                     maxLength={500}
                   />
                   <div className="flex justify-between text-xs text-gray-500">
-                    <span>Describe the environment</span>
+                    <span>{t('describeEnvironment')}</span>
                     <span>{envDescription.length}/500</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="envType" className="text-right">
-                  Type
+                  {t('type')}
                 </Label>
                 <Select value={envType} onValueChange={setEnvType}>
                   <SelectTrigger className="col-span-3">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="development">Development</SelectItem>
-                    <SelectItem value="staging">Staging</SelectItem>
-                    <SelectItem value="production">Production</SelectItem>
-                    <SelectItem value="custom">Custom</SelectItem>
+                    <SelectItem value="development">{t('development')}</SelectItem>
+                    <SelectItem value="staging">{t('staging')}</SelectItem>
+                    <SelectItem value="production">{t('production')}</SelectItem>
+                    <SelectItem value="custom">{t('custom')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="envUrl" className="text-right">
-                  API URL
+                  {t('apiUrlLabel')}
                 </Label>
                 <Input
                   id="envUrl"
@@ -373,7 +373,7 @@ export function Environments() {
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="envDbUrl" className="text-right">
-                  Database URL
+                  {t('databaseUrl')}
                 </Label>
                 <Input
                   id="envDbUrl"
@@ -386,13 +386,13 @@ export function Environments() {
             </div>
             <DialogFooter className="flex-col sm:flex-row gap-2">
               <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
-                Ctrl+Enter to submit
+                {t('ctrlEnterToSubmit')}
               </div>
               <Button
                 variant="outline"
                 onClick={() => handleDialogClose(false)}
               >
-                Cancel
+                {t('cancel')}
               </Button>
               <Button
                 type="submit"
@@ -400,7 +400,7 @@ export function Environments() {
                 disabled={!envName.trim() || isCreating}
                 className="transition-all duration-200"
               >
-                {isCreating ? 'Creating...' : 'Create Environment'}
+                {isCreating ? t('creating') : (isEditing ? t('updateEnvironment') : t('createEnvironment'))}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -452,7 +452,7 @@ export function Environments() {
                     className="flex-1 min-w-[80px]"
                   >
                     <PlayCircle className="h-4 w-4 mr-1" />
-                    <span className="whitespace-nowrap">Run Tests</span>
+                    <span className="whitespace-nowrap">{t('runTests')}</span>
                   </Button>
                   <Button 
                     variant="outline" 
@@ -461,7 +461,7 @@ export function Environments() {
                     className="min-w-[70px]"
                   >
                     <Copy className="h-4 w-4 mr-1" />
-                    <span className="whitespace-nowrap">Clone</span>
+                    <span className="whitespace-nowrap">{t('clone')}</span>
                   </Button>
                   <Button 
                     variant="outline" 
@@ -489,18 +489,18 @@ export function Environments() {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent isRTL={isRTL}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogTitle>{t('areYouSure')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the environment "{environmentToDelete?.name}" and all associated data.
+              {t('deleteEnvironmentConfirm', { name: environmentToDelete?.name || '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={cancelDelete}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onClick={cancelDelete}>{t('cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmDeleteEnvironment}
               className="bg-red-600 hover:bg-red-700"
             >
-              Delete Environment
+              {t('deleteEnvironment')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

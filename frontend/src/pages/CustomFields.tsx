@@ -16,6 +16,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -571,18 +581,15 @@ export function CustomFields() {
                   </Button>
                 </DialogTrigger>
                 <DialogContent isRTL={isRTL} onKeyDown={handleKeyDown} className="max-w-lg max-h-[90vh]">
-                  <DialogTitle id="dialog-title" className="sr-only">
-                    {editingField ? t('editCustomField') : t('createCustomField')}
-                  </DialogTitle>
                   <DialogHeader className="space-y-2 pb-4">
-                    <DialogTitle className="text-xl font-semibold">
+                    <DialogTitle id="custom-field-dialog-title" className="text-xl font-semibold">
                       {editingField ? t('editCustomField') : t('createCustomField')}
                     </DialogTitle>
                     <DialogDescription className="text-sm text-gray-500">
                       {editingField ? t('editCustomFieldDesc') : t('createCustomFieldDesc')}
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-4 py-2 max-h-[calc(90vh-200px)] overflow-y-auto px-4" role="form" aria-labelledby="dialog-title">
+                  <div className="space-y-4 py-2 max-h-[calc(90vh-200px)] overflow-y-auto px-4" role="form" aria-labelledby="custom-field-dialog-title">
                     {/* Field Name */}
                     <div className="space-y-2">
                       <Label htmlFor="field-name" className="text-sm font-medium">{t('customFieldName')} <span className="text-red-500">*</span></Label>
@@ -908,7 +915,6 @@ export function CustomFields() {
               {/* Unsaved Changes Confirmation Dialog */}
               <Dialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
                 <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
-                  <DialogTitle className="sr-only">{t('unsavedChangesTitle')}</DialogTitle>
                   <DialogHeader>
                     <DialogTitle>{t('unsavedChangesTitle')}</DialogTitle>
                     <DialogDescription>
@@ -927,25 +933,24 @@ export function CustomFields() {
               </Dialog>
 
               {/* Delete Confirmation Dialog */}
-              <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-                <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
-                  <DialogTitle className="sr-only">{t('deleteCustomField')}</DialogTitle>
-                  <DialogHeader>
-                    <DialogTitle>{t('deleteCustomField')}</DialogTitle>
-                    <DialogDescription>
+              <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                <AlertDialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t('deleteCustomField')}</AlertDialogTitle>
+                    <AlertDialogDescription>
                       {t('deleteCustomFieldConfirm')}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setShowDeleteDialog(false)} disabled={isDeleting}>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setShowDeleteDialog(false)} disabled={isDeleting}>
                       {t('cancel')}
-                    </Button>
-                    <Button onClick={handleConfirmDelete} disabled={isDeleting} variant="destructive">
+                    </AlertDialogCancel>
+                    <AlertDialogAction onClick={handleConfirmDelete} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
                       {isDeleting ? t('deleting') : t('delete')}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </CardHeader>
             <CardContent>
               {loading ? (

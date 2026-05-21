@@ -1878,15 +1878,15 @@ export function TestCaseExecution() {
       <Dialog open={isDefectDialogOpen} onOpenChange={handleDialogClose}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={handleKeyDown}>
           <DialogHeader>
-            <DialogTitle>Report New Defect</DialogTitle>
+            <DialogTitle>{t('reportNewDefect')}</DialogTitle>
             <DialogDescription>
-              Document a defect found during test execution.
+              {t('reportExecutionDefectDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="defectTitle" className="text-right">
-                Title
+                {t('title')}
               </Label>
               <div className="col-span-3 space-y-1">
                 <Input
@@ -1896,76 +1896,76 @@ export function TestCaseExecution() {
                   onChange={(e) => setNewDefect({...newDefect, title: e.target.value})}
                   onBlur={() => setDefectTouchedFields({...defectTouchedFields, title: true})}
                   className={defectTouchedFields.title && newDefect.title.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
-                  placeholder="Enter defect title"
+                  placeholder={t('defectTitlePlaceholder')}
                   maxLength={200}
                 />
                 <div className="flex justify-between text-xs text-gray-500">
-                  <span>Enter defect title</span>
+                  <span>{t('defectTitlePlaceholder')}</span>
                   <span>{newDefect.title.length}/200</span>
                 </div>
               </div>
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="defectDescription" className="text-right pt-2">
-                Description
+                {t('description')}
               </Label>
               <div className="col-span-3 space-y-1">
                 <Textarea
                   id="defectDescription"
                   value={newDefect.description}
                   onChange={(e) => setNewDefect({...newDefect, description: e.target.value})}
-                  placeholder="Describe the defect"
+                  placeholder={t('defectDescriptionPlaceholder')}
                   rows={3}
                   maxLength={1000}
                 />
                 <div className="flex justify-between text-xs text-gray-500">
-                  <span>Describe the defect</span>
+                  <span>{t('defectDescriptionPlaceholder')}</span>
                   <span>{newDefect.description.length}/1000</span>
                 </div>
               </div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="severity" className="text-right">
-                Severity
+                {t('defectSeverity')}
               </Label>
               <Select value={newDefect.severity} onValueChange={(value) => setNewDefect({...newDefect, severity: value})}>
                 <SelectTrigger className="col-span-3">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="low">{t('low')}</SelectItem>
+                  <SelectItem value="medium">{t('medium')}</SelectItem>
+                  <SelectItem value="high">{t('high')}</SelectItem>
+                  <SelectItem value="critical">{t('critical')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="priority" className="text-right">
-                Priority
+                {t('defectPriority')}
               </Label>
               <Select value={newDefect.priority} onValueChange={(value) => setNewDefect({...newDefect, priority: value})}>
                 <SelectTrigger className="col-span-3">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
+                  <SelectItem value="low">{t('low')}</SelectItem>
+                  <SelectItem value="medium">{t('medium')}</SelectItem>
+                  <SelectItem value="high">{t('high')}</SelectItem>
+                  <SelectItem value="urgent">{t('urgent')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
-              Ctrl+Enter to submit
+              {t('ctrlEnterToSubmit')}
             </div>
             <Button variant="outline" onClick={() => handleDialogClose(false)}>
-              Cancel
+              {t('cancel')}
             </Button>
             <Button onClick={handleCreateDefect} disabled={!newDefect.title.trim() || isCreating} className="transition-all duration-200">
-              {isCreating ? 'Creating...' : 'Report Defect'}
+              {isCreating ? t('creating') : t('reportDefect')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1975,17 +1975,17 @@ export function TestCaseExecution() {
       <Dialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Unsaved Changes</DialogTitle>
+            <DialogTitle>{t('unsavedChangesTitle')}</DialogTitle>
             <DialogDescription>
-              You have unsaved changes. Are you sure you want to close without saving?
+              {t('unsavedChangesModalMessage')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => handleUnsavedConfirm(false)}>
-              Keep Editing
+              {t('keepEditingModal')}
             </Button>
             <Button onClick={() => handleUnsavedConfirm(true)}>
-              Discard Changes
+              {t('discardChangesModal')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1995,15 +1995,15 @@ export function TestCaseExecution() {
       <Dialog open={showManualTimeDialog} onOpenChange={setShowManualTimeDialog}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Add Manual Time</DialogTitle>
+            <DialogTitle>{t('addManualTime')}</DialogTitle>
             <DialogDescription>
-              Add additional time to the current execution.
+              {t('addManualTimeDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="manualTime" className="text-right">
-                Hours
+                {t('hours')}
               </Label>
               <div className="col-span-3 space-y-1">
                 <Input
@@ -2014,21 +2014,21 @@ export function TestCaseExecution() {
                   max="24"
                   value={manualTimeEntry}
                   onChange={(e) => setManualTimeEntry(e.target.value)}
-                  placeholder="Enter hours (e.g., 1.5)"
+                  placeholder={t('enterHoursPlaceholder')}
                   className="h-9"
                 />
                 <div className="text-xs text-gray-500">
-                  Enter time in hours (e.g., 1.5 for 1 hour 30 minutes)
+                  {t('manualTimeHelper')}
                 </div>
               </div>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowManualTimeDialog(false)}>
-              Cancel
+              {t('cancel')}
             </Button>
             <Button onClick={handleManualTimeEntry} disabled={!manualTimeEntry || parseFloat(manualTimeEntry) <= 0}>
-              Add Time
+              {t('addTime')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2038,17 +2038,17 @@ export function TestCaseExecution() {
       <Dialog open={showResetTimerDialog} onOpenChange={setShowResetTimerDialog}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Reset Timer</DialogTitle>
+            <DialogTitle>{t('resetTimer')}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to reset the timer? This will clear all elapsed time and manual adjustments.
+              {t('resetTimerConfirm')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowResetTimerDialog(false)}>
-              Cancel
+              {t('cancel')}
             </Button>
             <Button onClick={handleConfirmResetTimer} className="bg-red-600 hover:bg-red-700">
-              Reset Timer
+              {t('resetTimer')}
             </Button>
           </DialogFooter>
         </DialogContent>

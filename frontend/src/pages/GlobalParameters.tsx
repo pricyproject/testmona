@@ -245,20 +245,20 @@ export function GlobalParameters() {
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
-              Create Parameter
+              {t('createParameter')}
             </Button>
           </DialogTrigger>
           <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={handleKeyDown}>
             <DialogHeader>
-              <DialogTitle>Create New Parameter</DialogTitle>
+              <DialogTitle>{t('createNewParameter')}</DialogTitle>
               <DialogDescription>
-                Create a reusable parameter that can be used across test cases and configurations.
+                {t('createParameterDesc')}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="name" className="text-right">
-                  Name *
+                  {t('name')} *
                 </Label>
                 <div className="col-span-3 space-y-1">
                   <Input
@@ -267,41 +267,41 @@ export function GlobalParameters() {
                     value={formData.name}
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
                     className={formData.name.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
-                    placeholder="Enter parameter name"
+                    placeholder={t('enterParameterName')}
                     maxLength={100}
                   />
                   <div className="flex justify-between text-xs text-gray-500">
-                    <span>Enter parameter name</span>
+                    <span>{t('enterParameterName')}</span>
                     <span>{formData.name.length}/100</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="type" className="text-right">
-                  Type *
+                  {t('type')} *
                 </Label>
                 <Select value={formData.parameter_type} onValueChange={(value) => setFormData({...formData, parameter_type: value})}>
                   <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="Select type" />
+                    <SelectValue placeholder={t('selectType')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="string">String</SelectItem>
-                    <SelectItem value="number">Number</SelectItem>
-                    <SelectItem value="boolean">Boolean</SelectItem>
+                    <SelectItem value="string">{t('string')}</SelectItem>
+                    <SelectItem value="number">{t('number')}</SelectItem>
+                    <SelectItem value="boolean">{t('boolean')}</SelectItem>
                     <SelectItem value="json">JSON</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="project" className="text-right">
-                  Scope
+                  {t('scope')}
                 </Label>
                 <Select value={formData.project_id === null ? 'global' : formData.project_id} onValueChange={(value) => setFormData({...formData, project_id: value === 'global' ? null : value})}>
                   <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="Select scope" />
+                    <SelectValue placeholder={t('selectScope')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="global">Global</SelectItem>
+                    <SelectItem value="global">{t('global')}</SelectItem>
                     {mockProjects.map(project => (
                       <SelectItem key={project.id} value={project.id}>
                         {project.name}
@@ -312,66 +312,66 @@ export function GlobalParameters() {
               </div>
               <div className="grid grid-cols-4 items-start gap-4">
                 <Label htmlFor="value" className="text-right pt-2">
-                  Value *
+                  {t('value')} *
                 </Label>
                 <div className="col-span-3 space-y-1">
                   <Textarea
                     id="value"
                     value={formData.value}
                     onChange={(e) => setFormData({...formData, value: e.target.value})}
-                    placeholder="Enter parameter value"
+                    placeholder={t('enterParameterValue')}
                     rows={2}
                     maxLength={1000}
                   />
                   <div className="flex justify-between text-xs text-gray-500">
-                    <span>Enter parameter value</span>
+                    <span>{t('enterParameterValue')}</span>
                     <span>{formData.value.length}/1000</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-start gap-4">
                 <Label htmlFor="description" className="text-right pt-2">
-                  Description
+                  {t('description')}
                 </Label>
                 <div className="col-span-3 space-y-1">
                   <Textarea
                     id="description"
                     value={formData.description}
                     onChange={(e) => setFormData({...formData, description: e.target.value})}
-                    placeholder="Enter parameter description"
+                    placeholder={t('enterParameterDescription')}
                     rows={2}
                     maxLength={500}
                   />
                   <div className="flex justify-between text-xs text-gray-500">
-                    <span>Enter parameter description</span>
+                    <span>{t('enterParameterDescription')}</span>
                     <span>{formData.description.length}/500</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="encrypted" className="text-right">
-                  Encrypted
+                  {t('encrypted')}
                 </Label>
                 <Select value={formData.is_encrypted.toString()} onValueChange={(value) => setFormData({...formData, is_encrypted: value === 'true'})}>
                   <SelectTrigger className="col-span-3">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="false">No</SelectItem>
-                    <SelectItem value="true">Yes</SelectItem>
+                    <SelectItem value="false">{t('no')}</SelectItem>
+                    <SelectItem value="true">{t('yes')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <DialogFooter className="flex-col sm:flex-row gap-2">
               <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
-                Ctrl+Enter to submit
+                {t('ctrlEnterToSubmit')}
               </div>
               <Button
                 variant="outline"
                 onClick={() => handleDialogClose(false)}
               >
-                Cancel
+                {t('cancel')}
               </Button>
               <Button
                 type="submit"
@@ -379,7 +379,7 @@ export function GlobalParameters() {
                 disabled={!formData.name.trim() || !formData.value.trim() || isCreating}
                 className="transition-all duration-200"
               >
-                {isCreating ? 'Creating...' : 'Create Parameter'}
+                {isCreating ? t('creating') : t('createParameter')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -483,53 +483,59 @@ export function GlobalParameters() {
       </div>
 
       {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+      <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+        setIsEditDialogOpen(open);
+        if (!open) {
+          resetForm();
+          setSelectedParameter(null);
+        }
+      }}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Edit Parameter</DialogTitle>
+            <DialogTitle>{t('editParameter')}</DialogTitle>
             <DialogDescription>
-              Update the parameter details.
+              {t('updateParameterDetails')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="edit-name" className="text-right">
-                Name *
+                {t('name')} *
               </Label>
               <Input
                 id="edit-name"
                 value={formData.name}
                 onChange={(e) => setFormData({...formData, name: e.target.value})}
                 className="col-span-3"
-                placeholder="Enter parameter name"
+                placeholder={t('enterParameterName')}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="edit-type" className="text-right">
-                Type *
+                {t('type')} *
               </Label>
               <Select value={formData.parameter_type} onValueChange={(value) => setFormData({...formData, parameter_type: value})}>
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select type" />
+                  <SelectValue placeholder={t('selectType')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="string">String</SelectItem>
-                  <SelectItem value="number">Number</SelectItem>
-                  <SelectItem value="boolean">Boolean</SelectItem>
+                  <SelectItem value="string">{t('string')}</SelectItem>
+                  <SelectItem value="number">{t('number')}</SelectItem>
+                  <SelectItem value="boolean">{t('boolean')}</SelectItem>
                   <SelectItem value="json">JSON</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="edit-project" className="text-right">
-                Scope
+                {t('scope')}
               </Label>
               <Select value={formData.project_id === null ? 'global' : formData.project_id} onValueChange={(value) => setFormData({...formData, project_id: value === 'global' ? null : value})}>
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select scope" />
+                  <SelectValue placeholder={t('selectScope')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="global">{t('global')}</SelectItem>
                   {mockProjects.map(project => (
                     <SelectItem key={project.id} value={project.id}>
                       {project.name}
@@ -540,52 +546,58 @@ export function GlobalParameters() {
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="edit-value" className="text-right pt-2">
-                Value *
+                {t('value')} *
               </Label>
               <Textarea
                 id="edit-value"
                 value={formData.value}
                 onChange={(e) => setFormData({...formData, value: e.target.value})}
                 className="col-span-3"
-                placeholder="Enter parameter value"
+                placeholder={t('enterParameterValue')}
                 rows={2}
               />
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="edit-description" className="text-right pt-2">
-                Description
+                {t('description')}
               </Label>
               <Textarea
                 id="edit-description"
                 value={formData.description}
                 onChange={(e) => setFormData({...formData, description: e.target.value})}
                 className="col-span-3"
-                placeholder="Enter parameter description"
+                placeholder={t('enterParameterDescription')}
                 rows={2}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="edit-encrypted" className="text-right">
-                Encrypted
+                {t('encrypted')}
               </Label>
               <Select value={formData.is_encrypted.toString()} onValueChange={(value) => setFormData({...formData, is_encrypted: value === 'true'})}>
                 <SelectTrigger className="col-span-3">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="false">No</SelectItem>
-                  <SelectItem value="true">Yes</SelectItem>
+                  <SelectItem value="false">{t('no')}</SelectItem>
+                  <SelectItem value="true">{t('yes')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter>
             <Button
+              variant="outline"
+              onClick={() => setIsEditDialogOpen(false)}
+            >
+              {t('cancel')}
+            </Button>
+            <Button
               type="submit"
               onClick={handleEditParameter}
               disabled={!formData.name.trim() || !formData.value.trim()}
             >
-              Update Parameter
+              {t('updateParameter')}
             </Button>
           </DialogFooter>
         </DialogContent>
