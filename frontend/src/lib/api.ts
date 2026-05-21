@@ -356,6 +356,78 @@ export const requirementsAPI = {
     const response = await api.delete(`/requirements/${id}`);
     return response.data;
   },
+  fetchExternalDocument: async (payload: { project_id: number; url: string }) => {
+    const response = await api.post('/requirements/fetch-external-document', payload);
+    return response.data;
+  },
+  searchTestCases: async (
+    id: number,
+    filters: {
+      search?: string;
+      linked?: boolean;
+      status?: string;
+      priority?: string;
+      suite_id?: number;
+      section_id?: number;
+      skip?: number;
+      limit?: number;
+    } = {}
+  ) => {
+    const params = new URLSearchParams({
+      skip: String(filters.skip ?? 0),
+      limit: String(filters.limit ?? 25),
+    });
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && key !== 'skip' && key !== 'limit' && value !== '') {
+        params.append(key, String(value));
+      }
+    });
+    const response = await api.get(`/requirements/${id}/test-cases?${params}`);
+    return response.data;
+  },
+  bulkUpdateTestCases: async (id: number, payload: { test_case_ids: number[]; action: 'link' | 'unlink' }) => {
+    const response = await api.post(`/requirements/${id}/test-cases/bulk`, payload);
+    return response.data;
+  },
+  createAndLinkTestCase: async (id: number, payload: any) => {
+    const response = await api.post(`/requirements/${id}/test-cases`, payload);
+    return response.data;
+  },
+  getTestCaseHistory: async (id: number, offset = 0, limit = 20) => {
+    const response = await api.get(`/requirements/${id}/test-cases/history?offset=${offset}&limit=${limit}`);
+    return response.data;
+  },
+  searchTestPlans: async (
+    id: number,
+    filters: {
+      search?: string;
+      linked?: boolean;
+      status?: string;
+      milestone_id?: number;
+      skip?: number;
+      limit?: number;
+    } = {}
+  ) => {
+    const params = new URLSearchParams({
+      skip: String(filters.skip ?? 0),
+      limit: String(filters.limit ?? 25),
+    });
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && key !== 'skip' && key !== 'limit' && value !== '') {
+        params.append(key, String(value));
+      }
+    });
+    const response = await api.get(`/requirements/${id}/test-plans?${params}`);
+    return response.data;
+  },
+  bulkUpdateTestPlans: async (id: number, payload: { test_plan_ids: number[]; action: 'link' | 'unlink' }) => {
+    const response = await api.post(`/requirements/${id}/test-plans/bulk`, payload);
+    return response.data;
+  },
+  getRelationships: async (id: number) => {
+    const response = await api.get(`/requirements/${id}/relationships`);
+    return response.data;
+  },
 };
 
 // Test Cases API

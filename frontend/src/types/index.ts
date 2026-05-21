@@ -77,6 +77,18 @@ export interface TestCase {
   project_name?: string;
 }
 
+export interface TestCaseSection {
+  id: number;
+  name: string;
+  description?: string;
+  test_suite_id?: number;
+  parent_section_id?: number;
+  order_index?: number;
+  is_active?: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface SharedStep {
   id: number;
   name: string;
@@ -389,6 +401,111 @@ export interface RequirementUpdate {
   tags?: string;
   acceptance_criteria?: string;
   estimated_effort?: number;
+}
+
+export interface RequirementExternalDocumentRequest {
+  project_id: number;
+  url: string;
+}
+
+export interface RequirementExternalDocumentResponse {
+  source_type: 'jira' | 'confluence' | string;
+  title: string;
+  description?: string;
+  acceptance_criteria?: string;
+  external_key?: string;
+  url: string;
+}
+
+export interface RequirementTraceabilitySummary {
+  linked_count: number;
+  active_count: number;
+  missing_coverage: number;
+  failed_related_runs: number;
+  blocked_related_runs: number;
+}
+
+export interface RequirementLinkedTestCase extends TestCase {
+  suite_name?: string;
+  section_name?: string;
+  linked: boolean;
+  link_id?: number;
+  latest_run_status?: string;
+  latest_run_at?: string;
+}
+
+export interface RequirementLinkedTestCaseList {
+  items: RequirementLinkedTestCase[];
+  total: number;
+  skip: number;
+  limit: number;
+  summary: RequirementTraceabilitySummary;
+}
+
+export interface RequirementLinkedTestCaseBulkResponse {
+  linked_count: number;
+  unlinked_count: number;
+  skipped_count: number;
+  items: RequirementLinkedTestCase[];
+  summary: RequirementTraceabilitySummary;
+}
+
+export interface RequirementLinkedTestCaseHistoryItem {
+  id: number;
+  action: 'link' | 'unlink' | string;
+  test_case_id?: number;
+  test_case_title?: string;
+  user_id: number;
+  username?: string;
+  full_name?: string;
+  created_at: string;
+  description?: string;
+}
+
+export interface RequirementLinkedTestCaseHistory {
+  items: RequirementLinkedTestCaseHistoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface RequirementLinkedTestPlan {
+  id: number;
+  title: string;
+  status?: string;
+  milestone_id?: number;
+  milestone_title?: string;
+  target_start_date?: string;
+  target_end_date?: string;
+  linked: boolean;
+}
+
+export interface RequirementLinkedTestPlanList {
+  items: RequirementLinkedTestPlan[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface RequirementLinkedTestPlanBulkResponse {
+  linked_count: number;
+  unlinked_count: number;
+  skipped_count: number;
+  items: RequirementLinkedTestPlan[];
+}
+
+export interface RequirementRelationshipCount {
+  total: number;
+  items: Array<Record<string, any>>;
+}
+
+export interface RequirementRelationshipSummary {
+  test_cases: RequirementTraceabilitySummary;
+  defects: RequirementRelationshipCount;
+  test_plans: RequirementRelationshipCount;
+  milestones: RequirementRelationshipCount;
+  test_runs: RequirementRelationshipCount;
+  coverage_reports: RequirementRelationshipCount;
 }
 
 // Milestone Types

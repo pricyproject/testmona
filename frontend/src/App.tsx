@@ -15,6 +15,7 @@ const Signup = lazyPage(() => import('@/pages/Signup'), 'Signup');
 const Dashboard = lazyPage(() => import('@/pages/Dashboard'), 'Dashboard');
 const Projects = lazyPage(() => import('@/pages/Projects'), 'Projects');
 const Requirements = lazyPage(() => import('@/pages/Requirements'), 'Requirements');
+const RequirementDetail = lazyPage(() => import('@/pages/RequirementDetail'), 'RequirementDetail');
 const TestSuites = lazyPage(() => import('@/pages/TestSuites'), 'TestSuites');
 const TestSuiteDetail = lazyPage(() => import('@/pages/TestSuiteDetail'), 'TestSuiteDetail');
 const TestCases = lazyPage(() => import('@/pages/TestCases'), 'TestCases');
@@ -193,6 +194,11 @@ function AppWithRouter() {
         <Route path="/projects/:projectId/requirements" element={
           <ProjectGuard>
             <Requirements />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/requirements/:requirementId" element={
+          <ProjectGuard>
+            <RequirementDetail />
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/defects" element={

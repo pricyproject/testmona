@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -31,20 +33,19 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Link, Filter, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle } from 'lucide-react';
-import { useProjectStore } from '@/stores/projectStore';
+import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI } from '@/lib/api';
 import { Requirement, RequirementCreate, RequirementUpdate } from '@/types';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { diffWords } from 'diff';
 
 
 export function Requirements() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const { selectedProject } = useProjectStore();
+  const { projectId, requirementId: routeRequirementId } = useParams<{ projectId: string; requirementId?: string }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
@@ -75,6 +76,11 @@ export function Requirements() {
   const [reqAcceptanceCriteria, setReqAcceptanceCriteria] = useState('');
   const [reqTags, setReqTags] = useState('');
   const [reqEstimatedEffort, setReqEstimatedEffort] = useState('');
+  const [useGherkinSyntax, setUseGherkinSyntax] = useState(false);
+  const [externalDocumentUrl, setExternalDocumentUrl] = useState('');
+  const [isFetchingDocument, setIsFetchingDocument] = useState(false);
+  const [showExternalImport, setShowExternalImport] = useState(false);
+  const [showAdvancedRequirementTools, setShowAdvancedRequirementTools] = useState(false);
   const [initialFormState, setInitialFormState] = useState<any>(null);
   const draftSaveTimeoutRef = useRef<number | null>(null);
   const [contentVersions, setContentVersions] = useState<Array<{ id: string; createdAt: string; description: string; acceptance: string }>>([]);
@@ -92,6 +98,70 @@ export function Requirements() {
       .replace(/<[^>]*>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
+  const gherkinTemplate = [
+    'Feature: ',
+    '',
+    '  Scenario: ',
+    '    Given ',
+    '    When ',
+    '    Then ',
+  ].join('\n');
+
+  const gherkinBackgroundTemplate = ['  Background:', '    Given '].join('\n');
+  const gherkinScenarioOutlineTemplate = [
+    '  Scenario Outline: ',
+    '    Given ',
+    '    When ',
+    '    Then ',
+    '',
+    '    Examples:',
+    '      | input | result |',
+    '      | value | expected |',
+  ].join('\n');
+
+  const looksLikeGherkin = (value: string): boolean =>
+    /^\s*(Feature|Scenario|Scenario Outline|Background|Given|When|Then|And|But):?\b/im.test(value);
+
+  const isValidExternalDocumentUrl = (value: string): boolean => {
+    try {
+      const parsed = new URL(value);
+      return ['http:', 'https:'].includes(parsed.protocol) && /(?:atlassian\.net|jira|confluence)/i.test(parsed.hostname + parsed.pathname);
+    } catch {
+      return false;
+    }
+  };
+
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
+  const buildExternalDocumentText = (documentData: any, currentDescription: string): string => {
+    const sourceType = String(documentData.source_type || 'external').toLowerCase();
+    const heading = sourceType === 'confluence' ? t('confluenceDocument') : t('jiraDocument');
+    const sourceUrl = String(documentData.url || '');
+    const documentText = [
+      `<section data-requirement-source="true" data-requirement-source-url="${escapeHtml(sourceUrl)}">`,
+      `<h2>${escapeHtml(`${heading}: ${documentData.title || t('untitledDocument')}`)}</h2>`,
+      documentData.external_key ? `<p><strong>Key:</strong> ${escapeHtml(String(documentData.external_key))}</p>` : '',
+      `<p><strong>Source:</strong> <a href="${escapeHtml(sourceUrl)}">${escapeHtml(sourceUrl)}</a></p>`,
+      `<pre>${escapeHtml(documentData.description || '')}</pre>`,
+      '</section>',
+    ].filter(Boolean).join('');
+
+    const existing = currentDescription.trim();
+    if (!existing) return documentText;
+    if (/data-requirement-source-url=/i.test(existing)) return documentText;
+    return `${existing}<hr />${documentText}`;
+  };
+
+  const insertGherkinSnippet = (snippet: string) => {
+    setReqAcceptanceCriteria((current) => current.trim() ? `${current.trim()}\n\n${snippet}` : snippet);
+  };
 
   const buildDiffHtml = (from: string, to: string): string => {
     const parts = diffWords(toPlain(from), toPlain(to));
@@ -119,12 +189,7 @@ export function Requirements() {
     setCompareFromId(snapshot.id);
   };
 
-  // Load requirements
-  useEffect(() => {
-    loadRequirements();
-  }, [projectId]);
-
-  const loadRequirements = async () => {
+  const loadRequirements = useCallback(async () => {
     if (!projectId) return;
     
     try {
@@ -141,7 +206,25 @@ export function Requirements() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectId, t, toast]);
+
+  // Load requirements
+  useEffect(() => {
+    Promise.resolve().then(loadRequirements);
+  }, [loadRequirements]);
+
+  const routeRequirement = useMemo(() => {
+    if (!routeRequirementId || requirements.length === 0) return null;
+    const decodedId = decodeURIComponent(routeRequirementId);
+    const currentProjectId = Number(projectId);
+    return requirements.find((item) =>
+      Number(item.project_id) === currentProjectId &&
+      (String(item.id) === decodedId || item.requirement_id.toLowerCase() === decodedId.toLowerCase())
+    ) || null;
+  }, [projectId, requirements, routeRequirementId]);
+
+  const visibleRequirement = routeRequirementId ? routeRequirement : selectedRequirement;
+  const isRequirementViewOpen = isViewDialogOpen || Boolean(routeRequirement);
 
   // Filtering logic
   const filteredRequirements = requirements.filter(req => {
@@ -247,6 +330,10 @@ export function Requirements() {
     setReqAcceptanceCriteria(requirement.acceptance_criteria || '');
     setReqTags(requirement.tags || '');
     setReqEstimatedEffort(requirement.estimated_effort?.toString() || '');
+    setUseGherkinSyntax(looksLikeGherkin(requirement.acceptance_criteria || ''));
+    setExternalDocumentUrl('');
+    setShowExternalImport(false);
+    setShowAdvancedRequirementTools(false);
     setInitialFormState({
       title: requirement.title,
       description: requirement.description || '',
@@ -255,6 +342,7 @@ export function Requirements() {
       acceptanceCriteria: requirement.acceptance_criteria || '',
       tags: requirement.tags || '',
       estimatedEffort: requirement.estimated_effort?.toString() || '',
+      useGherkinSyntax: looksLikeGherkin(requirement.acceptance_criteria || ''),
     });
     setContentVersions([]);
     setCompareFromId('');
@@ -356,6 +444,44 @@ export function Requirements() {
     }
   };
 
+  const handleFetchExternalDocument = async () => {
+    if (!projectId) return;
+    const url = externalDocumentUrl.trim();
+    if (!isValidExternalDocumentUrl(url)) {
+      toast({
+        title: t('validationError'),
+        description: t('externalDocInvalidUrl'),
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setIsFetchingDocument(true);
+      const documentData = await requirementsAPI.fetchExternalDocument({
+        project_id: Number(projectId),
+        url,
+      });
+      setReqTitle(documentData.title || reqTitle);
+      setReqDescription(buildExternalDocumentText(documentData, reqDescription));
+      setReqAcceptanceCriteria(documentData.acceptance_criteria || reqAcceptanceCriteria);
+      setUseGherkinSyntax(looksLikeGherkin(documentData.acceptance_criteria || reqAcceptanceCriteria));
+      toast({
+        title: t('success'),
+        description: t('externalDocImported', { title: documentData.title || url }),
+      });
+    } catch (error: any) {
+      console.error('Error fetching external document:', error);
+      toast({
+        title: t('error'),
+        description: error.response?.data?.detail || t('failedToFetchExternalDoc'),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsFetchingDocument(false);
+    }
+  };
+
   const resetForm = () => {
     setReqTitle('');
     setReqDescription('');
@@ -365,6 +491,10 @@ export function Requirements() {
     setReqAcceptanceCriteria('');
     setReqTags('');
     setReqEstimatedEffort('');
+    setUseGherkinSyntax(false);
+    setExternalDocumentUrl('');
+    setShowExternalImport(false);
+    setShowAdvancedRequirementTools(false);
     setHasUnsavedChanges(false);
     setInitialFormState(null);
     if (projectId) {
@@ -372,8 +502,7 @@ export function Requirements() {
     }
   };
   
-  const checkUnsavedChanges = () => {
-    const currentState = {
+  const currentFormState = useMemo(() => ({
       title: reqTitle,
       description: reqDescription,
       priority: reqPriority,
@@ -381,9 +510,12 @@ export function Requirements() {
       acceptanceCriteria: reqAcceptanceCriteria,
       tags: reqTags,
       estimatedEffort: reqEstimatedEffort,
-    };
-    return JSON.stringify(currentState) !== JSON.stringify(initialFormState);
-  };
+      useGherkinSyntax,
+  }), [reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, useGherkinSyntax]);
+
+  const checkUnsavedChanges = useCallback(() => {
+    return JSON.stringify(currentFormState) !== JSON.stringify(initialFormState);
+  }, [currentFormState, initialFormState]);
   
   const handleDialogClose = (dialogType: 'create' | 'edit') => {
     if (hasUnsavedChanges && checkUnsavedChanges()) {
@@ -417,6 +549,19 @@ export function Requirements() {
   const handleViewRequirement = (requirement: Requirement) => {
     setSelectedRequirement(requirement);
     setIsViewDialogOpen(true);
+    if (projectId) {
+      navigate(`/projects/${projectId}/requirements/${requirement.id}`);
+    }
+  };
+
+  const handleViewDialogOpenChange = (open: boolean) => {
+    setIsViewDialogOpen(open);
+    if (!open) {
+      setSelectedRequirement(null);
+      if (routeRequirementId && projectId) {
+        navigate(`/projects/${projectId}/requirements`);
+      }
+    }
   };
 
   const openDeleteDialog = (requirement: Requirement) => {
@@ -495,6 +640,10 @@ export function Requirements() {
           setReqAcceptanceCriteria(draft.reqAcceptanceCriteria || '');
           setReqTags(draft.reqTags || '');
           setReqEstimatedEffort(draft.reqEstimatedEffort || '');
+          setUseGherkinSyntax(Boolean(draft.useGherkinSyntax || looksLikeGherkin(draft.reqAcceptanceCriteria || '')));
+          setExternalDocumentUrl('');
+          setShowExternalImport(false);
+          setShowAdvancedRequirementTools(false);
           setInitialFormState({
             title: draft.reqTitle || '',
             description: draft.reqDescription || '',
@@ -503,6 +652,7 @@ export function Requirements() {
             acceptanceCriteria: draft.reqAcceptanceCriteria || '',
             tags: draft.reqTags || '',
             estimatedEffort: draft.reqEstimatedEffort || '',
+            useGherkinSyntax: Boolean(draft.useGherkinSyntax || looksLikeGherkin(draft.reqAcceptanceCriteria || '')),
           });
           setContentVersions([]);
           setCompareFromId('');
@@ -517,6 +667,10 @@ export function Requirements() {
     }
     resetForm();
     setReqId(generateRequirementId());
+    setUseGherkinSyntax(false);
+    setExternalDocumentUrl('');
+    setShowExternalImport(false);
+    setShowAdvancedRequirementTools(false);
     setInitialFormState({
       title: '',
       description: '',
@@ -525,6 +679,7 @@ export function Requirements() {
       acceptanceCriteria: '',
       tags: '',
       estimatedEffort: '',
+      useGherkinSyntax: false,
     });
     setContentVersions([]);
     setCompareFromId('');
@@ -550,6 +705,7 @@ export function Requirements() {
           reqAcceptanceCriteria,
           reqTags,
           reqEstimatedEffort,
+          useGherkinSyntax,
         })
       );
     }, 350);
@@ -558,14 +714,14 @@ export function Requirements() {
         window.clearTimeout(draftSaveTimeoutRef.current);
       }
     };
-  }, [isCreateDialogOpen, projectId, reqTitle, reqDescription, reqId, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort]);
+  }, [isCreateDialogOpen, projectId, reqTitle, reqDescription, reqId, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, useGherkinSyntax]);
   
   // Track form changes
   useEffect(() => {
     if (initialFormState) {
-      setHasUnsavedChanges(checkUnsavedChanges());
+      Promise.resolve().then(() => setHasUnsavedChanges(checkUnsavedChanges()));
     }
-  }, [reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort]);
+  }, [checkUnsavedChanges, initialFormState]);
   
   // Keyboard navigation
   useEffect(() => {
@@ -587,10 +743,417 @@ export function Requirements() {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateDialogOpen, isEditDialogOpen, showUnsavedDialog, reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, selectedRequirement]);
+
+  const renderExternalDocumentImport = (inputId: string) => (
+    <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/60 dark:bg-blue-950/20">
+      <div className="flex items-center gap-2">
+        <ExternalLink className="h-4 w-4 text-blue-600 dark:text-blue-300" />
+        <Label htmlFor={inputId} className="text-sm font-semibold">
+          {t('importFromAtlassian')}
+        </Label>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input
+          id={inputId}
+          value={externalDocumentUrl}
+          onChange={(e) => setExternalDocumentUrl(e.target.value)}
+          placeholder={t('externalDocUrlPlaceholder')}
+          className="min-w-0 flex-1"
+          dir="ltr"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleFetchExternalDocument}
+          disabled={isFetchingDocument || !externalDocumentUrl.trim()}
+          className="shrink-0"
+        >
+          {isFetchingDocument ? (
+            <>
+              <div className={`h-4 w-4 animate-spin rounded-full border-b-2 border-current ${isRTL ? 'ml-2' : 'mr-2'}`}></div>
+              {t('fetching')}
+            </>
+          ) : (
+            <>
+              <Wand2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('fetchDocument')}
+            </>
+          )}
+        </Button>
+      </div>
+      <p className="text-xs text-blue-700 dark:text-blue-300">{t('externalDocImportHelp')}</p>
+    </div>
+  );
+
+  const renderRequirementModeControls = (idPrefix: string) => (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+        <Label htmlFor={`${idPrefix}-external-import`} className="text-sm font-medium">
+          {t('importFromAtlassian')}
+        </Label>
+        <Switch
+          id={`${idPrefix}-external-import`}
+          checked={showExternalImport}
+          onCheckedChange={setShowExternalImport}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
+        <Label htmlFor={`${idPrefix}-advanced-tools`} className="text-sm font-medium">
+          {t('advancedRequirementTools')}
+        </Label>
+        <Switch
+          id={`${idPrefix}-advanced-tools`}
+          checked={showAdvancedRequirementTools}
+          onCheckedChange={setShowAdvancedRequirementTools}
+        />
+      </div>
+    </div>
+  );
+
+  const renderAcceptanceCriteriaEditor = (idPrefix: string) => (
+    <div className="space-y-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Label htmlFor={`${idPrefix}-acceptanceCriteria`} className="text-base font-semibold">
+          {t('acceptanceCriteria')}
+        </Label>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">{getPlainTextLength(reqAcceptanceCriteria)} {t('chars')}</span>
+          <div className="flex items-center gap-2">
+            <Label htmlFor={`${idPrefix}-gherkin`} className="text-xs font-medium text-gray-600 dark:text-gray-300">
+              {t('gherkinSyntax')}
+            </Label>
+            <Switch
+              id={`${idPrefix}-gherkin`}
+              checked={useGherkinSyntax}
+              onCheckedChange={(checked) => {
+                setUseGherkinSyntax(checked);
+                if (checked && !reqAcceptanceCriteria.trim()) {
+                  setReqAcceptanceCriteria(gherkinTemplate);
+                }
+              }}
+            />
+          </div>
+        </div>
+      </div>
+      {useGherkinSyntax ? (
+        <div className="space-y-2">
+          <Textarea
+            id={`${idPrefix}-acceptanceCriteria`}
+            value={reqAcceptanceCriteria}
+            onChange={(e) => setReqAcceptanceCriteria(e.target.value)}
+            placeholder={t('gherkinAcceptancePlaceholder')}
+            dir={isRTL ? 'rtl' : 'ltr'}
+            className="min-h-[190px] font-mono text-sm leading-6"
+          />
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => insertGherkinSnippet(gherkinTemplate)}
+            >
+              {t('insertGherkinTemplate')}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => insertGherkinSnippet(gherkinBackgroundTemplate)}>
+              {t('insertGherkinBackground')}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => insertGherkinSnippet(gherkinScenarioOutlineTemplate)}>
+              {t('insertScenarioOutline')}
+            </Button>
+          </div>
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('gherkinPreview')}</div>
+            <GherkinViewer value={reqAcceptanceCriteria} emptyLabel={t('noAcceptanceCriteriaProvided')} />
+          </div>
+        </div>
+      ) : (
+        <RichTextEditor
+          value={reqAcceptanceCriteria}
+          onChange={setReqAcceptanceCriteria}
+          placeholder={t('enterAcceptanceCriteria')}
+          mentions={[{ id: 'current-user', label: 'You' }]}
+          dir={isRTL ? 'rtl' : 'ltr'}
+          className="min-h-[170px]"
+        />
+      )}
+      <p className="text-xs text-gray-500">
+        {useGherkinSyntax ? t('gherkinAcceptanceHelper') : t('acceptanceCriteriaHelper')}
+      </p>
+    </div>
+  );
 
   const fromSnapshot = contentVersions.find((version) => version.id === compareFromId) || null;
   const toSnapshot = contentVersions.find((version) => version.id === compareToId) || null;
+
+  const renderVersionHistory = () => (
+    <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      <div className="flex items-center justify-between">
+        <Label className="text-sm font-semibold">{t('rteVersionHistory')}</Label>
+        <Button type="button" size="sm" variant="outline" onClick={saveVersionSnapshot}>
+          {t('rteSaveSnapshot')}
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <select
+          className="h-9 rounded-md border bg-background px-2 text-sm"
+          value={compareFromId}
+          onChange={(e) => setCompareFromId(e.target.value)}
+        >
+          <option value="">{t('rteCompareFrom')}</option>
+          {contentVersions.map((version) => (
+            <option key={version.id} value={version.id}>
+              {new Date(version.createdAt).toLocaleString()}
+            </option>
+          ))}
+        </select>
+        <select
+          className="h-9 rounded-md border bg-background px-2 text-sm"
+          value={compareToId}
+          onChange={(e) => setCompareToId(e.target.value)}
+        >
+          <option value="">{t('rteCompareTo')}</option>
+          {contentVersions.map((version) => (
+            <option key={version.id} value={version.id}>
+              {new Date(version.createdAt).toLocaleString()}
+            </option>
+          ))}
+        </select>
+      </div>
+      {fromSnapshot && toSnapshot && (
+        <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs dark:border-gray-700 dark:bg-gray-900/30">
+          <div className="font-medium">{t('rteInlineDiff')}</div>
+          <div
+            className="prose prose-sm max-w-none whitespace-pre-wrap"
+            dangerouslySetInnerHTML={{ __html: buildDiffHtml(fromSnapshot.description, toSnapshot.description) }}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  const requirementStatusOptions = ['draft', 'reviewed', 'approved', 'implemented', 'verified', 'deprecated'];
+  const requirementPriorityOptions = ['low', 'medium', 'high', 'critical'];
+  const isRequirementIdValid = /^REQ-\d{3,}$/.test(reqId.trim());
+  const estimatedEffortValue = reqEstimatedEffort ? parseFloat(reqEstimatedEffort) : undefined;
+  const hasInvalidEstimatedEffort = estimatedEffortValue !== undefined && (Number.isNaN(estimatedEffortValue) || estimatedEffortValue < 0);
+  const canCreateRequirement = Boolean(reqId.trim() && reqTitle.trim() && isRequirementIdValid && !hasInvalidEstimatedEffort && !isSubmitting);
+  const canUpdateRequirement = Boolean(reqTitle.trim() && !hasInvalidEstimatedEffort && !isSubmitting);
+
+  const getRequirementSubmitDisabledReason = (mode: 'create' | 'edit'): string => {
+    if (isSubmitting) return '';
+    if (mode === 'create' && !reqId.trim()) return t('fieldRequired', { field: t('reqId') });
+    if (!reqTitle.trim()) return t('fieldRequired', { field: t('title') });
+    if (mode === 'create' && !isRequirementIdValid) return t('requirementIdInvalid');
+    if (hasInvalidEstimatedEffort) return t('estimatedEffortInvalid');
+    return '';
+  };
+
+  const renderRequirementTitleField = (mode: 'create' | 'edit') => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label htmlFor={`${mode}-reqTitle`} className="text-base font-semibold">
+          {t('title')} <span className="text-red-500">*</span>
+        </Label>
+        {reqTitle.trim().length > 0 && (
+          <span className="text-xs font-medium text-green-600">✓</span>
+        )}
+      </div>
+      <Input
+        id={`${mode}-reqTitle`}
+        ref={titleInputRef}
+        value={reqTitle}
+        onChange={(e) => setReqTitle(e.target.value)}
+        className="h-12 text-lg font-medium transition-all focus:ring-2 focus:ring-blue-500"
+        placeholder={t('enterRequirementTitle')}
+      />
+      <p className="text-xs text-gray-500">{t('titleHelper')}</p>
+    </div>
+  );
+
+  const renderRequirementDescriptionField = (mode: 'create' | 'edit') => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label htmlFor={`${mode}-reqDescription`} className="text-base font-semibold">
+          {t('description')}
+        </Label>
+        <span className="text-xs text-gray-500">{getPlainTextLength(reqDescription)} {t('chars')}</span>
+      </div>
+      <RichTextEditor
+        value={reqDescription}
+        onChange={setReqDescription}
+        placeholder={t('enterRequirementDescription')}
+        mentions={[{ id: 'current-user', label: 'You' }]}
+        dir={isRTL ? 'rtl' : 'ltr'}
+        className="min-h-[220px]"
+      />
+      <p className="text-xs text-gray-500">{t('descriptionHelper')}</p>
+    </div>
+  );
+
+  const renderRequirementMetadataFields = (mode: 'create' | 'edit') => (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+      <div className="space-y-2">
+        <Label htmlFor={`${mode}-reqId`} className="text-sm font-medium">
+          {t('reqId')} {mode === 'create' && <span className="text-red-500">*</span>}
+        </Label>
+        <Input
+          id={`${mode}-reqId`}
+          value={reqId}
+          onChange={(e) => setReqId(e.target.value)}
+          disabled={mode === 'edit'}
+          className={mode === 'edit' ? 'border-gray-300 bg-gray-100 text-sm dark:border-gray-600 dark:bg-gray-700' : 'text-sm transition-all focus:ring-2 focus:ring-blue-500'}
+          placeholder="REQ-001"
+        />
+        {mode === 'edit' ? (
+          <p className="text-xs text-gray-500">{t('reqIdImmutable')}</p>
+        ) : reqId && !isRequirementIdValid ? (
+          <p className="text-xs text-red-500">{t('reqIdFormatHelper')}</p>
+        ) : null}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${mode}-reqStatus`} className="text-sm font-medium">
+          {t('status')}
+        </Label>
+        <Select value={reqStatus} onValueChange={setReqStatus}>
+          <SelectTrigger className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
+            <SelectValue placeholder={t('selectStatus')} />
+          </SelectTrigger>
+          <SelectContent>
+            {requirementStatusOptions.map((status) => (
+              <SelectItem key={status} value={status}>{t(status as any)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${mode}-reqPriority`} className="text-sm font-medium">
+          {t('priority')}
+        </Label>
+        <Select value={reqPriority} onValueChange={setReqPriority}>
+          <SelectTrigger className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
+            <SelectValue placeholder={t('selectPriority')} />
+          </SelectTrigger>
+          <SelectContent>
+            {requirementPriorityOptions.map((priority) => (
+              <SelectItem key={priority} value={priority}>{t(priority as any)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${mode}-reqEstimatedEffort`} className="text-sm font-medium">
+          {t('estEffort')}
+        </Label>
+        <Input
+          id={`${mode}-reqEstimatedEffort`}
+          type="number"
+          step="0.5"
+          min="0"
+          value={reqEstimatedEffort}
+          onChange={(e) => setReqEstimatedEffort(e.target.value)}
+          className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
+          placeholder="8.0"
+        />
+        <p className={hasInvalidEstimatedEffort ? 'text-xs text-red-500' : 'text-xs text-gray-500'}>
+          {hasInvalidEstimatedEffort ? t('estimatedEffortInvalid') : t('estimatedEffortHelper')}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${mode}-reqTags`} className="text-sm font-medium">
+          {t('tags')}
+        </Label>
+        <Input
+          id={`${mode}-reqTags`}
+          value={reqTags}
+          onChange={(e) => setReqTags(e.target.value)}
+          className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
+          placeholder="security, authentication"
+        />
+        <p className="text-xs text-gray-500">{t('tagsHelper')}</p>
+      </div>
+    </div>
+  );
+
+  const renderRequirementToolPanel = (mode: 'create' | 'edit', isCreateMode: boolean) => (
+    <aside className="space-y-4">
+      <div className="rounded-md border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+        <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">{t('requirementDetails')}</h3>
+        {renderRequirementMetadataFields(mode)}
+      </div>
+      <div className="rounded-md border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+        <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">{t('tools')}</h3>
+        <div className="space-y-3">
+          {renderRequirementModeControls(mode)}
+        </div>
+      </div>
+      {showExternalImport && renderExternalDocumentImport(isCreateMode ? 'external-document-url' : 'edit-external-document-url')}
+      {showAdvancedRequirementTools && renderVersionHistory()}
+    </aside>
+  );
+
+  const renderRequirementDialogContent = (mode: 'create' | 'edit') => {
+    const isCreateMode = mode === 'create';
+    const canSubmit = isCreateMode ? canCreateRequirement : canUpdateRequirement;
+    const submitLabel = isCreateMode ? t('createRequirement') : t('updateRequirement');
+    const submittingLabel = isCreateMode ? t('creating') : t('updating');
+
+    return (
+      <DialogContent isRTL={isRTL} className="max-h-[90vh] w-[96vw] max-w-[96vw] overflow-y-auto overflow-x-hidden sm:max-w-[95vw] lg:max-w-[1080px]">
+        <DialogHeader className="border-b border-gray-200 pb-4 text-start dark:border-gray-700">
+          <div className="min-w-0">
+            <DialogTitle className="text-2xl font-semibold">
+              {isCreateMode ? t('createNewRequirement') : t('editRequirement')}
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-sm">
+              {isCreateMode ? t('createRequirementDesc') : t('updateRequirementInfo')}
+            </DialogDescription>
+          </div>
+        </DialogHeader>
+
+        <div className="grid gap-5 py-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="min-w-0 space-y-5">
+            <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+              {renderRequirementTitleField(mode)}
+            </div>
+            <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+              {renderRequirementDescriptionField(mode)}
+            </div>
+            <div className="rounded-md border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+              {renderAcceptanceCriteriaEditor(mode)}
+            </div>
+          </section>
+          {renderRequirementToolPanel(mode, isCreateMode)}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => handleDialogClose(mode)}>
+            {t('cancel')}
+          </Button>
+          <Button
+            type="submit"
+            onClick={isCreateMode ? handleCreateRequirement : handleUpdateRequirement}
+            disabled={!canSubmit}
+            title={getRequirementSubmitDisabledReason(mode)}
+          >
+            {isSubmitting ? (
+              <>
+                <div className={`h-4 w-4 animate-spin rounded-full border-b-2 border-current ${isRTL ? 'ml-2' : 'mr-2'}`}></div>
+                {submittingLabel}
+              </>
+            ) : (
+              submitLabel
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    );
+  };
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -606,229 +1169,7 @@ export function Requirements() {
               {t('addRequirement')}
             </Button>
           </DialogTrigger>
-          <DialogContent isRTL={isRTL} className="w-[96vw] max-w-[96vw] sm:max-w-[95vw] md:max-w-[900px] lg:max-w-[1000px] max-h-[90vh] overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out">
-            <DialogHeader className="space-y-2 pb-4">
-              <DialogTitle className="text-2xl font-semibold">{t('createNewRequirement')}</DialogTitle>
-              <DialogDescription className="text-sm">
-                {t('createRequirementDesc')}
-              </DialogDescription>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded border">⌘ + Enter</kbd>
-                <span>{t('toSubmit')}</span>
-                <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded border">Esc</kbd>
-                <span>{t('toClose')}</span>
-              </div>
-            </DialogHeader>
-            <div className="grid gap-4 py-6 md:grid-cols-[minmax(0,1fr)_minmax(240px,280px)] lg:gap-6">
-              {/* Main Content Area - Writing Focused */}
-              <div className="min-w-0 space-y-5">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="reqTitle" className="text-base font-semibold">
-                      {t('title')} <span className="text-red-500">*</span>
-                    </Label>
-                    {reqTitle.length > 0 && (
-                      <span className="text-xs text-green-600 font-medium">✓</span>
-                    )}
-                  </div>
-                  <Input
-                    id="reqTitle"
-                    ref={titleInputRef}
-                    value={reqTitle}
-                    onChange={(e) => setReqTitle(e.target.value)}
-                    className="text-lg font-medium h-12 transition-all focus:ring-2 focus:ring-blue-500"
-                    placeholder={t('enterRequirementTitle')}
-                  />
-                  <p className="text-xs text-gray-500">{t('titleHelper')}</p>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="reqDescription" className="text-base font-semibold">
-                      {t('description')}
-                    </Label>
-                    <span className="text-xs text-gray-500">{getPlainTextLength(reqDescription)} {t('chars')}</span>
-                  </div>
-                  <RichTextEditor
-                    value={reqDescription}
-                    onChange={setReqDescription}
-                    placeholder={t('enterRequirementDescription')}
-                    mentions={[{ id: 'current-user', label: 'You' }]}
-                    dir={isRTL ? 'rtl' : 'ltr'}
-                    className="min-h-[220px]"
-                  />
-                  <p className="text-xs text-gray-500">{t('descriptionHelper')}</p>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="acceptanceCriteria" className="text-base font-semibold">
-                      {t('acceptanceCriteria')}
-                    </Label>
-                    <span className="text-xs text-gray-500">{getPlainTextLength(reqAcceptanceCriteria)} {t('chars')}</span>
-                  </div>
-                  <RichTextEditor
-                    value={reqAcceptanceCriteria}
-                    onChange={setReqAcceptanceCriteria}
-                    placeholder={t('enterAcceptanceCriteria')}
-                    mentions={[{ id: 'current-user', label: 'You' }]}
-                    dir={isRTL ? 'rtl' : 'ltr'}
-                    className="min-h-[170px]"
-                  />
-                  <p className="text-xs text-gray-500">{t('acceptanceCriteriaHelper')}</p>
-                </div>
-
-                <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-semibold">{t('rteVersionHistory')}</Label>
-                    <Button type="button" size="sm" variant="outline" onClick={saveVersionSnapshot}>
-                      {t('rteSaveSnapshot')}
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    <select
-                      className="h-9 rounded-md border bg-background px-2 text-sm"
-                      value={compareFromId}
-                      onChange={(e) => setCompareFromId(e.target.value)}
-                    >
-                      <option value="">{t('rteCompareFrom')}</option>
-                      {contentVersions.map((version) => (
-                        <option key={version.id} value={version.id}>
-                          {new Date(version.createdAt).toLocaleString()}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="h-9 rounded-md border bg-background px-2 text-sm"
-                      value={compareToId}
-                      onChange={(e) => setCompareToId(e.target.value)}
-                    >
-                      <option value="">{t('rteCompareTo')}</option>
-                      {contentVersions.map((version) => (
-                        <option key={version.id} value={version.id}>
-                          {new Date(version.createdAt).toLocaleString()}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {fromSnapshot && toSnapshot && (
-                    <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs dark:border-gray-700 dark:bg-gray-900/30">
-                      <div className="font-medium">{t('rteInlineDiff')}</div>
-                      <div
-                        className="prose prose-sm max-w-none whitespace-pre-wrap"
-                        dangerouslySetInnerHTML={{ __html: buildDiffHtml(fromSnapshot.description, toSnapshot.description) }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {/* Sidebar - Metadata */}
-              <div className="min-w-0 space-y-5 bg-gray-50 dark:bg-gray-800/50 p-4 sm:p-5 rounded-lg border border-gray-200 dark:border-gray-700">
-                <div className="pb-3 border-b border-gray-200 dark:border-gray-700">
-                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('metadata')}</h3>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="reqId" className="text-sm font-medium">
-                    {t('reqId')} <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="reqId"
-                    value={reqId}
-                    onChange={(e) => setReqId(e.target.value)}
-                    className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
-                    placeholder="REQ-001"
-                  />
-                  {reqId && !/^REQ-\d{3,}$/.test(reqId) && (
-                    <p className="text-xs text-red-500">{t('reqIdFormatHelper')}</p>
-                  )}
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="reqStatus" className="text-sm font-medium">
-                    {t('status')}
-                  </Label>
-                  <Select value={reqStatus} onValueChange={setReqStatus}>
-                    <SelectTrigger className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
-                      <SelectValue placeholder={t('selectStatus')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="draft">{t('draft')}</SelectItem>
-                      <SelectItem value="reviewed">{t('reviewed')}</SelectItem>
-                      <SelectItem value="approved">{t('approved')}</SelectItem>
-                      <SelectItem value="implemented">{t('implemented')}</SelectItem>
-                      <SelectItem value="verified">{t('verified')}</SelectItem>
-                      <SelectItem value="deprecated">{t('deprecated')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="reqPriority" className="text-sm font-medium">
-                    {t('priority')}
-                  </Label>
-                  <Select value={reqPriority} onValueChange={setReqPriority}>
-                    <SelectTrigger className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
-                      <SelectValue placeholder={t('selectPriority')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">{t('low')}</SelectItem>
-                      <SelectItem value="medium">{t('medium')}</SelectItem>
-                      <SelectItem value="high">{t('high')}</SelectItem>
-                      <SelectItem value="critical">{t('critical')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="reqEstimatedEffort" className="text-sm font-medium">
-                    {t('estEffort')}
-                  </Label>
-                  <Input
-                    id="reqEstimatedEffort"
-                    type="number"
-                    step="0.5"
-                    value={reqEstimatedEffort}
-                    onChange={(e) => setReqEstimatedEffort(e.target.value)}
-                    className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
-                    placeholder="8.0"
-                  />
-                  <p className="text-xs text-gray-500">{t('estimatedEffortHelper')}</p>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="reqTags" className="text-sm font-medium">
-                    {t('tags')}
-                  </Label>
-                  <Input
-                    id="reqTags"
-                    value={reqTags}
-                    onChange={(e) => setReqTags(e.target.value)}
-                    className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
-                    placeholder="security, authentication"
-                  />
-                  <p className="text-xs text-gray-500">{t('tagsHelper')}</p>
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                type="submit"
-                onClick={handleCreateRequirement}
-                disabled={isSubmitting || !reqId.trim() || !reqTitle.trim() || !/^REQ-\d{3,}$/.test(reqId.trim())}
-                title={!reqId.trim() ? t('reqId') + ' is required' : !reqTitle.trim() ? t('title') + ' is required' : !/^REQ-\d{3,}$/.test(reqId.trim()) ? t('requirementIdInvalid') : ''}
-              >
-                {isSubmitting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-                    {t('creating')}
-                  </>
-                ) : (
-                  t('createRequirement')
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
+          {renderRequirementDialogContent('create')}
         </Dialog>
       </div>
 
@@ -981,28 +1322,28 @@ export function Requirements() {
       </div>
 
       {/* View Requirement Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="sm:max-w-[95vw] md:max-w-[700px] lg:max-w-[800px] max-h-[90vh] overflow-y-auto">
+      <Dialog open={isRequirementViewOpen} onOpenChange={handleViewDialogOpenChange}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[95vw] md:max-w-[700px] lg:max-w-[800px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t('requirementDetails')}</DialogTitle>
             <DialogDescription>
               {t('viewManageRequirement')}
             </DialogDescription>
           </DialogHeader>
-          {selectedRequirement && (
+          {visibleRequirement && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-sm font-medium">{t('requirementId')}</Label>
-                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{selectedRequirement.requirement_id}</p>
+                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{visibleRequirement.requirement_id}</p>
                 </div>
                 <div>
                   <Label className="text-sm font-medium">{t('status')}</Label>
                   <div className="mt-1">
-                    <Badge className={getStatusBadge(selectedRequirement.status)}>
+                    <Badge className={getStatusBadge(visibleRequirement.status)}>
                       <div className="flex items-center gap-1">
-                        {getStatusIcon(selectedRequirement.status)}
-                        {selectedRequirement.status}
+                        {getStatusIcon(visibleRequirement.status)}
+                        {visibleRequirement.status}
                       </div>
                     </Badge>
                   </div>
@@ -1010,45 +1351,45 @@ export function Requirements() {
                 <div>
                   <Label className="text-sm font-medium">{t('priority')}</Label>
                   <div className="mt-1">
-                    <Badge className={getPriorityBadge(selectedRequirement.priority)}>
-                      {selectedRequirement.priority}
+                    <Badge className={getPriorityBadge(visibleRequirement.priority)}>
+                      {visibleRequirement.priority}
                     </Badge>
                   </div>
                 </div>
                 <div>
                   <Label className="text-sm font-medium">{t('created')}</Label>
                   <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">
-                    {new Date(selectedRequirement.created_at).toLocaleDateString()}
+                    {new Date(visibleRequirement.created_at).toLocaleDateString()}
                   </p>
                 </div>
               </div>
               
               <div>
                 <Label className="text-sm font-medium">{t('title')}</Label>
-                <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{selectedRequirement.title}</p>
+                <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{visibleRequirement.title}</p>
               </div>
               
               <div>
                 <Label className="text-sm font-medium">{t('description')}</Label>
                 <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap">
-                  {selectedRequirement.description || t('noDescriptionProvided')}
+                  {visibleRequirement.description || t('noDescriptionProvided')}
                 </p>
               </div>
               
-              {selectedRequirement.acceptance_criteria && (
+              {visibleRequirement.acceptance_criteria && (
                 <div>
                   <Label className="text-sm font-medium">{t('acceptanceCriteria')}</Label>
                   <p className="text-sm text-gray-900 dark:text-gray-100 mt-1 whitespace-pre-wrap">
-                    {selectedRequirement.acceptance_criteria}
+                    {visibleRequirement.acceptance_criteria}
                   </p>
                 </div>
               )}
               
-              {selectedRequirement.tags && selectedRequirement.tags.trim() && (
+              {visibleRequirement.tags && visibleRequirement.tags.trim() && (
                 <div>
                   <Label className="text-sm font-medium">{t('tags')}</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {selectedRequirement.tags.split(',').map((tag, index) => {
+                    {visibleRequirement.tags.split(',').map((tag, index) => {
                       const trimmedTag = tag.trim();
                       return trimmedTag ? (
                         <span key={index} className="text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 px-2 py-1 rounded">
@@ -1060,10 +1401,10 @@ export function Requirements() {
                 </div>
               )}
               
-              {selectedRequirement.estimated_effort && (
+              {visibleRequirement.estimated_effort && (
                 <div>
                   <Label className="text-sm font-medium">{t('estimatedEffortHours')}</Label>
-                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{selectedRequirement.estimated_effort} hours</p>
+                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{visibleRequirement.estimated_effort} hours</p>
                 </div>
               )}
             </div>
@@ -1071,14 +1412,14 @@ export function Requirements() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setIsViewDialogOpen(false)}
+              onClick={() => handleViewDialogOpenChange(false)}
             >
               {t('close')}
             </Button>
             <Button
               onClick={() => {
-                setIsViewDialogOpen(false);
-                handleEditRequirement(selectedRequirement!);
+                handleViewDialogOpenChange(false);
+                if (visibleRequirement) handleEditRequirement(visibleRequirement);
               }}
             >
               {t('editRequirement')}
@@ -1089,231 +1430,7 @@ export function Requirements() {
 
       {/* Edit Requirement Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={(open) => !open && handleDialogClose('edit')}>
-        <DialogContent isRTL={isRTL} className="w-[96vw] max-w-[96vw] sm:max-w-[95vw] md:max-w-[900px] lg:max-w-[1000px] max-h-[90vh] overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out">
-          <DialogHeader className="space-y-2 pb-4">
-            <DialogTitle className="text-2xl font-semibold">{t('editRequirement')}</DialogTitle>
-            <DialogDescription className="text-sm">
-              {t('updateRequirementInfo')}
-            </DialogDescription>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded border">⌘ + Enter</kbd>
-              <span>{t('toSubmit')}</span>
-              <kbd className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded border">Esc</kbd>
-              <span>{t('toClose')}</span>
-            </div>
-          </DialogHeader>
-          <div className="grid gap-4 py-6 md:grid-cols-[minmax(0,1fr)_minmax(240px,280px)] lg:gap-6">
-            {/* Main Content Area - Writing Focused */}
-            <div className="min-w-0 space-y-5">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="edit-reqTitle" className="text-base font-semibold">
-                    {t('title')} <span className="text-red-500">*</span>
-                  </Label>
-                  {reqTitle.length > 0 && (
-                    <span className="text-xs text-green-600 font-medium">✓</span>
-                  )}
-                </div>
-                <Input
-                  id="edit-reqTitle"
-                  ref={titleInputRef}
-                  value={reqTitle}
-                  onChange={(e) => setReqTitle(e.target.value)}
-                  className="text-lg font-medium h-12 transition-all focus:ring-2 focus:ring-blue-500"
-                  placeholder={t('enterRequirementTitle')}
-                />
-                <p className="text-xs text-gray-500">{t('titleHelper')}</p>
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="edit-reqDescription" className="text-base font-semibold">
-                    {t('description')}
-                  </Label>
-                  <span className="text-xs text-gray-500">{getPlainTextLength(reqDescription)} {t('chars')}</span>
-                </div>
-                <RichTextEditor
-                  value={reqDescription}
-                  onChange={setReqDescription}
-                  placeholder={t('enterRequirementDescription')}
-                  mentions={[{ id: 'current-user', label: 'You' }]}
-                  dir={isRTL ? 'rtl' : 'ltr'}
-                  className="min-h-[220px]"
-                />
-                <p className="text-xs text-gray-500">{t('descriptionHelper')}</p>
-              </div>
-              
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="edit-acceptanceCriteria" className="text-base font-semibold">
-                    {t('acceptanceCriteria')}
-                  </Label>
-                  <span className="text-xs text-gray-500">{getPlainTextLength(reqAcceptanceCriteria)} {t('chars')}</span>
-                </div>
-                <RichTextEditor
-                  value={reqAcceptanceCriteria}
-                  onChange={setReqAcceptanceCriteria}
-                  placeholder={t('enterAcceptanceCriteria')}
-                  mentions={[{ id: 'current-user', label: 'You' }]}
-                  dir={isRTL ? 'rtl' : 'ltr'}
-                  className="min-h-[170px]"
-                />
-                <p className="text-xs text-gray-500">{t('acceptanceCriteriaHelper')}</p>
-              </div>
-
-              <div className="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-semibold">{t('rteVersionHistory')}</Label>
-                  <Button type="button" size="sm" variant="outline" onClick={saveVersionSnapshot}>
-                    {t('rteSaveSnapshot')}
-                  </Button>
-                </div>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                  <select
-                    className="h-9 rounded-md border bg-background px-2 text-sm"
-                    value={compareFromId}
-                    onChange={(e) => setCompareFromId(e.target.value)}
-                  >
-                    <option value="">{t('rteCompareFrom')}</option>
-                    {contentVersions.map((version) => (
-                      <option key={version.id} value={version.id}>
-                        {new Date(version.createdAt).toLocaleString()}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="h-9 rounded-md border bg-background px-2 text-sm"
-                    value={compareToId}
-                    onChange={(e) => setCompareToId(e.target.value)}
-                  >
-                    <option value="">{t('rteCompareTo')}</option>
-                    {contentVersions.map((version) => (
-                      <option key={version.id} value={version.id}>
-                        {new Date(version.createdAt).toLocaleString()}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {fromSnapshot && toSnapshot && (
-                  <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs dark:border-gray-700 dark:bg-gray-900/30">
-                    <div className="font-medium">{t('rteInlineDiff')}</div>
-                    <div
-                      className="prose prose-sm max-w-none whitespace-pre-wrap"
-                      dangerouslySetInnerHTML={{ __html: buildDiffHtml(fromSnapshot.description, toSnapshot.description) }}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            {/* Sidebar - Metadata */}
-            <div className="min-w-0 space-y-5 bg-gray-50 dark:bg-gray-800/50 p-4 sm:p-5 rounded-lg border border-gray-200 dark:border-gray-700">
-              <div className="pb-3 border-b border-gray-200 dark:border-gray-700">
-                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('metadata')}</h3>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-reqId" className="text-sm font-medium">
-                  {t('reqId')}
-                </Label>
-                <Input
-                  id="edit-reqId"
-                  value={reqId}
-                  disabled
-                  className="text-sm bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
-                />
-                <p className="text-xs text-gray-500">{t('reqIdImmutable')}</p>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-reqStatus" className="text-sm font-medium">
-                  {t('status')}
-                </Label>
-                <Select value={reqStatus} onValueChange={setReqStatus}>
-                  <SelectTrigger className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
-                    <SelectValue placeholder={t('selectStatus')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="draft">{t('draft')}</SelectItem>
-                    <SelectItem value="reviewed">{t('reviewed')}</SelectItem>
-                    <SelectItem value="approved">{t('approved')}</SelectItem>
-                    <SelectItem value="implemented">{t('implemented')}</SelectItem>
-                    <SelectItem value="verified">{t('verified')}</SelectItem>
-                    <SelectItem value="deprecated">{t('deprecated')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-reqPriority" className="text-sm font-medium">
-                  {t('priority')}
-                </Label>
-                <Select value={reqPriority} onValueChange={setReqPriority}>
-                  <SelectTrigger className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
-                    <SelectValue placeholder={t('selectPriority')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">{t('low')}</SelectItem>
-                    <SelectItem value="medium">{t('medium')}</SelectItem>
-                    <SelectItem value="high">{t('high')}</SelectItem>
-                    <SelectItem value="critical">{t('critical')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-reqEstimatedEffort" className="text-sm font-medium">
-                  {t('estEffort')}
-                </Label>
-                <Input
-                  id="edit-reqEstimatedEffort"
-                  type="number"
-                  step="0.5"
-                  value={reqEstimatedEffort}
-                  onChange={(e) => setReqEstimatedEffort(e.target.value)}
-                  className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
-                  placeholder="8.0"
-                />
-                <p className="text-xs text-gray-500">{t('estimatedEffortHelper')}</p>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="edit-reqTags" className="text-sm font-medium">
-                  {t('tags')}
-                </Label>
-                <Input
-                  id="edit-reqTags"
-                  value={reqTags}
-                  onChange={(e) => setReqTags(e.target.value)}
-                  className="text-sm transition-all focus:ring-2 focus:ring-blue-500"
-                  placeholder="security, authentication"
-                />
-                <p className="text-xs text-gray-500">{t('tagsHelper')}</p>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => handleDialogClose('edit')}
-            >
-              {t('cancel')}
-            </Button>
-            <Button
-              type="submit"
-              onClick={handleUpdateRequirement}
-              disabled={isSubmitting || !reqTitle.trim()}
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-                  {t('updating')}
-                </>
-              ) : (
-                t('updateRequirement')
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        {renderRequirementDialogContent('edit')}
       </Dialog>
 
       {/* Unsaved Changes Dialog */}
@@ -1367,7 +1484,7 @@ export function Requirements() {
                   </ul>
                 </div>
                 <p className="text-red-600 dark:text-red-400 font-semibold mb-2">
-                  This action cannot be undone!
+                  {t('cannotUndo')}
                 </p>
                 <div className="mt-4">
                   <Label htmlFor="confirm-name" className="text-sm font-medium">
