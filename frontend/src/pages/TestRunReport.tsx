@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,10 +7,11 @@ import {
   ArrowLeft, Download, CheckCircle, XCircle, AlertTriangle, 
   Clock, FileText
 } from 'lucide-react';
-import { customFieldsAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
+import { customFieldsAPI, projectsAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
 import { CustomFieldDefinition } from '@/types';
 import { formatDurationSeconds } from '@/utils/timeFormat';
+import type { TranslationKey } from '@/locales/translations';
 
 type ReportCustomFieldValue = {
   id: number;
@@ -18,18 +19,62 @@ type ReportCustomFieldValue = {
   value: string;
 };
 
+type NormalizedResultStatus = 'pass' | 'fail' | 'block' | 'skip' | 'not_tested';
+
+const normalizeResultStatus = (status?: string): NormalizedResultStatus => {
+  const normalizedStatus = (status || '').toLowerCase().replace(/[\s-]+/g, '_');
+  const statusMap: Record<string, NormalizedResultStatus> = {
+    pass: 'pass',
+    passed: 'pass',
+    fail: 'fail',
+    failed: 'fail',
+    block: 'block',
+    blocked: 'block',
+    skip: 'skip',
+    skipped: 'skip',
+    pending: 'not_tested',
+    not_tested: 'not_tested',
+  };
+
+  return statusMap[normalizedStatus] || 'not_tested';
+};
+
 export function TestRunReport() {
   const navigate = useNavigate();
   const { projectId, testRunId } = useParams();
   const { t, isRTL } = useTranslation();
   const [testRun, setTestRun] = useState<any>(null);
+  const [project, setProject] = useState<any>(null);
   const [testResults, setTestResults] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const parsedProjectId = projectId ? parseInt(projectId, 10) : undefined;
+      const [runData, resultsData, usersData, customFieldsData, projectData] = await Promise.all([
+        testRunsAPI.getById(parseInt(testRunId!)),
+        testResultsAPI.getAll(parseInt(testRunId!)),
+        usersAPI.getAll(),
+        parsedProjectId ? customFieldsAPI.getDefinitions(parsedProjectId).catch(() => []) : Promise.resolve([]),
+        parsedProjectId ? projectsAPI.getById(parsedProjectId).catch(() => null) : Promise.resolve(null),
+      ]);
+      setTestRun(runData);
+      setProject(projectData);
+      setTestResults(resultsData);
+      setUsers(usersData);
+      setCustomFields(Array.isArray(customFieldsData) ? customFieldsData : []);
+    } catch (error) {
+      console.error('Failed to load report data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, testRunId]);
+
   useEffect(() => {
-    loadData();
+    Promise.resolve().then(loadData);
     
     // Set up interval to check status every 3 seconds
     const interval = setInterval(async () => {
@@ -65,28 +110,7 @@ export function TestRunReport() {
     }, 3000);
     
     return () => clearInterval(interval);
-  }, [testRunId]);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const parsedProjectId = projectId ? parseInt(projectId, 10) : undefined;
-      const [runData, resultsData, usersData, customFieldsData] = await Promise.all([
-        testRunsAPI.getById(parseInt(testRunId!)),
-        testResultsAPI.getAll(parseInt(testRunId!)),
-        usersAPI.getAll(),
-        parsedProjectId ? customFieldsAPI.getDefinitions(parsedProjectId).catch(() => []) : Promise.resolve([])
-      ]);
-      setTestRun(runData);
-      setTestResults(resultsData);
-      setUsers(usersData);
-      setCustomFields(Array.isArray(customFieldsData) ? customFieldsData : []);
-    } catch (error) {
-      console.error('Failed to load report data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [loadData, testRunId]);
 
   const getUserName = (userId: number | null) => {
     if (!userId) return 'N/A';
@@ -117,8 +141,43 @@ export function TestRunReport() {
     }, {});
   };
 
+  const getStatusLabel = (status?: string) => {
+    const statusKeyMap: Record<NormalizedResultStatus, TranslationKey> = {
+      pass: 'passed',
+      fail: 'failed',
+      block: 'blocked',
+      skip: 'skipped',
+      not_tested: 'notTested',
+    };
+
+    return t(statusKeyMap[normalizeResultStatus(status)]);
+  };
+
+  const getRunStatusLabel = (status?: string) => {
+    const normalizedStatus = (status || '').toLowerCase().replace(/[\s-]+/g, '_');
+    const statusKeyMap: Record<string, TranslationKey> = {
+      pending: 'testRunStatusPending',
+      running: 'testRunStatusRunning',
+      in_progress: 'testRunStatusInProgress',
+      completed: 'testRunStatusCompleted',
+      passed: 'testRunStatusPassed',
+      failed: 'testRunStatusFailed',
+      skipped: 'testRunStatusSkipped',
+      blocked: 'testRunStatusBlocked',
+    };
+
+    return statusKeyMap[normalizedStatus] ? t(statusKeyMap[normalizedStatus]) : (status || t('notAvailableShort'));
+  };
+
+  const getStatusBadgeVariant = (status?: string) => {
+    const normalizedStatus = normalizeResultStatus(status);
+    if (normalizedStatus === 'pass') return 'default';
+    if (normalizedStatus === 'fail') return 'destructive';
+    return 'secondary';
+  };
+
   const statusCounts = testResults.reduce((acc: any, result) => {
-    const status = result.status.toLowerCase();
+    const status = normalizeResultStatus(result.status);
     acc[status] = (acc[status] || 0) + 1;
     return acc;
   }, {});
@@ -131,7 +190,7 @@ export function TestRunReport() {
   const notTestedTests = statusCounts.not_tested || 0;
   const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
   const totalExecutionSeconds = testResults.reduce((total, result) => total + (Number(result.execution_time) || 0), 0);
-  const executedResultsCount = testResults.filter((result) => result.execution_time != null && result.status !== 'not_tested').length;
+  const executedResultsCount = testResults.filter((result) => result.execution_time != null && normalizeResultStatus(result.status) !== 'not_tested').length;
   const averageExecutionSeconds = executedResultsCount > 0 ? Math.round(totalExecutionSeconds / executedResultsCount) : 0;
 
   const handleDownloadJSON = () => {
@@ -158,7 +217,7 @@ export function TestRunReport() {
         testCaseTitle: result.test_case?.title,
         section: result.test_case?.section_id,
         priority: result.test_case?.priority,
-        status: result.status,
+        status: getStatusLabel(result.status),
         executedBy: getUserName(result.executed_by),
         executedById: result.executed_by,
         executionStartedAt: result.execution_started_at,
@@ -187,13 +246,13 @@ export function TestRunReport() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-600">Loading report...</div>
+        <div className="text-gray-600">{t('loadingReport')}</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 p-6" dir={isRTL ? 'rtl' : 'ltr'}>
+    <div className="space-y-4 bg-gray-50 p-6 print:bg-white print:p-0 print:text-black" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="flex items-center justify-between print:hidden">
         <div className="flex items-center gap-4">
@@ -203,133 +262,143 @@ export function TestRunReport() {
             onClick={() => navigate(`/projects/${projectId}/test-runs/${testRunId}`)}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Test Run
+            {t('backToTestRun')}
           </Button>
           <div>
-            <h1 className="text-2xl font-bold">Test Run Report</h1>
+            <h1 className="text-2xl font-bold">{t('testRunReport')}</h1>
             <p className="text-sm text-gray-600">{testRun?.name}</p>
           </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleDownloadJSON}>
             <Download className="h-4 w-4 mr-2" />
-            Download JSON
+            {t('downloadJsonReport')}
           </Button>
           <Button variant="outline" size="sm" onClick={handleDownloadPDF}>
             <FileText className="h-4 w-4 mr-2" />
-            Print / PDF
+            {t('printPdf')}
           </Button>
         </div>
       </div>
 
       {/* Report Header - Print Visible */}
-      <div className="hidden print:block mb-6">
-        <h1 className="text-3xl font-bold mb-2">Test Run Report</h1>
-        <p className="text-lg text-gray-700">{testRun?.name}</p>
-        <p className="text-sm text-gray-500">Generated: {new Date().toLocaleString()}</p>
+      <div className="hidden print:block print:border-b print:border-gray-300 print:pb-4">
+        <div className="print:flex print:items-start print:justify-between print:gap-8">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">{t('testRunReport')}</h1>
+            <p className="text-lg text-gray-700">{testRun?.name}</p>
+          </div>
+          <div className="text-sm text-gray-600 print:min-w-56">
+            <p>{t('generatedAt')}: {new Date().toLocaleString()}</p>
+            <p>{t('projectNameLabel')}: {project?.name || t('notAvailableShort')}</p>
+            <p>{t('projectIdLabel')}: {project?.id || projectId || t('notAvailableShort')}</p>
+            <p>{t('runId')}: {testRun?.id || t('notAvailableShort')}</p>
+            <p>{t('statusLabel')}: {testRun?.status ? getRunStatusLabel(testRun.status) : t('notAvailableShort')}</p>
+          </div>
+        </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Total Tests</CardTitle>
+      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4 print:grid-cols-3 print:gap-2">
+        <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+          <CardHeader className="pb-2 print:p-3 print:pb-1">
+            <CardTitle className="text-sm font-medium text-gray-600 print:text-xs print:text-gray-700">{t('totalTests')}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalTests}</div>
+          <CardContent className="print:p-3 print:pt-0">
+            <div className="text-2xl font-bold print:text-xl">{totalTests}</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Pass Rate</CardTitle>
+        <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+          <CardHeader className="pb-2 print:p-3 print:pb-1">
+            <CardTitle className="text-sm font-medium text-gray-600 print:text-xs print:text-gray-700">{t('passRate')}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{passRate}%</div>
+          <CardContent className="print:p-3 print:pt-0">
+            <div className="text-2xl font-bold text-green-600 print:text-xl print:text-black">{passRate}%</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Passed</CardTitle>
+        <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+          <CardHeader className="pb-2 print:p-3 print:pb-1">
+            <CardTitle className="text-sm font-medium text-gray-600 print:text-xs print:text-gray-700">{t('passed')}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="print:p-3 print:pt-0">
             <div className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              <div className="text-2xl font-bold">{passedTests}</div>
+              <CheckCircle className="h-5 w-5 text-green-600 print:hidden" />
+              <div className="text-2xl font-bold print:text-xl">{passedTests}</div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Failed</CardTitle>
+        <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+          <CardHeader className="pb-2 print:p-3 print:pb-1">
+            <CardTitle className="text-sm font-medium text-gray-600 print:text-xs print:text-gray-700">{t('failed')}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="print:p-3 print:pt-0">
             <div className="flex items-center gap-2">
-              <XCircle className="h-5 w-5 text-red-600" />
-              <div className="text-2xl font-bold">{failedTests}</div>
+              <XCircle className="h-5 w-5 text-red-600 print:hidden" />
+              <div className="text-2xl font-bold print:text-xl">{failedTests}</div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">{t('totalExecutionTime')}</CardTitle>
+        <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+          <CardHeader className="pb-2 print:p-3 print:pb-1">
+            <CardTitle className="text-sm font-medium text-gray-600 print:text-xs print:text-gray-700">{t('totalExecutionTime')}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatDurationSeconds(totalExecutionSeconds, t)}</div>
+          <CardContent className="print:p-3 print:pt-0">
+            <div className="text-2xl font-bold print:text-xl">{formatDurationSeconds(totalExecutionSeconds, t)}</div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">{t('averageCaseTime')}</CardTitle>
+        <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+          <CardHeader className="pb-2 print:p-3 print:pb-1">
+            <CardTitle className="text-sm font-medium text-gray-600 print:text-xs print:text-gray-700">{t('averageCaseTime')}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{executedResultsCount > 0 ? formatDurationSeconds(averageExecutionSeconds, t) : t('notAvailableShort')}</div>
+          <CardContent className="print:p-3 print:pt-0">
+            <div className="text-2xl font-bold print:text-xl">{executedResultsCount > 0 ? formatDurationSeconds(averageExecutionSeconds, t) : t('notAvailableShort')}</div>
           </CardContent>
         </Card>
       </div>
 
       {/* Test Run Details */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Test Run Information</CardTitle>
+      <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+        <CardHeader className="print:p-3 print:pb-2">
+          <CardTitle className="text-base">{t('testRunInformation')}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="print:p-3 print:pt-0">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <p className="text-gray-600 text-xs">Status</p>
-              <Badge className="mt-1">{testRun?.status}</Badge>
+              <p className="text-gray-600 text-xs">{t('statusLabel')}</p>
+              <Badge className="mt-1 print:border print:border-gray-400 print:bg-white print:text-black">{testRun?.status ? getRunStatusLabel(testRun.status) : t('notAvailableShort')}</Badge>
             </div>
             <div>
-              <p className="text-gray-600 text-xs">Created</p>
+              <p className="text-gray-600 text-xs">{t('created')}</p>
               <p className="font-medium">{testRun?.created_at ? new Date(testRun.created_at).toLocaleDateString() : 'N/A'}</p>
             </div>
             <div>
-              <p className="text-gray-600 text-xs">Started</p>
+              <p className="text-gray-600 text-xs">{t('started')}</p>
               <p className="font-medium">{testRun?.started_at ? new Date(testRun.started_at).toLocaleDateString() : 'N/A'}</p>
             </div>
             <div>
-              <p className="text-gray-600 text-xs">Completed</p>
-              <p className="font-medium">{testRun?.completed_at ? new Date(testRun.completed_at).toLocaleDateString() : 'In Progress'}</p>
+              <p className="text-gray-600 text-xs">{t('completedLabel')}</p>
+              <p className="font-medium">{testRun?.completed_at ? new Date(testRun.completed_at).toLocaleDateString() : t('inProgress')}</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
       {/* Status Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Status Breakdown</CardTitle>
+      <Card className="print:break-inside-avoid print:rounded print:border-gray-300 print:shadow-none">
+        <CardHeader className="print:p-3 print:pb-2">
+          <CardTitle className="text-base">{t('statusBreakdown')}</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
+        <CardContent className="print:p-3 print:pt-0">
+          <div className="space-y-3 print:space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <span className="text-sm">Passed</span>
+                <CheckCircle className="h-4 w-4 text-green-600 print:hidden" />
+                <span className="text-sm">{t('passed')}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48 bg-gray-200 rounded-full h-2">
@@ -344,8 +413,8 @@ export function TestRunReport() {
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <XCircle className="h-4 w-4 text-red-600" />
-                <span className="text-sm">Failed</span>
+                <XCircle className="h-4 w-4 text-red-600 print:hidden" />
+                <span className="text-sm">{t('failed')}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48 bg-gray-200 rounded-full h-2">
@@ -360,8 +429,8 @@ export function TestRunReport() {
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                <span className="text-sm">Blocked</span>
+                <AlertTriangle className="h-4 w-4 text-yellow-600 print:hidden" />
+                <span className="text-sm">{t('blocked')}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48 bg-gray-200 rounded-full h-2">
@@ -376,8 +445,8 @@ export function TestRunReport() {
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-gray-600" />
-                <span className="text-sm">Skipped</span>
+                <Clock className="h-4 w-4 text-gray-600 print:hidden" />
+                <span className="text-sm">{t('skipped')}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48 bg-gray-200 rounded-full h-2">
@@ -392,8 +461,8 @@ export function TestRunReport() {
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-gray-400" />
-                <span className="text-sm">Not Tested</span>
+                <Clock className="h-4 w-4 text-gray-400 print:hidden" />
+                <span className="text-sm">{t('notTested')}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-48 bg-gray-200 rounded-full h-2">
@@ -410,53 +479,49 @@ export function TestRunReport() {
       </Card>
 
       {/* Test Results Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Test Results</CardTitle>
+      <Card className="print:rounded-none print:border-0 print:shadow-none">
+        <CardHeader className="print:p-0 print:pb-2">
+          <CardTitle className="text-base">{t('testResultsTitle')}</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs">
+        <CardContent className="print:p-0">
+          <div className="overflow-x-auto print:overflow-visible">
+            <table className="w-full text-sm print:text-[10px] print:leading-tight">
+              <thead className="bg-gray-50 text-xs print:bg-gray-100 print:text-[10px]">
                 <tr>
-                  <th className="px-4 py-2 text-left">Test Case</th>
-                  <th className="px-4 py-2 text-left">Status</th>
-                  <th className="px-4 py-2 text-left">Priority</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('testCaseLabel')}</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('statusLabel')}</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('priority')}</th>
                   <th className="px-4 py-2 text-left">{t('customFields')}</th>
-                  <th className="px-4 py-2 text-left">Executed By</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('executedBy')}</th>
                   <th className="px-4 py-2 text-left">{t('executionStartedLabel')}</th>
-                  <th className="px-4 py-2 text-left">Executed At</th>
-                  <th className="px-4 py-2 text-left">{t('duration')}</th>
-                  <th className="px-4 py-2 text-left">Comments</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('executedAt')}</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('duration')}</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('comments')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {testResults.map((result) => (
-                  <tr key={result.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2">
+                  <tr key={result.id} className="hover:bg-gray-50 print:break-inside-avoid print:hover:bg-white">
+                    <td className="px-4 py-2 print:px-2 print:py-1 print:align-top">
                       <div>
-                        <p className="font-medium">{result.test_case?.title || 'Unknown'}</p>
+                        <p className="font-medium">{result.test_case?.title || t('unknownTestCase')}</p>
                         <p className="text-xs text-gray-500">TC-{result.test_case_id}</p>
                       </div>
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-4 py-2 print:px-2 print:py-1 print:align-top">
                       <Badge 
-                        variant={
-                          result.status === 'pass' ? 'default' : 
-                          result.status === 'fail' ? 'destructive' : 
-                          'secondary'
-                        }
-                        className="text-xs"
+                        variant={getStatusBadgeVariant(result.status)}
+                        className="text-xs print:border print:border-gray-400 print:bg-white print:text-black"
                       >
-                        {result.status}
+                        {getStatusLabel(result.status)}
                       </Badge>
                     </td>
-                    <td className="px-4 py-2">
-                      <Badge variant="outline" className="text-xs">
+                    <td className="px-4 py-2 print:px-2 print:py-1 print:align-top">
+                      <Badge variant="outline" className="text-xs print:border-gray-400">
                         {result.test_case?.priority || 'N/A'}
                       </Badge>
                     </td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
                       {getResultCustomFields(result).length > 0 ? (
                         <div className="space-y-1">
                           {getResultCustomFields(result).map((field) => (
@@ -470,15 +535,15 @@ export function TestRunReport() {
                         <span className="text-gray-400">{t('noCustomFieldValues')}</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-xs">{getUserName(result.executed_by)}</td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{getUserName(result.executed_by)}</td>
+                    <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
                       {result.execution_started_at ? new Date(result.execution_started_at).toLocaleString() : 'N/A'}
                     </td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
                       {result.executed_at ? new Date(result.executed_at).toLocaleString() : 'N/A'}
                     </td>
-                    <td className="px-4 py-2 text-xs">{formatDurationSeconds(result.execution_time, t)}</td>
-                    <td className="px-4 py-2 text-xs">{result.comments || '-'}</td>
+                    <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{formatDurationSeconds(result.execution_time, t)}</td>
+                    <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{result.comments || '-'}</td>
                   </tr>
                 ))}
               </tbody>

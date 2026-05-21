@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { 
   FileCheck, CheckCircle, XCircle, AlertCircle, Search, Download, 
   TrendingUp, TrendingDown, Clock, Target, BarChart3,
@@ -98,7 +105,7 @@ export function Reports() {
     if (projectId) {
       const id = parseInt(projectId);
       if (!isNaN(id)) {
-        setSelectedProject(id);
+        Promise.resolve().then(() => setSelectedProject(id));
       }
     }
   }, [projectId]);
@@ -339,18 +346,20 @@ export function Reports() {
 
   // Load data when tab, project, or time range changes
   useEffect(() => {
-    if (activeTab === 'dashboard') {
-      loadDashboardAnalytics();
-    } else if (activeTab === 'activity') {
-      loadActivityStatistics();
-    } else if (activeTab === 'traceability') {
-      loadTraceabilityData();
-    } else if (activeTab === 'coverage') {
-      loadCoverageReports();
-      loadTestExecutionStatus();
-    } else if (activeTab === 'test-activity') {
-      loadTestActivity();
-    }
+    Promise.resolve().then(() => {
+      if (activeTab === 'dashboard') {
+        loadDashboardAnalytics();
+      } else if (activeTab === 'activity') {
+        loadActivityStatistics();
+      } else if (activeTab === 'traceability') {
+        loadTraceabilityData();
+      } else if (activeTab === 'coverage') {
+        loadCoverageReports();
+        loadTestExecutionStatus();
+      } else if (activeTab === 'test-activity') {
+        loadTestActivity();
+      }
+    });
   }, [activeTab, selectedProject, timeRange]);
 
   const normalizeStatus = (status?: string) => {
@@ -1232,46 +1241,48 @@ export function Reports() {
         </div>
 
         {/* Create Report Dialog */}
-        {showCreateReportDialog && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-              <h3 className="text-lg font-semibold mb-4">Create New Shareable Report</h3>
+        <Dialog open={showCreateReportDialog} onOpenChange={setShowCreateReportDialog}>
+          <DialogContent isRTL={isRTL} className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('createNewShareableReport')}</DialogTitle>
+            </DialogHeader>
               <div className="space-y-4">
                 <div>
-                  <Label>Report Title</Label>
+                  <Label>{t('reportTitle')}</Label>
                   <Input
                     value={newReport.title}
                     onChange={(e) => setNewReport({...newReport, title: e.target.value})}
-                    placeholder="Enter report title"
+                    placeholder={t('enterReportTitle')}
+                    maxLength={200}
                   />
                 </div>
                 <div>
-                  <Label>Report Type</Label>
+                  <Label>{t('reportType')}</Label>
                   <Select value={newReport.report_type} onValueChange={(value) => setNewReport({...newReport, report_type: value})}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="executive">Executive</SelectItem>
-                      <SelectItem value="technical">Technical</SelectItem>
-                      <SelectItem value="summary">Summary</SelectItem>
+                      <SelectItem value="executive">{t('executive')}</SelectItem>
+                      <SelectItem value="technical">{t('technical')}</SelectItem>
+                      <SelectItem value="summary">{t('summary')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label>Access Level</Label>
+                  <Label>{t('accessLevel')}</Label>
                   <Select value={newReport.access_level} onValueChange={(value) => setNewReport({...newReport, access_level: value})}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="read-only">Read Only</SelectItem>
-                      <SelectItem value="edit">Edit</SelectItem>
+                      <SelectItem value="read-only">{t('readOnly')}</SelectItem>
+                      <SelectItem value="edit">{t('edit')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <Label>Expires In (Days)</Label>
+                  <Label>{t('expiresInDays')}</Label>
                   <Input
                     type="number"
                     value={newReport.expires_in_days}
@@ -1281,17 +1292,16 @@ export function Reports() {
                   />
                 </div>
               </div>
-              <div className="flex gap-2 justify-end mt-6">
+              <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setShowCreateReportDialog(false)}>
-                  Cancel
+                  {t('cancel')}
                 </Button>
                 <Button onClick={handleCreateReport} disabled={!newReport.title || isLoading}>
-                  {isLoading ? 'Creating...' : 'Create Report'}
+                  {isLoading ? t('creating') : t('createReport')}
                 </Button>
-              </div>
-            </div>
-          </div>
-        )}
+              </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <div className="grid gap-4">
           {shareableReports.map((report) => (
@@ -1634,7 +1644,14 @@ export function Reports() {
                               </Badge>
                             )}
                           </div>
-                          <CardTitle className="text-base font-semibold">{item.requirement_title}</CardTitle>
+                          <CardTitle className="text-base font-semibold">
+                            <Link
+                              to={`/projects/${selectedProject}/requirements/${item.requirement_id}`}
+                              className="text-gray-900 underline-offset-4 hover:text-blue-700 hover:underline dark:text-white dark:hover:text-blue-300"
+                            >
+                              {item.requirement_title}
+                            </Link>
+                          </CardTitle>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-sm">
@@ -1675,37 +1692,47 @@ export function Reports() {
                           </tr>
                         </thead>
                         <tbody className="divide-y dark:divide-gray-700">
-                          {(item.test_cases || []).map((tc: any) => (
-                            <tr key={tc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                              <td className="px-6 py-4 font-mono text-sm text-gray-600 dark:text-gray-400">TC-{tc.id}</td>
-                              <td className="px-6 py-4 font-medium">{tc.title}</td>
-                              <td className="px-6 py-4 text-center">
-                                <Badge variant="outline" className="capitalize text-xs">
-                                  {tc.coverage_type || 'functional'}
-                                </Badge>
-                              </td>
-                              <td className="px-6 py-4">
-                                <div className="flex items-center justify-center gap-2">
-                                  {getStatusIcon(tc.status)}
-                                  <span className="capitalize text-sm">{normalizeStatus(tc.status).replace('_', ' ')}</span>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 text-right text-sm text-gray-600 dark:text-gray-400">
-                                {tc.last_executed ? new Date(tc.last_executed).toLocaleDateString() : 'Never'}
-                              </td>
-                              <td className="px-6 py-4 text-center">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => window.open(`/projects/${selectedProject}/test-cases/${tc.id}/execute`, '_blank')}
-                                  className="text-xs"
-                                >
-                                  <Play className="h-3 w-3 mr-1" />
-                                  Execute
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
+                          {(item.test_cases || []).map((tc: any) => {
+                            const executionPath = tc.test_run_id
+                              ? `/projects/${selectedProject}/test-runs/${tc.test_run_id}/test-cases/${tc.id}`
+                              : `/projects/${selectedProject}/test-cases/${tc.id}/execute`;
+                            const normalizedStatus = normalizeStatus(tc.status);
+
+                            return (
+                              <tr key={tc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                <td className="px-6 py-4 font-mono text-sm text-gray-600 dark:text-gray-400">TC-{tc.id}</td>
+                                <td className="px-6 py-4 font-medium">{tc.title}</td>
+                                <td className="px-6 py-4 text-center">
+                                  <Badge variant="outline" className="capitalize text-xs">
+                                    {tc.coverage_type || 'functional'}
+                                  </Badge>
+                                </td>
+                                <td className="px-6 py-4">
+                                  <Link
+                                    to={executionPath}
+                                    className="flex items-center justify-center gap-2 rounded-md px-2 py-1 underline-offset-4 hover:bg-blue-50 hover:text-blue-700 hover:underline dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
+                                  >
+                                    {getStatusIcon(tc.status)}
+                                    <span className="capitalize text-sm">{normalizedStatus.replace('_', ' ')}</span>
+                                  </Link>
+                                </td>
+                                <td className="px-6 py-4 text-right text-sm text-gray-600 dark:text-gray-400">
+                                  {tc.last_executed ? new Date(tc.last_executed).toLocaleDateString() : 'Never'}
+                                </td>
+                                <td className="px-6 py-4 text-center">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => window.open(executionPath, '_blank')}
+                                    className="text-xs"
+                                  >
+                                    <Play className="h-3 w-3 mr-1" />
+                                    {tc.test_run_id ? 'Open Execution' : 'Execute'}
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     ) : (

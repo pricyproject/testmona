@@ -67,31 +67,35 @@ export function Layout({ children }: LayoutProps) {
   };
 
   return (
-    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200 flex ${isRTL ? 'font-vazir' : ''}`}>
+    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200 flex print:block print:bg-white ${isRTL ? 'font-vazir' : ''}`}>
       {/* Sidebar */}
-      <Sidebar
-        isCollapsed={sidebarCollapsed}
-        onToggleCollapse={handleSidebarToggle}
-        isHovering={isHovering}
-        onMouseEnter={() => setIsHovering(true)}
-        onMouseLeave={() => setIsHovering(false)}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
+      <div className="print:hidden">
+        <Sidebar
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={handleSidebarToggle}
+          isHovering={isHovering}
+          onMouseEnter={() => setIsHovering(true)}
+          onMouseLeave={() => setIsHovering(false)}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+      </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 print:block">
         {/* Navbar */}
-        <Navbar
-          onMobileMenuToggle={handleMobileMenuToggle}
-          isSidebarCollapsed={sidebarCollapsed}
-          onSidebarToggle={handleSidebarToggle}
-          theme={theme}
-          onThemeToggle={toggleTheme}
-        />
+        <div className="print:hidden">
+          <Navbar
+            onMobileMenuToggle={handleMobileMenuToggle}
+            isSidebarCollapsed={sidebarCollapsed}
+            onSidebarToggle={handleSidebarToggle}
+            theme={theme}
+            onThemeToggle={toggleTheme}
+          />
+        </div>
 
         {/* Page content */}
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="flex-1 p-6 overflow-auto print:p-0 print:overflow-visible">
           {children}
         </main>
       </div>
