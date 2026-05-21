@@ -861,7 +861,7 @@ class Requirement(Base):
     parent_requirement = relationship("Requirement", remote_side=[id])
     child_requirements = relationship("Requirement", back_populates="parent_requirement")
     test_cases = relationship("TestCase", secondary="requirement_test_case_links")
-    test_plans = relationship("TestPlan", secondary="requirement_test_plan_links")
+    test_plans = relationship("TestPlan", secondary="requirement_test_plan_links", back_populates="requirements")
 
 
 class Defect(Base):
@@ -943,7 +943,7 @@ class TestPlan(Base):
     milestone = relationship("Milestone", back_populates="test_plans")
     creator = relationship("User")
     test_runs = relationship("TestRun", back_populates="test_plan")
-    requirements = relationship("Requirement", secondary="requirement_test_plan_links")
+    requirements = relationship("Requirement", secondary="requirement_test_plan_links", back_populates="test_plans")
 
 
 class Milestone(Base):
