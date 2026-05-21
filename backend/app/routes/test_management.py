@@ -8,6 +8,7 @@ from typing import List, Optional
 from sqlalchemy import desc, case, func, cast, Date
 from datetime import datetime, timedelta, timezone
 import logging
+import re
 
 from .. import crud, schemas, auth, rbac, models
 from ..database import get_db
@@ -18,6 +19,59 @@ logger = logging.getLogger(__name__)
 
 
 COMPLETED_RESULT_STATUSES = {"pass", "fail", "skip", "block"}
+
+
+def _enum_value(value: object) -> str:
+    return getattr(value, "value", value) or ""
+
+
+def _reference_tokens(value: Optional[str]) -> set[str]:
+    raw_value = value or ""
+    tokens = {
+        token.strip("()[]{}\"'.,").lower()
+        for token in re.split(r"[\s,;|]+", raw_value)
+        if token.strip("()[]{}\"'.,")
+    }
+    tokens.update(token.lower() for token in re.findall(r"[a-z]+-\d+", raw_value, flags=re.IGNORECASE))
+    return tokens
+
+
+def _get_test_case_linked_requirements(db: Session, test_case: TestCase, project_id: int) -> List[schemas.TestCaseLinkedRequirement]:
+    requirement_ids = {
+        row[0]
+        for row in db.query(models.requirement_test_case_links.c.requirement_id).filter(
+            models.requirement_test_case_links.c.test_case_id == test_case.id,
+        ).all()
+    }
+    requirement_ids.update(
+        row[0]
+        for row in db.query(models.TraceabilityMatrix.requirement_id).filter(
+            models.TraceabilityMatrix.test_case_id == test_case.id,
+        ).all()
+    )
+
+    reference_tokens = _reference_tokens(test_case.reference)
+    query = db.query(models.Requirement).filter(models.Requirement.project_id == project_id)
+    if requirement_ids:
+        query = query.filter(models.Requirement.id.in_(requirement_ids) | func.lower(models.Requirement.requirement_id).in_(reference_tokens))
+    elif reference_tokens:
+        query = query.filter(func.lower(models.Requirement.requirement_id).in_(reference_tokens))
+    else:
+        return []
+
+    requirements = query.order_by(models.Requirement.requirement_id.asc()).all()
+    return [
+        schemas.TestCaseLinkedRequirement(
+            id=requirement.id,
+            requirement_id=requirement.requirement_id,
+            title=requirement.title,
+            status=_enum_value(requirement.status),
+            priority=_enum_value(requirement.priority),
+            description=requirement.description,
+            acceptance_criteria=requirement.acceptance_criteria,
+        )
+        for requirement in requirements
+    ]
 
 
 def _normalize_status_value(status: object) -> str:
@@ -661,7 +715,12 @@ def register_test_management_routes(app):
         return {"count": count}
 
     @app.get("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations)
-    def read_test_case(test_case_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
+    def read_test_case(
+        test_case_id: int,
+        include_linked_requirements: bool = Query(False),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
         db_test_case = crud.get_test_case(db, test_case_id=test_case_id)
         if db_test_case is None:
             raise HTTPException(status_code=404, detail="Test case not found")
@@ -672,6 +731,8 @@ def register_test_management_routes(app):
             # Check if user has permission to access this test case's project
             if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
                 raise HTTPException(status_code=403, detail="Not authorized to access this test case")
+            if include_linked_requirements:
+                db_test_case.linked_requirements = _get_test_case_linked_requirements(db, db_test_case, test_suite.project_id)
         
         return db_test_case
 

@@ -440,8 +440,13 @@ export const testCasesAPI = {
     const response = await api.get(`/test-cases?${params}`);
     return response.data;
   },
-  getById: async (id: number) => {
-    const response = await api.get(`/test-cases/${id}`);
+  getById: async (id: number, options: { includeLinkedRequirements?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (options.includeLinkedRequirements !== undefined) {
+      params.append('include_linked_requirements', String(options.includeLinkedRequirements));
+    }
+    const query = params.toString();
+    const response = await api.get(`/test-cases/${id}${query ? `?${query}` : ''}`);
     return response.data;
   },
   create: async (testCase: any) => {

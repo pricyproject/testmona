@@ -267,6 +267,20 @@ class TestCaseSectionNested(BaseModel):
         from_attributes = True
 
 
+class TestCaseLinkedRequirement(BaseModel):
+    id: int
+    requirement_id: str
+    title: str
+    status: str
+    priority: str
+    description: Optional[str] = None
+    acceptance_criteria: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        use_enum_values = True
+
+
 class TestCaseWithRelations(TestCaseBase):
     id: int
     test_suite_id: int
@@ -278,6 +292,7 @@ class TestCaseWithRelations(TestCaseBase):
     test_steps: List[TestCaseStep] = []
     custom_field_values: List['CustomFieldValue'] = []
     creator: Optional['User'] = None
+    linked_requirements: List[TestCaseLinkedRequirement] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -3169,7 +3184,7 @@ class TestRunEnvironment(TestRunEnvironmentBase):
 __all__ = [
     "ProjectBase", "ProjectCreate", "ProjectUpdate", "Project",
     "TestSuiteBase", "TestSuiteCreate", "TestSuiteUpdate", "TestSuite", 
-    "TestCaseBase", "TestCaseCreate", "TestCaseUpdate", "TestCase",
+    "TestCaseBase", "TestCaseCreate", "TestCaseUpdate", "TestCase", "TestCaseLinkedRequirement",
     "TestRunBase", "TestRunCreate", "TestRunUpdate", "TestRunAssign", "TestRun", "TestSuiteRunCreate", "TestSuiteRun",
     "TestResultBase", "TestResultCreate", "TestResultUpdate", "TestResult",
     "UserBase", "UserCreate", "UserUpdate", "User",

@@ -17,9 +17,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
-import { api, customFieldsAPI, requirementsAPI, sectionsAPI, testCasesAPI, testSuitesAPI } from '@/lib/api';
+import { api, customFieldsAPI, sectionsAPI, testCasesAPI, testSuitesAPI } from '@/lib/api';
 import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSuite } from '@/types';
 
 type SectionCrumb = { id: number; name: string };
@@ -75,7 +76,9 @@ export function TestCaseDetail() {
   const [revisions, setRevisions] = useState<any[]>([]);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [testRunHistory, setTestRunHistory] = useState<any[]>([]);
-  const [linkedRequirement, setLinkedRequirement] = useState<Requirement | null>(null);
+  const [showLinkedRequirements, setShowLinkedRequirements] = useState(true);
+  const [linkedRequirements, setLinkedRequirements] = useState<Requirement[]>([]);
+  const [linkedRequirementsLoading, setLinkedRequirementsLoading] = useState(false);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [customFieldsLoading, setCustomFieldsLoading] = useState(false);
   const [isValidatingProject, setIsValidatingProject] = useState(false);
@@ -134,6 +137,7 @@ export function TestCaseDetail() {
         if (!isMounted) return;
         setTestCase(testCaseData);
         setTestSuite(testSuiteData);
+        setLinkedRequirements([]);
 
         const projectForCustomFields = Number(projectId || testSuiteData?.project_id || testCaseData.test_suite?.project_id || (testCaseData as any).project_id);
         if (projectForCustomFields && !Number.isNaN(projectForCustomFields)) {
@@ -261,32 +265,37 @@ export function TestCaseDetail() {
     };
   }, [id, projectId]);
 
+  const loadedTestCaseId = testCase?.id;
+
   useEffect(() => {
-    if (!testCase?.reference || !testSuite) {
-      Promise.resolve().then(() => setLinkedRequirement(null));
-      return;
-    }
+    let isMounted = true;
+    const testCaseId = Number(id);
 
-    const reference = testCase.reference.trim();
-    const isInternalRequirementRef = /^REQ-\d{3,}$/i.test(reference);
-    if (!isInternalRequirementRef) {
-      Promise.resolve().then(() => setLinkedRequirement(null));
-      return;
-    }
+    const fetchLinkedRequirements = async () => {
+      if (!showLinkedRequirements || !testCaseId || Number.isNaN(testCaseId) || !loadedTestCaseId) {
+        setLinkedRequirements([]);
+        return;
+      }
 
-    const fetchRequirementDetails = async () => {
+      setLinkedRequirementsLoading(true);
       try {
-        const requirements = await requirementsAPI.getAll(Number(effectiveProjectId || testSuite.project_id), 0, 1000);
-        const requirement = requirements.find((item) => item.requirement_id?.toLowerCase() === reference.toLowerCase());
-        setLinkedRequirement(requirement || null);
+        const data = await testCasesAPI.getById(testCaseId, { includeLinkedRequirements: true });
+        if (isMounted) {
+          setLinkedRequirements(Array.isArray(data.linked_requirements) ? data.linked_requirements : []);
+        }
       } catch (error) {
-        console.log('No requirement found for reference:', reference);
-        setLinkedRequirement(null);
+        console.error('Failed to fetch linked requirements:', error);
+        if (isMounted) setLinkedRequirements([]);
+      } finally {
+        if (isMounted) setLinkedRequirementsLoading(false);
       }
     };
 
-    fetchRequirementDetails();
-  }, [effectiveProjectId, testCase?.reference, testSuite]);
+    fetchLinkedRequirements();
+    return () => {
+      isMounted = false;
+    };
+  }, [id, showLinkedRequirements, loadedTestCaseId]);
 
   const displaySteps = useMemo(() => {
     if (isMultistepCase) return testSteps;
@@ -380,9 +389,9 @@ export function TestCaseDetail() {
 
   const revisionsPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.id}/revisions` : `/test-cases/${testCase?.id}/revisions`;
   const executionHistoryPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.id}/execution-history` : `/test-cases/${testCase?.id}/execution-history`;
-  const linkedRequirementPath = linkedRequirement && effectiveProjectId
-    ? `/projects/${effectiveProjectId}/requirements/${linkedRequirement.id}`
-    : null;
+  const getLinkedRequirementPath = (requirement: Requirement) => (
+    effectiveProjectId ? `/projects/${effectiveProjectId}/requirements/${requirement.id}` : null
+  );
   const openRevisionsPage = () => navigate(revisionsPath);
   const openExecutionHistoryPage = () => navigate(executionHistoryPath);
 
@@ -589,37 +598,6 @@ export function TestCaseDetail() {
               </Card>
             )}
 
-            {linkedRequirement && (
-              <Card className="border-slate-200 shadow-sm dark:border-slate-800">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <FileText className="h-5 w-5 text-violet-600" />
-                    {t('linkedRequirement')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{linkedRequirement.requirement_id}</Badge>
-                    <Badge>{linkedRequirement.priority}</Badge>
-                    <Badge variant="secondary">{linkedRequirement.status}</Badge>
-                  </div>
-                  <h3 className="font-semibold text-slate-950 dark:text-white">
-                    {linkedRequirementPath ? (
-                      <Link to={linkedRequirementPath} className="text-blue-600 hover:underline dark:text-blue-400">
-                        {linkedRequirement.title}
-                      </Link>
-                    ) : linkedRequirement.title}
-                  </h3>
-                  {linkedRequirement.description && <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{linkedRequirement.description}</p>}
-                  {linkedRequirement.acceptance_criteria && (
-                    <div className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-950">
-                      <p className="mb-1 font-semibold">{t('acceptanceCriteria')}</p>
-                      <p className="whitespace-pre-wrap text-slate-600 dark:text-slate-300">{linkedRequirement.acceptance_criteria}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           <aside className="space-y-6">
@@ -651,17 +629,68 @@ export function TestCaseDetail() {
                 {hasReference && (
                   <PropertyRow
                     label={t('reference')}
-                    value={linkedRequirementPath ? (
-                      <Link to={linkedRequirementPath} className="text-blue-600 hover:underline dark:text-blue-400">
-                        {testCase.reference as string}
-                      </Link>
-                    ) : testCase.reference as string}
+                    value={testCase.reference as string}
                   />
                 )}
                 <PropertyRow label={t('createdBy')} value={testCase.creator?.full_name || testCase.creator?.username || t('unknown')} />
                 <PropertyRow label={t('created')} value={formatDateTime(testCase.created_at)} />
                 <PropertyRow label={t('updated')} value={formatDateTime(testCase.updated_at)} />
               </CardContent>
+            </Card>
+
+            <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <FileText className="h-4 w-4 text-violet-600" />
+                    {t('linkedRequirements')}
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">{t('showLinkedRequirements')}</span>
+                    <Switch
+                      checked={showLinkedRequirements}
+                      onCheckedChange={setShowLinkedRequirements}
+                      aria-label={t('showLinkedRequirements')}
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              {showLinkedRequirements && (
+                <CardContent>
+                  {linkedRequirementsLoading ? (
+                    <div className="space-y-2">
+                      <div className="h-16 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+                      <div className="h-16 animate-pulse rounded-xl bg-slate-100 dark:bg-slate-800" />
+                    </div>
+                  ) : linkedRequirements.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">
+                      {t('noLinkedRequirementsForTestCase')}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {linkedRequirements.map((requirement) => {
+                        const requirementPath = getLinkedRequirementPath(requirement);
+                        return (
+                          <div key={requirement.id} className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <Badge variant="outline">{requirement.requirement_id}</Badge>
+                              <Badge>{requirement.priority}</Badge>
+                              <Badge variant="secondary">{requirement.status}</Badge>
+                            </div>
+                            <h3 className="break-words text-sm font-semibold text-slate-950 dark:text-white">
+                              {requirementPath ? (
+                                <Link to={requirementPath} className="text-blue-600 hover:underline dark:text-blue-400">
+                                  {requirement.title}
+                                </Link>
+                              ) : requirement.title}
+                            </h3>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              )}
             </Card>
 
             {tags.length > 0 && (

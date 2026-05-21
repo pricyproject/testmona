@@ -969,6 +969,8 @@ export const ar = {
     noRevisionHistory: 'لا يوجد سجل مراجعات متاح لهذه حالة الاختبار.',
     executing: 'جاري التنفيذ...',
     linkedRequirement: 'المتطلب المرتبط',
+    showLinkedRequirements: 'إظهار المتطلبات المرتبطة',
+    noLinkedRequirementsForTestCase: 'لا توجد متطلبات مرتبطة بحالة الاختبار هذه.',
     acceptanceCriteria: 'معايير القبول',
     preconditions: 'المتطلبات المسبقة',
     noPreconditions: 'لم يتم تحديد متطلبات مسبقة',

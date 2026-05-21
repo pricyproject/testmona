@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Calendar, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Plus, Settings2, Tag, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Calendar, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, MoreVertical, Play, Plus, Settings2, Tag, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -25,7 +26,7 @@ import { isGherkinText } from '@/components/requirements/gherkin';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
-import { Requirement, RequirementLinkedTestCase, RequirementLinkedTestCaseHistoryItem, RequirementLinkedTestPlan, RequirementRelationshipSummary, RequirementTraceabilitySummary, TestCaseSection, TestSuite } from '@/types';
+import { Requirement, RequirementLinkedTestCase, RequirementLinkedTestCaseHistoryItem, RequirementRelationshipSummary, RequirementTraceabilitySummary, TestCaseSection, TestSuite } from '@/types';
 
 const decodeHtmlEntities = (value?: string | null): string => {
   if (!value) return '';
@@ -173,32 +174,21 @@ export function RequirementDetail() {
   const [availableTestCasesLoading, setAvailableTestCasesLoading] = useState(false);
   const [linkedTestCasesError, setLinkedTestCasesError] = useState('');
   const [relationshipError, setRelationshipError] = useState('');
-  const [testPlansError, setTestPlansError] = useState('');
   const [traceabilitySummary, setTraceabilitySummary] = useState<RequirementTraceabilitySummary>(emptyTraceabilitySummary);
   const [linkHistory, setLinkHistory] = useState<RequirementLinkedTestCaseHistoryItem[]>([]);
   const [linkHistoryTotal, setLinkHistoryTotal] = useState(0);
   const [relationships, setRelationships] = useState<RequirementRelationshipSummary | null>(null);
-  const [linkedTestPlans, setLinkedTestPlans] = useState<RequirementLinkedTestPlan[]>([]);
-  const [linkedTestPlansTotal, setLinkedTestPlansTotal] = useState(0);
-  const [availableTestPlans, setAvailableTestPlans] = useState<RequirementLinkedTestPlan[]>([]);
-  const [availableTestPlansTotal, setAvailableTestPlansTotal] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [testPlansLoading, setTestPlansLoading] = useState(false);
-  const [availableTestPlansLoading, setAvailableTestPlansLoading] = useState(false);
   const [showLinkHistory, setShowLinkHistory] = useState(false);
   const [visibleLinkedTestCasesCount, setVisibleLinkedTestCasesCount] = useState(10);
   const [selectedAvailableTestCaseIds, setSelectedAvailableTestCaseIds] = useState<number[]>([]);
-  const [selectedLinkedTestCaseIds, setSelectedLinkedTestCaseIds] = useState<number[]>([]);
-  const [selectedAvailableTestPlanIds, setSelectedAvailableTestPlanIds] = useState<number[]>([]);
   const [testCaseSearchQuery, setTestCaseSearchQuery] = useState('');
-  const [testPlanSearchQuery, setTestPlanSearchQuery] = useState('');
   const [linkedSearchQuery, setLinkedSearchQuery] = useState('');
   const [linkedStatusFilter, setLinkedStatusFilter] = useState('all');
   const [linkedPriorityFilter, setLinkedPriorityFilter] = useState('all');
-  const [linkedSuiteFilter, setLinkedSuiteFilter] = useState('all');
-  const [linkedSectionFilter, setLinkedSectionFilter] = useState('all');
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [refreshLinkedKey, setRefreshLinkedKey] = useState(0);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingTestCase, setCreatingTestCase] = useState(false);
   const [newTestCaseForm, setNewTestCaseForm] = useState({
@@ -237,21 +227,13 @@ export function RequirementDetail() {
           setRequirement(data);
           setVisibleLinkedTestCasesCount(10);
           setSelectedAvailableTestCaseIds([]);
-          setSelectedLinkedTestCaseIds([]);
           setTestCaseSearchQuery('');
           setLinkedSearchQuery('');
           setLinkedStatusFilter('all');
           setLinkedPriorityFilter('all');
-          setLinkedSuiteFilter('all');
-          setLinkedSectionFilter('all');
           setShowLinkHistory(false);
           setRelationships(null);
-          setLinkedTestPlans([]);
-          setAvailableTestPlans([]);
           setRelationshipError('');
-          setTestPlansError('');
-          setSelectedAvailableTestPlanIds([]);
-          setTestPlanSearchQuery('');
         } else {
           setRequirement(null);
         }
@@ -330,8 +312,6 @@ export function RequirementDetail() {
           search: linkedSearchQuery.trim() || undefined,
           status: linkedStatusFilter === 'all' ? undefined : linkedStatusFilter,
           priority: linkedPriorityFilter === 'all' ? undefined : linkedPriorityFilter,
-          suite_id: linkedSuiteFilter === 'all' ? undefined : Number(linkedSuiteFilter),
-          section_id: linkedSectionFilter === 'all' ? undefined : Number(linkedSectionFilter),
           skip: 0,
           limit: visibleLinkedTestCasesCount,
         });
@@ -339,7 +319,6 @@ export function RequirementDetail() {
         setLinkedTestCases(data.items || []);
         setLinkedTestCasesTotal(data.total || 0);
         setTraceabilitySummary(data.summary || emptyTraceabilitySummary);
-        setSelectedLinkedTestCaseIds((current) => current.filter((id) => (data.items || []).some((testCase: RequirementLinkedTestCase) => testCase.id === id)));
       } catch (error) {
         console.error('Failed to load linked test cases:', error);
         if (!isMounted) return;
@@ -355,7 +334,7 @@ export function RequirementDetail() {
     return () => {
       isMounted = false;
     };
-  }, [requirement?.id, linkedSearchQuery, linkedStatusFilter, linkedPriorityFilter, linkedSuiteFilter, linkedSectionFilter, visibleLinkedTestCasesCount, refreshLinkedKey, t]);
+  }, [requirement?.id, linkedSearchQuery, linkedStatusFilter, linkedPriorityFilter, visibleLinkedTestCasesCount, refreshLinkedKey, t]);
 
   useEffect(() => {
     let isMounted = true;
@@ -438,93 +417,6 @@ export function RequirementDetail() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadLinkedTestPlans = async () => {
-      if (!requirement?.id) {
-        setLinkedTestPlans([]);
-        setLinkedTestPlansTotal(0);
-        setTestPlansError('');
-        return;
-      }
-
-      setTestPlansLoading(true);
-      setTestPlansError('');
-      try {
-        const data = await requirementsAPI.searchTestPlans(requirement.id, {
-          linked: true,
-          skip: 0,
-          limit: 10,
-        });
-        if (!isMounted) return;
-        setLinkedTestPlans(data.items || []);
-        setLinkedTestPlansTotal(data.total || 0);
-      } catch (error) {
-        console.error('Failed to load linked test plans:', error);
-        if (isMounted) {
-          setLinkedTestPlans([]);
-          setLinkedTestPlansTotal(0);
-          setTestPlansError(t('failedToLoadRequirementTestPlans'));
-        }
-      } finally {
-        if (isMounted) setTestPlansLoading(false);
-      }
-    };
-
-    loadLinkedTestPlans();
-    return () => {
-      isMounted = false;
-    };
-  }, [requirement?.id, refreshLinkedKey, t]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadAvailableTestPlans = async () => {
-      if (!requirement?.id) {
-        setAvailableTestPlans([]);
-        setAvailableTestPlansTotal(0);
-        return;
-      }
-
-      const searchValue = testPlanSearchQuery.trim();
-      if (searchValue.length < 2) {
-        setAvailableTestPlans([]);
-        setAvailableTestPlansTotal(0);
-        setSelectedAvailableTestPlanIds([]);
-        return;
-      }
-
-      setAvailableTestPlansLoading(true);
-      try {
-        const data = await requirementsAPI.searchTestPlans(requirement.id, {
-          linked: false,
-          search: searchValue,
-          skip: 0,
-          limit: 10,
-        });
-        if (!isMounted) return;
-        setAvailableTestPlans(data.items || []);
-        setAvailableTestPlansTotal(data.total || 0);
-        setSelectedAvailableTestPlanIds((current) => current.filter((id) => (data.items || []).some((testPlan: RequirementLinkedTestPlan) => testPlan.id === id)));
-      } catch (error) {
-        console.error('Failed to load available test plans:', error);
-        if (isMounted) {
-          setAvailableTestPlans([]);
-          setAvailableTestPlansTotal(0);
-        }
-      } finally {
-        if (isMounted) setAvailableTestPlansLoading(false);
-      }
-    };
-
-    loadAvailableTestPlans();
-    return () => {
-      isMounted = false;
-    };
-  }, [requirement?.id, testPlanSearchQuery, refreshLinkedKey]);
-
-  useEffect(() => {
-    let isMounted = true;
-
     const loadLinkHistory = async () => {
       if (!requirement?.id) {
         setLinkHistory([]);
@@ -568,10 +460,6 @@ export function RequirementDetail() {
   const hasGherkin = isGherkinText(acceptanceCriteria);
   const visibleLinkedTestCases = linkedTestCases;
   const hasMoreLinkedTestCases = linkedTestCasesTotal > visibleLinkedTestCases.length;
-  const filteredSections = useMemo(() => {
-    if (!linkedSuiteFilter || linkedSuiteFilter === 'all') return sections;
-    return sections.filter((section) => String(section.test_suite_id) === linkedSuiteFilter);
-  }, [linkedSuiteFilter, sections]);
   const newTestCaseSections = useMemo(() => {
     if (!newTestCaseForm.test_suite_id) return [];
     return sections.filter((section) => String(section.test_suite_id) === newTestCaseForm.test_suite_id);
@@ -606,7 +494,6 @@ export function RequirementDetail() {
     setBulkUpdating(true);
     try {
       await requirementsAPI.bulkUpdateTestCases(requirement.id, { test_case_ids: testCaseIds, action: 'unlink' });
-      setSelectedLinkedTestCaseIds([]);
       refreshRequirementLinks();
       toast({ title: t('success'), description: t('testCasesUnlinkedFromRequirement', { count: testCaseIds.length }) });
     } catch (error: any) {
@@ -621,61 +508,9 @@ export function RequirementDetail() {
     }
   };
 
-  const handleBulkLinkTestPlans = async (testPlanIds: number[]) => {
-    if (!requirement || testPlanIds.length === 0) return;
-    setBulkUpdating(true);
-    try {
-      await requirementsAPI.bulkUpdateTestPlans(requirement.id, { test_plan_ids: testPlanIds, action: 'link' });
-      setSelectedAvailableTestPlanIds([]);
-      setTestPlanSearchQuery('');
-      refreshRequirementLinks();
-      toast({ title: t('success'), description: t('testPlansLinkedToRequirement', { count: testPlanIds.length }) });
-    } catch (error: any) {
-      console.error('Failed to link test plans:', error);
-      toast({
-        title: t('error'),
-        description: error.response?.data?.detail || t('failedToUpdateRequirementScope'),
-        variant: 'destructive',
-      });
-    } finally {
-      setBulkUpdating(false);
-    }
-  };
-
-  const handleUnlinkTestPlan = async (testPlanId: number) => {
-    if (!requirement) return;
-    setBulkUpdating(true);
-    try {
-      await requirementsAPI.bulkUpdateTestPlans(requirement.id, { test_plan_ids: [testPlanId], action: 'unlink' });
-      refreshRequirementLinks();
-      toast({ title: t('success'), description: t('testPlansUnlinkedFromRequirement', { count: 1 }) });
-    } catch (error: any) {
-      console.error('Failed to unlink test plan:', error);
-      toast({
-        title: t('error'),
-        description: error.response?.data?.detail || t('failedToUpdateRequirementScope'),
-        variant: 'destructive',
-      });
-    } finally {
-      setBulkUpdating(false);
-    }
-  };
-
   const toggleAvailableSelection = (testCaseId: number) => {
     setSelectedAvailableTestCaseIds((current) => (
       current.includes(testCaseId) ? current.filter((id) => id !== testCaseId) : [...current, testCaseId]
-    ));
-  };
-
-  const toggleLinkedSelection = (testCaseId: number) => {
-    setSelectedLinkedTestCaseIds((current) => (
-      current.includes(testCaseId) ? current.filter((id) => id !== testCaseId) : [...current, testCaseId]
-    ));
-  };
-
-  const toggleAvailableTestPlanSelection = (testPlanId: number) => {
-    setSelectedAvailableTestPlanIds((current) => (
-      current.includes(testPlanId) ? current.filter((id) => id !== testPlanId) : [...current, testPlanId]
     ));
   };
 
@@ -921,16 +756,8 @@ export function RequirementDetail() {
                 <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <SummaryTile label={t('linkedCount')} value={traceabilitySummary.linked_count} />
                   <SummaryTile label={t('activeCount')} value={traceabilitySummary.active_count} />
-                  <SummaryTile label={t('missingCoverage')} value={traceabilitySummary.missing_coverage} />
-                  <SummaryTile label={t('failedBlockedRuns')} value={`${traceabilitySummary.failed_related_runs}/${traceabilitySummary.blocked_related_runs}`} />
-                </div>
-
-                <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  <SummaryTile label={t('scopedTestPlans')} value={relationships?.test_plans.total ?? linkedTestPlansTotal} />
-                  <SummaryTile label={t('relatedMilestones')} value={relationships?.milestones.total ?? 0} />
                   <SummaryTile label={t('relatedDefects')} value={relationships?.defects.total ?? 0} />
                   <SummaryTile label={t('relatedTestRuns')} value={relationships?.test_runs.total ?? 0} />
-                  <SummaryTile label={t('coverageReports')} value={relationships?.coverage_reports.total ?? 0} />
                 </div>
                 {relationshipError && (
                   <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
@@ -938,95 +765,8 @@ export function RequirementDetail() {
                   </p>
                 )}
 
-                <div className="mb-4 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <Label className="text-sm font-medium">{t('requirementScope')}</Label>
-                      <p className="mt-1 text-xs text-slate-500">{t('requirementScopeDesc')}</p>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => handleBulkLinkTestPlans(selectedAvailableTestPlanIds)}
-                      disabled={selectedAvailableTestPlanIds.length === 0 || bulkUpdating}
-                    >
-                      <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                      {t('linkSelectedTestPlans', { count: selectedAvailableTestPlanIds.length })}
-                    </Button>
-                  </div>
-                  {testPlansLoading ? (
-                    <div className="h-12 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
-                  ) : testPlansError ? (
-                    <p className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-300">
-                      {testPlansError}
-                    </p>
-                  ) : linkedTestPlans.length > 0 ? (
-                    <div className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-                      {linkedTestPlans.map((testPlan) => (
-                        <div key={testPlan.id} className="flex flex-col gap-2 border-b border-slate-100 p-3 last:border-b-0 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-slate-950 dark:text-white">{testPlan.title}</p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {testPlan.status || t('status')}{testPlan.milestone_title ? ` / ${testPlan.milestone_title}` : ''}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-300 dark:hover:bg-rose-950/30"
-                            onClick={() => handleUnlinkTestPlan(testPlan.id)}
-                            disabled={bulkUpdating}
-                          >
-                            <X className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                            {t('remove')}
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">
-                      {t('noTestPlansScopedToRequirement')}
-                    </p>
-                  )}
-
-                  <Input
-                    value={testPlanSearchQuery}
-                    onChange={(event) => setTestPlanSearchQuery(event.target.value)}
-                    placeholder={t('searchTestPlansToScope')}
-                    disabled={availableTestPlansLoading}
-                  />
-                  {testPlanSearchQuery.trim().length < 2 ? (
-                    <p className="text-xs text-slate-500">{t('typeToSearchTestPlans')}</p>
-                  ) : availableTestPlansLoading ? (
-                    <div className="h-12 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
-                  ) : availableTestPlans.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">
-                      {t('noTestPlansMatchSearch')}
-                    </p>
-                  ) : (
-                    <div className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-                      {availableTestPlans.map((testPlan) => (
-                        <label key={testPlan.id} className="flex min-w-0 items-start gap-3 border-b border-slate-100 p-3 text-sm last:border-b-0 dark:border-slate-800">
-                          <Checkbox
-                            checked={selectedAvailableTestPlanIds.includes(testPlan.id)}
-                            onCheckedChange={() => toggleAvailableTestPlanSelection(testPlan.id)}
-                          />
-                          <span className="min-w-0">
-                            <span className="block font-medium text-slate-900 dark:text-white">{testPlan.title}</span>
-                            <span className="mt-1 block text-xs text-slate-500">{testPlan.status || t('status')}{testPlan.milestone_title ? ` / ${testPlan.milestone_title}` : ''}</span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  {availableTestPlansTotal > availableTestPlans.length && (
-                    <p className="text-xs text-slate-500">{t('showingTopTestPlanMatches', { shown: availableTestPlans.length, total: availableTestPlansTotal })}</p>
-                  )}
-                </div>
-
-                <div className="mb-4 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
-                  <div className="grid gap-2 md:grid-cols-2">
+                <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
+                  <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">
                     <Input
                       value={linkedSearchQuery}
                       onChange={(event) => {
@@ -1055,95 +795,16 @@ export function RequirementDetail() {
                         </SelectContent>
                       </Select>
                     </div>
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <Select value={linkedSuiteFilter} onValueChange={(value) => { setLinkedSuiteFilter(value); setLinkedSectionFilter('all'); setVisibleLinkedTestCasesCount(10); }}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={t('suite')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{t('allSuites')}</SelectItem>
-                        {testSuites.map((suite) => <SelectItem key={suite.id} value={String(suite.id)}>{suite.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Select value={linkedSectionFilter} onValueChange={(value) => { setLinkedSectionFilter(value); setVisibleLinkedTestCasesCount(10); }}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={t('section')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{t('allSections')}</SelectItem>
-                        {filteredSections.map((section) => <SelectItem key={section.id} value={String(section.id)}>{section.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="mb-4 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <Label className="text-sm font-medium">{t('linkExistingTestCases')}</Label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => handleBulkLink(selectedAvailableTestCaseIds)}
-                      disabled={selectedAvailableTestCaseIds.length === 0 || bulkUpdating}
-                    >
-                      <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                      {t('linkSelected', { count: selectedAvailableTestCaseIds.length })}
-                    </Button>
-                  </div>
-                  <Input
-                    value={testCaseSearchQuery}
-                    onChange={(event) => setTestCaseSearchQuery(event.target.value)}
-                    placeholder={t('searchTestCasesToLink')}
-                    disabled={availableTestCasesLoading}
-                  />
-                  {testCaseSearchQuery.trim().length < 2 ? (
-                    <p className="rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">
-                      {t('typeToSearchTestCases')}
-                    </p>
-                  ) : availableTestCasesLoading ? (
-                    <div className="h-12 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
-                  ) : availableTestCases.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500 dark:border-slate-700">
-                      {testCaseSearchQuery.trim() ? t('noTestCasesMatchSearch') : t('noTestCasesAvailableToLink')}
-                    </p>
-                  ) : (
-                    <div className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-                      {availableTestCases.map((testCase) => (
-                        <label key={testCase.id} className="flex min-w-0 items-start gap-3 border-b border-slate-100 p-3 text-sm last:border-b-0 dark:border-slate-800">
-                          <Checkbox
-                            checked={selectedAvailableTestCaseIds.includes(testCase.id)}
-                            onCheckedChange={() => toggleAvailableSelection(testCase.id)}
-                          />
-                          <span className="min-w-0">
-                            <span className="block font-medium text-slate-900 dark:text-white">TC-{String(testCase.id).padStart(3, '0')} - {testCase.title}</span>
-                            <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')} {testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                  {availableTestCasesTotal > availableTestCases.length && (
-                    <p className="text-xs text-slate-500">{t('showingTopTestCaseMatches', { shown: availableTestCases.length, total: availableTestCasesTotal })}</p>
-                  )}
-                </div>
-
-                {selectedLinkedTestCaseIds.length > 0 && (
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 dark:border-rose-900/60 dark:bg-rose-950/20">
-                    <span className="text-sm text-rose-700 dark:text-rose-300">{t('selectedLinkedTestCases', { count: selectedLinkedTestCaseIds.length })}</span>
                     <Button
                       type="button"
                       variant="outline"
-                      size="sm"
-                      className="text-rose-600 hover:bg-rose-100 hover:text-rose-700 dark:text-rose-300 dark:hover:bg-rose-950/30"
-                      onClick={() => handleBulkUnlink(selectedLinkedTestCaseIds)}
-                      disabled={bulkUpdating}
+                      onClick={() => setLinkDialogOpen(true)}
                     >
-                      <X className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                      {t('unlinkSelected')}
+                      <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                      {t('linkExistingTestCases')}
                     </Button>
                   </div>
-                )}
+                </div>
 
                 {linkedTestCasesLoading ? (
                   <div className="space-y-2">
@@ -1161,57 +822,63 @@ export function RequirementDetail() {
                 ) : (
                   <div className="space-y-3">
                     <div className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-                      <div className="hidden grid-cols-[44px_minmax(0,1.7fr)_minmax(140px,0.8fr)_minmax(150px,0.8fr)_160px] gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 lg:grid">
-                        <span />
-                        <span>{t('testCase')}</span>
-                        <span>{t('status')}</span>
-                        <span>{t('suite')}</span>
-                        <span className={isRTL ? 'text-left' : 'text-right'}>{t('actions')}</span>
+                      <div className="hidden grid-cols-[minmax(260px,1.5fr)_minmax(180px,0.75fr)_minmax(150px,0.65fr)] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 xl:grid">
+                        <span className="whitespace-nowrap">{t('testCase')}</span>
+                        <span className="whitespace-nowrap">{t('status')}</span>
+                        <span className="whitespace-nowrap">{t('suite')}</span>
                       </div>
                       {visibleLinkedTestCases.map((testCase) => (
-                        <div key={testCase.id} className="grid gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 dark:border-slate-800 lg:grid-cols-[44px_minmax(0,1.7fr)_minmax(140px,0.8fr)_minmax(150px,0.8fr)_160px] lg:items-center">
-                          <div className="flex items-start">
-                            <Checkbox
-                              checked={selectedLinkedTestCaseIds.includes(testCase.id)}
-                              onCheckedChange={() => toggleLinkedSelection(testCase.id)}
-                              className="mt-1 lg:mt-0"
-                            />
-                          </div>
+                        <div key={testCase.id} className={`relative grid gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 dark:border-slate-800 xl:grid-cols-[minmax(260px,1.5fr)_minmax(180px,0.75fr)_minmax(150px,0.65fr)] xl:items-start xl:gap-4 ${isRTL ? 'pl-14' : 'pr-14'}`}>
                           <div className="min-w-0">
                             <div className="mb-1 flex flex-wrap items-center gap-2">
                               <Badge variant="outline" className="font-mono">TC-{String(testCase.id).padStart(3, '0')}</Badge>
-                              {testCase.reference && <span className="truncate text-xs text-slate-500">{testCase.reference}</span>}
+                              {testCase.reference && <span className="max-w-full truncate text-xs text-slate-500">{testCase.reference}</span>}
                             </div>
-                            <p className="break-words text-sm font-medium text-slate-950 dark:text-white">{testCase.title}</p>
+                            <button
+                              type="button"
+                              className={`block min-w-0 break-words text-sm font-medium leading-6 text-blue-700 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-blue-300 dark:focus-visible:ring-offset-slate-900 ${isRTL ? 'text-right' : 'text-left'}`}
+                              onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
+                            >
+                              {testCase.title}
+                            </button>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge className={getPriorityBadge(testCase.priority)}>{testCase.priority}</Badge>
                             <Badge variant="secondary">{testCase.status}</Badge>
                             {testCase.latest_run_status && <Badge variant="outline">{testCase.latest_run_status}</Badge>}
                           </div>
-                          <p className="min-w-0 truncate text-xs text-slate-500">
+                          <p className="min-w-0 break-words text-xs leading-5 text-slate-500 xl:truncate">
                             {testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}
                           </p>
-                          <div className="flex flex-wrap gap-2 lg:justify-end">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
-                            >
-                              {t('viewTestCase')}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-300 dark:hover:bg-rose-950/30"
-                              onClick={() => handleBulkUnlink([testCase.id])}
-                              disabled={bulkUpdating}
-                            >
-                              <X className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                              {bulkUpdating ? t('removing') : t('remove')}
-                            </Button>
+                          <div className={`absolute top-3 ${isRTL ? 'left-3' : 'right-3'}`}>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={t('actions')}>
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-48">
+                                <DropdownMenuLabel>{t('actions')}</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`)}>
+                                  <Play className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                                  {t('execute')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execution-history`)}>
+                                  <History className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                                  {t('executionHistory')}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-rose-600 focus:bg-rose-50 focus:text-rose-700 dark:text-rose-300 dark:focus:bg-rose-950/30"
+                                  onClick={() => handleBulkUnlink([testCase.id])}
+                                  disabled={bulkUpdating}
+                                >
+                                  <X className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                                  {bulkUpdating ? t('removing') : t('remove')}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
                       ))}
@@ -1314,6 +981,68 @@ export function RequirementDetail() {
           </aside>
           )}
         </div>
+
+        <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+          <DialogContent isRTL={isRTL} className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{t('linkExistingTestCases')}</DialogTitle>
+              <DialogDescription>{t('searchTestCasesToLink')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <Input
+                value={testCaseSearchQuery}
+                onChange={(event) => setTestCaseSearchQuery(event.target.value)}
+                placeholder={t('searchTestCasesToLink')}
+                disabled={availableTestCasesLoading}
+              />
+              {testCaseSearchQuery.trim().length < 2 ? (
+                <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">
+                  {t('typeToSearchTestCases')}
+                </p>
+              ) : availableTestCasesLoading ? (
+                <div className="space-y-2">
+                  <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+                </div>
+              ) : availableTestCases.length === 0 ? (
+                <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">
+                  {testCaseSearchQuery.trim() ? t('noTestCasesMatchSearch') : t('noTestCasesAvailableToLink')}
+                </p>
+              ) : (
+                <div className="max-h-[360px] overflow-y-auto rounded-md border border-slate-200 dark:border-slate-800">
+                  {availableTestCases.map((testCase) => (
+                    <label key={testCase.id} className="flex min-w-0 cursor-pointer items-start gap-3 border-b border-slate-100 p-3 text-sm last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-950/50">
+                      <Checkbox
+                        checked={selectedAvailableTestCaseIds.includes(testCase.id)}
+                        onCheckedChange={() => toggleAvailableSelection(testCase.id)}
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium text-slate-900 dark:text-white">TC-{String(testCase.id).padStart(3, '0')} - {testCase.title}</span>
+                        <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')} {testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {availableTestCasesTotal > availableTestCases.length && (
+                <p className="text-xs text-slate-500">{t('showingTopTestCaseMatches', { shown: availableTestCases.length, total: availableTestCasesTotal })}</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setLinkDialogOpen(false)}>{t('cancel')}</Button>
+              <Button
+                type="button"
+                onClick={async () => {
+                  await handleBulkLink(selectedAvailableTestCaseIds);
+                  setLinkDialogOpen(false);
+                }}
+                disabled={selectedAvailableTestCaseIds.length === 0 || bulkUpdating}
+              >
+                {t('linkSelected', { count: selectedAvailableTestCaseIds.length })}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent isRTL={isRTL} className="max-w-2xl">

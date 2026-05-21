@@ -897,7 +897,7 @@ def register_requirements_defects_plans_routes(app):
                         "coverage_percentage": report.coverage_percentage,
                         "test_run_id": report.test_run_id,
                     }
-                    for report in coverage_query.order_by(models.CoverageReport.created_at.desc()).limit(10).all()
+                    for report in coverage_query.order_by(models.CoverageReport.generated_at.desc()).limit(10).all()
                 ],
             ),
         )

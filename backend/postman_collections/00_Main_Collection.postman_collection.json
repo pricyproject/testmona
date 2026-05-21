@@ -1050,16 +1050,22 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/test-cases/{{testCaseId}}",
+              "raw": "{{baseUrl}}/test-cases/{{testCaseId}}?include_linked_requirements=true",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "test-cases",
                 "{{testCaseId}}"
+              ],
+              "query": [
+                {
+                  "key": "include_linked_requirements",
+                  "value": "true"
+                }
               ]
             },
-            "description": "Get a specific test case by ID"
+            "description": "Get a specific test case by ID. Set include_linked_requirements to true to include server-resolved linked requirements."
           },
           "event": [
             {

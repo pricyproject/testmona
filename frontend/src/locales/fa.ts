@@ -1000,6 +1000,8 @@ export const fa = {
     noRevisionHistory: 'تاریخچه بازبینی برای این مورد تست موجود نیست.',
     executing: 'در حال اجرا...',
     linkedRequirement: 'نیازمندی مرتبط',
+    showLinkedRequirements: 'نمایش نیازمندی‌های مرتبط',
+    noLinkedRequirementsForTestCase: 'هیچ نیازمندی‌ای به این مورد تست لینک نشده است.',
     acceptanceCriteria: 'معیارهای پذیرش',
     preconditions: 'پیش‌شرط‌ها',
     noPreconditions: 'هیچ پیش‌شرطی تعریف نشده است',

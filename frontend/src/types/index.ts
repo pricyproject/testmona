@@ -62,6 +62,7 @@ export interface TestCase {
     step_type: string;
   }>;
   custom_field_values?: CustomFieldValue[];
+  linked_requirements?: Requirement[];
   // Nested relationships
   creator?: User;
   test_suite?: {

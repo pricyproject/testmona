@@ -631,13 +631,19 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/test-cases/1",
+              "raw": "{{baseUrl}}/test-cases/1?include_linked_requirements=true",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "test-cases",
                 "1"
+              ],
+              "query": [
+                {
+                  "key": "include_linked_requirements",
+                  "value": "true"
+                }
               ]
             }
           }

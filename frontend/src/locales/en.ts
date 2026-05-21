@@ -743,6 +743,8 @@ export const en = {
   noRevisionHistory: 'No revision history available for this test case.',
   executing: 'Executing...',
   linkedRequirement: 'Linked Requirement',
+  showLinkedRequirements: 'Show linked reqs',
+  noLinkedRequirementsForTestCase: 'No requirements are linked to this test case.',
   acceptanceCriteria: 'Acceptance Criteria',
   preconditions: 'Preconditions',
   noPreconditions: 'No preconditions defined',

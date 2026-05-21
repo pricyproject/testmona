@@ -6829,6 +6829,16 @@
               "type": "integer",
               "title": "Test Case Id"
             }
+          },
+          {
+            "name": "include_linked_requirements",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Linked Requirements"
+            }
           }
         ],
         "responses": {
@@ -26555,6 +26565,61 @@
         ],
         "title": "TestCaseCreate"
       },
+      "TestCaseLinkedRequirement": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "requirement_id": {
+            "type": "string",
+            "title": "Requirement Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "requirement_id",
+          "title",
+          "status",
+          "priority"
+        ],
+        "title": "TestCaseLinkedRequirement"
+      },
       "TestCaseSection": {
         "properties": {
           "name": {
@@ -27629,6 +27694,13 @@
                 "type": "null"
               }
             ]
+          },
+          "linked_requirements": {
+            "items": {
+              "$ref": "#/components/schemas/TestCaseLinkedRequirement"
+            },
+            "type": "array",
+            "title": "Linked Requirements"
           }
         },
         "type": "object",
