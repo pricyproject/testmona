@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
-import { defectsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI } from '@/lib/api';
+import { defectsAPI, executionSettingsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI } from '@/lib/api';
+import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -35,16 +36,33 @@ import {
   Edit,
   Save,
   Plus,
-  Trash2,
   FileText,
   Bug,
   User,
   ChevronLeft,
   ChevronRight,
   Link,
+  Link2,
+  Unlink,
+  RefreshCw,
+  ShieldAlert,
   PlayCircle,
   Pause,
 } from 'lucide-react';
+
+const DEFECT_LINK_TYPES = ['found', 'blocked_by', 'related'] as const;
+type DefectLinkType = typeof DEFECT_LINK_TYPES[number];
+
+const isValidHttpUrl = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return true; // empty is allowed
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
@@ -64,6 +82,15 @@ export function TestCaseExecution() {
   const [isDefectDialogOpen, setIsDefectDialogOpen] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  // Structured defect links for this execution result
+  const [testResultId, setTestResultId] = useState<number | null>(null);
+  const [resultDefectLinks, setResultDefectLinks] = useState<any[]>([]);
+  const [availableDefects, setAvailableDefects] = useState<any[]>([]);
+  const [selectedDefectId, setSelectedDefectId] = useState('');
+  const [linkType, setLinkType] = useState<DefectLinkType>('found');
+  const [isLinkingDefect, setIsLinkingDefect] = useState(false);
+  const [requireDefectOnFailure, setRequireDefectOnFailure] = useState(false);
+  const [retestNeeded, setRetestNeeded] = useState(false);
   const defectTitleInputRef = useRef<HTMLInputElement>(null);
   const [manualTimeAdjustment, setManualTimeAdjustment] = useState(0);
   const [executionStartedAtRef, setExecutionStartedAtRef] = useState<string | null>(null);
@@ -390,6 +417,10 @@ export function TestCaseExecution() {
           const mappedStatus = statusMap[result.status] || 'pending';
           setExecutionStatus(mappedStatus);
           setExecutionNotes(result.actual_result || result.comments || '');
+          setTestResultId(result.id ?? null);
+          setDefectLink(result.defect_link || '');
+          setCustomLink(result.custom_link || '');
+          setRetestNeeded(Boolean(result.retest_needed));
           setAssignee(
             result.executed_by?.toString()
             || testRun?.assigned_to?.toString()
@@ -431,6 +462,8 @@ export function TestCaseExecution() {
           setAssignee(testRun?.assigned_to?.toString() || currentUser?.id?.toString() || '');
           setExecutionState('idle');
           setIsPaused(false);
+          setTestResultId(null);
+          setRetestNeeded(false);
         }
       } finally {
         setIsLoading(false);
@@ -447,7 +480,8 @@ export function TestCaseExecution() {
       
       try {
         const allDefects = await defectsAPI.getAll(parseInt(projectId));
-        
+        setAvailableDefects(Array.isArray(allDefects) ? allDefects : []);
+
         // Filter defects for this test case
         const currentTestCaseId = Number(testCaseId);
         const currentTestRunId = Number(testRunId);
@@ -456,16 +490,60 @@ export function TestCaseExecution() {
           const linkedTestRunId = defect.test_run_id == null ? null : Number(defect.test_run_id);
           return linkedTestCaseId === currentTestCaseId && (linkedTestRunId === null || linkedTestRunId === currentTestRunId);
         });
-        
+
         setDefects(testCaseDefects);
       } catch (error) {
         console.error('❌ Failed to load existing defects:', error);
         setDefects([]);
+        setAvailableDefects([]);
       }
     };
-    
+
     loadExistingDefects();
   }, [projectId, testCaseId, testRunId]);
+
+  // Load structured defect links for this execution result
+  const loadResultDefectLinks = async (resultId: number | null) => {
+    if (!resultId) {
+      setResultDefectLinks([]);
+      return;
+    }
+    try {
+      const links = await testResultsAPI.getDefectLinks(resultId);
+      setResultDefectLinks(Array.isArray(links) ? links : []);
+    } catch (error) {
+      console.error('Failed to load defect links:', error);
+      setResultDefectLinks([]);
+    }
+  };
+
+  useEffect(() => {
+    loadResultDefectLinks(testResultId);
+  }, [testResultId]);
+
+  // Load project execution settings (defect-on-failure policy)
+  useEffect(() => {
+    const loadExecutionSettings = async () => {
+      if (!projectId) return;
+      try {
+        const settings = await executionSettingsAPI.get(parseInt(projectId));
+        setRequireDefectOnFailure(Boolean(settings?.require_defect_on_failure));
+      } catch (error) {
+        console.error('Failed to load execution settings:', error);
+        setRequireDefectOnFailure(false);
+      }
+    };
+    loadExecutionSettings();
+  }, [projectId]);
+
+  // Default the link type to match the execution status
+  useEffect(() => {
+    if (executionStatus === 'blocked') {
+      setLinkType('blocked_by');
+    } else if (executionStatus === 'failed') {
+      setLinkType('found');
+    }
+  }, [executionStatus]);
 
   // Mock saved executions (persisted data)
   const [savedExecutions, setSavedExecutions] = useState<any[]>(() => {
@@ -604,6 +682,31 @@ export function TestCaseExecution() {
         return;
       }
 
+      const isFailedOrBlocked = executionStatus === 'failed' || executionStatus === 'blocked';
+
+      // Validate failure-context URLs before saving
+      if (!isValidHttpUrl(defectLink) || !isValidHttpUrl(customLink)) {
+        toast({
+          title: t('invalidUrl'),
+          description: t('invalidUrlDescription'),
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Enforce the project's defect-on-failure policy
+      if (isFailedOrBlocked && requireDefectOnFailure) {
+        const hasDefectEvidence = resultDefectLinks.length > 0 || defectLink.trim() !== '';
+        if (!hasDefectEvidence) {
+          toast({
+            title: t('defectRequired'),
+            description: t('defectRequiredDescription'),
+            variant: 'destructive',
+          });
+          return;
+        }
+      }
+
       // Map frontend status to backend status
       const statusMap: Record<string, string> = {
         'passed': 'pass',
@@ -626,7 +729,10 @@ export function TestCaseExecution() {
         execution_started_at: startedAt,
         execution_time: executionTimeSeconds,
         executed_by: parseInt(assignee) || null,
-        logs: executionLogs
+        logs: executionLogs,
+        // Persist failure-context links to the backend (no longer localStorage-only)
+        defect_link: isFailedOrBlocked ? defectLink.trim() : '',
+        custom_link: isFailedOrBlocked ? customLink.trim() : '',
       };
 
       const authToken = localStorage.getItem('token');
@@ -745,6 +851,14 @@ export function TestCaseExecution() {
       // Get the savedResult from the fetch operations above
       // Note: savedResult is now available from the try block above
 
+      // Track the saved result id and refresh its structured defect links.
+      // Re-executing clears any pending retest flag (mirrors backend behavior).
+      if (savedResult?.id) {
+        setTestResultId(savedResult.id);
+        setRetestNeeded(Boolean(savedResult.retest_needed));
+        await loadResultDefectLinks(savedResult.id);
+      }
+
       // Also save additional data to localStorage for now (defects, logs, etc.)
       const additionalData = {
         test_case_id: testCaseId,
@@ -802,6 +916,96 @@ export function TestCaseExecution() {
     }
   };
 
+  // Derive defect fields from the current execution context (for prefilling)
+  const buildDefectContext = () => {
+    const stepsText = testSteps.length > 0
+      ? testSteps.map(step => `${step.step_number}. ${step.action}`).join('\n')
+      : (testCase?.steps || testCase?.test_steps || testCase?.preconditions || '');
+    const expectedText = testSteps.length > 0
+      ? testSteps
+          .filter(step => step.expected_result)
+          .map(step => `${step.step_number}. ${step.expected_result}`)
+          .join('\n')
+      : (testCase?.expected_result || testCase?.expected_results || '');
+    const environment = testRun?.environment?.name
+      || testRun?.environment_name
+      || testRun?.environment
+      || '';
+    const context: Record<string, string> = {};
+    if (stepsText) context.steps_to_reproduce = String(stepsText);
+    if (expectedText) context.expected_result = String(expectedText);
+    if (executionNotes.trim()) context.actual_result = executionNotes.trim();
+    if (environment) context.environment = String(environment);
+    return context;
+  };
+
+  // Open the report-defect dialog with values prefilled from execution context
+  const openDefectDialog = () => {
+    const tcPriority = String(testCase?.priority || '').toLowerCase();
+    const severity = ['low', 'medium', 'high', 'critical'].includes(tcPriority) ? tcPriority : 'medium';
+    const statusLabel = executionStatus === 'blocked' ? t('blocked') : t('failed');
+    setNewDefect({
+      title: testCase?.title ? `[${statusLabel}] ${testCase.title}` : '',
+      description: executionNotes.trim(),
+      severity,
+      priority: 'high',
+    });
+    setIsDefectDialogOpen(true);
+  };
+
+  const handleLinkExistingDefect = async () => {
+    if (!selectedDefectId) return;
+    if (!testResultId) {
+      toast({
+        title: t('error'),
+        description: t('saveExecutionBeforeLinkingDefect'),
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      setIsLinkingDefect(true);
+      await testResultsAPI.linkDefect(testResultId, {
+        defect_id: parseInt(selectedDefectId),
+        link_type: linkType,
+      });
+      setSelectedDefectId('');
+      await loadResultDefectLinks(testResultId);
+      toast({ title: t('success'), description: t('defectLinkedSuccessfully') });
+    } catch (error) {
+      console.error('Failed to link defect:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToLinkDefect')),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLinkingDefect(false);
+    }
+  };
+
+  const linkTypeLabel = (type: string) => {
+    if (type === 'blocked_by') return t('linkTypeBlockedBy');
+    if (type === 'related') return t('linkTypeRelated');
+    return t('linkTypeFound');
+  };
+
+  const handleUnlinkDefect = async (linkId: number) => {
+    if (!testResultId) return;
+    try {
+      await testResultsAPI.unlinkDefect(testResultId, linkId);
+      await loadResultDefectLinks(testResultId);
+      toast({ title: t('success'), description: t('defectUnlinkedSuccessfully') });
+    } catch (error) {
+      console.error('Failed to unlink defect:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToUnlinkDefect')),
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleCreateDefect = async () => {
     const currentProjectId = Number(projectId);
     const currentTestRunId = Number(testRunId);
@@ -842,8 +1046,8 @@ export function TestCaseExecution() {
     
     try {
       setIsCreating(true);
-      // Create defect via API
-      const defectData = {
+      // Build defect payload, prefilled with execution context
+      const defectData: any = {
         defect_id: createExecutionDefectId(),
         title: trimmedTitle,
         description: newDefect.description.trim(),
@@ -853,15 +1057,30 @@ export function TestCaseExecution() {
         test_run_id: currentTestRunId,
         project_id: currentProjectId,
         reported_by: currentUser?.id,
+        ...buildDefectContext(),
       };
-      
-      const createdDefect = await defectsAPI.create(defectData);
-      
-      // Add to local state
-      setDefects(prevDefects => [createdDefect, ...prevDefects]);
+
+      let createdDefect: any = null;
+      if (testResultId) {
+        // Create the defect and link it to this execution result atomically
+        const link = await testResultsAPI.linkDefect(testResultId, {
+          new_defect: defectData,
+          link_type: linkType,
+        });
+        createdDefect = link?.defect || null;
+        await loadResultDefectLinks(testResultId);
+      } else {
+        createdDefect = await defectsAPI.create(defectData);
+      }
+
+      // Keep loose defect lists in sync for ID generation / duplicate checks
+      if (createdDefect) {
+        setDefects(prevDefects => [createdDefect, ...prevDefects]);
+        setAvailableDefects(prevDefects => [createdDefect, ...prevDefects]);
+      }
       setNewDefect({ title: '', description: '', severity: 'medium', priority: 'high' });
       setIsDefectDialogOpen(false);
-      
+
       toast({
         title: t('success'),
         description: t('defectReportedSuccessfully'),
@@ -910,25 +1129,6 @@ export function TestCaseExecution() {
     navigate(`/projects/${projectId}/test-cases/${testCaseId}/edit`);
   };
 
-  const handleDeleteDefect = async (defectId: number) => {
-    if (!confirm(t('confirmDeleteDefect'))) return;
-
-    try {
-      await defectsAPI.delete(defectId);
-      setDefects(prevDefects => prevDefects.filter(d => d.id !== defectId));
-      toast({
-        title: t('success'),
-        description: t('defectDeletedSuccessfully'),
-      });
-    } catch (error) {
-      console.error('Failed to delete defect:', error);
-      toast({
-        title: t('error'),
-        description: getApiErrorMessage(error, t('failedToDeleteDefect')),
-        variant: "destructive",
-      });
-    }
-  };
 
   // Navigation functions
   const handleNextTestCase = () => {
@@ -1612,6 +1812,17 @@ export function TestCaseExecution() {
                 </div>
               </div>
 
+              {/* Retest banner: a linked defect changed status */}
+              {retestNeeded && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <div className="font-semibold">{t('retestNeededTitle')}</div>
+                    <div className="text-xs">{t('retestNeededDescription')}</div>
+                  </div>
+                </div>
+              )}
+
               {/* Show link fields only when failed or blocked */}
               {(executionStatus === 'failed' || executionStatus === 'blocked') && (
                 <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-orange-50 p-4 shadow-sm dark:border-red-900/60 dark:from-red-950/30 dark:to-orange-950/20">
@@ -1619,6 +1830,12 @@ export function TestCaseExecution() {
                     <AlertTriangle className="h-4 w-4" />
                     {t('failureContext')}
                   </div>
+                  {requireDefectOnFailure && (
+                    <div className="mb-3 flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 text-xs text-red-700 dark:bg-slate-950/40 dark:text-red-200">
+                      <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                      {t('defectRequiredHint')}
+                    </div>
+                  )}
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
                       <Label htmlFor="defectLink" className="text-xs font-semibold text-red-700 dark:text-red-200">
@@ -1710,53 +1927,108 @@ export function TestCaseExecution() {
             </CardContent>
           </Card>
 
-          {/* Defects Section */}
+          {/* Linked Defects Section */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Bug className="h-4 w-4" />
-                  Defects Found ({defects.length})
+                  {t('linkedDefects')} ({resultDefectLinks.length})
                 </CardTitle>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
-                  onClick={() => setIsDefectDialogOpen(true)}
+                  onClick={openDefectDialog}
                   className="h-8 text-xs"
                 >
                   <Plus className="h-3 w-3 mr-1" />
-                  Report Defect
+                  {t('reportDefect')}
                 </Button>
               </div>
             </CardHeader>
-            <CardContent>
-              {defects.length === 0 ? (
-                <p className="text-gray-500 text-center py-3 text-xs">No defects reported</p>
+            <CardContent className="space-y-3">
+              {/* Link an existing defect to this execution result */}
+              <div className="space-y-2 rounded-lg border border-dashed p-3 dark:border-slate-700">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  {t('linkExistingDefect')}
+                </Label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <SearchableDefectSelect
+                    id="defectLinkSelect"
+                    value={selectedDefectId}
+                    onChange={setSelectedDefectId}
+                    defects={availableDefects}
+                    className="flex-1"
+                  />
+                  <Select value={linkType} onValueChange={(value) => setLinkType(value as DefectLinkType)}>
+                    <SelectTrigger className="h-9 sm:w-44">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="found">{t('linkTypeFound')}</SelectItem>
+                      <SelectItem value="blocked_by">{t('linkTypeBlockedBy')}</SelectItem>
+                      <SelectItem value="related">{t('linkTypeRelated')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    onClick={handleLinkExistingDefect}
+                    disabled={!selectedDefectId || isLinkingDefect}
+                    className="h-9"
+                  >
+                    <Link2 className="h-3.5 w-3.5 mr-1" />
+                    {isLinkingDefect ? t('linking') : t('link')}
+                  </Button>
+                </div>
+              </div>
+
+              {/* List of defects linked to this execution result */}
+              {resultDefectLinks.length === 0 ? (
+                <p className="text-gray-500 text-center py-3 text-xs">{t('noDefectsLinked')}</p>
               ) : (
                 <div className="space-y-2">
-                  {defects.map((defect) => (
-                    <div key={defect.id} className="border rounded-lg p-2">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-mono text-xs">{defect.defect_id}</span>
-                            <Badge variant="outline" className="text-xs">{defect.severity}</Badge>
-                            <Badge variant="outline" className="text-xs">{defect.priority}</Badge>
+                  {resultDefectLinks.map((link) => {
+                    const defect = link.defect || {};
+                    return (
+                      <div key={link.id} className="border rounded-lg p-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span className="font-mono text-xs">{defect.defect_id || `#${link.defect_id}`}</span>
+                              {defect.severity && (
+                                <Badge variant="outline" className="text-xs capitalize">{defect.severity}</Badge>
+                              )}
+                              {defect.status && (
+                                <Badge variant="outline" className="text-xs capitalize">{defect.status}</Badge>
+                              )}
+                              <Badge variant="secondary" className="text-xs">{linkTypeLabel(link.link_type)}</Badge>
+                            </div>
+                            <h4 className="font-medium text-sm truncate">{defect.title}</h4>
+                            {defect.external_issue_url && (
+                              <a
+                                href={defect.external_issue_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+                              >
+                                <Link className="h-3 w-3" />
+                                {t('openInTracker')}
+                              </a>
+                            )}
                           </div>
-                          <h4 className="font-medium text-sm">{defect.title}</h4>
-                          <p className="text-xs text-gray-600 mt-1">{defect.description}</p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleUnlinkDefect(link.id)}
+                            className="h-7 w-7 p-0 shrink-0"
+                            title={t('unlinkDefect')}
+                          >
+                            <Unlink className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeleteDefect(defect.id)}
-                          className="h-7 w-7 p-0"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -1801,10 +2073,10 @@ export function TestCaseExecution() {
                 <XCircle className="h-3 w-3 mr-2 text-red-600" />
                 Mark as Failed
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full justify-start h-8 text-xs"
-                onClick={() => setIsDefectDialogOpen(true)}
+                onClick={openDefectDialog}
               >
                 <Bug className="h-3 w-3 mr-2 text-orange-600" />
                 Report Defect

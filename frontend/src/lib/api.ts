@@ -535,6 +535,25 @@ export const testRunsAPI = {
     const response = await api.put(`/test-runs/${id}/reset-time`);
     return response.data;
   },
+  getDefectCoverage: async (id: number) => {
+    const response = await api.get(`/test-runs/${id}/defect-coverage`);
+    return response.data;
+  },
+  getFlakiness: async (id: number) => {
+    const response = await api.get(`/test-runs/${id}/flakiness`);
+    return response.data;
+  },
+};
+
+// Test Execution Settings API
+export const executionSettingsAPI = {
+  get: async (projectId?: number) => {
+    const params = new URLSearchParams();
+    if (projectId) params.append('project_id', projectId.toString());
+    const query = params.toString();
+    const response = await api.get(`/test-execution-settings${query ? `?${query}` : ''}`);
+    return response.data;
+  },
 };
 
 // Test Results API
@@ -566,6 +585,19 @@ export const testResultsAPI = {
     const response = await api.put(`/test-results/${id}/reset-time`);
     return response.data;
   },
+  // Defect links for a specific execution result
+  getDefectLinks: async (id: number) => {
+    const response = await api.get(`/test-results/${id}/defect-links`);
+    return response.data;
+  },
+  linkDefect: async (id: number, payload: { defect_id?: number; link_type?: string; new_defect?: any }) => {
+    const response = await api.post(`/test-results/${id}/defect-links`, payload);
+    return response.data;
+  },
+  unlinkDefect: async (id: number, linkId: number) => {
+    const response = await api.delete(`/test-results/${id}/defect-links/${linkId}`);
+    return response.data;
+  },
 };
 
 // Users API
@@ -594,9 +626,16 @@ export const usersAPI = {
 
 // Defects API
 export const defectsAPI = {
-  getAll: async (projectId?: number, skip = 0, limit = 100) => {
+  getAll: async (
+    projectId?: number,
+    skip = 0,
+    limit = 100,
+    filters: { search?: string; status?: string } = {},
+  ) => {
     const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
     if (projectId) params.append('project_id', projectId.toString());
+    if (filters.search?.trim()) params.append('search', filters.search.trim());
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
     const response = await api.get(`/defects?${params}`);
     return response.data;
   },
