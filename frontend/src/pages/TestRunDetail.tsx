@@ -1,17 +1,20 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   ArrowLeft,
   CheckCircle,
   XCircle,
   AlertCircle,
+  AlertTriangle,
+  Bug,
   Clock,
   User,
   Calendar,
@@ -30,18 +33,30 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
   Columns3,
   Loader2,
+  Link2,
+  Unlink,
+  Zap,
+  Filter,
 } from 'lucide-react';
+import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { TestRunPieChart, TestRunBarChart, TestRunTrendChart } from '@/components/ui/chart';
 import { useTranslation } from '@/hooks/useTranslation';
-import { sectionsAPI, testCasesAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage, sectionsAPI, testCasesAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 import { TestResult } from '@/types/index';
 import { formatDurationSeconds } from '@/utils/timeFormat';
 
@@ -68,13 +83,16 @@ export function TestRunDetail() {
   const { id, projectId } = useParams<{ id: string; projectId: string }>();
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
+  const { toast } = useToast();
   const [testRun, setTestRun] = useState<any>(null);
   const [testResults, setTestResults] = useState<any[]>([]);
+  const [defectCoverage, setDefectCoverage] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<string>('all');
-  const [resultSearchQuery, setResultSearchQuery] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [filter, setFilter] = useState<string>(() => searchParams.get('status') || 'all');
+  const [resultSearchQuery, setResultSearchQuery] = useState(() => searchParams.get('q') || '');
   const [chartFilter, setChartFilter] = useState<string>('all'); // New state for chart filtering
   const [isAddTestCasesOpen, setIsAddTestCasesOpen] = useState(false);
   const [selectedTestCasesForRemoval, setSelectedTestCasesForRemoval] = useState<number[]>([]);
@@ -86,11 +104,11 @@ export function TestRunDetail() {
   const [isAssigningRun, setIsAssigningRun] = useState(false);
 
   // Column sorting
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortColumn, setSortColumn] = useState<string | null>(() => searchParams.get('sort') || null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => (searchParams.get('dir') === 'desc' ? 'desc' : 'asc'));
 
   // Column visibility (optional columns only; checkbox/testCase/status/actions are always visible)
-  type OptionalCol = 'section' | 'priority' | 'executedBy' | 'executedAt' | 'duration' | 'comments';
+  type OptionalCol = 'section' | 'priority' | 'defects' | 'executedBy' | 'executedAt' | 'duration' | 'comments';
   const [hiddenCols, setHiddenCols] = useState<Set<OptionalCol>>(new Set());
   const isVisible = (col: OptionalCol) => !hiddenCols.has(col);
   const toggleCol = (col: OptionalCol) => {
@@ -100,6 +118,37 @@ export function TestRunDetail() {
       return next;
     });
   };
+
+  // Faceted + quick filters
+  const [sectionFilter, setSectionFilter] = useState<string>(() => searchParams.get('section') || 'all');
+  const [priorityFilter, setPriorityFilter] = useState<string>(() => searchParams.get('priority') || 'all');
+  const [assigneeFilter, setAssigneeFilter] = useState<string>(() => searchParams.get('assignee') || 'all');
+  // attention: all | untested | failed_no_defect | retest
+  const [attentionFilter, setAttentionFilter] = useState<string>(() => searchParams.get('attention') || 'all');
+
+  // Pagination
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState<number>(() => Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1));
+
+  // Inline defect linking from the table
+  const [defectsCatalog, setDefectsCatalog] = useState<any[]>([]);
+  const [linkDialogResultId, setLinkDialogResultId] = useState<number | null>(null);
+  const [linkDefectId, setLinkDefectId] = useState('');
+  const [linkType, setLinkType] = useState('found');
+  const [isLinkingDefect, setIsLinkingDefect] = useState(false);
+
+  // Cross-run flakiness, keyed by test case id
+  const [flakiness, setFlakiness] = useState<Record<string, { runs: number; fails: number; flaky: boolean }>>({});
+
+  // Inline / bulk save progress
+  const [savingResultId, setSavingResultId] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Bumped whenever results are mutated, to refresh backend-computed rollups
+  const [derivedRefreshKey, setDerivedRefreshKey] = useState(0);
+  const bumpDerived = () => setDerivedRefreshKey((k) => k + 1);
+  // Server-side search term for the inline defect picker
+  const [defectSearch, setDefectSearch] = useState('');
 
   // Prepare chart data
   const prepareChartData = () => {
@@ -210,6 +259,76 @@ export function TestRunDetail() {
 
     return { pieData, sectionData, trendData };
   };  
+  // Load defect-linking coverage rollup for traceability reporting
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    testRunsAPI.getDefectCoverage(parseInt(id))
+      .then((data) => { if (!cancelled) setDefectCoverage(data); })
+      .catch((err) => { console.error('Failed to load defect coverage:', err); });
+    return () => { cancelled = true; };
+  }, [id, testResults.length, derivedRefreshKey]);
+
+  // Load cross-run flakiness for the test cases in this run
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    testRunsAPI.getFlakiness(parseInt(id))
+      .then((data) => { if (!cancelled) setFlakiness(data || {}); })
+      .catch((err) => { console.error('Failed to load flakiness:', err); });
+    return () => { cancelled = true; };
+  }, [id, testResults.length, derivedRefreshKey]);
+
+  // Load the project's defect catalog for inline defect linking.
+  // Empty search → 100 most recent; otherwise server-side filtered (debounced).
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    const query = defectSearch.trim();
+    const handle = window.setTimeout(() => {
+      defectsAPI.getAll(parseInt(projectId), 0, 100, query ? { search: query } : {})
+        .then((data) => { if (!cancelled) setDefectsCatalog(Array.isArray(data) ? data : []); })
+        .catch((err) => { console.error('Failed to load defects catalog:', err); });
+    }, query ? 250 : 0);
+    return () => { cancelled = true; window.clearTimeout(handle); };
+  }, [projectId, defectSearch]);
+
+  // Keep filter/search/sort/page state in the URL (shareable + survives reload)
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    const sync = (key: string, value: string, fallback: string) => {
+      if (value && value !== fallback) next.set(key, value);
+      else next.delete(key);
+    };
+    sync('status', filter, 'all');
+    sync('q', resultSearchQuery.trim(), '');
+    sync('section', sectionFilter, 'all');
+    sync('priority', priorityFilter, 'all');
+    sync('assignee', assigneeFilter, 'all');
+    sync('attention', attentionFilter, 'all');
+    sync('sort', sortColumn || '', '');
+    sync('dir', sortColumn ? sortDir : '', '');
+    sync('page', page > 1 ? String(page) : '', '');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, resultSearchQuery, sectionFilter, priorityFilter, assigneeFilter, attentionFilter, sortColumn, sortDir, page]);
+
+  // Reset to the first page whenever the filter set changes (but not on mount,
+  // so a page number provided in the URL survives the initial render). Also
+  // prune the selection to rows still visible, so bulk actions never hit
+  // filtered-out (invisible) results.
+  const filtersInitialized = useRef(false);
+  useEffect(() => {
+    if (!filtersInitialized.current) {
+      filtersInitialized.current = true;
+      return;
+    }
+    setPage(1);
+    const visibleIds = new Set(filteredResults.map((r) => r.id));
+    setSelectedTestCasesForRemoval((prev) => prev.filter((rid) => visibleIds.has(rid)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, resultSearchQuery, sectionFilter, priorityFilter, assigneeFilter, attentionFilter]);
+
   const normalizeRunStatus = (status?: string | null) => (status || '').toLowerCase().replace(/[-\s]/g, '_');
 
   const isResultComplete = (status?: string | null) => {
@@ -234,7 +353,14 @@ export function TestRunDetail() {
     const payload = { ...pendingValues };
     const targetStatus = payload.status ?? result.status;
 
-    if (isResultComplete(targetStatus) && payload.execution_time === undefined) {
+    // Only stamp a duration when the result is first completed and has none yet.
+    // Editing another field (comment, executor) on an already-timed result must
+    // never overwrite its recorded execution_time.
+    if (
+      isResultComplete(targetStatus)
+      && payload.execution_time === undefined
+      && result.execution_time == null
+    ) {
       const startedAt = payload.execution_started_at || result.execution_started_at || new Date().toISOString();
       const startedAtTime = new Date(startedAt).getTime();
       payload.execution_started_at = startedAt;
@@ -509,13 +635,55 @@ export function TestRunDetail() {
     }
   };
 
+  // --- Row-level defect / flakiness helpers --------------------------------
+  const NO_SECTION = '__no_section__';
+  const getResultDefectLinks = (result: any): any[] =>
+    Array.isArray(result?.defect_links) ? result.defect_links : [];
+  const isFailedOrBlocked = (result: any) =>
+    ['fail', 'block'].includes(normalizeRunStatus(result?.status));
+  const isUnlinkedFailure = (result: any) =>
+    isFailedOrBlocked(result)
+    && getResultDefectLinks(result).length === 0
+    && !String(result?.defect_link || '').trim();
+  const getFlakiness = (result: any) =>
+    result?.test_case_id != null ? flakiness[String(result.test_case_id)] : undefined;
+
+  // Facet option lists derived from the loaded results
+  const sectionOptions = useMemo(() => {
+    const names = new Set<string>();
+    testResults.forEach((r) => names.add(r.test_case?.section?.name || NO_SECTION));
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [testResults]);
+  const assigneeOptions = useMemo(() => {
+    const ids = new Set<string>();
+    let hasUnassigned = false;
+    testResults.forEach((r) => {
+      if (r.executed_by) ids.add(String(r.executed_by));
+      else hasUnassigned = true;
+    });
+    return { ids: Array.from(ids), hasUnassigned };
+  }, [testResults]);
+
   const filteredResults = testResults.filter(result => {
     const resultStatus = normalizeRunStatus(result.status) || 'not_tested';
-    const selectedStatus = normalizeRunStatus(filter);
-    const matchesStatus = filter === 'all' || resultStatus === selectedStatus;
-    const normalizedQuery = resultSearchQuery.trim().toLowerCase();
+    if (filter !== 'all' && resultStatus !== normalizeRunStatus(filter)) return false;
 
-    if (!normalizedQuery) return matchesStatus;
+    // Faceted filters
+    if (sectionFilter !== 'all' && (result.test_case?.section?.name || NO_SECTION) !== sectionFilter) return false;
+    if (priorityFilter !== 'all' && (result.test_case?.priority || 'medium') !== priorityFilter) return false;
+    if (assigneeFilter !== 'all') {
+      const execId = result.executed_by ? String(result.executed_by) : 'unassigned';
+      if (execId !== assigneeFilter) return false;
+    }
+
+    // Quick "needs attention" filters
+    if (attentionFilter === 'untested' && isResultComplete(result.status)) return false;
+    if (attentionFilter === 'failed_no_defect' && !isUnlinkedFailure(result)) return false;
+    if (attentionFilter === 'retest' && !result.retest_needed) return false;
+
+    // Free-text search
+    const normalizedQuery = resultSearchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return true;
 
     const searchableFields = [
       result.test_case?.title,
@@ -525,9 +693,10 @@ export function TestRunDetail() {
       result.comments,
       getResultExecutorName(result),
       formatStatusLabel(result.status),
+      ...getResultDefectLinks(result).map((link: any) => link?.defect?.defect_id),
     ];
 
-    return matchesStatus && searchableFields.some((field) =>
+    return searchableFields.some((field) =>
       String(field || '').toLowerCase().includes(normalizedQuery)
     );
   });
@@ -553,11 +722,18 @@ export function TestRunDetail() {
             return dir * (new Date(a.executed_at || 0).getTime() - new Date(b.executed_at || 0).getTime());
           case 'duration':
             return dir * ((Number(a.execution_time) || 0) - (Number(b.execution_time) || 0));
+          case 'defects':
+            return dir * (getResultDefectLinks(a).length - getResultDefectLinks(b).length);
           default:
             return 0;
         }
       })
     : filteredResults;
+
+  // Pagination over the filtered + sorted results
+  const totalPages = Math.max(1, Math.ceil(sortedFilteredResults.length / PAGE_SIZE));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const pagedResults = sortedFilteredResults.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const statusCounts = testResults.reduce((acc: any, result) => {
     const normalizedStatus = normalizeRunStatus(result.status) || 'not_tested';
@@ -571,6 +747,9 @@ export function TestRunDetail() {
   const blockedTests = (statusCounts.block || 0) + (statusCounts.blocked || 0);
   const skippedTests = (statusCounts.skip || 0) + (statusCounts.skipped || 0);
   const notTestedTests = (statusCounts.not_tested || 0) + (statusCounts.pending || 0);
+  const unlinkedFailureCount = testResults.filter(isUnlinkedFailure).length;
+  const retestCount = testResults.filter((r) => r.retest_needed).length;
+  const flakyCount = testResults.filter((r) => getFlakiness(r)?.flaky).length;
   const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
   const totalExecutionSeconds = testResults.reduce((total, result) => total + (Number(result.execution_time) || 0), 0);
   const executedResultsCount = testResults.filter((result) => isResultComplete(result.status) && result.execution_time != null).length;
@@ -714,6 +893,7 @@ export function TestRunDetail() {
       } else if (testRun?.testResults) {
         setTestRun({ ...testRun, testResults: updatedTestResults });
       }
+      bumpDerived();
       setEditValues((prev) => {
         const nextValues = { ...prev };
         delete nextValues[resultId];
@@ -725,6 +905,152 @@ export function TestRunDetail() {
     } finally {
       setEditingResult(null);
     }
+  };
+
+  // Apply a batch of updated results to local state and re-derive run status
+  const commitResults = async (updatedTestResults: any[]) => {
+    const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
+    setTestResults(updatedTestResults);
+    if (updatedTestRun) {
+      setTestRun({ ...updatedTestRun, testResults: updatedTestResults });
+    } else if (testRun?.testResults) {
+      setTestRun({ ...testRun, testResults: updatedTestResults });
+    }
+    // Backend-computed rollups (coverage, flakiness) depend on this change
+    bumpDerived();
+  };
+
+  const selectedResults = () => testResults.filter((r) => selectedTestCasesForRemoval.includes(r.id));
+
+  // One-click status change straight from the table
+  const quickUpdateStatus = async (result: any, status: string) => {
+    if (normalizeRunStatus(result.status) === normalizeRunStatus(status)) return;
+    setSavingResultId(result.id);
+    try {
+      const updated = await testResultsAPI.update(Number(result.id), getTimedResultPayload(result, { status }));
+      await commitResults(testResults.map((item) => (item.id === result.id ? { ...item, ...updated } : item)));
+    } catch (err) {
+      console.error('Failed to update status:', err);
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUpdateResult')), variant: 'destructive' });
+    } finally {
+      setSavingResultId(null);
+    }
+  };
+
+  // Bulk operations on the selected rows. Each row is updated independently so a
+  // single failure doesn't discard the rows that succeeded.
+  const runBulk = async (buildPayload: (result: any) => any) => {
+    const targets = selectedResults();
+    if (targets.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const outcomes = await Promise.allSettled(
+        targets.map((r) => testResultsAPI.update(Number(r.id), buildPayload(r))),
+      );
+      const succeeded = outcomes
+        .filter((o): o is PromiseFulfilledResult<any> => o.status === 'fulfilled')
+        .map((o) => o.value);
+      const failed = outcomes.length - succeeded.length;
+
+      if (succeeded.length > 0) {
+        const byId = new Map(succeeded.map((u: any) => [u.id, u]));
+        await commitResults(testResults.map((r) => (byId.has(r.id) ? { ...r, ...byId.get(r.id) } : r)));
+      }
+      // Keep only the rows that failed selected, so the user can retry them
+      const failedIds = new Set(
+        targets.filter((_, i) => outcomes[i].status === 'rejected').map((r) => r.id),
+      );
+      setSelectedTestCasesForRemoval((prev) => prev.filter((rid) => failedIds.has(rid)));
+
+      if (failed === 0) {
+        toast({ title: t('success'), description: t('bulkUpdateApplied', { count: succeeded.length }) });
+      } else {
+        toast({
+          title: t('error'),
+          description: t('bulkUpdatePartial', { ok: succeeded.length, failed }),
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      console.error('Bulk update failed:', err);
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUpdateResult')), variant: 'destructive' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkUpdateStatus = (status: string) => runBulk((r) => getTimedResultPayload(r, { status }));
+  const bulkAssign = (userId: string) =>
+    runBulk(() => ({ executed_by: userId ? parseInt(userId, 10) : null }));
+  const bulkMarkRetest = () => runBulk(() => ({ retest_needed: true }));
+
+  // Inline defect linking
+  const openLinkDialog = (resultId: number) => {
+    setLinkDialogResultId(resultId);
+    setLinkDefectId('');
+    setLinkType('found');
+    setDefectSearch('');
+  };
+
+  const refreshResultLinks = async (resultId: number) => {
+    const links = await testResultsAPI.getDefectLinks(resultId);
+    setTestResults((prev) => prev.map((r) => (r.id === resultId ? { ...r, defect_links: links } : r)));
+    // Linking/unlinking changes the run's defect-coverage rollup
+    bumpDerived();
+  };
+
+  const handleLinkDefectSave = async () => {
+    if (!linkDialogResultId || !linkDefectId) return;
+    setIsLinkingDefect(true);
+    try {
+      await testResultsAPI.linkDefect(linkDialogResultId, {
+        defect_id: parseInt(linkDefectId, 10),
+        link_type: linkType,
+      });
+      await refreshResultLinks(linkDialogResultId);
+      toast({ title: t('success'), description: t('defectLinkedSuccessfully') });
+      setLinkDialogResultId(null);
+    } catch (err) {
+      console.error('Failed to link defect:', err);
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLinkDefect')), variant: 'destructive' });
+    } finally {
+      setIsLinkingDefect(false);
+    }
+  };
+
+  const handleUnlinkDefect = async (result: any, linkId: number) => {
+    try {
+      await testResultsAPI.unlinkDefect(result.id, linkId);
+      await refreshResultLinks(result.id);
+      toast({ title: t('success'), description: t('defectUnlinkedSuccessfully') });
+    } catch (err) {
+      console.error('Failed to unlink defect:', err);
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUnlinkDefect')), variant: 'destructive' });
+    }
+  };
+
+  // Jump straight into the next not-yet-executed test case
+  const runNextUntested = () => {
+    const next = sortedFilteredResults.find((r) => !isResultComplete(r.status))
+      || testResults.find((r) => !isResultComplete(r.status));
+    if (next?.test_case_id) {
+      navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${next.test_case_id}`);
+    }
+  };
+
+  // Compact relative timestamp ("3m ago", "2h ago", …)
+  const relativeTime = (dateStr?: string | null) => {
+    if (!dateStr) return null;
+    const then = new Date(dateStr).getTime();
+    if (Number.isNaN(then)) return null;
+    const mins = Math.round((Date.now() - then) / 60000);
+    if (mins < 1) return t('justNow');
+    if (mins < 60) return t('minutesAgoShort', { count: mins });
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return t('hoursAgoShort', { count: hrs });
+    const days = Math.round(hrs / 24);
+    if (days < 30) return t('daysAgoShort', { count: days });
+    return new Date(dateStr).toLocaleDateString();
   };
 
   // Handle View Reports and Export Results
@@ -988,17 +1314,6 @@ export function TestRunDetail() {
               <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {isResettingTime ? 'Resetting...' : 'Reset Time'}
             </Button>
-            {selectedTestCasesForRemoval.length > 0 && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleRemoveTestCases}
-                className="h-11 rounded-xl sm:col-span-3"
-              >
-                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('removeSelectedCount', { count: selectedTestCasesForRemoval.length })}
-              </Button>
-            )}
             {testRun.status === 'completed' && (
               <Button size="sm" className="h-11 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300 sm:col-span-3">
                 <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -1120,6 +1435,50 @@ export function TestRunDetail() {
         </Card>
       </div>
 
+      {/* Defect Coverage / Traceability Rollup */}
+      {defectCoverage && defectCoverage.failed_or_blocked > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <Bug className="h-4 w-4 text-orange-600" />
+              {t('defectCoverage')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <div className="text-2xl font-bold">
+                  {defectCoverage.linked}/{defectCoverage.failed_or_blocked}
+                </div>
+                <p className="text-xs text-gray-500">{t('defectCoverageLinked')}</p>
+              </div>
+              <div>
+                <div className={`text-2xl font-bold ${defectCoverage.unlinked > 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                  {defectCoverage.unlinked}
+                </div>
+                <p className="text-xs text-gray-500">{t('defectCoverageUnlinked')}</p>
+              </div>
+              <div>
+                <div className="text-2xl font-bold">{defectCoverage.open_defects}</div>
+                <p className="text-xs text-gray-500">{t('defectCoverageOpenDefects')}</p>
+              </div>
+              <div>
+                <div className={`text-2xl font-bold ${defectCoverage.retest_needed > 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                  {defectCoverage.retest_needed}
+                </div>
+                <p className="text-xs text-gray-500">{t('defectCoverageRetestNeeded')}</p>
+              </div>
+            </div>
+            {defectCoverage.unlinked > 0 && (
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {t('defectCoverageUnlinkedWarning', { count: defectCoverage.unlinked })}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <TestRunPieChart 
@@ -1151,9 +1510,43 @@ export function TestRunDetail() {
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {t('testResultsTableDescription')}
-              </p>
+              {/* Dynamic, actionable summary — each segment is a one-click filter */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                {notTestedTests === 0 && unlinkedFailureCount === 0 && retestCount === 0 ? (
+                  <span className="text-slate-500 dark:text-slate-400">{t('testResultsTableDescription')}</span>
+                ) : (
+                  <>
+                    <span className="text-slate-500 dark:text-slate-400">{t('needsAttention')}:</span>
+                    {notTestedTests > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAttentionFilter(attentionFilter === 'untested' ? 'all' : 'untested')}
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${attentionFilter === 'untested' ? 'bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'}`}
+                      >
+                        {t('summaryUntested', { count: notTestedTests })}
+                      </button>
+                    )}
+                    {unlinkedFailureCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAttentionFilter(attentionFilter === 'failed_no_defect' ? 'all' : 'failed_no_defect')}
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${attentionFilter === 'failed_no_defect' ? 'bg-red-600 text-white' : 'bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950/50 dark:text-red-300'}`}
+                      >
+                        {t('summaryFailedNoDefect', { count: unlinkedFailureCount })}
+                      </button>
+                    )}
+                    {retestCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAttentionFilter(attentionFilter === 'retest' ? 'all' : 'retest')}
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${attentionFilter === 'retest' ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-300'}`}
+                      >
+                        {t('summaryRetest', { count: retestCount })}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-auto xl:min-w-[560px]">
@@ -1180,6 +1573,12 @@ export function TestRunDetail() {
                     <SelectItem value="not_tested">{t('notTestedCount', { count: notTestedTests })}</SelectItem>
                   </SelectContent>
                 </Select>
+                {notTestedTests > 0 && (
+                  <Button variant="outline" size="sm" className="shrink-0 gap-1.5 px-3" onClick={runNextUntested}>
+                    <PlayCircle className="h-4 w-4 text-emerald-600" />
+                    <span className="hidden sm:inline">{t('runNextUntested')}</span>
+                  </Button>
+                )}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="shrink-0 gap-1.5 px-3">
@@ -1191,6 +1590,7 @@ export function TestRunDetail() {
                     {([
                       { key: 'section', label: t('section') },
                       { key: 'priority', label: t('priority') },
+                      { key: 'defects', label: t('defects') },
                       { key: 'executedBy', label: t('executedBy') },
                       { key: 'executedAt', label: t('executedAt') },
                       { key: 'duration', label: t('duration') },
@@ -1209,8 +1609,123 @@ export function TestRunDetail() {
               </div>
             </div>
           </div>
+
+          {/* Faceted filters */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+            <Filter className="h-4 w-4 text-slate-400" />
+            <Select value={sectionFilter} onValueChange={setSectionFilter}>
+              <SelectTrigger className="h-8 w-auto min-w-[140px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('allSections')}</SelectItem>
+                {sectionOptions.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name === NO_SECTION ? t('noSection') : name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+              <SelectTrigger className="h-8 w-auto min-w-[120px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('allPriorities')}</SelectItem>
+                <SelectItem value="critical">{t('critical')}</SelectItem>
+                <SelectItem value="high">{t('high')}</SelectItem>
+                <SelectItem value="medium">{t('medium')}</SelectItem>
+                <SelectItem value="low">{t('low')}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+              <SelectTrigger className="h-8 w-auto min-w-[140px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('allAssignees')}</SelectItem>
+                {assigneeOptions.hasUnassigned && <SelectItem value="unassigned">{t('unassigned')}</SelectItem>}
+                {assigneeOptions.ids.map((uid) => {
+                  const u = users.find((x) => String(x.id) === uid);
+                  return <SelectItem key={uid} value={uid}>{u ? (u.full_name || u.username) : `#${uid}`}</SelectItem>;
+                })}
+              </SelectContent>
+            </Select>
+            {(sectionFilter !== 'all' || priorityFilter !== 'all' || assigneeFilter !== 'all' || attentionFilter !== 'all' || filter !== 'all') && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs text-slate-500"
+                onClick={() => {
+                  setFilter('all'); setSectionFilter('all'); setPriorityFilter('all');
+                  setAssigneeFilter('all'); setAttentionFilter('all');
+                }}
+              >
+                <X className="mr-1 h-3.5 w-3.5" />
+                {t('clearFilters')}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
+          {/* Bulk-action bar */}
+          {selectedTestCasesForRemoval.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-blue-50/70 px-4 py-2.5 dark:border-slate-800 dark:bg-blue-950/20">
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                {t('selectedResultsCount', { count: selectedTestCasesForRemoval.length })}
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy}>
+                    <CheckCircle className="h-3.5 w-3.5" />
+                    {t('bulkSetStatus')}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  {([
+                    ['pass', t('passed')], ['fail', t('failed')], ['block', t('blocked')],
+                    ['skip', t('skipped')], ['not_tested', t('notTested')],
+                  ] as [string, string][]).map(([val, label]) => (
+                    <DropdownMenuItem key={val} onClick={() => bulkUpdateStatus(val)}>{label}</DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy}>
+                    <User className="h-3.5 w-3.5" />
+                    {t('bulkAssign')}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="max-h-64 overflow-y-auto">
+                  <DropdownMenuItem onClick={() => bulkAssign('')}>{t('unassigned')}</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {users.map((u) => (
+                    <DropdownMenuItem key={u.id} onClick={() => bulkAssign(String(u.id))}>
+                      {u.full_name || u.username}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={bulkBusy} onClick={bulkMarkRetest}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t('bulkMarkRetest')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-red-600 hover:text-red-700 dark:text-red-400"
+                disabled={bulkBusy}
+                onClick={handleRemoveTestCases}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t('removeFromRun')}
+              </Button>
+              {bulkBusy && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`h-8 px-2 text-xs text-slate-500 ${isRTL ? 'mr-auto' : 'ml-auto'}`}
+                onClick={() => setSelectedTestCasesForRemoval([])}
+              >
+                {t('clearSelection')}
+              </Button>
+            </div>
+          )}
           {filteredResults.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
               <Search className="mb-3 h-10 w-10 text-slate-300" />
@@ -1224,7 +1739,13 @@ export function TestRunDetail() {
                   <TableRow className="border-slate-200 dark:border-slate-800">
                     <TableHead className="w-12">
                       <Checkbox
-                        checked={filteredResults.length > 0 && selectedTestCasesForRemoval.length === filteredResults.length}
+                        checked={
+                          filteredResults.length > 0 && selectedTestCasesForRemoval.length === filteredResults.length
+                            ? true
+                            : selectedTestCasesForRemoval.length > 0
+                              ? 'indeterminate'
+                              : false
+                        }
                         onCheckedChange={(checked) => {
                           if (checked) {
                             setSelectedTestCasesForRemoval(filteredResults.map(r => r.id));
@@ -1244,11 +1765,15 @@ export function TestRunDetail() {
                           : <ChevronDown className="h-3 w-3 shrink-0" />;
                       };
                       const SortHead = ({ col, className, children }: { col: string; className?: string; children: React.ReactNode }) => (
-                        <TableHead
-                          className={`cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-800 ${className || ''}`}
-                          onClick={() => handleSort(col)}
-                        >
-                          <div className="flex items-center gap-1">{children}<SortIcon col={col} /></div>
+                        <TableHead className={`select-none ${className || ''}`}>
+                          <button
+                            type="button"
+                            onClick={() => handleSort(col)}
+                            aria-label={t('sortBy', { column: String(children) })}
+                            className="-mx-1 flex items-center gap-1 rounded px-1 py-0.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            {children}<SortIcon col={col} />
+                          </button>
                         </TableHead>
                       );
                       return (
@@ -1257,6 +1782,7 @@ export function TestRunDetail() {
                           {isVisible('section') && <SortHead col="section" className="min-w-[130px]">{t('section')}</SortHead>}
                           {isVisible('priority') && <SortHead col="priority">{t('priority')}</SortHead>}
                           <SortHead col="status" className="min-w-[150px]">{t('status')}</SortHead>
+                          {isVisible('defects') && <SortHead col="defects" className="min-w-[170px]">{t('defects')}</SortHead>}
                           {isVisible('executedBy') && <SortHead col="executedBy" className="min-w-[160px]">{t('executedBy')}</SortHead>}
                           {isVisible('executedAt') && <SortHead col="executedAt" className="min-w-[150px]">{t('executedAt')}</SortHead>}
                           {isVisible('duration') && <SortHead col="duration">{t('duration')}</SortHead>}
@@ -1268,11 +1794,14 @@ export function TestRunDetail() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedFilteredResults.map((result) => {
+                  {pagedResults.map((result) => {
                     const isEditing = editingResult === result.id;
                     const testCaseTitle = result.test_case?.title || t('unknownTestCase');
                     const sectionName = result.test_case?.section?.name || t('noSection');
                     const executedBy = getResultExecutorName(result);
+                    const defectLinks = getResultDefectLinks(result);
+                    const flaky = getFlakiness(result);
+                    const isSaving = savingResultId === result.id;
 
                     return (
                       <TableRow key={result.id} className="group border-slate-100 transition-colors hover:bg-blue-50/40 dark:border-slate-800 dark:hover:bg-blue-950/20">
@@ -1302,6 +1831,21 @@ export function TestRunDetail() {
                                 {result.test_case_id ? `TC-${result.test_case_id}` : 'N/A'}
                               </span>
                               {result.test_case?.test_type && <span>{result.test_case.test_type}</span>}
+                              {result.retest_needed && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                                  <RefreshCw className="h-3 w-3" />
+                                  {t('retest')}
+                                </span>
+                              )}
+                              {flaky?.flaky && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 font-medium text-purple-700 dark:bg-purple-950/50 dark:text-purple-300"
+                                  title={t('flakyTooltip', { fails: flaky.fails, runs: flaky.runs })}
+                                >
+                                  <Zap className="h-3 w-3" />
+                                  {t('flaky')}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </TableCell>
@@ -1337,14 +1881,78 @@ export function TestRunDetail() {
                               </SelectContent>
                             </Select>
                           ) : (
-                            <div className="flex items-center gap-2">
-                              {getStatusIcon(result.status)}
-                              <Badge className={getStatusBadge(result.status)}>
-                                {formatStatusLabel(result.status)}
-                              </Badge>
-                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  disabled={isSaving}
+                                  title={t('clickToChangeStatus')}
+                                  className="-mx-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-slate-100 disabled:opacity-60 dark:hover:bg-slate-800"
+                                >
+                                  {isSaving
+                                    ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                                    : getStatusIcon(result.status)}
+                                  <Badge className={getStatusBadge(result.status)}>
+                                    {formatStatusLabel(result.status)}
+                                  </Badge>
+                                  <ChevronDown className="h-3 w-3 text-slate-400" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                <DropdownMenuLabel>{t('setStatus')}</DropdownMenuLabel>
+                                {([
+                                  ['pass', t('passed')], ['fail', t('failed')], ['block', t('blocked')],
+                                  ['skip', t('skipped')], ['not_tested', t('notTested')],
+                                ] as [string, string][]).map(([val, label]) => (
+                                  <DropdownMenuItem key={val} onClick={() => quickUpdateStatus(result, val)}>
+                                    {getStatusIcon(val)}
+                                    <span className="ml-2">{label}</span>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           )}
                         </TableCell>
+                        {isVisible('defects') && (
+                          <TableCell className="align-top">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {defectLinks.map((link: any) => (
+                                <span
+                                  key={link.id}
+                                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  title={link.defect?.title || ''}
+                                >
+                                  <Bug className="h-3 w-3" />
+                                  {link.defect?.defect_id || `#${link.defect_id}`}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUnlinkDefect(result, link.id)}
+                                    title={t('unlinkDefect')}
+                                    aria-label={`${t('unlinkDefect')} ${link.defect?.defect_id || ''}`}
+                                    className="rounded text-slate-400 hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
+                                  >
+                                    <Unlink className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                              {isUnlinkedFailure(result) && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {t('noDefect')}
+                                </span>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 gap-1 px-1.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                                onClick={() => openLinkDialog(result.id)}
+                              >
+                                <Link2 className="h-3 w-3" />
+                                {t('link')}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
                         {isVisible('executedBy') && (
                           <TableCell className="align-top">
                             {isEditing ? (
@@ -1376,7 +1984,7 @@ export function TestRunDetail() {
                             <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                               <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
                               <span className="max-w-[130px] truncate" title={result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notExecuted')}>
-                                {result.executed_at ? new Date(result.executed_at).toLocaleDateString() : t('notExecuted')}
+                                {result.executed_at ? relativeTime(result.executed_at) : t('notExecuted')}
                               </span>
                             </div>
                           </TableCell>
@@ -1390,10 +1998,20 @@ export function TestRunDetail() {
                         )}
                         {isVisible('comments') && (
                           <TableCell className="align-top">
-                            <div className="flex max-w-[200px] items-start gap-2 text-sm text-slate-600 dark:text-slate-300" title={result.comments || ''}>
-                              <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                              <span className="line-clamp-2">{result.comments || '-'}</span>
-                            </div>
+                            {isEditing ? (
+                              <Textarea
+                                value={editValues[result.id]?.comments ?? result.comments ?? ''}
+                                onChange={(e) => handleEdit(result.id, 'comments', e.target.value)}
+                                placeholder={t('comments')}
+                                rows={2}
+                                className="min-h-[40px] w-[200px] resize-y text-sm"
+                              />
+                            ) : (
+                              <div className="flex max-w-[200px] items-start gap-2 text-sm text-slate-600 dark:text-slate-300" title={result.comments || ''}>
+                                <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                                <span className="line-clamp-2">{result.comments || '-'}</span>
+                              </div>
+                            )}
                           </TableCell>
                         )}
                         <TableCell className="align-top text-right">
@@ -1433,6 +2051,44 @@ export function TestRunDetail() {
                   })}
                 </TableBody>
               </Table>
+            </div>
+          )}
+
+          {/* Pagination */}
+          {filteredResults.length > PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {t('paginationRange', {
+                  start: (currentPage - 1) * PAGE_SIZE + 1,
+                  end: Math.min(currentPage * PAGE_SIZE, sortedFilteredResults.length),
+                  total: sortedFilteredResults.length,
+                })}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1"
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className={`h-4 w-4 ${isRTL ? 'rotate-180' : ''}`} />
+                  {t('previous')}
+                </Button>
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  {t('pageOf', { current: currentPage, total: totalPages })}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  {t('next')}
+                  <ChevronRight className={`h-4 w-4 ${isRTL ? 'rotate-180' : ''}`} />
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -1607,6 +2263,50 @@ export function TestRunDetail() {
           </div>
         </div>
       )}
+
+      {/* Link Defect Dialog */}
+      <Dialog open={linkDialogResultId !== null} onOpenChange={(open) => !open && setLinkDialogResultId(null)}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{t('linkDefectToResult')}</DialogTitle>
+            <DialogDescription>{t('linkDefectToResultDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {t('defect')}
+              </label>
+              <SearchableDefectSelect
+                id="runLinkDefectSelect"
+                value={linkDefectId}
+                onChange={setLinkDefectId}
+                defects={defectsCatalog}
+                onSearchChange={setDefectSearch}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {t('linkType')}
+              </label>
+              <Select value={linkType} onValueChange={setLinkType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="found">{t('linkTypeFound')}</SelectItem>
+                  <SelectItem value="blocked_by">{t('linkTypeBlockedBy')}</SelectItem>
+                  <SelectItem value="related">{t('linkTypeRelated')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkDialogResultId(null)}>{t('cancel')}</Button>
+            <Button onClick={handleLinkDefectSave} disabled={!linkDefectId || isLinkingDefect}>
+              <Link2 className="mr-1.5 h-4 w-4" />
+              {isLinkingDefect ? t('linking') : t('link')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

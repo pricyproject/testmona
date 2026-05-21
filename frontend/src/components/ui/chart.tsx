@@ -185,6 +185,9 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
   const { t } = useTranslation();
   const allSections = [...data].sort((a, b) => b.total - a.total);
   const visibleData = allSections.slice(0, 8);
+  // With many sections, horizontal labels collide — angle them and give the
+  // axis extra vertical room.
+  const manySections = visibleData.length > 4;
 
   const handleBarClick = (entry: any) => {
     if (onChartClick && entry?.name) {
@@ -214,10 +217,24 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
           <EmptyChart />
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={manySections ? 268 : 220}>
               <BarChart data={visibleData} margin={{ top: 12, right: 8, left: -16, bottom: 0 }} barCategoryGap={18}>
                 <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} interval={0} tickFormatter={(value) => String(value).slice(0, 10)} />
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  interval={0}
+                  tickFormatter={(value) => {
+                    const label = String(value);
+                    const max = manySections ? 16 : 10;
+                    return label.length > max ? `${label.slice(0, max)}…` : label;
+                  }}
+                  {...(manySections
+                    ? { angle: -35, textAnchor: 'end' as const, height: 72, tickMargin: 8 }
+                    : {})}
+                />
                 <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
                 <Tooltip content={<ChartTooltip />} />
                 <Bar dataKey="pass" stackId="results" fill={COLORS.pass} name={t('passed')} radius={[8, 8, 0, 0]} onClick={handleBarClick} cursor="pointer" />
