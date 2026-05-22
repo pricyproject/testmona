@@ -18,7 +18,7 @@ import {
 interface ProjectImportPreviewProps {
   file: File;
   validationResult: any;
-  onConfirm: (mergeStrategy: string, partialImport: boolean) => Promise<void>;
+  onConfirm: (mergeStrategy: string, partialImport: boolean, selectedRows: number[]) => Promise<void>;
   onCancel: () => void;
 }
 
@@ -80,7 +80,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
   const handleConfirm = async () => {
     setIsImporting(true);
     try {
-      await onConfirm(mergeStrategy, partialImport);
+      await onConfirm(mergeStrategy, partialImport, Array.from(selectedRows));
     } finally {
       setIsImporting(false);
     }

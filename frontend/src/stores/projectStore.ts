@@ -7,6 +7,7 @@ export interface Project {
   description?: string;
   status: string;
   owner_id?: number;
+  owner_name?: string;
   created_at: string;
   updated_at?: string;
   test_suites_count?: number;

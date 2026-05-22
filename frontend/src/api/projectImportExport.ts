@@ -12,11 +12,20 @@ export const projectImportExportAPI = {
     return response.data;
   },
   
-  importProjects: async (file: File, mergeStrategy = 'skip', partialImport = false) => {
+  importProjects: async (
+    file: File,
+    mergeStrategy = 'skip',
+    partialImport = false,
+    selectedRows?: number[],
+  ) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('merge_strategy', mergeStrategy);
     formData.append('partial_import', partialImport.toString());
+    // When a subset of rows was chosen in the preview, only import those.
+    if (selectedRows && selectedRows.length > 0) {
+      formData.append('selected_rows', selectedRows.join(','));
+    }
     const response = await api.post('/import-export/import/projects', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });

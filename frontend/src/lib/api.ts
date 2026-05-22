@@ -256,6 +256,10 @@ export const projectsAPI = {
     const response = await api.delete(`/projects/${id}`);
     return response.data;
   },
+  clone: async (id: number, payload: { name?: string; description?: string; owner_id?: number }) => {
+    const response = await api.post(`/projects/${id}/clone`, payload);
+    return response.data;
+  },
 };
 
 // Test Suites API
@@ -719,9 +723,9 @@ export const environmentsAPI = {
 
 // Analytics API
 export const analyticsAPI = {
-  getDashboardStatistics: async (projectId?: number) => {
+  getDashboardStatistics: async (projectId?: number, signal?: AbortSignal) => {
     const params = projectId ? `?project_id=${projectId}` : '';
-    const response = await api.get(`/dashboard/statistics${params}`);
+    const response = await api.get(`/dashboard/statistics${params}`, { signal });
     return response.data;
   },
   getDashboard: async (projectId?: number) => {
@@ -779,7 +783,7 @@ export const analyticsAPI = {
 
 // Audit API
 export const auditAPI = {
-  getAuditTrails: async (filters?: any) => {
+  getAuditTrails: async (filters?: AuditTrailFilters, signal?: AbortSignal): Promise<AuditTrailList> => {
     const params = new URLSearchParams();
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
@@ -788,11 +792,11 @@ export const auditAPI = {
         }
       });
     }
-    const response = await api.get(`/audit-trails?${params}`);
+    const response = await api.get(`/audit-trails?${params}`, { signal });
     return response.data;
   },
   getAll: async (filters?: any, skip = 0, limit = 100) => {
-    const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
+    const params = new URLSearchParams({ offset: skip.toString(), limit: limit.toString() });
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
@@ -808,7 +812,7 @@ export const auditAPI = {
     return response.data;
   },
   getProjectActivitySummary: async (projectId: number, days: number) => {
-    const response = await api.get(`/audit/project-activity-summary?project_id=${projectId}&days=${days}`);
+    const response = await api.get(`/audit-trails/project/${projectId}/summary?days=${days}`);
     return response.data;
   },
 };
@@ -1253,13 +1257,14 @@ export const enumsAPI = {
 };
 
 export const sharedStepsAPI = {
-  getAll: async (projectId?: number, skip = 0, limit = 100): Promise<SharedStep[]> => {
+  getAll: async (projectId?: number, skip = 0, limit = 100, signal?: AbortSignal): Promise<SharedStep[]> => {
     const response = await api.get('/shared-steps/', {
       params: {
         ...(projectId ? { project_id: projectId } : {}),
         skip,
         limit,
       },
+      signal,
     });
     return response.data;
   },

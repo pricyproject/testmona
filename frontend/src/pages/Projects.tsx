@@ -27,7 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, FolderOpen, Settings, Trash2, TestTube, FileText, PlayCircle, ChevronRight, AlertTriangle, Edit, WifiOff, RefreshCw, Database, Archive, Copy, UserPlus, Clock, CheckCircle2, XCircle, Download, Upload, FileDown, FileUp, Filter, Eye, X, BarChart3, Layers3, Sparkles } from 'lucide-react';
+import { Plus, FolderOpen, Settings, Trash2, TestTube, FileText, PlayCircle, ChevronRight, AlertTriangle, Edit, WifiOff, RefreshCw, Archive, Copy, Clock, CheckCircle2, Download, Upload, FileDown, FileUp, Filter, Eye, X, BarChart3, Layers3, Sparkles, Search, ArrowUpDown, User as UserIcon, ChevronLeft } from 'lucide-react';
 import { useProjectStore, type Project } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -86,11 +86,14 @@ export function Projects() {
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
   const [statusProject, setStatusProject] = useState<Project | null>(null);
   const [newStatus, setNewStatus] = useState('');
-  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
-  const [transferProject, setTransferProject] = useState<Project | null>(null);
-  const [newOwnerId, setNewOwnerId] = useState('');
-  const [availableUsers, setAvailableUsers] = useState<Array<{id: number, email: string, name: string}>>([]);
   const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
+
+  // Search, filter, sort & pagination states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name-asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 12;
   const [cloneProject, setCloneProject] = useState<Project | null>(null);
   const [cloneName, setCloneName] = useState('');
   const [cloneDescription, setCloneDescription] = useState('');
@@ -658,11 +661,9 @@ export function Projects() {
 
     setIsRetrying(true);
     const result = await enhancedApiCall(
-      () => projectsAPI.create({
+      () => projectsAPI.clone(cloneProject.id, {
         name: sanitizeInput(cloneName),
         description: sanitizeInput(cloneDescription),
-        status: 'active',
-        cloned_from: cloneProject.id
       }),
       {
         maxRetries: 3,
@@ -676,9 +677,16 @@ export function Projects() {
     setIsRetrying(false);
 
     if (result.data) {
-      const updatedProjects = [...projects, result.data];
-      setProjects(updatedProjects);
-      setStoreProjects(updatedProjects);
+      // Refresh from the server so the clone's test suite/case counts are accurate.
+      const refreshResult = await enhancedApiCall(() => projectsAPI.getAll());
+      if (refreshResult.data) {
+        setProjects(refreshResult.data);
+        setStoreProjects(refreshResult.data);
+      } else {
+        const updatedProjects = [...projects, result.data];
+        setProjects(updatedProjects);
+        setStoreProjects(updatedProjects);
+      }
 
       toast({
         title: "Success",
@@ -718,7 +726,8 @@ export function Projects() {
         exportFormat,
         includeData,
         exportFields || undefined,
-        exportStatusFilter || undefined
+        // 'all' is a UI-only sentinel; sending it to the backend is rejected.
+        exportStatusFilter && exportStatusFilter !== 'all' ? exportStatusFilter : undefined
       );
 
       if (result) {
@@ -834,7 +843,7 @@ export function Projects() {
     }
   };
 
-  const handleImportProjects = async (strategy: string, partial: boolean) => {
+  const handleImportProjects = async (strategy: string, partial: boolean, selectedRows: number[]) => {
     if (!canImportExport) {
       toast({
         title: "Access Denied",
@@ -855,7 +864,7 @@ export function Projects() {
 
     setIsImporting(true);
     try {
-      const result = await projectImportExportAPI.importProjects(importFile, strategy, partial);
+      const result = await projectImportExportAPI.importProjects(importFile, strategy, partial, selectedRows);
 
       toast({
         title: "Import Completed",
@@ -921,6 +930,50 @@ export function Projects() {
     }),
     { active: 0, archived: 0, suites: 0, cases: 0, runs: 0 }
   );
+
+  // Apply search, status filter and sort, then paginate (all client-side).
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredProjects = projects
+    .filter((project) => {
+      const matchesSearch =
+        normalizedQuery === '' ||
+        project.name.toLowerCase().includes(normalizedQuery) ||
+        (project.description || '').toLowerCase().includes(normalizedQuery);
+      const matchesStatus = statusFilter === 'all' || project.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'name-desc':
+          return b.name.localeCompare(a.name);
+        case 'created-desc':
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case 'created-asc':
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case 'cases-desc':
+          return (b.test_cases_count ?? 0) - (a.test_cases_count ?? 0);
+        case 'name-asc':
+        default:
+          return a.name.localeCompare(b.name);
+      }
+    });
+
+  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedProjects = filteredProjects.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const hasActiveFilters = normalizedQuery !== '' || statusFilter !== 'all';
+  const rangeStart = filteredProjects.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredProjects.length);
+
+  // Reset to the first page whenever the filters change.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, sortBy]);
+
+  const clearProjectFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('all');
+  };
 
   const getProjectStatusLabel = (status: string) => {
     const statusLabels: Record<string, string> = {
@@ -1210,7 +1263,73 @@ export function Projects() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {/* Search, filter & sort toolbar */}
+        {!isLoading && !isBackendDown && projects.length > 0 && (
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm lg:flex-row lg:items-center">
+            <div className="relative flex-1">
+              <Search className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t('searchProjectsPlaceholder')}
+                className={isRTL ? 'pr-9' : 'pl-9'}
+                aria-label={t('searchProjectsPlaceholder')}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[150px]" aria-label={t('filterByStatus')}>
+                    <SelectValue placeholder={t('filterByStatus')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('allStatuses')}</SelectItem>
+                    <SelectItem value="active">{t('active')}</SelectItem>
+                    <SelectItem value="inactive">{t('inactive')}</SelectItem>
+                    <SelectItem value="archived">{t('archived')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <ArrowUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-[170px]" aria-label={t('sortByLabel')}>
+                    <SelectValue placeholder={t('sortByLabel')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name-asc">{t('sortNameAsc')}</SelectItem>
+                    <SelectItem value="name-desc">{t('sortNameDesc')}</SelectItem>
+                    <SelectItem value="created-desc">{t('sortNewest')}</SelectItem>
+                    <SelectItem value="created-asc">{t('sortOldest')}</SelectItem>
+                    <SelectItem value="cases-desc">{t('sortMostCases')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Always rendered so showing/hiding it never shifts the controls above. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearProjectFilters}
+                className={hasActiveFilters ? '' : 'invisible pointer-events-none'}
+                aria-hidden={!hasActiveFilters}
+                tabIndex={hasActiveFilters ? 0 : -1}
+              >
+                <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                {t('clearFilters')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Result count */}
+        {!isLoading && !isBackendDown && filteredProjects.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {t('showingRange', { start: rangeStart, end: rangeEnd, total: filteredProjects.length })}
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {isLoading ? (
           <div className="col-span-full overflow-hidden rounded-[2rem] border border-border bg-card shadow-sm">
             <div className="flex items-center justify-center px-6 py-16">
@@ -1222,11 +1341,15 @@ export function Projects() {
               </div>
             </div>
           </div>
-        ) : projects.length > 0 ? (
-          projects.map((project) => (
+        ) : paginatedProjects.length > 0 ? (
+          paginatedProjects.map((project) => (
             <Card
               key={project.id}
-              className={`group relative overflow-hidden rounded-[1.75rem] border-border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-2xl hover:shadow-muted/70 ${
+              role="button"
+              tabIndex={0}
+              aria-label={t('openProjectAria', { name: project.name })}
+              aria-pressed={selectedProject?.id === project.id}
+              className={`group relative cursor-pointer overflow-hidden rounded-[1.75rem] border-border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-2xl hover:shadow-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
                 selectedProject?.id === project.id ? 'ring-2 ring-primary shadow-xl shadow-muted' : ''
               } ${
                 selectedProjects.has(project.id) ? 'ring-2 ring-primary/70 shadow-xl shadow-muted' : ''
@@ -1238,188 +1361,172 @@ export function Projects() {
                   handleSelectProject(project);
                 }
               }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                if (e.target !== e.currentTarget) return;
+                e.preventDefault();
+                if (isBulkMode) {
+                  toggleProjectSelection(project.id);
+                } else {
+                  handleSelectProject(project);
+                }
+              }}
             >
-              <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
-              <CardHeader className="pb-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex min-w-0 flex-1 items-start gap-3">
-                    {isBulkMode && (
-                      <Checkbox
-                        checked={selectedProjects.has(project.id)}
-                        onCheckedChange={() => toggleProjectSelection(project.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-1"
-                      />
-                    )}
-                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-muted transition-transform group-hover:scale-105">
-                      <FolderOpen className="h-6 w-6" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <CardTitle className="truncate text-xl font-black tracking-tight text-foreground">{project.name}</CardTitle>
-                      <p className="mt-2 line-clamp-2 min-h-[2.5rem] text-sm leading-5 text-muted-foreground">
-                        {project.description || t('noDescription')}
-                      </p>
-                    </div>
-                  </div>
-                  {selectedProject?.id === project.id && !isBulkMode && (
-                    <div className="rounded-full bg-primary/10 p-2 text-primary">
-                      <ChevronRight className={`h-5 w-5 ${isRTL ? 'rotate-180' : ''}`} />
-                    </div>
+              <div className="absolute inset-x-0 top-0 h-0.5 bg-primary" />
+              <CardHeader className="space-y-0 p-4 pb-3">
+                <div className="flex items-start gap-3">
+                  {isBulkMode && (
+                    <Checkbox
+                      checked={selectedProjects.has(project.id)}
+                      onCheckedChange={() => toggleProjectSelection(project.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-1"
+                    />
                   )}
+                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
+                    <FolderOpen className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <CardTitle className="truncate text-base font-bold tracking-tight text-foreground">{project.name}</CardTitle>
+                      {selectedProject?.id === project.id && !isBulkMode && (
+                        <ChevronRight className={`h-4 w-4 flex-shrink-0 text-primary ${isRTL ? 'rotate-180' : ''}`} />
+                      )}
+                    </div>
+                    <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
+                      {project.description || t('noDescription')}
+                    </p>
+                  </div>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className={`w-fit ${getProjectStatusClasses(project.status)}`}>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className={`px-2 py-0 text-[11px] ${getProjectStatusClasses(project.status)}`}>
                     {getProjectStatusLabel(project.status)}
                   </Badge>
-                  {project.owner_id && (
-                    <Badge variant="outline" className="w-fit border-border bg-muted text-muted-foreground">
-                      {t('ownerIdLabel', { id: project.owner_id })}
+                  {(project.owner_name || project.owner_id) && (
+                    <Badge variant="outline" className="flex items-center gap-1 border-border bg-muted px-2 py-0 text-[11px] text-muted-foreground">
+                      <UserIcon className="h-3 w-3 flex-shrink-0" />
+                      <span className="max-w-[120px] truncate">{project.owner_name || t('ownerIdLabel', { id: project.owner_id })}</span>
                     </Badge>
                   )}
                 </div>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-2xl bg-muted p-3 text-center">
-                      <TestTube className="mx-auto h-4 w-4 text-primary" />
-                      <div className="mt-2 text-2xl font-black text-foreground">{project.test_suites_count ?? 0}</div>
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('suites')}</div>
-                    </div>
-                    <div className="rounded-2xl bg-muted p-3 text-center">
-                      <FileText className="mx-auto h-4 w-4 text-primary" />
-                      <div className="mt-2 text-2xl font-black text-foreground">{project.test_cases_count ?? 0}</div>
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('cases')}</div>
-                    </div>
-                    <div className="rounded-2xl bg-muted p-3 text-center">
-                      <PlayCircle className="mx-auto h-4 w-4 text-primary" />
-                      <div className="mt-2 text-2xl font-black text-foreground">{project.test_runs_count ?? 0}</div>
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('runs')}</div>
-                    </div>
-                  </div>
+              <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0">
+                {/* Metric tiles double as drill-down navigation */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleViewTestSuites(project); }}
+                    title={t('suites')}
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <TestTube className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-lg font-bold leading-none text-foreground">{project.test_suites_count ?? 0}</span>
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('suites')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleViewTestCases(project); }}
+                    title={t('cases')}
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-lg font-bold leading-none text-foreground">{project.test_cases_count ?? 0}</span>
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('cases')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleViewTestRuns(project); }}
+                    title={t('runs')}
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <PlayCircle className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-lg font-bold leading-none text-foreground">{project.test_runs_count ?? 0}</span>
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('runs')}</span>
+                  </button>
+                </div>
 
-                  <div className="grid grid-cols-3 gap-2">
+                {/* Footer: created date + management actions */}
+                <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
+                  <span className="truncate text-[11px] text-muted-foreground">
+                    {t('created')}: {new Date(project.created_at).toLocaleDateString()}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleViewTestSuites(project);
+                        setStatusProject(project);
+                        setNewStatus(project.status);
+                        setIsStatusDialogOpen(true);
                       }}
-                      className="rounded-xl bg-background/80"
+                      title={t('changeProjectStatus')}
+                      className="h-8 w-8 rounded-lg p-0"
                     >
-                      <TestTube className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                      {t('suites')}
+                      <Settings className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleViewTestCases(project);
+                        handleOpenEditDialog(project);
                       }}
-                      className="rounded-xl bg-background/80"
+                      title={t('editProject')}
+                      className="h-8 w-8 rounded-lg p-0"
                     >
-                      <FileText className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                      {t('cases')}
+                      <Edit className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleViewTestRuns(project);
+                        setCloneProject(project);
+                        setCloneName(`${project.name} (Copy)`);
+                        setCloneDescription(project.description || '');
+                        setIsCloneDialogOpen(true);
                       }}
-                      className="rounded-xl bg-background/80"
+                      title={t('cloneProject')}
+                      className="h-8 w-8 rounded-lg p-0"
                     >
-                      <PlayCircle className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                      {t('runs')}
+                      <Copy className="h-3.5 w-3.5" />
                     </Button>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
                     <Button
+                      variant="outline"
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleSelectProject(project);
+                        handleOpenDeleteDialog(project);
                       }}
-                      className="rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
+                      className="h-8 w-8 rounded-lg p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      title={t('deleteProject')}
                     >
-                      <Layers3 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                      {t('openProjectWorkspace')}
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setStatusProject(project);
-                          setNewStatus(project.status);
-                          setIsStatusDialogOpen(true);
-                        }}
-                        title={t('changeProjectStatus')}
-                        className="h-9 w-9 rounded-xl p-0"
-                      >
-                        <Settings className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenEditDialog(project);
-                        }}
-                        title={t('editProject')}
-                        className="h-9 w-9 rounded-xl p-0"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCloneProject(project);
-                          setCloneName(`${project.name} (Copy)`);
-                          setCloneDescription(project.description || '');
-                          setIsCloneDialogOpen(true);
-                        }}
-                        title={t('cloneProject')}
-                        className="h-9 w-9 rounded-xl p-0"
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenDeleteDialog(project);
-                        }}
-                        className="h-9 w-9 rounded-xl p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        title={t('deleteProject')}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-muted px-3 py-2 text-xs text-muted-foreground">
-                    <span>
-                      {t('created')}: {new Date(project.created_at).toLocaleDateString()}
-                    </span>
-                    {project.updated_at && project.updated_at !== project.created_at && (
-                      <span>
-                        {t('updated')}: {new Date(project.updated_at).toLocaleDateString()}
-                      </span>
-                    )}
                   </div>
                 </div>
               </CardContent>
             </Card>
           ))
+        ) : projects.length > 0 ? (
+          <div className="col-span-full">
+            <Card className="overflow-hidden rounded-[2rem] border-dashed border-border bg-muted/40">
+              <CardContent className="px-6 py-14">
+                <div className="mx-auto max-w-md text-center">
+                  <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                    <Search className="h-8 w-8" />
+                  </div>
+                  <h3 className="text-xl font-bold text-foreground">{t('noProjectsMatchFilters')}</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">{t('noProjectsMatchFiltersDesc')}</p>
+                  <Button variant="outline" size="sm" className="mt-5" onClick={clearProjectFilters}>
+                    <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                    {t('clearFilters')}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         ) : isBackendDown ? (
           <div className="col-span-full">
             <Card className="overflow-hidden rounded-[2rem] border-dashed border-border bg-muted/40">
@@ -1494,6 +1601,33 @@ export function Projects() {
           </div>
         )}
         </div>
+
+        {/* Pagination */}
+        {!isLoading && !isBackendDown && totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+            >
+              {isRTL ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              {t('previous')}
+            </Button>
+            <span className="px-3 text-sm font-medium text-muted-foreground">
+              {t('pageOf', { current: safePage, total: totalPages })}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+            >
+              {t('next')}
+              {isRTL ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </Button>
+          </div>
+        )}
       </section>
 
       {/* Create Project Dialog */}

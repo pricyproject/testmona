@@ -2,14 +2,37 @@
 Project management routes for projects, assignments, schedules, and executions.
 """
 
-from fastapi import Depends, HTTPException
+import logging
+from fastapi import Depends, HTTPException, Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from .. import crud, schemas, auth, rbac, models, crud_rbac
 from ..database import get_db
 from ..auth import get_current_active_user, check_password_change_required
-from ..models import Project
+from ..models import Project, TestSuite, TestCase, TestRun, User, AuditAction
+
+logger = logging.getLogger(__name__)
+
+
+def _record_project_audit(db: Session, user, action: str, project_id: int, description: str) -> None:
+    """Best-effort audit trail entry for a project action. Never raises."""
+    try:
+        from ..services.audit_service import get_audit_service
+        from ..schemas_audit import AuditTrailCreate
+        from ..models import EntityType
+        audit_service = get_audit_service(db)
+        audit_service.create_audit_trail(AuditTrailCreate(
+            user_id=user.id if user else None,
+            action=action,
+            entity_type=EntityType.PROJECT.value,
+            entity_id=project_id,
+            project_id=project_id,
+            description=description,
+        ))
+    except Exception as e:
+        logger.warning(f"Failed to create project audit trail: {e}")
 
 
 def register_project_routes(app):
@@ -37,33 +60,85 @@ def register_project_routes(app):
         ).first()
         if existing_project:
             raise HTTPException(status_code=400, detail="A project with this name already exists")
-        
-        return crud.create_project(db=db, project=project)
+
+        db_project = crud.create_project(db=db, project=project)
+        _record_project_audit(
+            db, current_user, AuditAction.CREATE.value, db_project.id,
+            f"Project '{db_project.name}' created"
+        )
+        return db_project
 
     @app.get("/projects")
     def read_projects(
-        skip: int = 0, 
-        limit: int = 100, 
+        response: Response,
+        skip: int = 0,
+        limit: int = 100,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         try:
-            projects = rbac.get_accessible_projects(current_user, db)[skip:skip + limit]
-            # Convert to dict to avoid serialization issues
+            accessible = rbac.get_accessible_projects(current_user, db)
+            total = len(accessible)
+            projects = accessible[skip:skip + limit]
+
+            # Expose the unpaginated total so the UI can drive pagination controls.
+            response.headers["X-Total-Count"] = str(total)
+
+            if not projects:
+                return []
+
+            project_ids = [project.id for project in projects]
+
+            # Aggregate related-entity counts in three grouped queries instead of
+            # running per-project COUNT(*) statements (avoids an N+1 query pattern).
+            suite_counts = dict(
+                db.query(TestSuite.project_id, func.count(TestSuite.id))
+                .filter(TestSuite.project_id.in_(project_ids))
+                .group_by(TestSuite.project_id)
+                .all()
+            )
+            case_counts = dict(
+                db.query(TestSuite.project_id, func.count(TestCase.id))
+                .join(TestCase, TestCase.test_suite_id == TestSuite.id)
+                .filter(TestSuite.project_id.in_(project_ids))
+                .group_by(TestSuite.project_id)
+                .all()
+            )
+            run_counts = dict(
+                db.query(TestRun.project_id, func.count(TestRun.id))
+                .filter(TestRun.project_id.in_(project_ids))
+                .group_by(TestRun.project_id)
+                .all()
+            )
+
+            # Resolve owner display names in a single query.
+            owner_ids = {project.owner_id for project in projects if project.owner_id}
+            owner_names = {}
+            if owner_ids:
+                owner_names = {
+                    user.id: (user.full_name or user.username or user.email)
+                    for user in db.query(User).filter(User.id.in_(owner_ids)).all()
+                }
+
             result = []
             for project in projects:
                 result.append({
                     "id": project.id,
                     "name": project.name,
                     "description": project.description,
-                    "status": project.status,
+                    "status": project.status.value if hasattr(project.status, "value") else project.status,
                     "owner_id": project.owner_id,
+                    "owner_name": owner_names.get(project.owner_id),
                     "created_at": project.created_at,
-                    "updated_at": project.updated_at
+                    "updated_at": project.updated_at,
+                    "test_suites_count": suite_counts.get(project.id, 0),
+                    "test_cases_count": case_counts.get(project.id, 0),
+                    "test_runs_count": run_counts.get(project.id, 0),
                 })
             return result
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        except Exception:
+            logger.exception("Failed to list projects")
+            raise HTTPException(status_code=500, detail="Failed to retrieve projects")
 
     @app.get("/projects/{project_id}", response_model=schemas.Project)
     def read_project(
@@ -92,20 +167,33 @@ def register_project_routes(app):
         db_project = crud.update_project(db, project_id=project_id, project=project)
         if db_project is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        _record_project_audit(
+            db, current_user, AuditAction.UPDATE.value, db_project.id,
+            f"Project '{db_project.name}' updated"
+        )
         return db_project
 
     @app.delete("/projects/{project_id}")
     def delete_project(
-        project_id: int, 
+        project_id: int,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         if not rbac.has_permission(current_user, "delete", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
+        existing = crud.get_project(db, project_id=project_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        project_name = existing.name
+
         db_project = crud.delete_project(db, project_id=project_id)
         if db_project is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        _record_project_audit(
+            db, current_user, AuditAction.DELETE.value, project_id,
+            f"Project '{project_name}' deleted"
+        )
         return {"message": "Project deleted successfully"}
 
     @app.post("/projects/{project_id}/delete")
@@ -131,15 +219,102 @@ def register_project_routes(app):
         # Verify project name matches
         if db_project.name != project_name:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Project name mismatch. Expected '{db_project.name}', got '{project_name}'"
             )
-        
+
         # Delete the project
         deleted_project = crud.delete_project(db, project_id=project_id)
         if deleted_project is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        _record_project_audit(
+            db, current_user, AuditAction.DELETE.value, project_id,
+            f"Project '{project_name}' deleted"
+        )
         return {"message": "Project deleted successfully"}
+
+    @app.post("/projects/{project_id}/clone", response_model=schemas.Project)
+    def clone_project(
+        project_id: int,
+        clone_data: schemas.ProjectClone,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Clone a project together with its test suites and test cases."""
+        check_password_change_required(current_user)
+
+        if not rbac.has_permission(current_user, "manage_projects"):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        source = crud.get_project(db, project_id=project_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        owner_id = clone_data.owner_id or current_user.id
+        new_name = (clone_data.name or f"{source.name} (Copy)").strip()
+
+        existing_project = db.query(models.Project).filter(
+            models.Project.name == new_name,
+            models.Project.owner_id == owner_id
+        ).first()
+        if existing_project:
+            raise HTTPException(status_code=400, detail="A project with this name already exists")
+
+        source_status = source.status.value if hasattr(source.status, "value") else source.status
+        new_project = crud.create_project(db, project=schemas.ProjectCreate(
+            name=new_name,
+            description=clone_data.description if clone_data.description is not None else source.description,
+            status=source_status,
+            owner_id=owner_id,
+        ))
+
+        def _enum_value(value, default):
+            if value is None:
+                return default
+            return value.value if hasattr(value, "value") else value
+
+        # Copy each test suite and its test cases into the new project.
+        for suite in crud.get_test_suites(db, project_id=source.id):
+            new_suite = crud.create_test_suite(db, test_suite=schemas.TestSuiteCreate(
+                name=suite.name,
+                description=suite.description,
+                project_id=new_project.id,
+            ))
+            for case in crud.get_test_cases(db, test_suite_id=suite.id):
+                is_multistep = bool(getattr(case, "is_multistep", False))
+                new_case = crud.create_test_case(db, test_case=schemas.TestCaseCreate(
+                    title=case.title,
+                    description=case.description,
+                    preconditions=case.preconditions or "",
+                    steps=case.steps or "",
+                    expected_result=case.expected_result or "",
+                    priority=_enum_value(case.priority, "medium"),
+                    status=_enum_value(case.status, "active"),
+                    tags=case.tags,
+                    test_suite_id=new_suite.id,
+                    test_type=_enum_value(case.test_type, "manual"),
+                    section_id=None,
+                    order_index=case.order_index or 0,
+                    is_multistep=is_multistep,
+                ), created_by=current_user.id)
+
+                if is_multistep:
+                    for step in crud.get_test_case_steps(db, case.id):
+                        crud.create_test_case_step(db, step=schemas.TestCaseStepCreate(
+                            test_case_id=new_case.id,
+                            step_number=step.step_number,
+                            action=step.action or "",
+                            expected_result=step.expected_result or "",
+                            step_type=_enum_value(step.step_type, "manual"),
+                        ))
+
+        _record_project_audit(
+            db, current_user, AuditAction.CREATE.value, new_project.id,
+            f"Project '{new_project.name}' cloned from '{source.name}'"
+        )
+        return new_project
 
     # Project Assignment Endpoints
     @app.post("/project-assignments", response_model=schemas.ProjectAssignment)

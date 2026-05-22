@@ -2154,11 +2154,16 @@ async def _perform_export(
     current_user: schemas.User
 ) -> dict:
     """Perform the actual export operation (wrapped in timeout)"""
-    # Get projects to export
-    query = db.query(Project)
+    # Restrict the export to projects the requesting user can actually access,
+    # so role-based access control is honored (not just the admin/manager gate).
+    accessible_ids = {p.id for p in rbac.get_accessible_projects(current_user, db)}
+    if not accessible_ids:
+        raise HTTPException(status_code=404, detail="No projects found")
 
-    # Apply status filter
-    if status_filter:
+    query = db.query(Project).filter(Project.id.in_(accessible_ids))
+
+    # Apply status filter ('all' or empty means no filtering)
+    if status_filter and status_filter.strip().lower() not in ("", "all"):
         try:
             status_enum = Status(status_filter.lower())
             query = query.filter(Project.status == status_enum)
@@ -2494,12 +2499,16 @@ async def import_projects(
     file: UploadFile = File(...),
     merge_strategy: str = Form("skip"),  # skip, update, or merge
     partial_import: bool = Form(False),  # Allow partial import with error isolation
+    selected_rows: Optional[str] = Form(None),  # Comma-separated 1-based row numbers to import
     db: Session = Depends(get_db),
     current_user: schemas.User = Depends(auth.get_current_active_user)
 ):
     """
     Import project(s) from JSON or CSV file
     Only accessible by admin and manager roles
+
+    When `selected_rows` is provided, only those 1-based row numbers are imported;
+    this lets the import-preview row selection actually take effect.
     """
     # Check role-based access control
     user_role = str(current_user.role).upper()
@@ -2575,11 +2584,24 @@ async def import_projects(
     else:
         raise HTTPException(status_code=400, detail="Only JSON and CSV files are supported")
 
+    # Parse the optional row-selection filter (1-based row numbers).
+    selected_row_set: Optional[Set[int]] = None
+    if selected_rows is not None and selected_rows.strip() != "":
+        try:
+            selected_row_set = {
+                int(token.strip())
+                for token in selected_rows.split(",")
+                if token.strip() != ""
+            }
+        except ValueError:
+            raise HTTPException(status_code=400, detail="selected_rows must be comma-separated integers")
+
     # Wrap import in timeout
     try:
         result = await asyncio.wait_for(
             _perform_import(
-                projects_data, file.filename, merge_strategy, partial_import, db, current_user
+                projects_data, file.filename, merge_strategy, partial_import, db, current_user,
+                selected_row_set
             ),
             timeout=IMPORT_TIMEOUT_SECONDS
         )
@@ -2597,7 +2619,8 @@ async def _perform_import(
     merge_strategy: str,
     partial_import: bool,
     db: Session,
-    current_user: schemas.User
+    current_user: schemas.User,
+    selected_rows: Optional[Set[int]] = None
 ) -> dict:
     """Perform the actual import operation (wrapped in timeout)"""
     imported_count = 0
@@ -2607,16 +2630,26 @@ async def _perform_import(
     successful_imports = []
     failed_imports = []
 
+    valid_statuses = {'active', 'inactive', 'archived'}
+
     # Only CSV supports basic project info only
     if filename.endswith('.csv'):
         # CSV import - basic project info only
         for index, project_data in enumerate(projects_data):
             row_num = index + 1
 
+            # Honor the import-preview row selection, if one was supplied.
+            if selected_rows is not None and row_num not in selected_rows:
+                continue
+
             try:
                 project_name = project_data.get('name', '').strip()
                 project_description = project_data.get('description', '')
-                project_status = project_data.get('status', 'active')
+                project_status = (project_data.get('status') or 'active')
+                if isinstance(project_status, str):
+                    project_status = project_status.strip().lower()
+                if project_status not in valid_statuses:
+                    project_status = 'active'
                 owner_id = project_data.get('owner_id', current_user.id) if project_data.get('owner_id') else current_user.id
 
                 if not project_name:
@@ -2704,10 +2737,23 @@ async def _perform_import(
         for index, project_data in enumerate(projects_data):
             row_num = index + 1
 
+            # Honor the import-preview row selection, if one was supplied.
+            if selected_rows is not None and row_num not in selected_rows:
+                continue
+
+            # Per-project maps translating IDs from the export file to the
+            # freshly created rows, so nested references resolve correctly.
+            custom_field_id_map: Dict[int, int] = {}
+            test_case_id_map: Dict[int, int] = {}
+
             try:
                 project_name = project_data.get('name', '').strip()
                 project_description = project_data.get('description', '')
-                project_status = project_data.get('status', 'active')
+                project_status = (project_data.get('status') or 'active')
+                if isinstance(project_status, str):
+                    project_status = project_status.strip().lower()
+                if project_status not in valid_statuses:
+                    project_status = 'active'
                 owner_id = project_data.get('owner_id', current_user.id)
 
                 if not project_name:
@@ -2809,7 +2855,7 @@ async def _perform_import(
                 if 'custom_field_definitions' in project_data:
                     for cf_data in project_data['custom_field_definitions']:
                         try:
-                            crud.create_custom_field_definition(
+                            new_cf = crud.create_custom_field_definition(
                                 db,
                                 field=schemas.CustomFieldDefinitionCreate(
                                     name=cf_data['name'],
@@ -2820,6 +2866,9 @@ async def _perform_import(
                                     project_id=project_id
                                 )
                             )
+                            # Remember old -> new id so custom field values can be remapped.
+                            if cf_data.get('id') is not None and new_cf is not None:
+                                custom_field_id_map[cf_data['id']] = new_cf.id
                         except Exception as cf_error:
                             errors.append(f"Row {row_num}: Failed to import custom field '{cf_data['name']}': {str(cf_error)}")
 
@@ -2859,8 +2908,12 @@ async def _perform_import(
                                                 order_index=tc_data.get('order_index', 0),
                                                 is_multistep=tc_data.get('is_multistep', False)
                                             ),
-                                            created_by=1
+                                            created_by=current_user.id
                                         )
+
+                                        # Remember old -> new id so test results can be remapped.
+                                        if tc_data.get('id') is not None:
+                                            test_case_id_map[tc_data['id']] = new_case.id
 
                                         # Import test case steps if multistep
                                         if tc_data.get('is_multistep') and 'test_case_steps' in tc_data:
@@ -2879,12 +2932,21 @@ async def _perform_import(
                                                 except Exception as step_error:
                                                     errors.append(f"Row {row_num}: Failed to import test case step: {str(step_error)}")
 
-                                        # Import custom field values
+                                        # Import custom field values, remapping the
+                                        # field definition id from the export file.
                                         if 'custom_field_values' in tc_data:
                                             for cfv_data in tc_data['custom_field_values']:
                                                 try:
+                                                    old_field_id = cfv_data.get('field_definition_id')
+                                                    mapped_field_id = custom_field_id_map.get(old_field_id)
+                                                    if mapped_field_id is None:
+                                                        errors.append(
+                                                            f"Row {row_num}: Skipped custom field value "
+                                                            f"(no imported field definition for id {old_field_id})"
+                                                        )
+                                                        continue
                                                     db.add(CustomFieldValue(
-                                                        field_definition_id=cfv_data['field_definition_id'],
+                                                        field_definition_id=mapped_field_id,
                                                         test_case_id=new_case.id,
                                                         value=cfv_data['value']
                                                     ))
@@ -2917,13 +2979,19 @@ async def _perform_import(
                                 )
                             )
 
-                            # Import test results
+                            # Import test results, remapping the test case id from
+                            # the export file to the freshly imported test case.
                             if 'test_results' in tr_data:
                                 for result_data in tr_data['test_results']:
                                     try:
-                                        # Map test case ID from export to new test case ID
-                                        # This is simplified - in production, you'd need a mapping
-                                        test_case_id = result_data.get('test_case_id')
+                                        old_case_id = result_data.get('test_case_id')
+                                        test_case_id = test_case_id_map.get(old_case_id)
+                                        if test_case_id is None:
+                                            errors.append(
+                                                f"Row {row_num}: Skipped test result "
+                                                f"(no imported test case for id {old_case_id})"
+                                            )
+                                            continue
 
                                         crud.create_test_result(
                                             db,
@@ -3293,7 +3361,9 @@ async def validate_project_import(
             "valid": len(validation_errors) == 0,
             "total_rows": len(projects_data) if 'projects_data' in locals() else 0,
             "valid_rows": valid_rows,
-            "invalid_rows": len(validation_errors),
+            # Count distinct invalid rows, not the number of error messages
+            # (a single row can contribute several error messages).
+            "invalid_rows": sum(1 for row in preview_data if not row.get("valid", False)),
             "errors": validation_errors,
             "warnings": validation_warnings,
             "preview_data": preview_data,
