@@ -2,9 +2,9 @@
 Shared steps and shared step templates routes.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import logging
 
 from .. import crud, schemas, auth, rbac
@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 def register_shared_steps_routes(app):
     """Register shared steps routes with the FastAPI app."""
+
+    def require_project_exists(db: Session, project_id: int):
+        from ..models import Project
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project
     
     # Shared Steps Endpoints
     @app.post("/shared-steps/", response_model=schemas.SharedStep)
@@ -24,11 +31,14 @@ def register_shared_steps_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
+        require_project_exists(db, step.project_id)
         if not rbac.has_permission(current_user, "write", step.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         step_data = step.model_dump()
         step_data["created_by"] = current_user.id
+        step_data["is_active"] = True
+        step_data["usage_count"] = 0
         db_step = crud.create_shared_step(db=db, step=step_data)
         
         # Create audit trail
@@ -53,16 +63,16 @@ def register_shared_steps_routes(app):
 
     @app.get("/shared-steps/", response_model=List[schemas.SharedStep])
     def read_shared_steps(
-        project_id: int = None,
-        skip: int = 0,
-        limit: int = 100,
+        project_id: Optional[int] = Query(None, ge=1),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=1000),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-
         if project_id is not None:
+            require_project_exists(db, project_id)
+            if not rbac.has_permission(current_user, "read", project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
             return crud.get_shared_steps(db, project_id=project_id, skip=skip, limit=limit)
 
         accessible_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
@@ -70,7 +80,7 @@ def register_shared_steps_routes(app):
 
     @app.get("/shared-steps/{step_id}", response_model=schemas.SharedStep)
     def read_shared_step(
-        step_id: int,
+        step_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -85,8 +95,8 @@ def register_shared_steps_routes(app):
 
     @app.put("/shared-steps/{step_id}", response_model=schemas.SharedStep)
     def update_shared_step(
-        step_id: int,
         step: schemas.SharedStepUpdate,
+        step_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -121,7 +131,7 @@ def register_shared_steps_routes(app):
 
     @app.delete("/shared-steps/{step_id}")
     def delete_shared_step(
-        step_id: int,
+        step_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -161,7 +171,7 @@ def register_shared_steps_routes(app):
 
     @app.post("/shared-steps/{step_id}/increment-usage")
     def increment_shared_step_usage(
-        step_id: int,
+        step_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):

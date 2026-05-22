@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { sharedStepsAPI } from '@/lib/api';
@@ -65,6 +65,12 @@ const normalizeSharedStepPayload = (formData: SharedStepFormData, projectId: num
   project_id: projectId,
 });
 
+const formatDateTime = (value?: string, fallback = '') => {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString();
+};
+
 export function SharedSteps() {
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
@@ -75,10 +81,12 @@ export function SharedSteps() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [deletingStepId, setDeletingStepId] = useState<number | null>(null);
+  const [duplicatingStepId, setDuplicatingStepId] = useState<number | null>(null);
+  const [pendingCloseDialog, setPendingCloseDialog] = useState<'create' | 'edit' | null>(null);
   const [touchedFields, setTouchedFields] = useState<Record<keyof SharedStepFormData, boolean>>({
     name: false,
     description: false,
@@ -86,10 +94,11 @@ export function SharedSteps() {
     expected_result: false,
   });
   const [formData, setFormData] = useState<SharedStepFormData>(emptyFormData);
+  const [initialFormData, setInitialFormData] = useState<SharedStepFormData>(emptyFormData);
   const stepNameInputRef = useRef<HTMLInputElement>(null);
 
   const numericProjectId = projectId ? Number(projectId) : undefined;
-  const isProjectIdValid = numericProjectId === undefined || Number.isInteger(numericProjectId);
+  const isProjectIdValid = numericProjectId !== undefined && Number.isInteger(numericProjectId) && numericProjectId > 0;
   const canSubmit = Boolean(
     formData.name.trim() &&
     formData.action.trim() &&
@@ -99,6 +108,7 @@ export function SharedSteps() {
   );
 
   const resetForm = () => {
+    setInitialFormData(emptyFormData);
     setFormData(emptyFormData);
     setTouchedFields({
       name: false,
@@ -108,7 +118,16 @@ export function SharedSteps() {
     });
   };
 
-  const loadSharedSteps = useCallback(async () => {
+  const isFormDirty = useCallback((data: SharedStepFormData = formData) => (
+    data.name !== initialFormData.name ||
+    data.description !== initialFormData.description ||
+    data.action !== initialFormData.action ||
+    data.expected_result !== initialFormData.expected_result
+  ), [formData, initialFormData]);
+
+  const hasUnsavedChanges = useMemo(() => isFormDirty(), [isFormDirty]);
+
+  const loadSharedSteps = useCallback(async (signal?: AbortSignal) => {
     if (!isProjectIdValid) {
       setError(t('invalidProjectId'));
       setSharedSteps([]);
@@ -118,19 +137,29 @@ export function SharedSteps() {
     try {
       setLoading(true);
       setError(null);
-      const data = await sharedStepsAPI.getAll(numericProjectId);
+      const data = await sharedStepsAPI.getAll(numericProjectId, 0, 100, signal);
       setSharedSteps(data);
     } catch (loadError) {
+      if (signal?.aborted) return;
       console.error('Failed to load shared steps:', loadError);
       setSharedSteps([]);
       setError(getErrorMessage(loadError, t('failedToLoadSharedSteps')));
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   }, [isProjectIdValid, numericProjectId, t]);
 
   useEffect(() => {
-    loadSharedSteps();
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      loadSharedSteps(controller.signal);
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [loadSharedSteps]);
 
   useEffect(() => {
@@ -139,15 +168,6 @@ export function SharedSteps() {
       return () => window.clearTimeout(focusTimer);
     }
   }, [isCreateDialogOpen]);
-
-  useEffect(() => {
-    setHasUnsavedChanges(
-      formData.name.trim() !== '' ||
-      formData.description.trim() !== '' ||
-      formData.action.trim() !== '' ||
-      formData.expected_result.trim() !== ''
-    );
-  }, [formData]);
 
   const updateFormField = (field: keyof SharedStepFormData, value: string) => {
     setFormData((current) => ({ ...current, [field]: value }));
@@ -169,7 +189,6 @@ export function SharedSteps() {
       setError(null);
       await sharedStepsAPI.create(normalizeSharedStepPayload(formData, numericProjectId));
       resetForm();
-      setHasUnsavedChanges(false);
       setIsCreateDialogOpen(false);
       await loadSharedSteps();
     } catch (createError) {
@@ -217,20 +236,29 @@ export function SharedSteps() {
     if (!window.confirm(t('confirmDeleteReusableSharedStep'))) return;
 
     try {
+      setDeletingStepId(stepId);
       setError(null);
       await sharedStepsAPI.delete(stepId);
       await loadSharedSteps();
     } catch (deleteError) {
       console.error('Failed to delete shared step:', deleteError);
       setError(getErrorMessage(deleteError, t('failedToDeleteSharedStep')));
+    } finally {
+      setDeletingStepId(null);
     }
   };
 
   const handleDuplicateStep = async (step: SharedStep) => {
     try {
+      setDuplicatingStepId(step.id);
       setError(null);
+      const copySuffix = t('sharedStepCopySuffix');
+      const fallbackCopyName = t('sharedStepCopyName', { name: step.name });
+      const copyName = step.name.length + copySuffix.length <= NAME_MAX_LENGTH
+        ? `${step.name}${copySuffix}`
+        : fallbackCopyName.slice(0, NAME_MAX_LENGTH);
       await sharedStepsAPI.create({
-        name: t('sharedStepCopyName', { name: step.name }),
+        name: copyName,
         description: step.description || null,
         action: step.action,
         expected_result: step.expected_result,
@@ -240,11 +268,20 @@ export function SharedSteps() {
     } catch (duplicateError) {
       console.error('Failed to duplicate shared step:', duplicateError);
       setError(getErrorMessage(duplicateError, t('failedToDuplicateSharedStep')));
+    } finally {
+      setDuplicatingStepId(null);
     }
   };
 
   const handleCreateDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setInitialFormData(emptyFormData);
+      setIsCreateDialogOpen(true);
+      return;
+    }
+
     if (!open && hasUnsavedChanges) {
+      setPendingCloseDialog('create');
       setShowUnsavedDialog(true);
       return;
     }
@@ -252,16 +289,20 @@ export function SharedSteps() {
     setIsCreateDialogOpen(open);
     if (!open) {
       resetForm();
-      setHasUnsavedChanges(false);
     }
   };
 
   const handleEditDialogOpenChange = (open: boolean) => {
+    if (!open && hasUnsavedChanges) {
+      setPendingCloseDialog('edit');
+      setShowUnsavedDialog(true);
+      return;
+    }
+
     setIsEditDialogOpen(open);
     if (!open) {
       resetForm();
       setSelectedStep(null);
-      setHasUnsavedChanges(false);
     }
   };
 
@@ -269,9 +310,15 @@ export function SharedSteps() {
     setShowUnsavedDialog(false);
     if (discard) {
       resetForm();
-      setHasUnsavedChanges(false);
-      setIsCreateDialogOpen(false);
+      if (pendingCloseDialog === 'create') {
+        setIsCreateDialogOpen(false);
+      }
+      if (pendingCloseDialog === 'edit') {
+        setIsEditDialogOpen(false);
+        setSelectedStep(null);
+      }
     }
+    setPendingCloseDialog(null);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -282,13 +329,15 @@ export function SharedSteps() {
   };
 
   const openEditDialog = (step: SharedStep) => {
-    setSelectedStep(step);
-    setFormData({
+    const nextFormData = {
       name: step.name,
       description: step.description || '',
       action: step.action,
       expected_result: step.expected_result,
-    });
+    };
+    setSelectedStep(step);
+    setInitialFormData(nextFormData);
+    setFormData(nextFormData);
     setTouchedFields({
       name: false,
       description: false,
@@ -439,7 +488,7 @@ export function SharedSteps() {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <span>{error}</span>
         </div>
@@ -526,15 +575,21 @@ export function SharedSteps() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleDuplicateStep(step)}
+                        disabled={duplicatingStepId === step.id || deletingStepId === step.id}
                         aria-label={t('duplicateSharedStep')}
                         title={t('duplicateSharedStep')}
                       >
-                        <Copy className="h-4 w-4" />
+                        {duplicatingStepId === step.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => openEditDialog(step)}
+                        disabled={duplicatingStepId === step.id || deletingStepId === step.id}
                         aria-label={t('editSharedStep')}
                         title={t('editSharedStep')}
                       >
@@ -544,10 +599,15 @@ export function SharedSteps() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleDeleteSharedStep(step.id)}
+                        disabled={deletingStepId === step.id || duplicatingStepId === step.id}
                         aria-label={t('deleteSharedStep')}
                         title={t('deleteSharedStep')}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        {deletingStepId === step.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -563,7 +623,7 @@ export function SharedSteps() {
                       <p className="rounded bg-green-50 p-2 text-sm text-gray-600">{step.expected_result}</p>
                     </div>
                     <div className="text-xs text-gray-500">
-                      {t('createdDate', { date: new Date(step.created_at).toLocaleString() })}
+                      {t('createdDate', { date: formatDateTime(step.created_at, t('unknownTime')) })}
                     </div>
                   </div>
                 </CardContent>
