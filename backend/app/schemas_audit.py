@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from enum import Enum
@@ -45,6 +45,8 @@ class AuditTrailUpdate(BaseModel):
 class AuditTrailResponse(AuditTrailBase):
     id: int
     user_id: int
+    username: Optional[str] = None
+    user_full_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -71,14 +73,17 @@ class AuditTrailFilter(BaseModel):
 
     @field_validator('date_from', 'date_to', mode='before')
     @classmethod
-    def parse_date(cls, v):
+    def parse_date(cls, v, info: ValidationInfo):
         if v is None:
             return None
         if isinstance(v, datetime):
             return v
         if isinstance(v, str):
             try:
-                return datetime.strptime(v, '%Y-%m-%d')
+                parsed_date = datetime.strptime(v, '%Y-%m-%d')
+                if info.field_name == 'date_to':
+                    return parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                return parsed_date
             except ValueError:
                 raise ValueError('Date must be in YYYY-MM-DD format')
         return v

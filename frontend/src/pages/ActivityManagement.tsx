@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +40,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
-import { auditAPI, usersAPI } from '@/lib/api';
+import { auditAPI, getApiErrorMessage } from '@/lib/api';
 import { AuditTrail, AuditTrailFilters, AuditAction, EntityType } from '@/types';
 
 const ACTION_LABELS: Record<AuditAction, string> = {
@@ -74,7 +74,24 @@ const ENTITY_LABELS: Record<EntityType, string> = {
   milestone: 'entityMilestone',
   custom_field: 'entityCustomField',
   jira_integration: 'entityJiraIntegration',
-  notification: 'entityNotification'
+  notification: 'entityNotification',
+  test_case_section: 'entityTestCaseSection',
+  test_schedule: 'entityTestSchedule',
+  test_execution: 'entityTestExecution',
+  invitation: 'entityInvitation',
+  shared_step: 'entitySharedStep',
+  shared_step_template: 'entitySharedStepTemplate',
+  system_setting: 'entitySystemSetting',
+  global_parameter: 'entityGlobalParameter',
+  test_execution_settings: 'entityTestExecutionSettings',
+  automation_settings: 'entityAutomationSettings',
+  kpi_data: 'entityKpiData',
+  test_step_result: 'entityTestStepResult',
+  shareable_report: 'entityShareableReport',
+  root_cause_analysis: 'entityRootCauseAnalysis',
+  dashboard_widget: 'entityDashboardWidget',
+  traceability_entry: 'entityTraceabilityEntry',
+  coverage_report: 'entityCoverageReport'
 };
 
 const ACTION_ICONS: Record<AuditAction, React.ReactNode> = {
@@ -108,15 +125,37 @@ const ENTITY_ICONS: Record<EntityType, React.ReactNode> = {
   milestone: <CheckCircle className="h-4 w-4" />,
   custom_field: <Settings className="h-4 w-4" />,
   jira_integration: <GitBranch className="h-4 w-4" />,
-  notification: <AlertTriangle className="h-4 w-4" />
+  notification: <AlertTriangle className="h-4 w-4" />,
+  test_case_section: <FileText className="h-4 w-4" />,
+  test_schedule: <Calendar className="h-4 w-4" />,
+  test_execution: <Play className="h-4 w-4" />,
+  invitation: <UserCheck className="h-4 w-4" />,
+  shared_step: <FileText className="h-4 w-4" />,
+  shared_step_template: <FileText className="h-4 w-4" />,
+  system_setting: <Settings className="h-4 w-4" />,
+  global_parameter: <Settings className="h-4 w-4" />,
+  test_execution_settings: <Settings className="h-4 w-4" />,
+  automation_settings: <Settings className="h-4 w-4" />,
+  kpi_data: <CheckCircle className="h-4 w-4" />,
+  test_step_result: <CheckCircle className="h-4 w-4" />,
+  shareable_report: <FileDown className="h-4 w-4" />,
+  root_cause_analysis: <AlertTriangle className="h-4 w-4" />,
+  dashboard_widget: <Settings className="h-4 w-4" />,
+  traceability_entry: <GitBranch className="h-4 w-4" />,
+  coverage_report: <FileText className="h-4 w-4" />
 };
+
+const ENTITY_TYPES = Object.keys(ENTITY_LABELS) as EntityType[];
 
 export function ActivityManagement() {
   const { t, isRTL } = useTranslation();
   const [auditTrails, setAuditTrails] = useState<AuditTrail[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [total, setTotal] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [selectedAction, setSelectedAction] = useState<AuditAction | 'all'>('all');
   const [selectedEntityType, setSelectedEntityType] = useState<EntityType | 'all'>('all');
   const [dateRange, setDateRange] = useState('all');
@@ -124,16 +163,16 @@ export function ActivityManagement() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
-  const [userMap, setUserMap] = useState<Record<number, string>>({});
+  const requestIdRef = useRef(0);
 
   const getActionLabel = (action: AuditAction) => {
     const key = ACTION_LABELS[action];
-    return t(key as any);
+    return key ? t(key as any) : action;
   };
 
   const getEntityLabel = (entityType: EntityType) => {
     const key = ENTITY_LABELS[entityType];
-    return t(key as any);
+    return key ? t(key as any) : entityType.split('_').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
   };
 
   const getLocalDateString = (date: Date): string => {
@@ -143,57 +182,76 @@ export function ActivityManagement() {
     return `${year}-${month}-${day}`;
   };
 
-  const filters = useMemo((): AuditTrailFilters => ({
+  const baseFilters = useMemo((): AuditTrailFilters => ({
     limit,
     offset,
-    search: searchQuery || undefined,
+    search: debouncedSearchQuery || undefined,
     action: selectedAction !== 'all' ? selectedAction : undefined,
-    entity_type: selectedEntityType !== 'all' ? selectedEntityType : undefined,
-    date_from: dateRange === 'today' ? getLocalDateString(new Date()) :
-              dateRange === 'week' ? getLocalDateString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) :
-              dateRange === 'month' ? getLocalDateString(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)) :
-              undefined
-  }), [limit, offset, searchQuery, selectedAction, selectedEntityType, dateRange]);
+    entity_type: selectedEntityType !== 'all' ? selectedEntityType : undefined
+  }), [limit, offset, debouncedSearchQuery, selectedAction, selectedEntityType]);
+
+  const buildFilters = useCallback((overrides: AuditTrailFilters = {}): AuditTrailFilters => {
+    const now = new Date();
+    const dateFrom = dateRange === 'today' ? getLocalDateString(now) :
+      dateRange === 'week' ? getLocalDateString(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)) :
+      dateRange === 'month' ? getLocalDateString(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)) :
+      undefined;
+
+    return {
+      ...baseFilters,
+      date_from: dateFrom,
+      ...overrides
+    };
+  }, [baseFilters, dateRange]);
 
   useEffect(() => {
-    loadAuditTrails();
-  }, [filters]);
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+      setOffset(0);
+    }, 300);
 
-  const loadAuditTrails = async () => {
+    return () => window.clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const loadAuditTrails = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const activeFilters = buildFilters();
     setLoading(true);
+    setLoadError('');
     try {
-      const response = await auditAPI.getAuditTrails(filters);
+      const response = await auditAPI.getAuditTrails(activeFilters);
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      if (response.total > 0 && activeFilters.offset !== undefined && activeFilters.limit && activeFilters.offset >= response.total) {
+        setOffset(Math.floor((response.total - 1) / activeFilters.limit) * activeFilters.limit);
+        return;
+      }
       setAuditTrails(response.items);
       setTotal(response.total);
-      
-      // Fetch usernames for unique user IDs
-      const uniqueUserIds = [...new Set(response.items.map(item => item.user_id))];
-      if (uniqueUserIds.length > 0) {
-        const users = await Promise.all(
-          uniqueUserIds.map((userId: number) => usersAPI.getById(userId).catch(() => null))
-        );
-        const newUserMap: Record<number, string> = {};
-        let failedLookups = 0;
-        users.forEach(user => {
-          if (user) {
-            newUserMap[user.id] = user.username;
-          } else {
-            failedLookups++;
-          }
-        });
-        setUserMap(newUserMap);
-        if (failedLookups > 0) {
-          console.warn(`Failed to fetch ${failedLookups} user(s) for audit trails`);
-        }
-      }
     } catch (error) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
       console.error('Failed to load audit trails:', error);
       setAuditTrails([]);
       setTotal(0);
+      setLoadError(getApiErrorMessage(error, t('failedToLoadAuditTrails')));
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [buildFilters, t]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      loadAuditTrails();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [loadAuditTrails]);
 
   const handleViewDetails = (auditTrail: AuditTrail) => {
     setSelectedAuditTrail(auditTrail);
@@ -201,25 +259,50 @@ export function ActivityManagement() {
   };
 
   const exportAuditTrails = async () => {
+    setExporting(true);
     try {
-      // Fetch all audit trails with current filters for export
-      const exportFilters = { ...filters, limit: 10000, offset: 0 };
-      const response = await auditAPI.getAuditTrails(exportFilters);
-      const allAuditTrails = response.items;
+      const pageSize = 1000;
+      let exportOffset = 0;
+      let exportTotal = 0;
+      const allAuditTrails: AuditTrail[] = [];
+
+      do {
+        const response = await auditAPI.getAuditTrails(buildFilters({ limit: pageSize, offset: exportOffset }));
+        allAuditTrails.push(...response.items);
+        exportTotal = response.total;
+        exportOffset += pageSize;
+
+        if (response.items.length === 0) {
+          break;
+        }
+      } while (allAuditTrails.length < exportTotal);
       
       if (!allAuditTrails || allAuditTrails.length === 0) {
         alert(t('noAuditTrailsToExport'));
         return;
       }
+
+      const csvValue = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
       
       const csvContent = [
         t('csvHeader'),
         ...allAuditTrails.map(audit => 
-          `"${audit.id}","${audit.user_id}","${audit.action}","${audit.entity_type}","${audit.entity_id || ''}","${audit.project_id || ''}","${(audit.description || '').replace(/"/g, '""')}","${audit.ip_address || ''}","${(audit.user_agent || '').replace(/"/g, '""')}","${audit.created_at}"`
+          [
+            audit.id,
+            audit.user_id,
+            audit.action,
+            audit.entity_type,
+            audit.entity_id,
+            audit.project_id,
+            audit.description,
+            audit.ip_address,
+            audit.user_agent,
+            audit.created_at
+          ].map(csvValue).join(',')
         )
       ].join('\n');
 
-      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -231,6 +314,8 @@ export function ActivityManagement() {
     } catch (error) {
       console.error('Failed to export audit trails:', error);
       alert(t('failedToExportAuditTrails'));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -269,9 +354,35 @@ export function ActivityManagement() {
       milestone: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
       custom_field: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
       jira_integration: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400',
-      notification: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400'
+      notification: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
+      test_case_section: 'bg-lime-100 text-lime-800 dark:bg-lime-900/30 dark:text-lime-400',
+      test_schedule: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400',
+      test_execution: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
+      invitation: 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400',
+      shared_step: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
+      shared_step_template: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400',
+      system_setting: 'bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400',
+      global_parameter: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400',
+      test_execution_settings: 'bg-stone-100 text-stone-800 dark:bg-stone-900/30 dark:text-stone-400',
+      automation_settings: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+      kpi_data: 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900/30 dark:text-fuchsia-400',
+      test_step_result: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+      shareable_report: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400',
+      root_cause_analysis: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+      dashboard_widget: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
+      traceability_entry: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400',
+      coverage_report: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400'
     };
     return variants[entityType] || 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
+  };
+
+  const getUserDisplayName = (auditTrail: AuditTrail) => (
+    auditTrail.user_full_name || auditTrail.username || `${t('auditUser')} ${auditTrail.user_id}`
+  );
+
+  const formatDateTime = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? t('notAvailable') : date.toLocaleString();
   };
 
   return (
@@ -282,12 +393,12 @@ export function ActivityManagement() {
           <p className="text-gray-600 dark:text-gray-400">{t('activityManagementDescription')}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={loadAuditTrails}>
-            <RefreshCw className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={loadAuditTrails} disabled={loading} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('refresh')}
           </Button>
-          <Button variant="outline" onClick={exportAuditTrails}>
-            <Download className="h-4 w-4 mr-2" />
+          <Button variant="outline" onClick={exportAuditTrails} disabled={exporting || loading} className="gap-2">
+            <Download className="h-4 w-4" />
             {t('export')}
           </Button>
         </div>
@@ -305,16 +416,22 @@ export function ActivityManagement() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label>{t('search')}</Label>
-              <Input
-                placeholder={t('searchActivities')}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full"
-              />
+              <div className="relative">
+                <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 ${isRTL ? 'right-3' : 'left-3'}`} />
+                <Input
+                  placeholder={t('searchActivities')}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className={`w-full ${isRTL ? 'pr-9' : 'pl-9'}`}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label>{t('action')}</Label>
-              <Select value={selectedAction} onValueChange={(value: any) => setSelectedAction(value)}>
+              <Select value={selectedAction} onValueChange={(value) => {
+                setSelectedAction(value as AuditAction | 'all');
+                setOffset(0);
+              }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -328,21 +445,27 @@ export function ActivityManagement() {
             </div>
             <div className="space-y-2">
               <Label>{t('entityType')}</Label>
-              <Select value={selectedEntityType} onValueChange={(value: any) => setSelectedEntityType(value)}>
+              <Select value={selectedEntityType} onValueChange={(value) => {
+                setSelectedEntityType(value as EntityType | 'all');
+                setOffset(0);
+              }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t('allEntityTypes')}</SelectItem>
-                  {Object.entries(ENTITY_LABELS).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{t(label as any)}</SelectItem>
+                  {ENTITY_TYPES.map((entityType) => (
+                    <SelectItem key={entityType} value={entityType}>{getEntityLabel(entityType)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>{t('allTime')}</Label>
-              <Select value={dateRange} onValueChange={setDateRange}>
+              <Label>{t('dateRange')}</Label>
+              <Select value={dateRange} onValueChange={(value) => {
+                setDateRange(value);
+                setOffset(0);
+              }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -363,23 +486,28 @@ export function ActivityManagement() {
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <span>{t('auditTrails')} ({auditTrails.length} of {total})</span>
-            <Button variant="outline" size="sm" onClick={loadAuditTrails}>
-              <RefreshCw className="h-4 w-4 mr-2" />
+            <Button variant="outline" size="sm" onClick={loadAuditTrails} className="gap-2" disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {t('refresh')}
             </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center gap-2 py-8">
               <RefreshCw className="h-6 w-6 animate-spin" />
-              <span className="ml-2">{t('loadingAuditTrails')}</span>
+              <span>{t('loadingAuditTrails')}</span>
+            </div>
+          ) : loadError ? (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {loadError}
             </div>
           ) : auditTrails.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p>{t('noAuditTrailsFound')}</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -415,10 +543,10 @@ export function ActivityManagement() {
                         <div className="flex items-center gap-1.5">
                           <User className="h-3.5 w-3.5 text-gray-400" />
                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {userMap[auditTrail.user_id] ?? `${t('auditUser')} ${auditTrail.user_id}`}
+                            {getUserDisplayName(auditTrail)}
                           </span>
                         </div>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-5">
+                        <span className={`text-xs text-gray-500 dark:text-gray-400 ${isRTL ? 'mr-5' : 'ml-5'}`}>
                           {t('idPrefix')}: {auditTrail.user_id}
                         </span>
                       </div>
@@ -430,7 +558,7 @@ export function ActivityManagement() {
                       <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4 text-gray-400" />
                         <span className="text-sm">
-                          {new Date(auditTrail.created_at).toLocaleString()}
+                          {formatDateTime(auditTrail.created_at)}
                         </span>
                       </div>
                     </TableCell>
@@ -439,6 +567,7 @@ export function ActivityManagement() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          aria-label={t('viewDetails')}
                           onClick={() => handleViewDetails(auditTrail)}
                         >
                           <Eye className="h-4 w-4" />
@@ -449,6 +578,7 @@ export function ActivityManagement() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -457,8 +587,8 @@ export function ActivityManagement() {
       {total > 0 && (
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-gray-600 dark:text-gray-400">
                   {t('showingEntries', { start: total > 0 ? offset + 1 : 0, end: total > 0 ? Math.min(offset + limit, total) : 0, total })}
                 </span>
@@ -519,7 +649,7 @@ export function ActivityManagement() {
           </DialogHeader>
           {selectedAuditTrail && (
             <div className="space-y-4 max-h-[600px] overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <Label>{t('auditAction')}</Label>
                   <Badge className={`${getActionBadge(selectedAuditTrail.action)} inline-flex items-center gap-1.5 px-2.5 py-1 whitespace-nowrap`}>
@@ -536,15 +666,15 @@ export function ActivityManagement() {
                 </div>
                 <div>
                   <Label>{t('entityId')}</Label>
-                  <p className="text-sm font-medium">{selectedAuditTrail.entity_id || '-'}</p>
+                  <p className="text-sm font-medium">{selectedAuditTrail.entity_id ?? '-'}</p>
                 </div>
                 <div>
                   <Label>{t('auditProjectId')}</Label>
-                  <p className="text-sm font-medium">{selectedAuditTrail.project_id || '-'}</p>
+                  <p className="text-sm font-medium">{selectedAuditTrail.project_id ?? '-'}</p>
                 </div>
                 <div>
                   <Label>{t('userId')}</Label>
-                  <p className="text-sm font-medium">{selectedAuditTrail.user_id}</p>
+                  <p className="text-sm font-medium">{getUserDisplayName(selectedAuditTrail)} ({t('idPrefix')}: {selectedAuditTrail.user_id})</p>
                 </div>
                 <div>
                   <Label>{t('ipAddress')}</Label>
@@ -557,7 +687,7 @@ export function ActivityManagement() {
               </div>
               <div>
                 <Label>{t('timestamp')}</Label>
-                <p className="text-sm">{new Date(selectedAuditTrail.created_at).toLocaleString()}</p>
+                <p className="text-sm">{formatDateTime(selectedAuditTrail.created_at)}</p>
               </div>
               <div>
                 <Label>{t('userAgent')}</Label>

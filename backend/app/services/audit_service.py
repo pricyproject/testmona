@@ -1,5 +1,5 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, func, case
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, or_, desc, func, cast, String
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from fastapi import Depends
@@ -91,47 +91,67 @@ class AuditService:
         """Get audit trail by ID"""
         return self.db.query(AuditTrail).filter(AuditTrail.id == audit_id).first()
 
-    def get_audit_trails(self, filters: AuditTrailFilter) -> tuple[List[AuditTrail], int]:
-        """Get audit trails with filtering and pagination"""
-        query = self.db.query(AuditTrail)
+    def _build_audit_trail_query(self, filters: AuditTrailFilter):
+        query = self.db.query(AuditTrail).options(joinedload(AuditTrail.user))
 
-        # Apply filters
         if filters.user_id:
             query = query.filter(AuditTrail.user_id == filters.user_id)
-        
+
         if filters.action:
             query = query.filter(AuditTrail.action == filters.action)
-        
+
         if filters.entity_type:
             query = query.filter(AuditTrail.entity_type == filters.entity_type)
-        
+
         if filters.entity_id:
             query = query.filter(AuditTrail.entity_id == filters.entity_id)
-        
+
         if filters.project_id:
             query = query.filter(AuditTrail.project_id == filters.project_id)
-        
+
         if filters.date_from:
             query = query.filter(AuditTrail.created_at >= filters.date_from)
-        
+
         if filters.date_to:
             query = query.filter(AuditTrail.created_at <= filters.date_to)
-        
-        if filters.search:
-            # Use parameterized query with ilike for safe search
-            search_pattern = f"%{filters.search}%"
+
+        if filters.search and filters.search.strip():
+            search_pattern = f"%{filters.search.strip()}%"
             query = query.filter(
                 or_(
                     AuditTrail.description.ilike(search_pattern),
-                    AuditTrail.entity_type.ilike(search_pattern),
-                    AuditTrail.action.ilike(search_pattern)
+                    cast(AuditTrail.entity_type, String).ilike(search_pattern),
+                    cast(AuditTrail.action, String).ilike(search_pattern)
                 )
             )
 
-        # Get total count
-        total = query.count()
+        return query
 
-        # Apply pagination and ordering
+    def get_audit_trails(self, filters: AuditTrailFilter) -> tuple[List[AuditTrail], int]:
+        """Get audit trails with filtering and pagination"""
+        query = self._build_audit_trail_query(filters)
+        total = query.count()
+        audit_trails = query.order_by(desc(AuditTrail.created_at)).offset(filters.offset).limit(filters.limit).all()
+
+        return audit_trails, total
+
+    def get_visible_audit_trails(
+        self,
+        filters: AuditTrailFilter,
+        current_user_id: int,
+        accessible_project_ids: List[int],
+        is_superuser: bool = False,
+    ) -> tuple[List[AuditTrail], int]:
+        """Get audit trails visible to a user before pagination is applied."""
+        query = self._build_audit_trail_query(filters)
+
+        if not is_superuser:
+            visibility_filters = [AuditTrail.user_id == current_user_id]
+            if accessible_project_ids:
+                visibility_filters.append(AuditTrail.project_id.in_(accessible_project_ids))
+            query = query.filter(or_(*visibility_filters))
+
+        total = query.count()
         audit_trails = query.order_by(desc(AuditTrail.created_at)).offset(filters.offset).limit(filters.limit).all()
 
         return audit_trails, total

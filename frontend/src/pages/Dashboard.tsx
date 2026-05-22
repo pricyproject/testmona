@@ -1,28 +1,55 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { FileText, TestTube, PlayCircle, TrendingUp, Users, Bug, FileCheck, Target, ExternalLink, AlertTriangle, Flag, Calendar, Loader2, CheckCircle } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
-import { auditAPI, analyticsAPI } from '@/lib/api';
+import { auditAPI, analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useProjectStore } from '@/stores/projectStore';
+import { AuditAction, AuditTrail, EntityType } from '@/types';
 
 // StatCard component moved outside to avoid React 19 issues
 interface StatCardProps {
   title: string;
   value: string | number;
-  icon: any;
+  icon: LucideIcon;
   color: string;
   trend?: string;
-  href?: string;
   onClick?: () => void;
 }
 
-const StatCard = ({ title, value, icon: Icon, color, trend, onClick }: StatCardProps) => (
+interface DashboardStatistics {
+  totalTestCases: number;
+  totalTestSuites: number;
+  totalTestRuns: number;
+  totalRequirements: number;
+  totalDefects: number;
+  totalMilestones: number;
+  totalTestPlans: number;
+  totalProjects: number;
+  passRate: number;
+  totalExecuted?: number;
+  totalNotTested?: number;
+}
+
+const StatCard = ({ title, value, icon: Icon, color, trend, onClick }: StatCardProps) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onClick) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onClick();
+    }
+  };
+
+  return (
   <Card 
-    className="hover:shadow-lg transition-shadow duration-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    className="hover:shadow-lg transition-shadow duration-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     onClick={onClick}
+    onKeyDown={handleKeyDown}
   >
     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
       <CardTitle className="text-sm font-medium text-gray-600">{title}</CardTitle>
@@ -35,56 +62,107 @@ const StatCard = ({ title, value, icon: Icon, color, trend, onClick }: StatCardP
       )}
     </CardContent>
   </Card>
-);
-
-const ACTIVITY_LABELS: Record<string, string> = {
-  create: 'Create',
-  update: 'Update',
-  delete: 'Delete',
-  execute: 'Execute',
-  login: 'Login',
-  logout: 'Logout',
+  );
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  not_tested: 'Not Tested',
-  in_progress: 'In Progress',
-  pending: 'Pending',
-  pass: 'Passed',
-  passed: 'Passed',
-  fail: 'Failed',
-  failed: 'Failed',
-  block: 'Blocked',
-  blocked: 'Blocked',
-  skip: 'Skipped',
-  skipped: 'Skipped',
-  completed: 'Completed',
+const ACTIVITY_LABEL_KEYS: Partial<Record<AuditAction, string>> = {
+  create: 'actionCreated',
+  update: 'actionUpdated',
+  delete: 'actionDeleted',
+  execute: 'actionExecuted',
+  login: 'actionLoggedIn',
+  logout: 'actionLoggedOut',
+  assign: 'actionAssigned',
+  unassign: 'actionUnassigned',
+  approve: 'actionApproved',
+  reject: 'actionRejected',
+  archive: 'actionArchived',
+  restore: 'actionRestored',
+  export: 'actionExported',
+  import: 'actionImported',
+  sync: 'actionSynced',
 };
 
-const ENTITY_LABELS: Record<string, string> = {
-  test_case: 'test case',
-  test_run: 'test run',
-  test_suite: 'test suite',
-  test_result: 'test result',
-  user: 'user',
-  project: 'project',
-  defect: 'defect',
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  not_tested: 'statusNotTested',
+  in_progress: 'statusInProgress',
+  pending: 'statusPending',
+  pass: 'statusPassed',
+  passed: 'statusPassed',
+  fail: 'statusFailed',
+  failed: 'statusFailed',
+  block: 'statusBlocked',
+  blocked: 'statusBlocked',
+  skip: 'statusSkipped',
+  skipped: 'statusSkipped',
+  completed: 'statusCompleted',
 };
 
-const formatActivityToken = (value?: string) => {
+const ENTITY_LABEL_KEYS: Partial<Record<EntityType, string>> = {
+  test_case: 'entityTestCase',
+  test_run: 'entityTestRun',
+  test_suite: 'entityTestSuite',
+  test_result: 'entityTestResult',
+  user: 'entityUser',
+  project: 'entityProject',
+  defect: 'entityDefect',
+  requirement: 'entityRequirement',
+  milestone: 'entityMilestone',
+  test_plan: 'entityTestPlan',
+  custom_field: 'entityCustomField',
+  jira_integration: 'entityJiraIntegration',
+  notification: 'entityNotification',
+  test_case_section: 'entityTestCaseSection',
+  test_schedule: 'entityTestSchedule',
+  test_execution: 'entityTestExecution',
+  invitation: 'entityInvitation',
+  shared_step: 'entitySharedStep',
+  shared_step_template: 'entitySharedStepTemplate',
+  system_setting: 'entitySystemSetting',
+  global_parameter: 'entityGlobalParameter',
+  test_execution_settings: 'entityTestExecutionSettings',
+  automation_settings: 'entityAutomationSettings',
+  kpi_data: 'entityKpiData',
+  test_step_result: 'entityTestStepResult',
+  shareable_report: 'entityShareableReport',
+  root_cause_analysis: 'entityRootCauseAnalysis',
+  dashboard_widget: 'entityDashboardWidget',
+  traceability_entry: 'entityTraceabilityEntry',
+  coverage_report: 'entityCoverageReport',
+};
+
+const humanizeToken = (value?: string) => value ? value.replace(/[-_]/g, ' ') : '';
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const formatActivityToken = (value: string | undefined, t: (key: any, params?: Record<string, string | number>) => string) => {
   if (!value) return '';
   const normalized = value.toLowerCase();
-  return ACTIVITY_LABELS[normalized] || STATUS_LABELS[normalized] || value.replace(/[-_]/g, ' ');
+  const actionKey = ACTIVITY_LABEL_KEYS[normalized as AuditAction];
+  const statusKey = STATUS_LABEL_KEYS[normalized];
+  return actionKey ? t(actionKey as any) : statusKey ? t(statusKey as any) : humanizeToken(value);
 };
 
-const formatActivityDescription = (description?: string) => {
+const formatActivityDescription = (description: string | undefined, t: (key: any, params?: Record<string, string | number>) => string) => {
   if (!description) return '';
-  return Object.entries(STATUS_LABELS).reduce((text, [token, label]) => {
-    return text.replace(new RegExp(`\b${token}\b`, 'gi'), label);
+  return Object.entries(STATUS_LABEL_KEYS).reduce((text, [token, labelKey]) => {
+    return text.replace(new RegExp(`\\b${escapeRegExp(token)}\\b`, 'gi'), t(labelKey as any));
   }, description);
 };
 
-const ActivityIcon = ({ activity }: { activity: any }) => {
+const formatEntityLabel = (entityType: EntityType | undefined, t: (key: any, params?: Record<string, string | number>) => string) => {
+  if (!entityType) return '';
+  const labelKey = ENTITY_LABEL_KEYS[entityType];
+  return labelKey ? t(labelKey as any) : humanizeToken(entityType);
+};
+
+const formatDateTime = (value?: string, fallback = '') => {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString();
+};
+
+const ActivityIcon = ({ activity }: { activity: AuditTrail }) => {
   const action = activity.action?.toLowerCase();
   const entityType = activity.entity_type?.toLowerCase();
 
@@ -104,61 +182,60 @@ export function Dashboard() {
   const { t, isRTL } = useTranslation();
   const navigate = useNavigate();
   const { selectedProject } = useProjectStore();
-  const [recentActivities, setRecentActivities] = useState<any[]>([]);
-  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [recentActivities, setRecentActivities] = useState<AuditTrail[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStatistics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isActivityLoading, setIsActivityLoading] = useState(true);
+  const [statsError, setStatsError] = useState('');
+  const [activityError, setActivityError] = useState('');
   
   useEffect(() => {
-    // Load recent activities from real audit API
+    const controller = new AbortController();
+    const projectId = selectedProject?.id;
+
     const loadRecentActivities = async () => {
+      setIsActivityLoading(true);
+      setActivityError('');
       try {
-        const response = await auditAPI.getAuditTrails({ limit: 10 });
+        const response = await auditAPI.getAuditTrails({ limit: 10, project_id: projectId }, controller.signal);
         setRecentActivities(response.items);
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error('Failed to load recent activities:', error);
-        // Fallback to empty array if API fails
         setRecentActivities([]);
+        setActivityError(getApiErrorMessage(error, t('failedToLoadRecentActivity')));
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsActivityLoading(false);
+        }
       }
     };
 
-    // Load dashboard statistics from real API
     const loadDashboardStats = async () => {
       setIsLoading(true);
+      setStatsError('');
       try {
-        // Pass selectedProject.id if available, otherwise get global stats
-        const projectId = selectedProject?.id;
-        const stats = await analyticsAPI.getDashboardStatistics(projectId);
+        const stats = await analyticsAPI.getDashboardStatistics(projectId, controller.signal);
         setDashboardStats(stats);
       } catch (error) {
+        if (controller.signal.aborted) return;
         console.error('❌ Failed to load dashboard statistics:', error);
-        // Set empty stats on error
-        setDashboardStats({
-          totalTestCases: 0,
-          totalTestSuites: 0,
-          totalTestRuns: 0,
-          totalRequirements: 0,
-          totalDefects: 0,
-          totalMilestones: 0,
-          totalTestPlans: 0,
-          totalProjects: 0,
-          testResults: [
-            { status: 'passed', count: 0 },
-            { status: 'failed', count: 0 },
-            { status: 'blocked', count: 0 },
-            { status: 'not_tested', count: 0 }
-          ],
-          passRate: 0
-        });
+        setDashboardStats(null);
+        setStatsError(getApiErrorMessage(error, t('failedToLoadDashboardStats')));
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     };
-    
+
     loadRecentActivities();
     loadDashboardStats();
-  }, [selectedProject]); // React to project changes
 
-  const handleActivityClick = (activity: any) => {
+    return () => controller.abort();
+  }, [selectedProject?.id, t]);
+
+  const handleActivityClick = (activity: AuditTrail) => {
     // Only navigate if the activity belongs to the selected project or if no project is selected
     // This prevents users from being navigated to projects they don't have access to
     const targetProjectId = activity.project_id;
@@ -170,6 +247,16 @@ export function Dashboard() {
       return;
     }
     
+    if (activity.entity_type === 'user') {
+      navigate('/settings');
+      return;
+    }
+
+    if (activity.entity_type === 'project') {
+      navigate(activity.entity_id ? `/projects/${activity.entity_id}` : '/projects');
+      return;
+    }
+
     // Use the activity's project_id if available, otherwise use selected project
     const projectId = targetProjectId || selectedProject?.id;
     
@@ -201,15 +288,17 @@ export function Dashboard() {
           navigate(`/projects/${projectId}/test-suites`);
         }
         break;
-      case 'user':
-        navigate('/settings');
+      case 'requirement':
+        navigate(`/projects/${projectId}/requirements${activity.entity_id ? `/${activity.entity_id}` : ''}`);
         break;
-      case 'project':
-        if (activity.entity_id) {
-          navigate(`/projects/${activity.entity_id}`);
-        } else {
-          navigate('/projects');
-        }
+      case 'defect':
+        navigate(`/projects/${projectId}/defects`);
+        break;
+      case 'test_plan':
+        navigate(`/projects/${projectId}/test-plans`);
+        break;
+      case 'milestone':
+        navigate(`/projects/${projectId}/milestones`);
         break;
       default:
         // For other entity types, navigate to activity management
@@ -228,10 +317,12 @@ export function Dashboard() {
         totalRequirements: 0,
         totalDefects: 0,
         totalMilestones: 0,
-        totalTestPlans: 0,
-        totalProjects: 0,
-        recentActivity: recentActivities
-      };
+      totalTestPlans: 0,
+      totalProjects: 0,
+      totalExecuted: 0,
+      totalNotTested: 0,
+      recentActivity: recentActivities
+    };
     }
 
     const totalTests = dashboardStats.totalTestCases || 0;
@@ -249,6 +340,8 @@ export function Dashboard() {
       totalMilestones: dashboardStats.totalMilestones || 0,
       totalTestPlans: dashboardStats.totalTestPlans || 0,
       totalProjects: dashboardStats.totalProjects || 0,
+      totalExecuted: dashboardStats.totalExecuted || 0,
+      totalNotTested: dashboardStats.totalNotTested || 0,
       recentActivity: recentActivities
     };
   }, [dashboardStats, recentActivities]);
@@ -278,6 +371,12 @@ export function Dashboard() {
         <div className="flex items-center justify-center py-8">
           <Loader2 className={`h-8 w-8 animate-spin text-blue-600 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           <span className="text-gray-600">{t('loadingDashboardStats')}</span>
+        </div>
+      )}
+
+      {statsError && (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+          {statsError}
         </div>
       )}
 
@@ -370,7 +469,16 @@ export function Dashboard() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {recentActivities.length === 0 ? (
+          {isActivityLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 px-4 text-sm text-gray-600 dark:text-gray-400">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+              <span>{t('loadingRecentActivity')}</span>
+            </div>
+          ) : activityError ? (
+            <div role="alert" className="m-4 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {activityError}
+            </div>
+          ) : recentActivities.length === 0 ? (
             <div className="text-center py-12 px-4">
               <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Calendar className="h-8 w-8 text-gray-400" />
@@ -391,12 +499,12 @@ export function Dashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-900 dark:text-white font-medium leading-snug">
-                      <span>{formatActivityToken(activity.action) || t('unknown')}</span>
-                      {activity.entity_type && <span className="text-gray-600 dark:text-gray-400 font-normal"> {ENTITY_LABELS[activity.entity_type] || activity.entity_type.replace(/[-_]/g, ' ')}</span>}
-                      {activity.description && <span className="text-gray-600 dark:text-gray-400 font-normal">: {formatActivityDescription(activity.description)}</span>}
+                      <span>{formatActivityToken(activity.action, t) || t('unknown')}</span>
+                      {activity.entity_type && <span className="text-gray-600 dark:text-gray-400 font-normal"> {formatEntityLabel(activity.entity_type, t)}</span>}
+                      {activity.description && <span className="text-gray-600 dark:text-gray-400 font-normal">: {formatActivityDescription(activity.description, t)}</span>}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {activity.created_at ? new Date(activity.created_at).toLocaleString() : t('unknownTime')}
+                      {formatDateTime(activity.created_at, t('unknownTime'))}
                     </p>
                   </div>
                   <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">

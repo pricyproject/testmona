@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import Optional, List
+from pydantic import ValidationError
 
 from ..database import get_db
 from ..services.audit_service import AuditService, get_audit_service
@@ -8,18 +9,19 @@ from ..schemas_audit import (
     AuditTrailResponse, AuditTrailList, AuditTrailFilter,
     ActivitySummary, EntityHistory, AuditTrailUpdate
 )
-from .. import crud_rbac
+from .. import crud_rbac, rbac
 from ..auth import get_current_user
+from ..models import AuditAction, EntityType
 
 router = APIRouter()
 
 @router.get("", response_model=AuditTrailList)
 async def get_audit_trails(
-    user_id: Optional[int] = Query(None, description="Filter by user ID"),
-    action: Optional[str] = Query(None, description="Filter by action"),
-    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
-    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
-    project_id: Optional[int] = Query(None, description="Filter by project ID"),
+    user_id: Optional[int] = Query(None, ge=1, description="Filter by user ID"),
+    action: Optional[AuditAction] = Query(None, description="Filter by action"),
+    entity_type: Optional[EntityType] = Query(None, description="Filter by entity type"),
+    entity_id: Optional[int] = Query(None, ge=1, description="Filter by entity ID"),
+    project_id: Optional[int] = Query(None, ge=1, description="Filter by project ID"),
     date_from: Optional[str] = Query(None, description="Filter by date from (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="Filter by date to (YYYY-MM-DD)"),
     search: Optional[str] = Query(None, description="Search in description, entity type, and action"),
@@ -48,40 +50,39 @@ async def get_audit_trails(
             raise HTTPException(status_code=404, detail="User not found")
 
     # Build filter object
-    filters = AuditTrailFilter(
-        user_id=user_id,
-        action=action,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        project_id=project_id,
-        date_from=date_from,
-        date_to=date_to,
-        search=search,
-        limit=limit,
-        offset=offset
-    )
+    try:
+        filters = AuditTrailFilter(
+            user_id=user_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            project_id=project_id,
+            date_from=date_from,
+            date_to=date_to,
+            search=search,
+            limit=limit,
+            offset=offset
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    if filters.date_from and filters.date_to and filters.date_from > filters.date_to:
+        raise HTTPException(status_code=400, detail="date_from cannot be after date_to")
 
     # Check permissions - users can only see audit trails for entities they have access to
     if project_id and not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
         raise HTTPException(status_code=403, detail="Not enough permissions to view audit trails for this project")
 
-    audit_trails, total = audit_service.get_audit_trails(filters)
-
-    # Filter results based on user permissions
-    filtered_trails = []
-    for audit in audit_trails:
-        # Users can always see their own audit trails
-        if audit.user_id == current_user.id:
-            filtered_trails.append(audit)
-        # For other audit trails, check project permissions
-        elif audit.project_id and crud_rbac.has_project_permission(db, current_user.id, audit.project_id, "view"):
-            filtered_trails.append(audit)
-        # Admin can see everything
-        elif current_user.is_superuser:
-            filtered_trails.append(audit)
+    accessible_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
+    audit_trails, total = audit_service.get_visible_audit_trails(
+        filters,
+        current_user_id=current_user.id,
+        accessible_project_ids=accessible_project_ids,
+        is_superuser=current_user.is_superuser,
+    )
 
     return AuditTrailList(
-        items=[AuditTrailResponse.from_orm(audit) for audit in filtered_trails],
+        items=[AuditTrailResponse.from_orm(audit) for audit in audit_trails],
         total=total,
         limit=limit,
         offset=offset
@@ -90,7 +91,7 @@ async def get_audit_trails(
 @router.get("/recent", response_model=List[AuditTrailResponse])
 async def get_recent_activities(
     limit: int = Query(50, ge=1, le=1000, description="Number of items to return"),
-    project_id: Optional[int] = Query(None, description="Filter by project ID"),
+    project_id: Optional[int] = Query(None, ge=1, description="Filter by project ID"),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service)
@@ -103,17 +104,16 @@ async def get_recent_activities(
     if project_id and not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
         raise HTTPException(status_code=403, detail="Not enough permissions to view activities for this project")
 
-    activities = audit_service.get_recent_activities(limit, project_id)
+    filters = AuditTrailFilter(limit=limit, project_id=project_id)
+    accessible_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
+    activities, _ = audit_service.get_visible_audit_trails(
+        filters,
+        current_user_id=current_user.id,
+        accessible_project_ids=accessible_project_ids,
+        is_superuser=current_user.is_superuser,
+    )
 
-    # Filter based on permissions
-    filtered_activities = []
-    for activity in activities:
-        if (activity.user_id == current_user.id or 
-            (activity.project_id and crud_rbac.has_project_permission(db, current_user.id, activity.project_id, "view")) or
-            current_user.is_superuser):
-            filtered_activities.append(activity)
-
-    return [AuditTrailResponse.from_orm(activity) for activity in filtered_activities]
+    return [AuditTrailResponse.from_orm(activity) for activity in activities]
 
 @router.get("/{audit_id}", response_model=AuditTrailResponse)
 async def get_audit_trail(
@@ -140,7 +140,7 @@ async def get_audit_trail(
 
 @router.get("/entity/{entity_type}/{entity_id}", response_model=EntityHistory)
 async def get_entity_history(
-    entity_type: str,
+    entity_type: EntityType,
     entity_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
@@ -153,10 +153,11 @@ async def get_entity_history(
     # Check if user has permission to view this entity type and ID
     if not current_user.is_superuser:
         # Check based on entity type
-        if entity_type == "project":
+        entity_type_value = entity_type.value
+        if entity_type_value == "project":
             if not crud_rbac.has_project_permission(db, current_user.id, entity_id, "view"):
                 raise HTTPException(status_code=403, detail="Not enough permissions to view this entity history")
-        elif entity_type in ["test_case", "test_suite", "test_run", "test_result", "test_plan", "requirement", "defect", "milestone"]:
+        elif entity_type_value in ["test_case", "test_suite", "test_run", "test_result", "test_plan", "requirement", "defect", "milestone"]:
             # For project-related entities, check if user has view permission on the project
             # First, get the project_id from the entity
             from ..models import TestCase, TestSuite, TestRun, TestResult, TestPlan, Requirement, Defect, Milestone
@@ -170,7 +171,7 @@ async def get_entity_history(
                 "defect": Defect,
                 "milestone": Milestone
             }
-            model_class = entity_map.get(entity_type)
+            model_class = entity_map.get(entity_type_value)
             if model_class:
                 entity = db.query(model_class).filter(model_class.id == entity_id).first()
                 if not entity:
@@ -178,12 +179,12 @@ async def get_entity_history(
                 if hasattr(entity, 'project_id') and entity.project_id:
                     if not crud_rbac.has_project_permission(db, current_user.id, entity.project_id, "view"):
                         raise HTTPException(status_code=403, detail="Not enough permissions to view this entity history")
-        elif entity_type == "user":
+        elif entity_type_value == "user":
             # Users can only view their own user history
             if entity_id != current_user.id:
                 raise HTTPException(status_code=403, detail="Not enough permissions to view this entity history")
 
-    history = audit_service.get_entity_history(entity_type, entity_id)
+    history = audit_service.get_entity_history(entity_type.value, entity_id)
 
     # Filter history based on permissions
     filtered_history = []
@@ -300,9 +301,14 @@ async def create_audit_trail(
     audit_data["user_id"] = current_user.id
 
     from ..schemas_audit import AuditTrailCreate
-    audit_create = AuditTrailCreate(**audit_data)
+    try:
+        audit_create = AuditTrailCreate(**audit_data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
     
     audit_trail = audit_service.create_audit_trail(audit_create)
+    if audit_trail is None:
+        raise HTTPException(status_code=409, detail="Audit trail logging is disabled for this entity type")
     return AuditTrailResponse.from_orm(audit_trail)
 
 

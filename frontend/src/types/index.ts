@@ -300,11 +300,13 @@ export interface Notification {
 // Audit Trail Types
 export type AuditAction = 'create' | 'update' | 'delete' | 'login' | 'logout' | 'execute' | 'assign' | 'unassign' | 'approve' | 'reject' | 'archive' | 'restore' | 'export' | 'import' | 'sync';
 
-export type EntityType = 'user' | 'project' | 'test_case' | 'test_suite' | 'test_run' | 'test_result' | 'test_plan' | 'requirement' | 'defect' | 'milestone' | 'custom_field' | 'jira_integration' | 'notification';
+export type EntityType = 'user' | 'project' | 'test_case' | 'test_suite' | 'test_run' | 'test_result' | 'test_plan' | 'requirement' | 'defect' | 'milestone' | 'custom_field' | 'jira_integration' | 'notification' | 'test_case_section' | 'test_schedule' | 'test_execution' | 'invitation' | 'shared_step' | 'shared_step_template' | 'system_setting' | 'global_parameter' | 'test_execution_settings' | 'automation_settings' | 'kpi_data' | 'test_step_result' | 'shareable_report' | 'root_cause_analysis' | 'dashboard_widget' | 'traceability_entry' | 'coverage_report';
 
 export interface AuditTrail {
   id: number;
   user_id: number;
+  username?: string;
+  user_full_name?: string;
   action: AuditAction;
   entity_type: EntityType;
   entity_id?: number;

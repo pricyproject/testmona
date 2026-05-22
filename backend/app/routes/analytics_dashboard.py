@@ -2,7 +2,7 @@
 Analytics, dashboard, KPI data, test step results, and shareable reports routes.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -135,7 +135,7 @@ def register_analytics_dashboard_routes(app):
 
     @app.get("/dashboard/statistics")
     def get_dashboard_statistics(
-        project_id: int = None,
+        project_id: Optional[int] = Query(None, ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -147,9 +147,12 @@ def register_analytics_dashboard_routes(app):
         try:
             # Get projects user has access to
             if project_id:
-                if not rbac.has_permission(current_user, "read", project_id, db):
+                project = db.query(models.Project).filter(models.Project.id == project_id).first()
+                if not project:
+                    raise HTTPException(status_code=404, detail="Project not found")
+                if not rbac.has_permission(current_user, "read", project.id, db):
                     raise HTTPException(status_code=403, detail="Insufficient permissions")
-                projects = [db.query(models.Project).filter(models.Project.id == project_id).first()]
+                projects = [project]
             else:
                 # Get all projects user has access to
                 projects = db.query(models.Project).all()
@@ -170,76 +173,82 @@ def register_analytics_dashboard_routes(app):
             total_passed = 0
             total_failed = 0
             total_blocked = 0
+            total_skipped = 0
             total_not_tested = 0
             
             for project in projects:
                 # Count test cases
-                test_cases = db.query(models.TestCase).join(models.TestSuite).filter(
-                    models.TestSuite.project_id == project.id
-                ).all()
-                total_test_cases += len(test_cases)
+                active_test_cases_query = db.query(models.TestCase).join(models.TestSuite).filter(
+                    models.TestSuite.project_id == project.id,
+                    models.TestCase.is_deleted == False
+                )
+                test_case_ids = [row[0] for row in active_test_cases_query.with_entities(models.TestCase.id).all()]
+                total_test_cases += len(test_case_ids)
                 
                 # Count test suites
-                test_suites = db.query(models.TestSuite).filter(
+                total_test_suites += db.query(models.TestSuite).filter(
                     models.TestSuite.project_id == project.id
-                ).all()
-                total_test_suites += len(test_suites)
+                ).count()
                 
                 # Count test runs
-                test_runs = db.query(models.TestRun).filter(
+                total_test_runs += db.query(models.TestRun).filter(
                     models.TestRun.project_id == project.id
-                ).all()
-                total_test_runs += len(test_runs)
+                ).count()
                 
                 # Count requirements
-                requirements = db.query(models.Requirement).filter(
+                total_requirements += db.query(models.Requirement).filter(
                     models.Requirement.project_id == project.id
-                ).all()
-                total_requirements += len(requirements)
+                ).count()
                 
                 # Count defects
-                defects = db.query(models.Defect).filter(
+                total_defects += db.query(models.Defect).filter(
                     models.Defect.project_id == project.id
-                ).all()
-                total_defects += len(defects)
+                ).count()
                 
                 # Count milestones (handle potential schema issues)
                 try:
-                    milestones = db.query(models.Milestone).filter(
+                    total_milestones += db.query(models.Milestone).filter(
                         models.Milestone.project_id == project.id
-                    ).all()
-                    total_milestones += len(milestones)
+                    ).count()
                 except Exception as e:
                     # If milestone query fails due to schema issues, skip it
                     print(f"Error counting milestones for project {project.id}: {e}")
                     total_milestones += 0
                 
                 # Count test plans
-                test_plans = db.query(models.TestPlan).filter(
+                total_test_plans += db.query(models.TestPlan).filter(
                     models.TestPlan.project_id == project.id
-                ).all()
-                total_test_plans += len(test_plans)
+                ).count()
                 
                 # Count test execution results
-                for tc in test_cases:
+                for test_case_id in test_case_ids:
                     latest_result = db.query(models.TestResult).filter(
-                        models.TestResult.test_case_id == tc.id
-                    ).order_by(models.TestResult.executed_at.desc()).first()
+                        models.TestResult.test_case_id == test_case_id
+                    ).order_by(
+                        models.TestResult.executed_at.desc(),
+                        models.TestResult.created_at.desc(),
+                        models.TestResult.id.desc()
+                    ).first()
                     
                     if latest_result:
-                        if latest_result.status == "pass":
+                        normalized_status = (latest_result.status or "").lower()
+                        if normalized_status in {"pass", "passed"}:
                             total_passed += 1
-                        elif latest_result.status == "fail":
+                        elif normalized_status in {"fail", "failed"}:
                             total_failed += 1
-                        elif latest_result.status == "blocked":
+                        elif normalized_status in {"block", "blocked"}:
                             total_blocked += 1
-                        elif latest_result.status == "not_tested":
+                        elif normalized_status in {"skip", "skipped"}:
+                            total_skipped += 1
+                        elif normalized_status == "not_tested":
+                            total_not_tested += 1
+                        else:
                             total_not_tested += 1
                     else:
                         total_not_tested += 1
             
             # Calculate pass rate
-            total_executed = total_passed + total_failed + total_blocked
+            total_executed = total_passed + total_failed + total_blocked + total_skipped
             pass_rate = round((total_passed / total_executed) * 100) if total_executed > 0 else 0
             
             return {
@@ -255,35 +264,18 @@ def register_analytics_dashboard_routes(app):
                     { "status": "passed", "count": total_passed },
                     { "status": "failed", "count": total_failed },
                     { "status": "blocked", "count": total_blocked },
+                    { "status": "skipped", "count": total_skipped },
                     { "status": "not_tested", "count": total_not_tested }
                 ],
                 "passRate": pass_rate,
                 "totalExecuted": total_executed,
                 "totalNotTested": total_not_tested
             }
-            
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"Error in get_dashboard_statistics: {e}")
-            # Return empty stats on error
-            return {
-                "totalTestCases": 0,
-                "totalTestSuites": 0,
-                "totalTestRuns": 0,
-                "totalRequirements": 0,
-                "totalDefects": 0,
-                "totalMilestones": 0,
-                "totalTestPlans": 0,
-                "totalProjects": 0,
-                "testResults": [
-                    { "status": "passed", "count": 0 },
-                    { "status": "failed", "count": 0 },
-                    { "status": "blocked", "count": 0 },
-                    { "status": "not_tested", "count": 0 }
-                ],
-                "passRate": 0,
-                "totalExecuted": 0,
-                "totalNotTested": 0
-            }
+            raise HTTPException(status_code=500, detail="Failed to load dashboard statistics")
 
     @app.get("/analytics/kpi/{project_id}")
     def get_project_kpis(
