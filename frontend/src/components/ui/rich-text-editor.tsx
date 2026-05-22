@@ -61,6 +61,78 @@ type SlashCommand = {
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'];
 const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
+// Inline style properties the editor schema understands as real formatting.
+// Everything else (margins, font-family, line-height, font-size, …) is layout
+// noise from Google Docs / Word and gets dropped on paste.
+const SEMANTIC_STYLE_PROPS = new Set([
+  'font-weight',
+  'font-style',
+  'text-decoration',
+  'text-decoration-line',
+  'color',
+]);
+
+const unwrapElement = (element: Element) => {
+  const parent = element.parentNode;
+  if (!parent) return;
+  while (element.firstChild) parent.insertBefore(element.firstChild, element);
+  parent.removeChild(element);
+};
+
+// Normalises clipboard HTML from Google Docs and Word into the small, clean
+// subset the editor schema supports, so pasted documents keep their structure
+// (headings, lists, tables, bold/italic) without dragging in inline-style junk.
+const sanitizePastedHtml = (rawHtml: string): string => {
+  if (typeof window === 'undefined' || !rawHtml) return rawHtml;
+
+  let documentValue: Document;
+  try {
+    documentValue = new DOMParser().parseFromString(rawHtml.replace(/<!--[\s\S]*?-->/g, ''), 'text/html');
+  } catch {
+    return rawHtml;
+  }
+
+  documentValue.querySelectorAll('style, meta, link, title, script').forEach((element) => element.remove());
+
+  // Google Docs wraps a paste in <b style="font-weight:normal" id="docs-internal-guid-…">
+  // and Word emits non-bold <b>; unwrap them so they are not treated as bold.
+  documentValue.querySelectorAll('b, strong').forEach((element) => {
+    const inlineStyle = (element.getAttribute('style') || '').toLowerCase();
+    const id = (element.getAttribute('id') || '').toLowerCase();
+    if (id.startsWith('docs-internal-guid') || /font-weight\s*:\s*(normal|400)\b/.test(inlineStyle)) {
+      unwrapElement(element);
+    }
+  });
+
+  documentValue.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    ['id', 'class', 'lang', 'dir', 'align', 'width', 'height', 'face'].forEach((attr) => element.removeAttribute(attr));
+
+    const inlineStyle = element.getAttribute('style');
+    if (!inlineStyle) return;
+
+    const kept = inlineStyle
+      .split(';')
+      .map((rule) => rule.trim())
+      .filter((rule) => {
+        const separator = rule.indexOf(':');
+        if (separator === -1) return false;
+        const name = rule.slice(0, separator).trim().toLowerCase();
+        const ruleValue = rule.slice(separator + 1).trim().toLowerCase();
+        if (!SEMANTIC_STYLE_PROPS.has(name)) return false;
+        if (name === 'font-weight' && (ruleValue === 'normal' || ruleValue === '400')) return false;
+        if (name === 'font-style' && ruleValue === 'normal') return false;
+        if (name.startsWith('text-decoration') && (!ruleValue || ruleValue === 'none')) return false;
+        if (name === 'color' && (ruleValue === 'inherit' || ruleValue === 'initial')) return false;
+        return true;
+      });
+
+    if (kept.length) element.setAttribute('style', kept.join('; '));
+    else element.removeAttribute('style');
+  });
+
+  return documentValue.body.innerHTML;
+};
+
 export function RichTextEditor({
   value,
   onChange,
@@ -162,11 +234,7 @@ export function RichTextEditor({
           'min-h-[180px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         dir,
       },
-      transformPastedHTML: (html) =>
-        html
-          .replace(/<!--[\s\S]*?-->/g, '')
-          .replace(/\s*mso-[^:]+:[^;"]+;?/gi, '')
-          .replace(/\s*class="Mso[^"]*"/gi, ''),
+      transformPastedHTML: (html) => sanitizePastedHtml(html),
       handleDrop: (_view, event) => {
         const files = event.dataTransfer?.files;
         if (!files?.length) return false;

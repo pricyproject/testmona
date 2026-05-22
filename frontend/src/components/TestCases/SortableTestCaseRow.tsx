@@ -17,7 +17,6 @@ import {
 import { TableCell, TableRow } from '@/components/ui/table';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TestCase } from '@/types';
-import { Section } from '@/types/testCases';
 
 type BadgeStyle = string | Record<string, any>;
 
@@ -31,22 +30,10 @@ interface SortableTestCaseRowProps {
   getTestCaseDetailUrl: (id: number) => string;
   selectedTestCases: number[];
   handleSelectTestCase: (id: number, checked: boolean) => void;
-  sections: Section[];
   getTypeBadge: (type: string) => BadgeStyle;
   getPriorityBadge: (priority: string) => BadgeStyle;
   isRTL: boolean;
 }
-
-const findSectionName = (sectionList: Section[], sectionId: number): string | null => {
-  for (const section of sectionList) {
-    if (parseInt(section.id) === sectionId) return section.name;
-    if (section.children) {
-      const found = findSectionName(section.children, sectionId);
-      if (found) return found;
-    }
-  }
-  return null;
-};
 
 const resolveBadgeClass = (badge: BadgeStyle): string => (typeof badge === 'string' ? badge : '');
 const resolveBadgeStyle = (badge: BadgeStyle): CSSProperties | undefined => (
@@ -63,7 +50,6 @@ export function SortableTestCaseRow({
   getTestCaseDetailUrl,
   selectedTestCases,
   handleSelectTestCase,
-  sections,
   getTypeBadge,
   getPriorityBadge,
   isRTL,
@@ -85,16 +71,13 @@ export function SortableTestCaseRow({
   };
   const isSelected = selectedTestCases.includes(testCase.id);
   const testCaseTags = (testCase.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean);
-  const sectionLabel = testCase.section_id
-    ? findSectionName(sections, testCase.section_id) || `Section ${testCase.section_id}`
-    : t('noSection');
   const typeBadge = getTypeBadge(testCase.test_type);
   const priorityBadge = getPriorityBadge(testCase.priority);
 
   if (isDragging) {
     return (
       <TableRow ref={setNodeRef} style={style}>
-        <TableCell colSpan={10} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+        <TableCell colSpan={8} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
           <div className="flex items-center justify-center">
             <GripVertical className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             <span className="text-sm text-gray-500">Dragging {testCase.title}...</span>
@@ -136,29 +119,13 @@ export function SortableTestCaseRow({
           {testCase.title}
         </Button>
       </TableCell>
-      <TableCell className="text-xs py-2">
-        <div className="max-w-32">
-          <Badge
-            variant="outline"
-            className="text-xs truncate block"
-            title={testCase.test_suite?.project?.name || 'N/A'}
-          >
-            {testCase.test_suite?.project?.name || 'N/A'}
-          </Badge>
-        </div>
-      </TableCell>
-      <TableCell className="text-xs text-gray-500 py-2 max-w-[150px]">
-        <div className="truncate" title={sectionLabel}>
-          {sectionLabel}
-        </div>
-      </TableCell>
       <TableCell className="py-2">
-        <Badge className={`text-xs ${resolveBadgeClass(typeBadge)}`} style={resolveBadgeStyle(typeBadge)}>
+        <Badge className={`text-xs capitalize ${resolveBadgeClass(typeBadge)}`} style={resolveBadgeStyle(typeBadge)}>
           {testCase.test_type}
         </Badge>
       </TableCell>
       <TableCell className="py-2">
-        <Badge className={`text-xs ${resolveBadgeClass(priorityBadge)}`} style={resolveBadgeStyle(priorityBadge)}>
+        <Badge className={`text-xs capitalize ${resolveBadgeClass(priorityBadge)}`} style={resolveBadgeStyle(priorityBadge)}>
           {testCase.priority}
         </Badge>
       </TableCell>

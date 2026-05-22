@@ -133,7 +133,15 @@ def delete_project(db: Session, project_id: int):
         noload(Project.jira_integrations)
     ).filter(Project.id == project_id).first()
     if db_project:
-        # Delete all related data in the correct order to avoid foreign key constraints
+        # Delete all related data in the correct order to avoid foreign key constraints.
+        # Import related models up front: a `from .models import` further down would
+        # otherwise make these names function-locals and raise UnboundLocalError when
+        # they are referenced above that import statement.
+        from .models import (
+            TestPlan, Milestone, Requirement, Defect, CoverageReport,
+            ProjectAssignment, CustomFieldDefinition, JiraIntegration,
+            TraceabilityMatrix, KPIData, ShareableReport, DashboardWidget
+        )
         test_suites = db.query(TestSuite).filter(TestSuite.project_id == project_id).all()
         test_suite_ids = [suite.id for suite in test_suites]
         test_case_ids = [
@@ -153,16 +161,8 @@ def delete_project(db: Session, project_id: int):
         # Delete test runs
         db.query(TestRun).filter(TestRun.project_id == project_id).delete()
 
-        # Delete traceability matrix entries (through requirements and test cases)
-        # TraceabilityMatrix links requirements to test cases, so we need to delete entries
-        # where either the requirement or test case belongs to this project
-        from .models import (
-            TestPlan, Milestone, Requirement, Defect, CoverageReport,
-            ProjectAssignment, CustomFieldDefinition, JiraIntegration,
-            TraceabilityMatrix, KPIData, ShareableReport, DashboardWidget
-        )
-
-        # Delete traceability matrix entries
+        # Delete traceability matrix entries — TraceabilityMatrix links requirements
+        # to test cases, so remove entries for either side belonging to this project.
         if test_case_ids:
             db.query(TraceabilityMatrix).filter(TraceabilityMatrix.test_case_id.in_(test_case_ids)).delete()
             db.execute(
@@ -1168,7 +1168,8 @@ def create_requirement(db: Session, requirement: RequirementCreate):
         db_requirement.tags = requirement.tags
     if requirement.acceptance_criteria:
         db_requirement.acceptance_criteria = requirement.acceptance_criteria
-    if requirement.estimated_effort:
+    if requirement.estimated_effort is not None:
+        # `is not None` (not truthiness) so a legitimate 0 is stored, not dropped.
         db_requirement.estimated_effort = requirement.estimated_effort
     
     # Handle enums - convert to proper enum objects
@@ -1209,11 +1210,30 @@ def update_requirement(db: Session, requirement_id: int, requirement: Requiremen
 def delete_requirement(db: Session, requirement_id: int):
     db_requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if db_requirement:
+        from .models import TraceabilityMatrix, requirement_test_case_links
+
+        # Detach child requirements so their parent FK does not dangle.
+        db.query(Requirement).filter(
+            Requirement.parent_requirement_id == requirement_id
+        ).update({Requirement.parent_requirement_id: None}, synchronize_session=False)
+
+        # Remove every association / traceability row that references this
+        # requirement, otherwise the rows are orphaned (or the delete 500s
+        # when foreign keys are enforced).
         db.execute(
             requirement_test_plan_links.delete().where(
                 requirement_test_plan_links.c.requirement_id == requirement_id
             )
         )
+        db.execute(
+            requirement_test_case_links.delete().where(
+                requirement_test_case_links.c.requirement_id == requirement_id
+            )
+        )
+        db.query(TraceabilityMatrix).filter(
+            TraceabilityMatrix.requirement_id == requirement_id
+        ).delete(synchronize_session=False)
+
         db.delete(db_requirement)
         safe_commit(db)
     return db_requirement
@@ -3129,7 +3149,7 @@ def delete_shared_step_template(db: Session, template_id: int):
     return db_template
 
 
-def increment_shared_step_usage(db: Session, template_id: int):
+def increment_shared_step_template_usage(db: Session, template_id: int):
     db_template = db.query(SharedStepTemplate).filter(SharedStepTemplate.id == template_id).first()
     if db_template:
         db_template.usage_count += 1

@@ -858,7 +858,8 @@ class Requirement(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
     description = Column(Text)
-    requirement_id = Column(String(50), unique=True, nullable=False)  # REQ-001, etc.
+    # Human-facing ID (REQ-001, etc.) — unique per project, not globally.
+    requirement_id = Column(String(50), nullable=False)
     status = Column(Enum(RequirementStatus), default=RequirementStatus.DRAFT)
     priority = Column(Enum(Priority), default=Priority.MEDIUM)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
@@ -870,6 +871,10 @@ class Requirement(Base):
     estimated_effort = Column(Float)  # in hours
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('project_id', 'requirement_id', name='uq_requirements_project_requirement_id'),
+    )
 
     # Relationships
     project = relationship("Project")
@@ -1503,6 +1508,14 @@ class AuditTrail(Base):
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
     project = relationship("Project")
+
+    @property
+    def username(self):
+        return self.user.username if self.user else None
+
+    @property
+    def user_full_name(self):
+        return self.user.full_name if self.user else None
 
 
 class ImportOperation(Base):

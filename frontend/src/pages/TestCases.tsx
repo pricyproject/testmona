@@ -29,6 +29,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
+  TableCell,
   TableHead,
   TableHeader,
   TableRow,
@@ -249,6 +250,7 @@ export function TestCases() {
   const [newSectionName, setNewSectionName] = useState('');
   const [newSectionParentId, setNewSectionParentId] = useState<string>('none');
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all', '29', '30', '31', '32', '33', '34', '35']));
+  const [sectionsPanelCollapsed, setSectionsPanelCollapsed] = useState(false);
 
   // Move test case dialog state
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
@@ -1117,7 +1119,7 @@ export function TestCases() {
     sections.forEach((section) => {
       const indent = '　'.repeat(level); // Use full-width spaces for indentation
       options.push(
-        <SelectItem key={section.id} value={section.name}>
+        <SelectItem key={section.id} value={section.id}>
           {indent}{section.name}
         </SelectItem>
       );
@@ -1474,7 +1476,10 @@ export function TestCases() {
 
   // Pagination logic using filtered data
   const totalPages = Math.ceil(filteredAndSortedTestCases.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  // Clamp during render so the table never lands on an out-of-range empty
+  // page after deletes/filtering/page-size changes shrink the result set.
+  const safePage = Math.min(Math.max(1, currentPage), Math.max(1, totalPages));
+  const startIndex = (safePage - 1) * itemsPerPage;
   const endIndex = Math.min(startIndex + itemsPerPage, filteredAndSortedTestCases.length);
   const paginatedTestCases = filteredAndSortedTestCases.slice(startIndex, startIndex + itemsPerPage);
 
@@ -2186,10 +2191,13 @@ export function TestCases() {
   const handleSelectAll = (checked: boolean | "indeterminate") => {
     const isChecked = checked === true;
     setSelectAll(isChecked);
+    const pageIds = paginatedTestCases.map(tc => tc.id);
     if (isChecked) {
-      setSelectedTestCases(paginatedTestCases.map(tc => tc.id));
+      // Merge with existing selection so other pages stay selected.
+      setSelectedTestCases(prev => Array.from(new Set([...prev, ...pageIds])));
     } else {
-      setSelectedTestCases([]);
+      // Only clear the rows visible on the current page.
+      setSelectedTestCases(prev => prev.filter(id => !pageIds.includes(id)));
     }
   };
 
@@ -2616,33 +2624,55 @@ export function TestCases() {
 
   const handleMoveTestCase = (testCase: TestCase) => {
     setSelectedTestCaseToMove(testCase);
-    setDestinationSection(testCase.section || '');
+    setDestinationSection(testCase.section_id ? String(testCase.section_id) : '');
     setMoveDialogOpen(true);
   };
 
-  const handleConfirmMove = () => {
+  // Resolve a section name from its id within the section tree (for messages).
+  const findSectionNameById = (sectionId: string, sections: Section[]): string => {
+    for (const section of sections) {
+      if (section.id === sectionId) return section.name;
+      if (section.children && section.children.length > 0) {
+        const found = findSectionNameById(sectionId, section.children);
+        if (found) return found;
+      }
+    }
+    return '';
+  };
+
+  const handleConfirmMove = async () => {
     if (!selectedTestCaseToMove || !destinationSection) return;
 
-    // Log the activity
-    const activity = {
-      id: Date.now(),
-      type: 'testCaseMoved',
-      testCaseTitle: selectedTestCaseToMove.title,
-      sectionName: destinationSection,
-      timestamp: new Date().toISOString(),
-      user: 'Current User'
-    };
+    const testCaseToMove = selectedTestCaseToMove;
+    const sectionName = findSectionNameById(destinationSection, mockSections) || destinationSection;
 
-    const existingActivities = JSON.parse(localStorage.getItem('recentActivities') || '[]');
-    existingActivities.unshift(activity);
-    localStorage.setItem('recentActivities', JSON.stringify(existingActivities.slice(0, 10)));
+    try {
+      // Persist the move: only the section changes, so send just section_id
+      // (sending the whole test case would re-escape every text field server-side).
+      await testCasesAPI.update(testCaseToMove.id, {
+        section_id: parseInt(destinationSection),
+      });
 
-    setMoveDialogOpen(false);
-    setSelectedTestCaseToMove(null);
-    setDestinationSection('');
+      setMoveDialogOpen(false);
+      setSelectedTestCaseToMove(null);
+      setDestinationSection('');
 
-    // Show success message
-    alert(`Test case "${selectedTestCaseToMove.title}" moved to "${destinationSection}"`);
+      toast({
+        title: t('success'),
+        description: t('movedTestCasesSuccessfully', { count: 1, sectionName }),
+      });
+
+      // Refresh data so the test case appears under its new section.
+      await loadTestCases();
+      await loadSections();
+    } catch (error) {
+      console.error('Failed to move test case:', error);
+      toast({
+        title: t('error'),
+        description: t('failedToMoveTestCases'),
+        variant: "destructive",
+      });
+    }
   };
 
   // Drag and drop handlers
@@ -2684,8 +2714,9 @@ export function TestCases() {
         for (const testCaseId of testCasesToMove) {
           const testCase = apiTestCases.find(tc => tc.id === testCaseId);
           if (testCase) {
+            // Only the section changes — sending the full test case would
+            // re-escape (and so corrupt) every text field on the server.
             await testCasesAPI.update(testCaseId, {
-              ...testCase,
               section_id: parseInt(sectionId)
             });
           }
@@ -3496,12 +3527,36 @@ export function TestCases() {
       >
         <div className="flex gap-6">
           {/* Sections Sidebar */}
+        {sectionsPanelCollapsed ? (
+          <div className="flex-shrink-0">
+            <Button
+              variant="outline"
+              onClick={() => setSectionsPanelCollapsed(false)}
+              title={t('sections')}
+              className="flex h-auto flex-col items-center gap-2 px-2 py-3"
+            >
+              <ChevronRight className="h-4 w-4 rtl:rotate-180" />
+              <Layers className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
         <div className="w-64 flex-shrink-0">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                {t('sections')}
-                <Button variant="ghost" size="sm" onClick={() => setSectionDialogOpen(true)}>
+                <span className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => setSectionsPanelCollapsed(true)}
+                    title={t('collapse')}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5 rtl:rotate-180" />
+                  </Button>
+                  {t('sections')}
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => setSectionDialogOpen(true)} title={t('newSection')}>
                   <Plus className="h-3 w-3" />
                 </Button>
               </CardTitle>
@@ -3624,6 +3679,7 @@ export function TestCases() {
             </CardContent>
           </Card>
         </div>
+        )}
 
         {/* Main Content */}
         <div className="flex-1 min-w-0 space-y-4">
@@ -3802,9 +3858,13 @@ export function TestCases() {
               <SortableContext items={paginatedTestCases.map(tc => tc.id)} strategy={verticalListSortingStrategy}>
                 <Table>
                     <TableHeader>
-                      <TableRow>
+                      <TableRow className="bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                         <TableHead className="w-12">
-                          <Checkbox checked={selectAll} onCheckedChange={handleSelectAll} className="rtl:mr-0" />
+                          <Checkbox
+                            checked={paginatedTestCases.length > 0 && paginatedTestCases.every(tc => selectedTestCases.includes(tc.id))}
+                            onCheckedChange={handleSelectAll}
+                            className="rtl:mr-0"
+                          />
                         </TableHead>
                         <TableHead>
                           <Button variant="ghost" size="sm" onClick={() => { setSortField('id'); setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); }}>
@@ -3813,11 +3873,9 @@ export function TestCases() {
                         </TableHead>
                         <TableHead>
                           <Button variant="ghost" size="sm" onClick={() => { setSortField('title'); setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); }}>
-                            Title {sortField === 'title' && (sortDirection === 'asc' ? <ArrowUp className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" /> : <ArrowDown className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" />)}
+                            {t('title')} {sortField === 'title' && (sortDirection === 'asc' ? <ArrowUp className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" /> : <ArrowDown className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" />)}
                           </Button>
                         </TableHead>
-                        <TableHead>Project</TableHead>
-                        <TableHead>{t('section')}</TableHead>
                         <TableHead>{t('type')}</TableHead>
                         <TableHead>{t('priority')}</TableHead>
                         <TableHead>{t('tags')}</TableHead>
@@ -3842,12 +3900,22 @@ export function TestCases() {
                           getTestCaseDetailUrl={getTestCaseDetailUrl}
                           selectedTestCases={selectedTestCases}
                           handleSelectTestCase={handleSelectTestCase}
-                          sections={mockSections}
                           getTypeBadge={getTypeBadge}
                           getPriorityBadge={getPriorityBadge}
                           isRTL={isRTL}
                         />
                       ))}
+                      {!loading && paginatedTestCases.length === 0 && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={8} className="h-40 text-center">
+                            <div className="flex flex-col items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+                              <FileText className="h-10 w-10 text-gray-300 dark:text-gray-600" />
+                              <p className="text-sm font-medium">{t('noTestCasesFound')}</p>
+                              <p className="text-xs text-gray-400">{t('tryAdjustingSearch')}</p>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </SortableContext>
@@ -3858,7 +3926,7 @@ export function TestCases() {
           <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow mt-4">
             <div className="flex items-center gap-4">
               <div className="text-sm text-gray-600">
-                {t('showing', { start: filteredAndSortedTestCases.length > 0 ? startIndex + 1 : 0, end: endIndex, total: totalCount })}
+                {t('showing', { start: filteredAndSortedTestCases.length > 0 ? startIndex + 1 : 0, end: endIndex, total: filteredAndSortedTestCases.length })}
               </div>
               <div className="flex items-center gap-2">
                 <Label className="text-sm text-gray-600">{t('itemsPerPage')}:</Label>
@@ -3883,11 +3951,11 @@ export function TestCases() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1}>
+              <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}>
                 <ChevronLeft className="h-4 w-4 rtl:rotate-180" /> {t('previous')}
               </Button>
-              <span className="text-sm">{t('pageOf', { current: currentPage, total: totalPages })}</span>
-              <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages}>
+              <span className="text-sm">{t('pageOf', { current: safePage, total: Math.max(1, totalPages) })}</span>
+              <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))} disabled={safePage >= totalPages}>
                 {t('next')} <ChevronRight className="h-4 w-4 rtl:rotate-180" />
               </Button>
             </div>
@@ -4012,7 +4080,7 @@ export function TestCases() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setMoveDialogOpen(false)}>{t('cancelMove')}</Button>
-            <Button onClick={handleConfirmMove} disabled={!destinationSection || destinationSection === selectedTestCaseToMove?.section}>
+            <Button onClick={handleConfirmMove} disabled={!destinationSection || destinationSection === String(selectedTestCaseToMove?.section_id ?? '')}>
               {t('confirmMove')}
             </Button>
           </DialogFooter>

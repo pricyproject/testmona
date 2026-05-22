@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Calendar, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, MoreVertical, Play, Plus, Settings2, Tag, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, MoreVertical, Pencil, Play, Plus, Settings2, Tag, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,6 +23,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { isGherkinText } from '@/components/requirements/gherkin';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
@@ -36,8 +37,19 @@ const decodeHtmlEntities = (value?: string | null): string => {
   return textarea.value;
 };
 
+// Requirement rich text is stored HTML-escaped (and some legacy rows are
+// double-escaped). Decode up to twice so real markup is recovered.
+const decodeEntitiesDeep = (value?: string | null): string => {
+  if (!value) return '';
+  let decoded = decodeHtmlEntities(value);
+  if (/&(lt|gt|amp|quot|#\d+);/i.test(decoded)) {
+    decoded = decodeHtmlEntities(decoded);
+  }
+  return decoded;
+};
+
 const htmlToReadableText = (value?: string | null): string => {
-  const decoded = decodeHtmlEntities(value);
+  const decoded = decodeEntitiesDeep(value);
   if (!decoded.trim()) return '';
   if (typeof window === 'undefined' || !/<[a-z][\s\S]*>/i.test(decoded)) {
     return decoded;
@@ -46,6 +58,70 @@ const htmlToReadableText = (value?: string | null): string => {
   const parser = new DOMParser();
   const documentValue = parser.parseFromString(decoded, 'text/html');
   return documentValue.body.textContent?.replace(/\n{3,}/g, '\n\n').trim() || decoded;
+};
+
+const ALLOWED_HTML_TAGS = new Set([
+  'a', 'b', 'blockquote', 'br', 'code', 'col', 'colgroup', 'div', 'em', 'figure', 'figcaption',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'label', 'li', 'mark', 'ol', 'p', 'pre',
+  's', 'section', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td',
+  'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
+]);
+const ALLOWED_HTML_ATTRS = new Set([
+  'href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'start', 'type',
+  'data-type', 'data-checked',
+]);
+const FORBIDDEN_HTML_TAGS = new Set([
+  'script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button',
+  'textarea', 'select', 'option', 'link', 'meta', 'base', 'noscript',
+]);
+
+// Defensive client-side sanitizer: keeps a known-safe subset of TipTap output
+// and strips scripts, event handlers and unsafe URLs before it is rendered.
+const sanitizeRichHtml = (rawHtml: string): string => {
+  if (typeof window === 'undefined' || !rawHtml) return '';
+  const documentValue = new DOMParser().parseFromString(rawHtml, 'text/html');
+
+  const visit = (parent: Element) => {
+    Array.from(parent.children).forEach((child) => {
+      const tag = child.tagName.toLowerCase();
+      if (FORBIDDEN_HTML_TAGS.has(tag)) {
+        child.remove();
+        return;
+      }
+
+      Array.from(child.attributes).forEach((attr) => {
+        const name = attr.name.toLowerCase();
+        const isUnsafeUrl = (name === 'href' || name === 'src')
+          && /^\s*(javascript|vbscript|data:text\/html)/i.test(attr.value);
+        if (name.startsWith('on') || !ALLOWED_HTML_ATTRS.has(name) || isUnsafeUrl) {
+          child.removeAttribute(attr.name);
+        }
+      });
+
+      if (!ALLOWED_HTML_TAGS.has(tag)) {
+        child.removeAttribute('class');
+      }
+      if (tag === 'a' && child.getAttribute('href')) {
+        child.setAttribute('target', '_blank');
+        child.setAttribute('rel', 'noreferrer noopener');
+      }
+
+      visit(child);
+    });
+  };
+
+  visit(documentValue.body);
+  return documentValue.body.innerHTML;
+};
+
+const isHtmlMarkup = (value: string): boolean => /<[a-z][\s\S]*>/i.test(value);
+
+const hasRenderableContent = (decodedHtml: string): boolean => {
+  if (!decodedHtml.trim()) return false;
+  if (typeof window === 'undefined' || !isHtmlMarkup(decodedHtml)) return Boolean(decodedHtml.trim());
+  const documentValue = new DOMParser().parseFromString(decodedHtml, 'text/html');
+  return Boolean(documentValue.body.textContent?.trim())
+    || Boolean(documentValue.body.querySelector('img, table, hr'));
 };
 
 const formatDate = (value?: string | null): string => {
@@ -81,34 +157,31 @@ const getPriorityBadge = (priority: string) => {
   return variants[priority] || variants.medium;
 };
 
-const getReferenceTokens = (value?: string | null): string[] =>
-  Array.from(new Set([
-    ...(value || '')
-    .split(/[\s,;|]+/)
-    .map((token) => token.replace(/^[([{"']+|[\])}"'.,]+$/g, '').trim().toLowerCase()),
-    ...((value || '').match(/[a-z]+-\d+/gi) || []).map((token) => token.toLowerCase()),
-  ].filter(Boolean)));
+// Turns raw enum values like "not_tested" into readable text ("not tested").
+const humanizeStatus = (value?: string | null): string =>
+  (value || '').replace(/[_-]+/g, ' ').trim();
 
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const addRequirementReference = (value: string | undefined, requirementRef: string): string => {
-  const existing = (value || '').trim();
-  if (getReferenceTokens(existing).includes(requirementRef.toLowerCase())) return existing;
-  return existing ? `${existing}, ${requirementRef}` : requirementRef;
-};
-
-const removeRequirementReference = (value: string | undefined, requirementRef: string): string => {
-  const pattern = new RegExp(`(^|[\\s,;|])${escapeRegExp(requirementRef)}(?=$|[\\s,;|])`, 'gi');
-  return (value || '')
-    .replace(pattern, (_match, prefix: string) => (prefix.trim() ? prefix : ''))
-    .replace(/\s*([,;|])\s*/g, '$1 ')
-    .replace(/^[,;|\s]+|[,;|\s]+$/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+const getRunStatusBadge = (status: string) => {
+  const key = status.toLowerCase();
+  if (['passed', 'pass'].includes(key)) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300';
+  if (['failed', 'fail'].includes(key)) return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300';
+  if (['blocked'].includes(key)) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300';
+  if (['skipped', 'retest', 'in_progress'].includes(key)) return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
 };
 
 const TEST_CASE_STATUSES = ['active', 'inactive', 'archived'];
 const TEST_CASE_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+const REQUIREMENT_STATUSES = ['draft', 'reviewed', 'approved', 'implemented', 'verified', 'deprecated'] as const;
+const REQUIREMENT_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+const GHERKIN_TEMPLATE = [
+  'Feature: ',
+  '',
+  '  Scenario: ',
+  '    Given ',
+  '    When ',
+  '    Then ',
+].join('\n');
 
 const emptyTraceabilitySummary: RequirementTraceabilitySummary = {
   linked_count: 0,
@@ -204,6 +277,18 @@ export function RequirementDetail() {
   const [showSourceDocument, setShowSourceDocument] = useState(true);
   const [showAcceptanceCriteria, setShowAcceptanceCriteria] = useState(true);
   const [showLinkedTestCases, setShowLinkedTestCases] = useState(true);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [savingRequirement, setSavingRequirement] = useState(false);
+  const [editGherkin, setEditGherkin] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    acceptance_criteria: '',
+    status: 'draft',
+    priority: 'medium',
+    tags: '',
+    estimated_effort: '',
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -418,12 +503,7 @@ export function RequirementDetail() {
     let isMounted = true;
 
     const loadLinkHistory = async () => {
-      if (!requirement?.id) {
-        setLinkHistory([]);
-        setLinkHistoryTotal(0);
-        return;
-      }
-      if (!showLinkHistory) {
+      if (!requirement?.id || !showLinkHistory) {
         setLinkHistory([]);
         setLinkHistoryTotal(0);
         return;
@@ -453,11 +533,20 @@ export function RequirementDetail() {
     };
   }, [requirement?.id, refreshLinkedKey, showLinkHistory]);
 
-  const description = useMemo(() => htmlToReadableText(requirement?.description), [requirement?.description]);
-  const acceptanceCriteria = useMemo(() => htmlToReadableText(requirement?.acceptance_criteria), [requirement?.acceptance_criteria]);
+  const descriptionHtml = useMemo(() => decodeEntitiesDeep(requirement?.description), [requirement?.description]);
+  const acceptanceHtml = useMemo(() => decodeEntitiesDeep(requirement?.acceptance_criteria), [requirement?.acceptance_criteria]);
+  const acceptanceText = useMemo(() => htmlToReadableText(requirement?.acceptance_criteria), [requirement?.acceptance_criteria]);
   const sourceDocument = useMemo(() => extractSourceDocument(requirement?.description), [requirement?.description]);
   const tags = useMemo(() => requirement?.tags?.split(',').map((tag) => tag.trim()).filter(Boolean) || [], [requirement?.tags]);
-  const hasGherkin = isGherkinText(acceptanceCriteria);
+  const hasGherkin = isGherkinText(acceptanceText);
+  const hasDescription = useMemo(
+    () => (sourceDocument ? Boolean(sourceDocument.intro) : hasRenderableContent(descriptionHtml)),
+    [sourceDocument, descriptionHtml],
+  );
+  const hasAcceptanceCriteria = useMemo(
+    () => hasGherkin || hasRenderableContent(acceptanceHtml),
+    [hasGherkin, acceptanceHtml],
+  );
   const visibleLinkedTestCases = linkedTestCases;
   const hasMoreLinkedTestCases = linkedTestCasesTotal > visibleLinkedTestCases.length;
   const newTestCaseSections = useMemo(() => {
@@ -466,8 +555,67 @@ export function RequirementDetail() {
   }, [newTestCaseForm.test_suite_id, sections]);
 
   const backPath = projectId ? `/projects/${projectId}/requirements` : '/projects';
+  const BackIcon = isRTL ? ArrowRight : ArrowLeft;
 
   const refreshRequirementLinks = () => setRefreshLinkedKey((current) => current + 1);
+
+  const editEffortNumber = editForm.estimated_effort.trim() ? Number(editForm.estimated_effort) : undefined;
+  const editEffortInvalid = editEffortNumber !== undefined && (!Number.isFinite(editEffortNumber) || editEffortNumber < 0);
+  const canSaveRequirement = Boolean(editForm.title.trim()) && !editEffortInvalid && !savingRequirement;
+
+  const openEditDialog = () => {
+    if (!requirement) return;
+    setEditForm({
+      title: requirement.title,
+      description: requirement.description || '',
+      acceptance_criteria: requirement.acceptance_criteria || '',
+      status: requirement.status,
+      priority: requirement.priority,
+      tags: requirement.tags || '',
+      estimated_effort: requirement.estimated_effort !== undefined && requirement.estimated_effort !== null
+        ? String(requirement.estimated_effort)
+        : '',
+    });
+    setEditGherkin(isGherkinText(requirement.acceptance_criteria));
+    setEditDialogOpen(true);
+  };
+
+  const handleUpdateRequirement = async () => {
+    if (!requirement) return;
+    if (!editForm.title.trim()) {
+      toast({ title: t('error'), description: t('fieldRequired', { field: t('title') }), variant: 'destructive' });
+      return;
+    }
+    if (editEffortInvalid) {
+      toast({ title: t('error'), description: t('estimatedEffortInvalid'), variant: 'destructive' });
+      return;
+    }
+
+    setSavingRequirement(true);
+    try {
+      const updated = await requirementsAPI.update(requirement.id, {
+        title: editForm.title.trim(),
+        description: editForm.description,
+        acceptance_criteria: editForm.acceptance_criteria,
+        status: editForm.status,
+        priority: editForm.priority,
+        tags: editForm.tags.trim(),
+        estimated_effort: editEffortNumber,
+      });
+      setRequirement(updated);
+      setEditDialogOpen(false);
+      toast({ title: t('success'), description: t('requirementUpdated') });
+    } catch (error: any) {
+      console.error('Failed to update requirement:', error);
+      toast({
+        title: t('error'),
+        description: error.response?.data?.detail || t('failedToUpdateRequirement'),
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingRequirement(false);
+    }
+  };
 
   const handleBulkLink = async (testCaseIds: number[]) => {
     if (!requirement || testCaseIds.length === 0) return;
@@ -571,7 +719,8 @@ export function RequirementDetail() {
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8">
-        <div className="h-40 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
+        <div className="h-9 w-44 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
+        <div className="h-36 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="h-96 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
           <div className="h-96 animate-pulse rounded-md bg-slate-200 dark:bg-slate-800" />
@@ -599,28 +748,41 @@ export function RequirementDetail() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 dark:bg-slate-950" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="mx-auto max-w-6xl space-y-6">
-        <Button variant="ghost" className="-mx-3 text-slate-600 dark:text-slate-300" onClick={() => navigate(backPath)}>
-          {isRTL ? <ArrowRight className="ml-2 h-4 w-4" /> : <ArrowLeft className="mr-2 h-4 w-4" />}
+        <Button variant="ghost" size="sm" className="-mx-2 text-slate-600 dark:text-slate-300" onClick={() => navigate(backPath)}>
+          <BackIcon className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
           {t('backToRequirements')}
         </Button>
 
-        <header className="rounded-md border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 space-y-4">
+        <header className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="font-mono">{requirement.requirement_id}</Badge>
-                <Badge className={getStatusBadge(requirement.status)}>{requirement.status}</Badge>
-                <Badge className={getPriorityBadge(requirement.priority)}>{requirement.priority}</Badge>
-                {hasGherkin && <Badge className="bg-indigo-600 text-white">{t('gherkinSyntax')}</Badge>}
+                <Badge className={`capitalize ${getStatusBadge(requirement.status)}`}>{requirement.status}</Badge>
+                <Badge className={`capitalize ${getPriorityBadge(requirement.priority)}`}>{requirement.priority}</Badge>
+                {hasGherkin && <Badge className="bg-indigo-600 text-white hover:bg-indigo-600">{t('gherkinSyntax')}</Badge>}
               </div>
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('readingView')}</p>
-                <h1 className="max-w-4xl break-words text-3xl font-semibold tracking-tight text-slate-950 dark:text-white lg:text-4xl">
-                  {requirement.title}
-                </h1>
+              <h1 className="max-w-3xl break-words text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
+                {requirement.title}
+              </h1>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5" />
+                  {t('created')} {formatDate(requirement.created_at)}
+                </span>
+                {requirement.updated_at && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5" />
+                    {t('updated')} {formatDate(requirement.updated_at)}
+                  </span>
+                )}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" size="sm" onClick={openEditDialog}>
+                <Pencil className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                {t('edit')}
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" variant="outline" size="sm">
@@ -654,16 +816,8 @@ export function RequirementDetail() {
                     onCheckedChange={setShowLinkedTestCases}
                     onSelect={(event) => event.preventDefault()}
                   >
-                    <ListChecks className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                    {showLinkedTestCases ? <Eye className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} /> : <EyeOff className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />}
                     {t('linkedTestCases')}
-                  </DropdownMenuCheckboxItem>
-                  <DropdownMenuCheckboxItem
-                    checked={showLinkHistory}
-                    onCheckedChange={setShowLinkHistory}
-                    onSelect={(event) => event.preventDefault()}
-                  >
-                    <History className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                    {t('linkHistory')}
                   </DropdownMenuCheckboxItem>
                   <DropdownMenuCheckboxItem
                     checked={showMetadata}
@@ -675,34 +829,33 @@ export function RequirementDetail() {
                   </DropdownMenuCheckboxItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant="outline" size="sm" onClick={() => navigate(backPath)}>
-                {t('viewAll')}
-              </Button>
             </div>
           </div>
         </header>
 
         <div className={`grid gap-6 ${showMetadata ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : ''}`}>
-          <main className="space-y-6">
+          <main className="min-w-0 space-y-6">
             {sourceDocument && showSourceDocument && (
               <section className="rounded-md border border-blue-200 bg-blue-50/70 p-5 dark:border-blue-900/60 dark:bg-blue-950/30">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{t('sourceDocument')}</p>
-                    <h2 className="mt-1 text-xl font-semibold text-slate-950 dark:text-white">{sourceDocument.heading}</h2>
+                    <h2 className="mt-1 break-words text-lg font-semibold text-slate-950 dark:text-white">{sourceDocument.heading}</h2>
                   </div>
-                  <a
-                    href={sourceDocument.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:bg-slate-950 dark:text-blue-300 dark:hover:bg-blue-950"
-                  >
-                    <ExternalLink className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                    {t('openSource')}
-                  </a>
+                  {sourceDocument.sourceUrl && (
+                    <a
+                      href={sourceDocument.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex shrink-0 items-center rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 dark:border-blue-800 dark:bg-slate-950 dark:text-blue-300 dark:hover:bg-blue-950"
+                    >
+                      <ExternalLink className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                      {t('openSource')}
+                    </a>
+                  )}
                 </div>
                 {sourceDocument.body && (
-                  <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-700 dark:text-slate-300">
+                  <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
                     {sourceDocument.body}
                   </p>
                 )}
@@ -710,24 +863,35 @@ export function RequirementDetail() {
             )}
 
             <section className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-              <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-slate-950 dark:text-white">
-                <FileText className="h-5 w-5 text-slate-500" />
+              <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                <FileText className="h-4 w-4 text-slate-400" />
                 {t('description')}
               </h2>
-              <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-700 dark:text-slate-300">
-                {sourceDocument ? sourceDocument.intro || t('sourceDocumentImported') : description || t('noDescriptionProvided')}
-              </p>
+              {hasDescription ? (
+                sourceDocument ? (
+                  <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
+                    {sourceDocument.intro}
+                  </p>
+                ) : (
+                  <RichTextContent html={descriptionHtml} />
+                )
+              ) : (
+                <EmptyState label={sourceDocument ? t('sourceDocumentImported') : t('noDescriptionProvided')} />
+              )}
             </section>
 
             {showAcceptanceCriteria && (
               <section className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-                <h2 className="mb-4 text-xl font-semibold text-slate-950 dark:text-white">{t('acceptanceCriteria')}</h2>
+                <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                  <CheckCircle2 className="h-4 w-4 text-slate-400" />
+                  {t('acceptanceCriteria')}
+                </h2>
                 {hasGherkin ? (
-                  <GherkinViewer value={acceptanceCriteria} emptyLabel={t('noAcceptanceCriteriaProvided')} />
+                  <GherkinViewer value={acceptanceText} emptyLabel={t('noAcceptanceCriteriaProvided')} />
+                ) : hasAcceptanceCriteria ? (
+                  <RichTextContent html={acceptanceHtml} />
                 ) : (
-                  <p className="whitespace-pre-wrap text-[15px] leading-7 text-slate-700 dark:text-slate-300">
-                    {acceptanceCriteria || t('noAcceptanceCriteriaProvided')}
-                  </p>
+                  <EmptyState label={t('noAcceptanceCriteriaProvided')} />
                 )}
               </section>
             )}
@@ -735,27 +899,30 @@ export function RequirementDetail() {
             {showLinkedTestCases && (
               <section className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="flex items-center gap-2 text-xl font-semibold text-slate-950 dark:text-white">
-                      <ListChecks className="h-5 w-5 text-slate-500" />
+                  <div className="min-w-0">
+                    <h2 className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                      <ListChecks className="h-4 w-4 text-slate-400" />
                       {t('linkedTestCases')}
+                      <Badge variant="secondary">{traceabilitySummary.linked_count}</Badge>
                     </h2>
-                    <p className="mt-1 text-sm text-slate-500">
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                       {t('showingLinkedTestCases', { shown: Math.min(visibleLinkedTestCases.length, linkedTestCasesTotal), total: linkedTestCasesTotal })}
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setCreateDialogOpen(true)}>
-                      <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
-                      {t('createAndLinkTestCase')}
-                    </Button>
-                    <Badge variant="secondary">{traceabilitySummary.linked_count}</Badge>
-                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setCreateDialogOpen(true)}>
+                    <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                    {t('createAndLinkTestCase')}
+                  </Button>
                 </div>
 
-                <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                  {t('traceabilitySnapshot')}
+                </p>
+                <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
                   <SummaryTile label={t('linkedCount')} value={traceabilitySummary.linked_count} />
                   <SummaryTile label={t('activeCount')} value={traceabilitySummary.active_count} />
+                  <SummaryTile label={t('failedResults')} value={traceabilitySummary.failed_related_runs} tone="danger" />
+                  <SummaryTile label={t('blockedResults')} value={traceabilitySummary.blocked_related_runs} tone="warning" />
                   <SummaryTile label={t('relatedDefects')} value={relationships?.defects.total ?? 0} />
                   <SummaryTile label={t('relatedTestRuns')} value={relationships?.test_runs.total ?? 0} />
                 </div>
@@ -782,7 +949,7 @@ export function RequirementDetail() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">{t('allStatuses')}</SelectItem>
-                          {TEST_CASE_STATUSES.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                          {TEST_CASE_STATUSES.map((status) => <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>)}
                         </SelectContent>
                       </Select>
                       <Select value={linkedPriorityFilter} onValueChange={(value) => { setLinkedPriorityFilter(value); setVisibleLinkedTestCasesCount(10); }}>
@@ -791,7 +958,7 @@ export function RequirementDetail() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">{t('allPriorities')}</SelectItem>
-                          {TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}
+                          {TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority} className="capitalize">{priority}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
@@ -808,27 +975,25 @@ export function RequirementDetail() {
 
                 {linkedTestCasesLoading ? (
                   <div className="space-y-2">
-                    <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
-                    <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-16 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-16 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                   </div>
                 ) : linkedTestCasesError ? (
                   <p className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-300">
                     {linkedTestCasesError}
                   </p>
                 ) : linkedTestCases.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">
-                    {t('noLinkedTestCasesForRequirement')}
-                  </p>
+                  <EmptyState label={t('noLinkedTestCasesForRequirement')} />
                 ) : (
                   <div className="space-y-3">
-                    <div className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+                    <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
                       <div className="hidden grid-cols-[minmax(260px,1.5fr)_minmax(180px,0.75fr)_minmax(150px,0.65fr)] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-500 dark:border-slate-800 dark:bg-slate-950/60 xl:grid">
                         <span className="whitespace-nowrap">{t('testCase')}</span>
                         <span className="whitespace-nowrap">{t('status')}</span>
                         <span className="whitespace-nowrap">{t('suite')}</span>
                       </div>
                       {visibleLinkedTestCases.map((testCase) => (
-                        <div key={testCase.id} className={`relative grid gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 dark:border-slate-800 xl:grid-cols-[minmax(260px,1.5fr)_minmax(180px,0.75fr)_minmax(150px,0.65fr)] xl:items-start xl:gap-4 ${isRTL ? 'pl-14' : 'pr-14'}`}>
+                        <div key={testCase.id} className={`relative grid gap-3 border-b border-slate-100 px-4 py-4 transition-colors last:border-b-0 hover:bg-slate-50/70 dark:border-slate-800 dark:hover:bg-slate-950/40 xl:grid-cols-[minmax(260px,1.5fr)_minmax(180px,0.75fr)_minmax(150px,0.65fr)] xl:items-start xl:gap-4 ${isRTL ? 'pl-14' : 'pr-14'}`}>
                           <div className="min-w-0">
                             <div className="mb-1 flex flex-wrap items-center gap-2">
                               <Badge variant="outline" className="font-mono">TC-{String(testCase.id).padStart(3, '0')}</Badge>
@@ -843,9 +1008,13 @@ export function RequirementDetail() {
                             </button>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge className={getPriorityBadge(testCase.priority)}>{testCase.priority}</Badge>
-                            <Badge variant="secondary">{testCase.status}</Badge>
-                            {testCase.latest_run_status && <Badge variant="outline">{testCase.latest_run_status}</Badge>}
+                            <Badge className={`capitalize ${getPriorityBadge(testCase.priority)}`}>{testCase.priority}</Badge>
+                            <Badge variant="secondary" className="capitalize">{testCase.status}</Badge>
+                            {testCase.latest_run_status && (
+                              <Badge className={`capitalize ${getRunStatusBadge(testCase.latest_run_status)}`}>
+                                {humanizeStatus(testCase.latest_run_status)}
+                              </Badge>
+                            )}
                           </div>
                           <p className="min-w-0 break-words text-xs leading-5 text-slate-500 xl:truncate">
                             {testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}
@@ -860,6 +1029,10 @@ export function RequirementDetail() {
                               <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-48">
                                 <DropdownMenuLabel>{t('actions')}</DropdownMenuLabel>
                                 <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}>
+                                  <FileText className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                                  {t('viewTestCase')}
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`)}>
                                   <Play className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('execute')}
@@ -884,10 +1057,11 @@ export function RequirementDetail() {
                       ))}
                     </div>
                     {hasMoreLinkedTestCases && (
-                      <div className="flex justify-center pt-2">
+                      <div className="flex justify-center pt-1">
                         <Button
                           type="button"
                           variant="outline"
+                          size="sm"
                           onClick={() => setVisibleLinkedTestCasesCount((current) => current + 10)}
                         >
                           {t('loadMore')}
@@ -897,10 +1071,10 @@ export function RequirementDetail() {
                   </div>
                 )}
 
-                <div className="mt-6 rounded-md border border-slate-200 p-4 dark:border-slate-800">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="mt-6 rounded-md border border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                     <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      <History className="h-4 w-4 text-slate-500" />
+                      <History className="h-4 w-4 text-slate-400" />
                       {t('linkHistory')}
                       {showLinkHistory && linkHistoryTotal > 0 && <Badge variant="secondary">{linkHistoryTotal}</Badge>}
                     </h3>
@@ -916,7 +1090,7 @@ export function RequirementDetail() {
                     </div>
                   </div>
                   {showLinkHistory && (
-                    <div className="mt-3">
+                    <div className="border-t border-slate-200 p-4 dark:border-slate-800">
                       {historyLoading ? (
                         <div className="h-12 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                       ) : linkHistory.length === 0 ? (
@@ -925,14 +1099,16 @@ export function RequirementDetail() {
                         <div className="space-y-2">
                           {linkHistory.map((item) => (
                             <div key={item.id} className="flex flex-col gap-1 rounded-md bg-slate-50 p-3 text-sm dark:bg-slate-950/50 sm:flex-row sm:items-center sm:justify-between">
-                              <span className="text-slate-700 dark:text-slate-300">
-                                <Badge variant={item.action === 'link' ? 'default' : 'secondary'} className={isRTL ? 'ml-2' : 'mr-2'}>
+                              <span className="flex flex-wrap items-center gap-2 text-slate-700 dark:text-slate-300">
+                                <Badge variant={item.action === 'link' ? 'default' : 'secondary'}>
                                   {item.action === 'link' ? t('linked') : t('unlinked')}
                                 </Badge>
-                                {item.test_case_id ? `TC-${String(item.test_case_id).padStart(3, '0')}` : t('testCase')} {item.test_case_title || ''}
+                                <span className="break-words [overflow-wrap:anywhere]">
+                                  {item.test_case_id ? `TC-${String(item.test_case_id).padStart(3, '0')}` : t('testCase')} {item.test_case_title || ''}
+                                </span>
                               </span>
-                              <span className="text-xs text-slate-500">
-                                {item.full_name || item.username || `${t('auditUser')} ${item.user_id}`} - {formatDate(item.created_at)}
+                              <span className="shrink-0 text-xs text-slate-500">
+                                {item.full_name || item.username || `${t('auditUser')} ${item.user_id}`} · {formatDate(item.created_at)}
                               </span>
                             </div>
                           ))}
@@ -948,13 +1124,19 @@ export function RequirementDetail() {
           {showMetadata && (
           <aside className="space-y-6">
             <Card>
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="text-base">{t('metadata')}</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <MetaRow label={t('requirementId')} value={requirement.requirement_id} />
-                <MetaRow label={t('status')} value={requirement.status} />
-                <MetaRow label={t('priority')} value={requirement.priority} />
+              <CardContent className="text-sm">
+                <MetaRow label={t('requirementId')} value={<span className="font-mono">{requirement.requirement_id}</span>} />
+                <MetaRow
+                  label={t('status')}
+                  value={<Badge className={`capitalize ${getStatusBadge(requirement.status)}`}>{requirement.status}</Badge>}
+                />
+                <MetaRow
+                  label={t('priority')}
+                  value={<Badge className={`capitalize ${getPriorityBadge(requirement.priority)}`}>{requirement.priority}</Badge>}
+                />
                 <MetaRow label={t('created')} value={formatDate(requirement.created_at)} icon={<Calendar className="h-4 w-4" />} />
                 <MetaRow label={t('updated')} value={formatDate(requirement.updated_at)} icon={<Calendar className="h-4 w-4" />} />
                 {requirement.estimated_effort !== undefined && requirement.estimated_effort !== null && (
@@ -965,9 +1147,9 @@ export function RequirementDetail() {
 
             {tags.length > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <Tag className="h-4 w-4 text-slate-500" />
+                    <Tag className="h-4 w-4 text-slate-400" />
                     {t('tags')}
                   </CardTitle>
                 </CardHeader>
@@ -996,18 +1178,14 @@ export function RequirementDetail() {
                 disabled={availableTestCasesLoading}
               />
               {testCaseSearchQuery.trim().length < 2 ? (
-                <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">
-                  {t('typeToSearchTestCases')}
-                </p>
+                <EmptyState label={t('typeToSearchTestCases')} />
               ) : availableTestCasesLoading ? (
                 <div className="space-y-2">
                   <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                   <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                 </div>
               ) : availableTestCases.length === 0 ? (
-                <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700">
-                  {testCaseSearchQuery.trim() ? t('noTestCasesMatchSearch') : t('noTestCasesAvailableToLink')}
-                </p>
+                <EmptyState label={testCaseSearchQuery.trim() ? t('noTestCasesMatchSearch') : t('noTestCasesAvailableToLink')} />
               ) : (
                 <div className="max-h-[360px] overflow-y-auto rounded-md border border-slate-200 dark:border-slate-800">
                   {availableTestCases.map((testCase) => (
@@ -1017,8 +1195,8 @@ export function RequirementDetail() {
                         onCheckedChange={() => toggleAvailableSelection(testCase.id)}
                       />
                       <span className="min-w-0">
-                        <span className="block font-medium text-slate-900 dark:text-white">TC-{String(testCase.id).padStart(3, '0')} - {testCase.title}</span>
-                        <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')} {testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
+                        <span className="block font-medium text-slate-900 [overflow-wrap:anywhere] dark:text-white">TC-{String(testCase.id).padStart(3, '0')} · {testCase.title}</span>
+                        <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
                       </span>
                     </label>
                   ))}
@@ -1100,7 +1278,7 @@ export function RequirementDetail() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}
+                      {TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority} className="capitalize">{priority}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1111,7 +1289,7 @@ export function RequirementDetail() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TEST_CASE_STATUSES.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                      {TEST_CASE_STATUSES.map((status) => <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1143,28 +1321,217 @@ export function RequirementDetail() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Dialog
+          open={editDialogOpen}
+          onOpenChange={(open) => {
+            if (!open && savingRequirement) return;
+            setEditDialogOpen(open);
+          }}
+        >
+          <DialogContent isRTL={isRTL} className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{t('editRequirement')}</DialogTitle>
+              <DialogDescription>{t('updateRequirementInfo')}</DialogDescription>
+            </DialogHeader>
+            <div className="-mx-1 max-h-[65vh] space-y-5 overflow-y-auto px-1 py-1">
+              <div className="space-y-2">
+                <Label htmlFor="edit-requirement-title">
+                  {t('title')} <span className="text-rose-500">*</span>
+                </Label>
+                <Input
+                  id="edit-requirement-title"
+                  value={editForm.title}
+                  onChange={(event) => setEditForm((current) => ({ ...current, title: event.target.value }))}
+                  placeholder={t('enterRequirementTitle')}
+                />
+                <p className="text-xs text-slate-500">{t('titleHelper')}</p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{t('status')}</Label>
+                  <Select value={editForm.status} onValueChange={(value) => setEditForm((current) => ({ ...current, status: value }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REQUIREMENT_STATUSES.map((status) => <SelectItem key={status} value={status}>{t(status)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('priority')}</Label>
+                  <Select value={editForm.priority} onValueChange={(value) => setEditForm((current) => ({ ...current, priority: value }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REQUIREMENT_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{t(priority)}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t('description')}</Label>
+                <RichTextEditor
+                  value={editForm.description}
+                  onChange={(value) => setEditForm((current) => ({ ...current, description: value }))}
+                  placeholder={t('enterRequirementDescription')}
+                  dir={isRTL ? 'rtl' : 'ltr'}
+                  className="min-h-[200px]"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label>{t('acceptanceCriteria')}</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="edit-requirement-gherkin" className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      {t('gherkinSyntax')}
+                    </Label>
+                    <Switch
+                      id="edit-requirement-gherkin"
+                      checked={editGherkin}
+                      onCheckedChange={(checked) => {
+                        setEditGherkin(checked);
+                        if (checked && !editForm.acceptance_criteria.trim()) {
+                          setEditForm((current) => ({ ...current, acceptance_criteria: GHERKIN_TEMPLATE }));
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                {editGherkin ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={editForm.acceptance_criteria}
+                      onChange={(event) => setEditForm((current) => ({ ...current, acceptance_criteria: event.target.value }))}
+                      placeholder={t('gherkinAcceptancePlaceholder')}
+                      dir={isRTL ? 'rtl' : 'ltr'}
+                      className="min-h-[180px] font-mono text-sm leading-6"
+                    />
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('gherkinPreview')}</p>
+                      <GherkinViewer value={editForm.acceptance_criteria} emptyLabel={t('noAcceptanceCriteriaProvided')} />
+                    </div>
+                  </div>
+                ) : (
+                  <RichTextEditor
+                    value={editForm.acceptance_criteria}
+                    onChange={(value) => setEditForm((current) => ({ ...current, acceptance_criteria: value }))}
+                    placeholder={t('enterAcceptanceCriteria')}
+                    dir={isRTL ? 'rtl' : 'ltr'}
+                    className="min-h-[160px]"
+                  />
+                )}
+                <p className="text-xs text-slate-500">{t('acceptanceCriteriaHelper')}</p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-requirement-effort">{t('estimatedEffortHours')}</Label>
+                  <Input
+                    id="edit-requirement-effort"
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editForm.estimated_effort}
+                    onChange={(event) => setEditForm((current) => ({ ...current, estimated_effort: event.target.value }))}
+                    placeholder="8.0"
+                  />
+                  <p className={`text-xs ${editEffortInvalid ? 'text-rose-500' : 'text-slate-500'}`}>
+                    {editEffortInvalid ? t('estimatedEffortInvalid') : t('estimatedEffortHelper')}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-requirement-tags">{t('tags')}</Label>
+                  <Input
+                    id="edit-requirement-tags"
+                    value={editForm.tags}
+                    onChange={(event) => setEditForm((current) => ({ ...current, tags: event.target.value }))}
+                    placeholder="security, authentication"
+                  />
+                  <p className="text-xs text-slate-500">{t('tagsHelper')}</p>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={savingRequirement}>
+                {t('cancel')}
+              </Button>
+              <Button type="button" onClick={handleUpdateRequirement} disabled={!canSaveRequirement}>
+                {savingRequirement ? t('saving') : t('updateRequirement')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
 }
 
-function SummaryTile({ label, value }: { label: string; value: string | number }) {
+function RichTextContent({ html }: { html: string }) {
+  const isHtml = isHtmlMarkup(html);
+  const safeHtml = useMemo(() => (isHtml ? sanitizeRichHtml(html) : ''), [isHtml, html]);
+
+  if (!isHtml) {
+    return (
+      <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
+        {html}
+      </p>
+    );
+  }
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-slate-950 dark:text-white">{value}</p>
+    <div data-rich-text-editor>
+      <div
+        className="rich-text-preview max-w-[72ch] text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300"
+        dangerouslySetInnerHTML={{ __html: safeHtml }}
+      />
     </div>
   );
 }
 
-function MetaRow({ label, value, icon }: { label: string; value: string; icon?: ReactNode }) {
+function EmptyState({ label }: { label: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2 last:border-0 dark:border-slate-800">
-      <span className="flex items-center gap-2 text-slate-500">
+    <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+      {label}
+    </p>
+  );
+}
+
+function SummaryTile({ label, value, tone = 'default' }: { label: string; value: string | number; tone?: 'default' | 'danger' | 'warning' }) {
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  const isAlert = (tone === 'danger' || tone === 'warning') && Number.isFinite(numericValue) && numericValue > 0;
+
+  const containerTone = !isAlert
+    ? 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50'
+    : tone === 'danger'
+      ? 'border-rose-200 bg-rose-50 dark:border-rose-900/60 dark:bg-rose-950/30'
+      : 'border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30';
+  const valueTone = !isAlert
+    ? 'text-slate-950 dark:text-white'
+    : tone === 'danger'
+      ? 'text-rose-700 dark:text-rose-300'
+      : 'text-amber-700 dark:text-amber-300';
+
+  return (
+    <div className={`flex min-w-0 flex-col rounded-md border p-3 ${containerTone}`}>
+      <p className="text-xs font-medium leading-tight text-slate-500 dark:text-slate-400">{label}</p>
+      <p className={`mt-auto pt-1 text-2xl font-semibold leading-none ${valueTone}`}>{value}</p>
+    </div>
+  );
+}
+
+function MetaRow({ label, value, icon }: { label: string; value: ReactNode; icon?: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-slate-100 py-2.5 last:border-0 dark:border-slate-800">
+      <span className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
         {icon}
         {label}
       </span>
-      <span className="max-w-[160px] break-words text-end font-medium text-slate-900 dark:text-white">{value}</span>
+      <span className="max-w-[170px] break-words text-end font-medium text-slate-900 [overflow-wrap:anywhere] dark:text-white">{value}</span>
     </div>
   );
 }

@@ -348,6 +348,36 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        # Authorship comes from the authenticated user, never the client payload
+        # (prevents spoofing and invalid-foreign-key failures).
+        requirement.created_by = current_user.id
+
+        # Reject duplicate human-facing IDs within the same project.
+        duplicate = db.query(models.Requirement).filter(
+            models.Requirement.project_id == requirement.project_id,
+            models.Requirement.requirement_id == requirement.requirement_id,
+        ).first()
+        if duplicate:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Requirement ID '{requirement.requirement_id}' already exists in this project.",
+            )
+
+        # Validate optional references so bad input fails clearly (not as a 500).
+        if requirement.parent_requirement_id is not None:
+            parent = get_requirement(db, requirement_id=requirement.parent_requirement_id)
+            if parent is None:
+                raise HTTPException(status_code=400, detail="Parent requirement not found")
+            if parent.project_id != requirement.project_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Parent requirement must belong to the same project",
+                )
+        if requirement.assigned_to is not None:
+            assignee = db.query(models.User).filter(models.User.id == requirement.assigned_to).first()
+            if assignee is None:
+                raise HTTPException(status_code=400, detail="Assigned user not found")
+
         try:
             db_requirement = create_requirement(db=db, requirement=requirement)
             
@@ -976,6 +1006,36 @@ def register_requirements_defects_plans_routes(app):
 
         if not rbac.has_permission(current_user, "write", db_requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # Validate optional references that the update is explicitly changing.
+        update_fields = requirement.model_fields_set
+        if "parent_requirement_id" in update_fields and requirement.parent_requirement_id is not None:
+            if requirement.parent_requirement_id == requirement_id:
+                raise HTTPException(status_code=400, detail="A requirement cannot be its own parent")
+            parent = get_requirement(db, requirement_id=requirement.parent_requirement_id)
+            if parent is None:
+                raise HTTPException(status_code=400, detail="Parent requirement not found")
+            if parent.project_id != db_requirement.project_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Parent requirement must belong to the same project",
+                )
+            # Walk the ancestor chain to reject parent cycles (A -> B -> A).
+            ancestor = parent
+            seen: set[int] = set()
+            while ancestor is not None and ancestor.id not in seen:
+                if ancestor.id == requirement_id:
+                    raise HTTPException(status_code=400, detail="Parent assignment would create a cycle")
+                seen.add(ancestor.id)
+                ancestor = (
+                    get_requirement(db, requirement_id=ancestor.parent_requirement_id)
+                    if ancestor.parent_requirement_id
+                    else None
+                )
+        if "assigned_to" in update_fields and requirement.assigned_to is not None:
+            assignee = db.query(models.User).filter(models.User.id == requirement.assigned_to).first()
+            if assignee is None:
+                raise HTTPException(status_code=400, detail="Assigned user not found")
 
         try:
             db_requirement = update_requirement(db, requirement_id=requirement_id, requirement=requirement)

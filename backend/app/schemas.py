@@ -75,6 +75,23 @@ class ProjectUpdate(BaseModel):
         return data
 
 
+class ProjectClone(BaseModel):
+    """Payload for cloning a project; all fields optional and inherited from source when omitted."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    owner_id: Optional[int] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def sanitize_html(cls, data):
+        """Sanitize HTML in string fields to prevent XSS attacks"""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, str):
+                    data[key] = html.escape(value)
+        return data
+
+
 class Project(ProjectBase):
     id: int
     owner_id: Optional[int] = None
@@ -196,11 +213,16 @@ class TestCaseUpdate(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape before escaping so re-saving an already-stored value is
+        idempotent -- a plain ``html.escape`` would compound ``&lt;`` into
+        ``&amp;lt;`` on every update, progressively corrupting the text.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['test_type', 'priority', 'status']:
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 
@@ -1783,11 +1805,16 @@ class RequirementBase(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape first so the operation is idempotent: requirement content is
+        loaded into the edit form and sent back on every save, so a plain
+        ``html.escape`` would compound (``&lt;`` -> ``&amp;lt;``) each update.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['status', 'priority']:
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 
@@ -1810,11 +1837,15 @@ class RequirementUpdate(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape first so re-saving an already-escaped value is idempotent
+        rather than compounding the escaping on every update.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['status', 'priority']:
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 

@@ -44,7 +44,7 @@ import { diffWords } from 'diff';
 
 
 export function Requirements() {
-  const { projectId, requirementId: routeRequirementId } = useParams<{ projectId: string; requirementId?: string }>();
+  const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
@@ -53,7 +53,6 @@ export function Requirements() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
@@ -99,6 +98,24 @@ export function Requirements() {
       .replace(/\s+/g, ' ')
       .trim();
 
+  // Requirement description/acceptance is stored HTML-escaped; decode entities
+  // then strip tags so the list shows readable text, not raw "&lt;p&gt;" markup.
+  // Decoding twice also cleans up any legacy double-escaped rows.
+  const toDisplayText = (value?: string | null): string => {
+    if (!value) return '';
+    const decode = (input: string): string => {
+      const textarea = document.createElement('textarea');
+      textarea.innerHTML = input;
+      return textarea.value;
+    };
+    const decoded = decode(decode(value));
+    if (!/<[a-z][\s\S]*>/i.test(decoded)) {
+      return decoded.replace(/\s+/g, ' ').trim();
+    }
+    const parsed = new DOMParser().parseFromString(decoded, 'text/html');
+    return (parsed.body.textContent || '').replace(/\s+/g, ' ').trim();
+  };
+
   const gherkinTemplate = [
     'Feature: ',
     '',
@@ -126,7 +143,11 @@ export function Requirements() {
   const isValidExternalDocumentUrl = (value: string): boolean => {
     try {
       const parsed = new URL(value);
-      return ['http:', 'https:'].includes(parsed.protocol) && /(?:atlassian\.net|jira|confluence)/i.test(parsed.hostname + parsed.pathname);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+      // Match on the host only — matching the path let through URLs like
+      // https://evil.com/jira. The backend remains the authoritative gate.
+      const host = parsed.hostname.toLowerCase();
+      return host.endsWith('.atlassian.net') || /(^|\.)(jira|confluence)(\.|$)/.test(host);
     } catch {
       return false;
     }
@@ -194,7 +215,8 @@ export function Requirements() {
     
     try {
       setLoading(true);
-      const data = await requirementsAPI.getAll(parseInt(projectId));
+      // Fetch a high limit so projects with >100 requirements are not silently truncated.
+      const data = await requirementsAPI.getAll(parseInt(projectId), 0, 1000);
       setRequirements(data);
     } catch (error) {
       console.error('Error loading requirements:', error);
@@ -213,19 +235,6 @@ export function Requirements() {
     Promise.resolve().then(loadRequirements);
   }, [loadRequirements]);
 
-  const routeRequirement = useMemo(() => {
-    if (!routeRequirementId || requirements.length === 0) return null;
-    const decodedId = decodeURIComponent(routeRequirementId);
-    const currentProjectId = Number(projectId);
-    return requirements.find((item) =>
-      Number(item.project_id) === currentProjectId &&
-      (String(item.id) === decodedId || item.requirement_id.toLowerCase() === decodedId.toLowerCase())
-    ) || null;
-  }, [projectId, requirements, routeRequirementId]);
-
-  const visibleRequirement = routeRequirementId ? routeRequirement : selectedRequirement;
-  const isRequirementViewOpen = isViewDialogOpen || Boolean(routeRequirement);
-
   // Filtering logic
   const filteredRequirements = requirements.filter(req => {
     const matchesSearch = searchQuery === '' || 
@@ -240,9 +249,16 @@ export function Requirements() {
     return matchesSearch && matchesStatus && matchesPriority;
   });
 
-  const totalPages = Math.ceil(filteredRequirements.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
+  const totalPages = Math.max(1, Math.ceil(filteredRequirements.length / itemsPerPage));
+  // Clamp so a stale page index (e.g. after filtering) never yields an empty slice.
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safePage - 1) * itemsPerPage;
   const paginatedRequirements = filteredRequirements.slice(startIndex, startIndex + itemsPerPage);
+
+  // Reset to the first page whenever the active filters change.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, priorityFilter]);
 
   // API functions
   const handleCreateRequirement = async () => {
@@ -276,7 +292,7 @@ export function Requirements() {
       }
       
       const estimatedEffort = reqEstimatedEffort ? parseFloat(reqEstimatedEffort) : undefined;
-      if (estimatedEffort !== undefined && (isNaN(estimatedEffort) || estimatedEffort < 0)) {
+      if (estimatedEffort !== undefined && (!Number.isFinite(estimatedEffort) || estimatedEffort < 0)) {
         toast({
           title: t('error'),
           description: t('estimatedEffortInvalid'),
@@ -366,7 +382,7 @@ export function Requirements() {
     try {
       setIsSubmitting(true);
       const estimatedEffort = reqEstimatedEffort ? parseFloat(reqEstimatedEffort) : undefined;
-      if (estimatedEffort !== undefined && (isNaN(estimatedEffort) || estimatedEffort < 0)) {
+      if (estimatedEffort !== undefined && (!Number.isFinite(estimatedEffort) || estimatedEffort < 0)) {
         toast({
           title: t('error'),
           description: t('estimatedEffortInvalid'),
@@ -411,7 +427,7 @@ export function Requirements() {
   const handleDeleteRequirement = async () => {
     if (!requirementToDelete) return;
     
-    if (deleteConfirmationName.toLowerCase() !== requirementToDelete.title.toLowerCase()) {
+    if (deleteConfirmationName.trim().toLowerCase() !== requirementToDelete.title.trim().toLowerCase()) {
       toast({
         title: t('error'),
         description: t('titleDoesntMatch'),
@@ -547,20 +563,8 @@ export function Requirements() {
   };
 
   const handleViewRequirement = (requirement: Requirement) => {
-    setSelectedRequirement(requirement);
-    setIsViewDialogOpen(true);
     if (projectId) {
       navigate(`/projects/${projectId}/requirements/${requirement.id}`);
-    }
-  };
-
-  const handleViewDialogOpenChange = (open: boolean) => {
-    setIsViewDialogOpen(open);
-    if (!open) {
-      setSelectedRequirement(null);
-      if (routeRequirementId && projectId) {
-        navigate(`/projects/${projectId}/requirements`);
-      }
     }
   };
 
@@ -568,6 +572,52 @@ export function Requirements() {
     setRequirementToDelete(requirement);
     setDeleteConfirmationName('');
     setIsDeleteDialogOpen(true);
+  };
+
+  const handleExportRequirements = () => {
+    if (filteredRequirements.length === 0) {
+      toast({
+        title: t('error'),
+        description: t('noRequirementsFound'),
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const escapeCsv = (value: unknown): string => {
+      const str = value == null ? '' : String(value);
+      return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const headers = ['Requirement ID', 'Title', 'Status', 'Priority', 'Tags', 'Estimated Effort', 'Description', 'Acceptance Criteria', 'Created At'];
+    const rows = filteredRequirements.map((req) => [
+      req.requirement_id,
+      req.title,
+      req.status,
+      req.priority,
+      req.tags || '',
+      req.estimated_effort ?? '',
+      toDisplayText(req.description),
+      toDisplayText(req.acceptance_criteria),
+      req.created_at,
+    ].map(escapeCsv).join(','));
+
+    // Prepend a BOM so Excel reads the UTF-8 content correctly.
+    const csv = '﻿' + [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `requirements-project-${projectId}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: t('success'),
+      description: t('requirementsExported', { count: filteredRequirements.length }),
+    });
   };
 
   const getStatusBadge = (status: string) => {
@@ -617,10 +667,13 @@ export function Requirements() {
       return 'REQ-001';
     }
     
+    // Only consider well-formed "REQ-<number>" ids so an outlier like
+    // "REQ-2024-001" cannot inflate the next suggested id.
     const maxId = requirements.reduce((max, req) => {
-      if (!req.requirement_id) return max;
-      const num = parseInt(req.requirement_id.replace(/\D/g, ''));
-      return !isNaN(num) && num > max ? num : max;
+      const match = /^REQ-(\d+)$/.exec((req.requirement_id || '').trim());
+      if (!match) return max;
+      const num = parseInt(match[1], 10);
+      return num > max ? num : max;
     }, 0);
     return `REQ-${String(maxId + 1).padStart(3, '0')}`;
   };
@@ -744,7 +797,7 @@ export function Requirements() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCreateDialogOpen, isEditDialogOpen, showUnsavedDialog, reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, selectedRequirement]);
+  }, [isCreateDialogOpen, isEditDialogOpen, showUnsavedDialog, reqId, reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, selectedRequirement]);
 
   const renderExternalDocumentImport = (inputId: string) => (
     <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/60 dark:bg-blue-950/20">
@@ -937,7 +990,7 @@ export function Requirements() {
   const requirementPriorityOptions = ['low', 'medium', 'high', 'critical'];
   const isRequirementIdValid = /^REQ-\d{3,}$/.test(reqId.trim());
   const estimatedEffortValue = reqEstimatedEffort ? parseFloat(reqEstimatedEffort) : undefined;
-  const hasInvalidEstimatedEffort = estimatedEffortValue !== undefined && (Number.isNaN(estimatedEffortValue) || estimatedEffortValue < 0);
+  const hasInvalidEstimatedEffort = estimatedEffortValue !== undefined && (!Number.isFinite(estimatedEffortValue) || estimatedEffortValue < 0);
   const canCreateRequirement = Boolean(reqId.trim() && reqTitle.trim() && isRequirementIdValid && !hasInvalidEstimatedEffort && !isSubmitting);
   const canUpdateRequirement = Boolean(reqTitle.trim() && !hasInvalidEstimatedEffort && !isSubmitting);
 
@@ -1212,7 +1265,7 @@ export function Requirements() {
                 <SelectItem value="critical">{t('critical')}</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handleExportRequirements}>
               <Download className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
               {t('export')}
             </Button>
@@ -1241,7 +1294,9 @@ export function Requirements() {
                       </Badge>
                     </div>
                     <CardTitle className="text-lg mb-1">{requirement.title}</CardTitle>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{requirement.description}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
+                      {toDisplayText(requirement.description) || t('noDescriptionProvided')}
+                    </p>
                     {requirement.tags && requirement.tags.trim() && (
                       <div className="flex flex-wrap gap-1 mb-2">
                         {requirement.tags.split(',').map((tag, index) => {
@@ -1321,113 +1376,6 @@ export function Requirements() {
         )}
       </div>
 
-      {/* View Requirement Dialog */}
-      <Dialog open={isRequirementViewOpen} onOpenChange={handleViewDialogOpenChange}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[95vw] md:max-w-[700px] lg:max-w-[800px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t('requirementDetails')}</DialogTitle>
-            <DialogDescription>
-              {t('viewManageRequirement')}
-            </DialogDescription>
-          </DialogHeader>
-          {visibleRequirement && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium">{t('requirementId')}</Label>
-                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{visibleRequirement.requirement_id}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">{t('status')}</Label>
-                  <div className="mt-1">
-                    <Badge className={getStatusBadge(visibleRequirement.status)}>
-                      <div className="flex items-center gap-1">
-                        {getStatusIcon(visibleRequirement.status)}
-                        {visibleRequirement.status}
-                      </div>
-                    </Badge>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">{t('priority')}</Label>
-                  <div className="mt-1">
-                    <Badge className={getPriorityBadge(visibleRequirement.priority)}>
-                      {visibleRequirement.priority}
-                    </Badge>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">{t('created')}</Label>
-                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">
-                    {new Date(visibleRequirement.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-              
-              <div>
-                <Label className="text-sm font-medium">{t('title')}</Label>
-                <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{visibleRequirement.title}</p>
-              </div>
-              
-              <div>
-                <Label className="text-sm font-medium">{t('description')}</Label>
-                <p className="text-sm text-gray-900 mt-1 whitespace-pre-wrap">
-                  {visibleRequirement.description || t('noDescriptionProvided')}
-                </p>
-              </div>
-              
-              {visibleRequirement.acceptance_criteria && (
-                <div>
-                  <Label className="text-sm font-medium">{t('acceptanceCriteria')}</Label>
-                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1 whitespace-pre-wrap">
-                    {visibleRequirement.acceptance_criteria}
-                  </p>
-                </div>
-              )}
-              
-              {visibleRequirement.tags && visibleRequirement.tags.trim() && (
-                <div>
-                  <Label className="text-sm font-medium">{t('tags')}</Label>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {visibleRequirement.tags.split(',').map((tag, index) => {
-                      const trimmedTag = tag.trim();
-                      return trimmedTag ? (
-                        <span key={index} className="text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 px-2 py-1 rounded">
-                          {trimmedTag}
-                        </span>
-                      ) : null;
-                    })}
-                  </div>
-                </div>
-              )}
-              
-              {visibleRequirement.estimated_effort && (
-                <div>
-                  <Label className="text-sm font-medium">{t('estimatedEffortHours')}</Label>
-                  <p className="text-sm text-gray-900 dark:text-gray-100 mt-1">{visibleRequirement.estimated_effort} hours</p>
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => handleViewDialogOpenChange(false)}
-            >
-              {t('close')}
-            </Button>
-            <Button
-              onClick={() => {
-                handleViewDialogOpenChange(false);
-                if (visibleRequirement) handleEditRequirement(visibleRequirement);
-              }}
-            >
-              {t('editRequirement')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Edit Requirement Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={(open) => !open && handleDialogClose('edit')}>
         {renderRequirementDialogContent('edit')}
@@ -1464,6 +1412,9 @@ export function Requirements() {
               <AlertTriangle className={`h-5 w-5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('deleteRequirementConfirm')}
             </AlertDialogTitle>
+            <AlertDialogDescription className="sr-only">
+              {t('aboutToDeleteRequirement')}
+            </AlertDialogDescription>
             <div className="space-y-4">
               <div className="text-sm">
                 <p className="font-semibold text-gray-900 dark:text-gray-100 mb-2">
@@ -1512,7 +1463,7 @@ export function Requirements() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteRequirement}
-              disabled={deleteConfirmationName.toLowerCase() !== requirementToDelete?.title?.toLowerCase()}
+              disabled={deleteConfirmationName.trim().toLowerCase() !== requirementToDelete?.title?.trim().toLowerCase()}
               className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
             >
               {t('deleteRequirement')}
@@ -1531,20 +1482,20 @@ export function Requirements() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(Math.max(1, safePage - 1))}
+              disabled={safePage === 1}
             >
               {isRTL ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
               {t('previous')}
             </Button>
             <span className="text-sm text-gray-600 dark:text-gray-400">
-              {t('pageOf', { current: currentPage, total: totalPages })}
+              {t('pageOf', { current: safePage, total: totalPages })}
             </span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))}
+              disabled={safePage === totalPages}
             >
               {t('next')}
               {isRTL ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
