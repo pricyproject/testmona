@@ -78,7 +78,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+              "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/token",
@@ -89,7 +89,7 @@
                 "token"
               ]
             },
-            "description": "Default credentials: demo@testmona.com / demo123"
+            "description": "Default credentials: demo@testmona.com / 12345678"
           },
           "event": [
             {
@@ -1607,6 +1607,28 @@
       "name": "Analytics",
       "item": [
         {
+          "name": "Dashboard Statistics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/statistics?project_id=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dashboard",
+                "statistics"
+              ],
+              "query": [
+                {
+                  "key": "project_id",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Dashboard Analytics",
           "request": {
             "method": "POST",
@@ -2232,7 +2254,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/audit-trails?skip=0&limit=100",
+              "raw": "{{baseUrl}}/audit-trails?offset=0&limit=100",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2241,7 +2263,7 @@
               ],
               "query": [
                 {
-                  "key": "skip",
+                  "key": "offset",
                   "value": "0"
                 },
                 {
@@ -2907,7 +2929,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"old_password\":\"demo123\",\"new_password\":\"demo123\"}"
+              "raw": "{\"old_password\":\"12345678\",\"new_password\":\"12345678\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/users/me/change-password",
@@ -2935,7 +2957,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"old_password\":\"demo123\",\"new_password\":\"123\"}"
+              "raw": "{\"old_password\":\"12345678\",\"new_password\":\"123\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/users/me/change-password",
@@ -3977,7 +3999,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"password\":\"demo123\",\"confirm_text\":\"WRONG TEXT\"}"
+              "raw": "{\"password\":\"12345678\",\"confirm_text\":\"WRONG TEXT\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/users/me",
@@ -4031,7 +4053,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"password\":\"demo123\"}"
+              "raw": "{\"password\":\"12345678\"}"
             },
             "url": {
               "raw": "{{baseUrl}}/users/me",

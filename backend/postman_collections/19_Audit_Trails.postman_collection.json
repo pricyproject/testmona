@@ -44,7 +44,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -85,7 +85,7 @@
       "request": {
         "method": "GET",
         "url": {
-          "raw": "{{baseUrl}}/audit-trails?skip=0&limit=100",
+          "raw": "{{baseUrl}}/audit-trails?offset=0&limit=100",
           "host": [
             "{{baseUrl}}"
           ],
@@ -94,7 +94,7 @@
           ],
           "query": [
             {
-              "key": "skip",
+              "key": "offset",
               "value": "0"
             },
             {

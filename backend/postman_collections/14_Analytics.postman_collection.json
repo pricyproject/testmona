@@ -44,7 +44,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -73,6 +73,48 @@
               "    if (jsonData.refresh_token) {",
               "        pm.environment.set(\"refreshToken\", jsonData.refresh_token);",
               "    }",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard Statistics",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/dashboard/statistics?project_id={{testProjectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "dashboard",
+            "statistics"
+          ],
+          "query": [
+            {
+              "key": "project_id",
+              "value": "{{testProjectId}}"
+            }
+          ]
+        },
+        "description": "Get dashboard counters, pass rate, and latest execution status counts for a project."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response contains dashboard totals\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('totalTestCases');",
+              "    pm.expect(jsonData).to.have.property('passRate');",
+              "    pm.expect(jsonData.testResults).to.be.an('array');",
               "});"
             ],
             "type": "text/javascript"

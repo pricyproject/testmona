@@ -54,7 +54,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -98,7 +98,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Reusable login step\",\n  \"description\": \"Logs in with default demo credentials\",\n  \"action\": \"Enter demo@testmona.com and demo123, then submit the login form\",\n  \"expected_result\": \"The user is authenticated and the dashboard is shown\",\n  \"project_id\": {{testProjectId}}\n}"
+          "raw": "{\n  \"name\": \"Reusable login step\",\n  \"description\": \"Logs in with default demo credentials\",\n  \"action\": \"Enter demo@testmona.com and 12345678, then submit the login form\",\n  \"expected_result\": \"The user is authenticated and the dashboard is shown\",\n  \"project_id\": {{testProjectId}}\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/shared-steps/",
@@ -160,6 +160,42 @@
           ]
         }
       }
+    },
+    {
+      "name": "List Shared Steps - Invalid Project ID",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/shared-steps/?project_id=-1",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "shared-steps",
+            ""
+          ],
+          "query": [
+            {
+              "key": "project_id",
+              "value": "-1"
+            }
+          ]
+        },
+        "description": "Expected: 422 validation error for invalid project_id."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 422\", function () {",
+              "    pm.response.to.have.status(422);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
     },
     {
       "name": "Update Shared Step",

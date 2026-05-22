@@ -559,7 +559,7 @@
           "Import/Export"
         ],
         "summary": "Import Projects",
-        "description": "Import project(s) from JSON or CSV file\nOnly accessible by admin and manager roles",
+        "description": "Import project(s) from JSON or CSV file\nOnly accessible by admin and manager roles\n\nWhen `selected_rows` is provided, only those 1-based row numbers are imported;\nthis lets the import-preview row selection actually take effect.",
         "operationId": "import_projects_import_export_import_projects__post",
         "requestBody": {
           "content": {
@@ -711,7 +711,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -729,7 +730,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/AuditAction"
                 },
                 {
                   "type": "null"
@@ -747,7 +748,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/EntityType"
                 },
                 {
                   "type": "null"
@@ -765,7 +766,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -783,7 +785,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -981,7 +984,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": 1
                 },
                 {
                   "type": "null"
@@ -1188,8 +1192,7 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string",
-              "title": "Entity Type"
+              "$ref": "#/components/schemas/EntityType"
             }
           },
           {
@@ -5409,6 +5412,61 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/clone": {
+      "post": {
+        "summary": "Clone Project",
+        "description": "Clone a project together with its test suites and test cases.",
+        "operationId": "clone_project_projects__project_id__clone_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectClone"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
               }
             }
           },
@@ -10224,6 +10282,38 @@
               "default": 100,
               "title": "Limit"
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
           }
         ],
         "responses": {
@@ -10374,6 +10464,249 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-results/{test_result_id}/defect-links": {
+      "get": {
+        "summary": "Read Test Result Defect Links",
+        "operationId": "read_test_result_defect_links_test_results__test_result_id__defect_links_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_result_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Result Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TestResultDefectLink"
+                  },
+                  "title": "Response Read Test Result Defect Links Test Results  Test Result Id  Defect Links Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Test Result Defect Link",
+        "operationId": "create_test_result_defect_link_test_results__test_result_id__defect_links_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_result_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Result Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestResultDefectLinkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestResultDefectLink"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-results/{test_result_id}/defect-links/{link_id}": {
+      "delete": {
+        "summary": "Delete Test Result Defect Link",
+        "operationId": "delete_test_result_defect_link_test_results__test_result_id__defect_links__link_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_result_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Result Id"
+            }
+          },
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-runs/{test_run_id}/defect-coverage": {
+      "get": {
+        "summary": "Read Test Run Defect Coverage",
+        "operationId": "read_test_run_defect_coverage_test_runs__test_run_id__defect_coverage_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestRunDefectCoverage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-runs/{test_run_id}/flakiness": {
+      "get": {
+        "summary": "Read Test Run Flakiness",
+        "operationId": "read_test_run_flakiness_test_runs__test_run_id__flakiness_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/FlakinessEntry"
+                  },
+                  "title": "Response Read Test Run Flakiness Test Runs  Test Run Id  Flakiness Get"
+                }
               }
             }
           },
@@ -12282,7 +12615,15 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Project Id"
             }
           }
@@ -16107,7 +16448,15 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Project Id"
             }
           },
@@ -16117,6 +16466,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 0,
               "default": 0,
               "title": "Skip"
             }
@@ -16127,6 +16477,8 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
               "default": 100,
               "title": "Limit"
             }
@@ -16176,6 +16528,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Step Id"
             }
           }
@@ -16218,6 +16571,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Step Id"
             }
           }
@@ -16270,6 +16624,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Step Id"
             }
           }
@@ -16312,6 +16667,7 @@
             "required": true,
             "schema": {
               "type": "integer",
+              "minimum": 1,
               "title": "Step Id"
             }
           }
@@ -16911,6 +17267,28 @@
             "type": "integer",
             "title": "User Id"
           },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "user_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Full Name"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -17105,6 +17483,17 @@
             "type": "boolean",
             "title": "Partial Import",
             "default": false
+          },
+          "selected_rows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Rows"
           }
         },
         "type": "object",
@@ -18985,6 +19374,15 @@
         ],
         "title": "DefectHistory"
       },
+      "DefectLinkType": {
+        "type": "string",
+        "enum": [
+          "found",
+          "blocked_by",
+          "related"
+        ],
+        "title": "DefectLinkType"
+      },
       "DefectManagement": {
         "properties": {
           "title": {
@@ -20265,6 +20663,64 @@
         ],
         "title": "DefectStatus"
       },
+      "DefectSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "defect_id": {
+            "type": "string",
+            "title": "Defect Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DefectStatus"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DefectSeverity"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/DefectPriority"
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To"
+          },
+          "external_issue_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Issue Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "defect_id",
+          "title",
+          "status",
+          "severity",
+          "priority"
+        ],
+        "title": "DefectSummary",
+        "description": "Lightweight defect representation for embedding in link responses."
+      },
       "DefectSyncRequest": {
         "properties": {
           "integration_id": {
@@ -21068,6 +21524,30 @@
           "total_rows"
         ],
         "title": "ExportTestCasesResponse"
+      },
+      "FlakinessEntry": {
+        "properties": {
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "fails": {
+            "type": "integer",
+            "title": "Fails"
+          },
+          "flaky": {
+            "type": "boolean",
+            "title": "Flaky"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "fails",
+          "flaky"
+        ],
+        "title": "FlakinessEntry",
+        "description": "Cross-run outcome stability for a single test case."
       },
       "GlobalParameter": {
         "properties": {
@@ -24129,6 +24609,46 @@
           "project_id"
         ],
         "title": "ProjectAssignmentCreate"
+      },
+      "ProjectClone": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          }
+        },
+        "type": "object",
+        "title": "ProjectClone",
+        "description": "Payload for cloning a project; all fields optional and inherited from source when omitted."
       },
       "ProjectCreate": {
         "properties": {
@@ -28025,6 +28545,11 @@
             "title": "Cleanup On Failure",
             "default": true
           },
+          "require_defect_on_failure": {
+            "type": "boolean",
+            "title": "Require Defect On Failure",
+            "default": false
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -28159,6 +28684,17 @@
               }
             ],
             "title": "Cleanup On Failure"
+          },
+          "require_defect_on_failure": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Defect On Failure"
           }
         },
         "type": "object",
@@ -28992,6 +29528,44 @@
             "title": "Manual Time Adjustment",
             "default": 0.0
           },
+          "defect_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Link",
+            "description": "URL to a defect in an external tracker"
+          },
+          "custom_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Link",
+            "description": "Free-form reference URL"
+          },
+          "retest_needed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retest Needed",
+            "description": "Set when a linked defect is resolved or reopened"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -29151,6 +29725,44 @@
             "description": "Manual time adjustments (seconds)",
             "default": 0.0
           },
+          "defect_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Link",
+            "description": "URL to a defect in an external tracker"
+          },
+          "custom_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Link",
+            "description": "Free-form reference URL"
+          },
+          "retest_needed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retest Needed",
+            "description": "Set when a linked defect is resolved or reopened"
+          },
           "test_case_id": {
             "type": "integer",
             "title": "Test Case Id"
@@ -29167,6 +29779,93 @@
           "test_run_id"
         ],
         "title": "TestResultCreate"
+      },
+      "TestResultDefectLink": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "test_result_id": {
+            "type": "integer",
+            "title": "Test Result Id"
+          },
+          "defect_id": {
+            "type": "integer",
+            "title": "Defect Id"
+          },
+          "link_type": {
+            "type": "string",
+            "title": "Link Type"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "defect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefectSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "test_result_id",
+          "defect_id",
+          "link_type",
+          "created_at"
+        ],
+        "title": "TestResultDefectLink"
+      },
+      "TestResultDefectLinkCreate": {
+        "properties": {
+          "defect_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Id"
+          },
+          "link_type": {
+            "$ref": "#/components/schemas/DefectLinkType",
+            "default": "found"
+          },
+          "new_defect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefectCreate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "TestResultDefectLinkCreate",
+        "description": "Link a defect to a test result. Provide either an existing defect_id\nor a new_defect payload to create and link in one call."
       },
       "TestResultUpdate": {
         "properties": {
@@ -29286,6 +29985,44 @@
             ],
             "title": "Manual Time Adjustment",
             "description": "Manual time adjustments (seconds)"
+          },
+          "defect_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Link",
+            "description": "URL to a defect in an external tracker"
+          },
+          "custom_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Link",
+            "description": "Free-form reference URL"
+          },
+          "retest_needed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retest Needed",
+            "description": "Set when a linked defect is resolved or reopened"
           }
         },
         "type": "object",
@@ -29401,6 +30138,44 @@
             "title": "Manual Time Adjustment",
             "default": 0.0
           },
+          "defect_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Link",
+            "description": "URL to a defect in an external tracker"
+          },
+          "custom_link": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Link",
+            "description": "Free-form reference URL"
+          },
+          "retest_needed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retest Needed",
+            "description": "Set when a linked defect is resolved or reopened"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -29454,6 +30229,14 @@
                 "type": "null"
               }
             ]
+          },
+          "defect_links": {
+            "items": {
+              "$ref": "#/components/schemas/TestResultDefectLink"
+            },
+            "type": "array",
+            "title": "Defect Links",
+            "default": []
           }
         },
         "type": "object",
@@ -29805,6 +30588,50 @@
           "project_id"
         ],
         "title": "TestRunCreate"
+      },
+      "TestRunDefectCoverage": {
+        "properties": {
+          "test_run_id": {
+            "type": "integer",
+            "title": "Test Run Id"
+          },
+          "total_results": {
+            "type": "integer",
+            "title": "Total Results"
+          },
+          "failed_or_blocked": {
+            "type": "integer",
+            "title": "Failed Or Blocked"
+          },
+          "linked": {
+            "type": "integer",
+            "title": "Linked"
+          },
+          "unlinked": {
+            "type": "integer",
+            "title": "Unlinked"
+          },
+          "open_defects": {
+            "type": "integer",
+            "title": "Open Defects"
+          },
+          "retest_needed": {
+            "type": "integer",
+            "title": "Retest Needed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "test_run_id",
+          "total_results",
+          "failed_or_blocked",
+          "linked",
+          "unlinked",
+          "open_defects",
+          "retest_needed"
+        ],
+        "title": "TestRunDefectCoverage",
+        "description": "Defect-linking rollup for a test run, used for traceability reporting."
       },
       "TestRunStatistics": {
         "properties": {
