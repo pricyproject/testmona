@@ -195,31 +195,38 @@ export function Sidebar({
         `}
       >
         {/* Sidebar Header */}
-        <div className={`flex items-center justify-between h-16 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${
-          showCollapsed ? 'px-2' : 'px-6'
+        <div className={`flex items-center h-16 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${
+          showCollapsed ? 'justify-center px-2' : 'justify-between px-6'
         }`}>
-          <div className={`flex items-center space-x-2 transition-all duration-300 ease-in-out overflow-hidden ${
-            showCollapsed ? 'opacity-0' : 'opacity-100'
-          }`}>
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
+          <Link
+            to="/dashboard"
+            onClick={onClose}
+            title={appName}
+            className="flex items-center gap-2 overflow-hidden rounded-lg transition-opacity hover:opacity-80"
+          >
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
               {appLogoUrl ? (
                 <img src={appLogoUrl} alt={appName} className="h-full w-full rounded-lg object-cover" />
               ) : (
                 <span className="text-white font-bold text-sm">{getAppInitials(appName)}</span>
               )}
             </div>
-            <span className="text-xl font-bold text-gray-900 dark:text-white whitespace-nowrap">{appName}</span>
-          </div>
+            {!showCollapsed && (
+              <span className="text-xl font-bold text-gray-900 dark:text-white whitespace-nowrap">{appName}</span>
+            )}
+          </Link>
 
           {/* Mobile close button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="lg:hidden"
-            onClick={onClose}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
+          {!showCollapsed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="lg:hidden"
+              onClick={onClose}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         {/* Navigation */}
