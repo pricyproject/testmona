@@ -15,98 +15,81 @@ from ..crud import (
     create_kpi_data, get_kpi_data, get_latest_kpi_data,
     create_test_step_result, get_test_step_results, get_test_step_results_by_test_result,
     create_shareable_report, get_shareable_reports, get_shareable_report_by_token, update_shareable_report,
-    create_root_cause_analysis, get_root_cause_analyses, update_root_cause_analysis,
-    create_dashboard_widget, get_dashboard_widgets, update_dashboard_widget, delete_dashboard_widget,
+    create_root_cause_analysis, get_root_cause_analyses, get_root_cause_analysis,
+    update_root_cause_analysis, delete_root_cause_analysis,
+    create_dashboard_widget, get_dashboard_widgets, get_dashboard_widget,
+    update_dashboard_widget, delete_dashboard_widget,
     generate_dashboard_analytics
 )
 
 
+def _build_shareable_report_content(db, project_id, report_type, title, generated_by):
+    """Build a point-in-time analytics snapshot to store inside a shareable report.
+
+    Without this the report would only carry a metadata header and no data. The
+    depth of the snapshot varies by report_type:
+      - summary:   headline KPIs + entity counts
+      - executive: the above + recent activity
+      - technical: everything, including KPI trends, team performance and upcoming items
+    """
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    content = {
+        "title": title,
+        "report_type": report_type,
+        "generated_at": datetime.now().isoformat(),
+        "generated_by": generated_by,
+        "project_id": project_id,
+        "project_name": project.name if project else None,
+    }
+    try:
+        analytics = generate_dashboard_analytics(db, project_id, "30d")
+        kpi = analytics.get("kpi_data", {})
+
+        def kpi_value(key):
+            return (kpi.get(key) or {}).get("current", 0)
+
+        test_suite_ids = [
+            row.id for row in db.query(models.TestSuite.id)
+            .filter(models.TestSuite.project_id == project_id).all()
+        ]
+        total_test_cases = (
+            db.query(models.TestCase)
+            .filter(models.TestCase.test_suite_id.in_(test_suite_ids), models.TestCase.is_deleted == False)
+            .count()
+            if test_suite_ids else 0
+        )
+
+        content["summary"] = {
+            "total_test_cases": total_test_cases,
+            "total_test_suites": len(test_suite_ids),
+            "total_test_runs": db.query(models.TestRun).filter(models.TestRun.project_id == project_id).count(),
+            "total_requirements": db.query(models.Requirement).filter(models.Requirement.project_id == project_id).count(),
+            "total_defects": db.query(models.Defect).filter(models.Defect.project_id == project_id).count(),
+        }
+        content["kpis"] = {
+            "coverage_percent": kpi_value("coverage"),
+            "pass_rate_percent": kpi_value("passRate"),
+            "failure_rate_percent": kpi_value("failureTrends"),
+            "flakiness_percent": kpi_value("flakiness"),
+            "cycle_time_hours": kpi_value("cycleTime"),
+            "defect_density": kpi_value("defectDensity"),
+        }
+        if report_type in ("executive", "technical"):
+            content["recent_activity"] = analytics.get("recent_activity", {})
+        if report_type == "technical":
+            content["kpi_trends"] = kpi
+            content["team_performance"] = analytics.get("team_performance", {})
+            content["upcoming"] = analytics.get("upcoming_items", {})
+        content["data_available"] = True
+    except Exception as exc:
+        print(f"Failed to build shareable report content for project {project_id}: {exc}")
+        content["data_available"] = False
+        content["error"] = "Analytics data could not be generated for this report."
+    return content
+
+
 def register_analytics_dashboard_routes(app):
     """Register analytics and dashboard routes with the FastAPI app."""
-    
-    # Test Execution Status
-    @app.get("/test-execution-status")
-    def get_test_execution_status(
-        project_id: int,
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        """Get detailed test execution status for a project."""
-        if not rbac.has_permission(current_user, "read", project_id, db):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-        def normalize_status(status: str) -> str:
-            status_map = {
-                "pass": "passed",
-                "passed": "passed",
-                "fail": "failed",
-                "failed": "failed",
-                "block": "blocked",
-                "blocked": "blocked",
-                "skip": "skipped",
-                "skipped": "skipped",
-                "not_tested": "not_tested",
-            }
-            return status_map.get((status or "").lower(), (status or "").lower())
-
-        test_cases = db.query(models.TestCase).join(models.TestSuite).filter(
-            models.TestSuite.project_id == project_id,
-            models.TestCase.is_deleted == False,
-        ).all()
-
-        counters = {
-            "passed": 0,
-            "failed": 0,
-            "blocked": 0,
-            "skipped": 0,
-            "not_tested": 0,
-        }
-        test_case_details = []
-
-        for test_case in test_cases:
-            latest_result = db.query(models.TestResult).filter(
-                models.TestResult.test_case_id == test_case.id
-            ).order_by(models.TestResult.executed_at.desc()).first()
-            status = normalize_status(latest_result.status) if latest_result else "not_tested"
-            if status not in counters:
-                status = "not_tested"
-            counters[status] += 1
-            test_case_details.append({
-                "id": test_case.id,
-                "title": test_case.title,
-                "status": status,
-                "last_executed": latest_result.executed_at.isoformat() if latest_result and latest_result.executed_at else None,
-                "test_suite": test_case.test_suite.name if test_case.test_suite else None,
-            })
-
-        total_test_cases = len(test_cases)
-        executed_test_cases = counters["passed"] + counters["failed"] + counters["blocked"] + counters["skipped"]
-        status_percentages = {
-            key: (value / executed_test_cases * 100) if executed_test_cases else 0
-            for key, value in counters.items()
-            if key != "not_tested"
-        }
-        overall_percentages = {
-            key: (value / total_test_cases * 100) if total_test_cases else 0
-            for key, value in counters.items()
-        }
-
-        return {
-            "project_id": project_id,
-            "summary": {
-                "total_test_cases": total_test_cases,
-                "executed_test_cases": executed_test_cases,
-                "passed_test_cases": counters["passed"],
-                "failed_test_cases": counters["failed"],
-                "blocked_test_cases": counters["blocked"],
-                "skipped_test_cases": counters["skipped"],
-                "not_tested_test_cases": counters["not_tested"],
-            },
-            "execution_rate": (executed_test_cases / total_test_cases * 100) if total_test_cases else 0,
-            "status_percentages": status_percentages,
-            "overall_percentages": overall_percentages,
-            "test_cases": test_case_details,
-        }
 
     # Dashboard Analytics
     @app.post("/analytics/dashboard")
@@ -445,14 +428,10 @@ def register_analytics_dashboard_routes(app):
         if request.expires_in_days is not None and not 1 <= request.expires_in_days <= 365:
             raise HTTPException(status_code=400, detail="expires_in_days must be between 1 and 365")
         
-        # Create report content
-        report_content = {
-            "title": title,
-            "report_type": request.report_type,
-            "generated_at": datetime.now().isoformat(),
-            "generated_by": current_user.username,
-            "project_id": request.project_id
-        }
+        # Build a real analytics snapshot so the report actually carries data.
+        report_content = _build_shareable_report_content(
+            db, request.project_id, request.report_type, title, current_user.username
+        )
         
         # Set expiration date
         expires_at = None
@@ -505,16 +484,41 @@ def register_analytics_dashboard_routes(app):
         
         return get_shareable_reports(db, project_id, created_by, skip, limit)
 
-    @app.get("/analytics/shareable-reports/shared/{share_token}", response_model=schemas.ShareableReport)
+    @app.get("/analytics/shareable-reports/shared/{share_token}")
     def get_shared_report(
         share_token: str,
         db: Session = Depends(get_db)
     ):
+        """Public viewer endpoint. Returns the report with regenerated content for
+        legacy stub reports, enforces active/expiry, and tracks views."""
         report = get_shareable_report_by_token(db, share_token)
-        if not report:
+        if not report or not report.is_active:
             raise HTTPException(status_code=404, detail="Shared report not found or expired")
-        
-        return report
+        if report.expires_at and report.expires_at < datetime.now(report.expires_at.tzinfo):
+            raise HTTPException(status_code=410, detail="Shareable report has expired")
+
+        # Legacy reports stored only a metadata stub — regenerate a live snapshot.
+        content = report.report_content or {}
+        if "kpis" not in content and "summary" not in content:
+            content = _build_shareable_report_content(
+                db, report.project_id, report.report_type, report.title, "system"
+            )
+
+        # view_count and last_viewed are already incremented inside
+        # get_shareable_report_by_token, so no manual bump needed here.
+
+        return {
+            "id": report.id,
+            "project_id": report.project_id,
+            "title": report.title,
+            "report_type": report.report_type,
+            "report_content": content,
+            "access_level": report.access_level,
+            "shared_with": report.shared_with or [],
+            "view_count": report.view_count,
+            "expires_at": report.expires_at.isoformat() if report.expires_at else None,
+            "generated_at": report.created_at.isoformat() if report.created_at else None,
+        }
 
     @app.get("/analytics/shareable-reports/{report_id}/download")
     def download_shareable_report(
@@ -533,14 +537,49 @@ def register_analytics_dashboard_routes(app):
         if report.expires_at and report.expires_at < datetime.now(report.expires_at.tzinfo):
             raise HTTPException(status_code=410, detail="Shareable report has expired")
 
+        # Legacy reports were stored with only a metadata stub (no analytics).
+        # Regenerate a live snapshot for those so the download still has data.
+        content = report.report_content or {}
+        if "kpis" not in content and "summary" not in content:
+            content = _build_shareable_report_content(
+                db, report.project_id, report.report_type, report.title, "system"
+            )
+
+        # Track downloads so view_count and last_viewed are meaningful, and audit
+        # who pulled the report (compliance trail).
+        try:
+            report.view_count = (report.view_count or 0) + 1
+            report.last_viewed = datetime.now()
+            db.commit()
+        except Exception as exc:
+            print(f"Failed to record view for shareable report {report.id}: {exc}")
+            db.rollback()
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            from ..models import AuditAction, EntityType
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=current_user.id,
+                action=AuditAction.EXECUTE.value,
+                entity_type=EntityType.SHAREABLE_REPORT.value,
+                entity_id=report.id,
+                project_id=report.project_id,
+                description=f"Shareable report downloaded: {report.title}",
+            ))
+        except Exception as exc:
+            print(f"Failed to write audit for shareable report download: {exc}")
+
         return {
             "id": report.id,
             "project_id": report.project_id,
             "title": report.title,
             "report_type": report.report_type,
-            "report_content": report.report_content,
+            "report_content": content,
             "access_level": report.access_level,
             "shared_with": report.shared_with or [],
+            "view_count": report.view_count,
+            "expires_at": report.expires_at.isoformat() if report.expires_at else None,
             "generated_at": report.created_at.isoformat() if report.created_at else None,
         }
 
@@ -589,7 +628,14 @@ def register_analytics_dashboard_routes(app):
     ):
         if not rbac.has_permission(current_user, "write", analysis.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
+        # The creator is recorded as the discoverer regardless of any client input.
+        analysis.discovered_by = current_user.id
+        if not (analysis.analysis_title or "").strip():
+            raise HTTPException(status_code=400, detail="analysis_title is required")
+        if not (analysis.root_cause or "").strip():
+            raise HTTPException(status_code=400, detail="root_cause is required")
+
         db_analysis = create_root_cause_analysis(db=db, analysis=analysis)
         
         # Create audit trail
@@ -604,7 +650,7 @@ def register_analytics_dashboard_routes(app):
                 entity_type=EntityType.ROOT_CAUSE_ANALYSIS.value,
                 entity_id=db_analysis.id,
                 project_id=db_analysis.project_id,
-                description=f"Root cause analysis created: {analysis.title or 'Untitled'}",
+                description=f"Root cause analysis created: {analysis.analysis_title or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
@@ -632,34 +678,71 @@ def register_analytics_dashboard_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        db_analysis = get_root_cause_analyses(db, analysis_id, 0, 1)
+        db_analysis = get_root_cause_analysis(db, analysis_id)
         if not db_analysis:
             raise HTTPException(status_code=404, detail="Root cause analysis not found")
 
-        if not rbac.has_permission(current_user, "write", db_analysis[0].project_id, db):
+        if not rbac.has_permission(current_user, "write", db_analysis.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_analysis = update_root_cause_analysis(db, analysis_id=analysis_id, analysis=analysis)
-        
+        # Don't let clients overwrite identity fields.
+        for protected in ("id", "project_id", "discovered_by", "created_at"):
+            analysis.pop(protected, None)
+
+        updated = update_root_cause_analysis(db, analysis_id=analysis_id, analysis_data=analysis)
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
             from ..models import AuditAction, EntityType
             audit_service = get_audit_service(db)
-            audit_data = AuditTrailCreate(
+            audit_service.create_audit_trail(AuditTrailCreate(
                 user_id=current_user.id if current_user else None,
                 action=AuditAction.UPDATE.value,
                 entity_type=EntityType.ROOT_CAUSE_ANALYSIS.value,
                 entity_id=analysis_id,
-                project_id=db_analysis[0].project_id,
-                description=f"Root cause analysis updated: {db_analysis[0].title or 'Untitled'}",
-            )
-            audit_service.create_audit_trail(audit_data)
+                project_id=updated.project_id,
+                description=f"Root cause analysis updated: {updated.analysis_title or 'Untitled'}",
+            ))
         except Exception as e:
             print(f"Failed to create audit trail for root cause analysis update: {e}")
 
-        return db_analysis
+        return updated
+
+    @app.delete("/analytics/root-cause-analysis/{analysis_id}")
+    def delete_root_cause_analysis_endpoint(
+        analysis_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        db_analysis = get_root_cause_analysis(db, analysis_id)
+        if not db_analysis:
+            raise HTTPException(status_code=404, detail="Root cause analysis not found")
+        if not rbac.has_permission(current_user, "delete", db_analysis.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        analysis_title = db_analysis.analysis_title
+        project_id = db_analysis.project_id
+        delete_root_cause_analysis(db, analysis_id=analysis_id)
+
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            from ..models import AuditAction, EntityType
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=current_user.id if current_user else None,
+                action=AuditAction.DELETE.value,
+                entity_type=EntityType.ROOT_CAUSE_ANALYSIS.value,
+                entity_id=analysis_id,
+                project_id=project_id,
+                description=f"Root cause analysis deleted: {analysis_title or 'Untitled'}",
+            ))
+        except Exception as e:
+            print(f"Failed to create audit trail for root cause analysis deletion: {e}")
+
+        return {"message": "Root cause analysis deleted successfully"}
 
     # Dashboard Widgets
     @app.post("/analytics/dashboard-widgets", response_model=schemas.DashboardWidget)
@@ -696,15 +779,13 @@ def register_analytics_dashboard_routes(app):
     @app.get("/analytics/dashboard-widgets/{project_id}", response_model=List[schemas.DashboardWidget])
     def get_dashboard_widgets_endpoint(
         project_id: int,
-        skip: int = 0,
-        limit: int = 100,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return get_dashboard_widgets(db, project_id, skip, limit)
+
+        return get_dashboard_widgets(db, current_user.id, project_id)
 
     @app.put("/analytics/dashboard-widgets/{widget_id}", response_model=schemas.DashboardWidget)
     def update_dashboard_widget_endpoint(
@@ -713,14 +794,14 @@ def register_analytics_dashboard_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        db_widget = get_dashboard_widgets(db, widget_id, 0, 1)
+        db_widget = get_dashboard_widget(db, widget_id)
         if not db_widget:
             raise HTTPException(status_code=404, detail="Dashboard widget not found")
 
-        if not rbac.has_permission(current_user, "write", db_widget[0].project_id, db):
+        if not rbac.has_permission(current_user, "write", db_widget.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_widget = update_dashboard_widget(db, widget_id=widget_id, widget=widget)
+        db_widget = update_dashboard_widget(db, widget_id=widget_id, widget_data=widget)
         
         # Create audit trail
         try:
@@ -733,8 +814,8 @@ def register_analytics_dashboard_routes(app):
                 action=AuditAction.UPDATE.value,
                 entity_type=EntityType.DASHBOARD_WIDGET.value,
                 entity_id=widget_id,
-                project_id=db_widget[0].project_id,
-                description=f"Dashboard widget updated: {db_widget[0].widget_type or 'Untitled'}",
+                project_id=db_widget.project_id,
+                description=f"Dashboard widget updated: {db_widget.widget_type or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
@@ -754,7 +835,7 @@ def register_analytics_dashboard_routes(app):
         """Get project-scoped test case activity over time."""
         from sqlalchemy import func
         from datetime import datetime, timedelta
-        from ..models import TestCase, TestResult, TestSuite, TestRun
+        from ..models import TestCase, TestResult, TestSuite, TestRun, AuditTrail, AuditAction, EntityType
         
         if granularity != "day":
             raise HTTPException(status_code=400, detail="Only day granularity is currently supported")
@@ -803,9 +884,23 @@ def register_analytics_dashboard_routes(app):
             TestResult.executed_at.isnot(None)
         ).group_by(func.date(TestResult.executed_at)).all()
         
+        # Test cases deleted are soft-deletes with no per-row timestamp, so the
+        # delete date is sourced from the audit trail (action=DELETE, entity=test_case).
+        test_cases_deleted = db.query(
+            func.date(AuditTrail.created_at).label('date'),
+            func.count(AuditTrail.id).label('count')
+        ).filter(
+            AuditTrail.project_id == project_id,
+            AuditTrail.entity_type == EntityType.TEST_CASE,
+            AuditTrail.action == AuditAction.DELETE,
+            AuditTrail.created_at >= start_dt,
+            AuditTrail.created_at <= end_dt,
+        ).group_by(func.date(AuditTrail.created_at)).all()
+
         added_dict = {str(item.date): item.count for item in test_cases_added}
         modified_dict = {str(item.date): item.count for item in test_cases_modified}
         executed_dict = {str(item.date): item.count for item in test_executions}
+        deleted_dict = {str(item.date): item.count for item in test_cases_deleted}
         
         activity_data = []
         current_date = start_dt.date()
@@ -817,7 +912,7 @@ def register_analytics_dashboard_routes(app):
                 'added': added_dict.get(date_str, 0),
                 'modified': modified_dict.get(date_str, 0),
                 'executed': executed_dict.get(date_str, 0),
-                'deleted': 0
+                'deleted': deleted_dict.get(date_str, 0)
             })
             current_date += timedelta(days=1)
         
@@ -844,17 +939,17 @@ def register_analytics_dashboard_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        db_widget = get_dashboard_widgets(db, widget_id, 0, 1)
+        db_widget = get_dashboard_widget(db, widget_id)
         if not db_widget:
             raise HTTPException(status_code=404, detail="Dashboard widget not found")
 
-        if not rbac.has_permission(current_user, "delete", db_widget[0].project_id, db):
+        if not rbac.has_permission(current_user, "delete", db_widget.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion
-        widget_id_val = db_widget[0].id
-        widget_type = db_widget[0].widget_type
-        project_id = db_widget[0].project_id
+        widget_id_val = db_widget.id
+        widget_type = db_widget.widget_type
+        project_id = db_widget.project_id
 
         delete_dashboard_widget(db, widget_id=widget_id)
 

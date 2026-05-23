@@ -2885,7 +2885,8 @@ class RootCauseAnalysisCreate(RootCauseAnalysisBase):
     requirement_id: Optional[int] = None
     test_case_id: Optional[int] = None
     defect_id: Optional[int] = None
-    discovered_by: int
+    # Set server-side from the authenticated user; clients do not supply it.
+    discovered_by: Optional[int] = None
 
 
 class RootCauseAnalysis(RootCauseAnalysisBase):

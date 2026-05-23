@@ -1936,6 +1936,18 @@ def update_root_cause_analysis(db: Session, analysis_id: int, analysis_data: dic
     return db_analysis
 
 
+def get_root_cause_analysis(db: Session, analysis_id: int):
+    return db.query(RootCauseAnalysis).filter(RootCauseAnalysis.id == analysis_id).first()
+
+
+def delete_root_cause_analysis(db: Session, analysis_id: int):
+    db_analysis = db.query(RootCauseAnalysis).filter(RootCauseAnalysis.id == analysis_id).first()
+    if db_analysis:
+        db.delete(db_analysis)
+        safe_commit(db)
+    return db_analysis
+
+
 # Dashboard Widgets CRUD
 def create_dashboard_widget(db: Session, widget: DashboardWidgetCreate):
     db_widget = DashboardWidget(**widget.model_dump())
@@ -1950,6 +1962,10 @@ def get_dashboard_widgets(db: Session, user_id: int, project_id: int = None):
     if project_id:
         query = query.filter(DashboardWidget.project_id == project_id)
     return query.order_by(DashboardWidget.position_y, DashboardWidget.position_x).all()
+
+
+def get_dashboard_widget(db: Session, widget_id: int):
+    return db.query(DashboardWidget).filter(DashboardWidget.id == widget_id).first()
 
 
 def update_dashboard_widget(db: Session, widget_id: int, widget_data: dict):
@@ -2142,11 +2158,14 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
     
     prev_cycle_time = sum(prev_cycle_times) / len(prev_cycle_times) if prev_cycle_times else 0
     
-    # Calculate previous defect density
+    # Calculate previous defect density.
+    # Defect density is a cumulative metric (all defects / all test cases), so the
+    # previous-period baseline must also be cumulative: every defect created before
+    # the current period began. Comparing cumulative-now vs cumulative-then yields a
+    # meaningful trend instead of mixing an all-time count with a single-period count.
     from .models import Defect
     prev_defects = db.query(Defect).filter(
         Defect.project_id == project_id,
-        Defect.created_at >= start_date,
         Defect.created_at < end_date
     ).count()
     prev_defect_density = (prev_defects / total_test_cases) if total_test_cases > 0 else 0
@@ -2181,11 +2200,10 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
         TestResult.executed_at >= today_start
     ).count()
     
-    # Get defects found (could be from a defects table or failed tests)
-    defects_found_today = db.query(TestResult).join(TestRun).filter(
-        TestRun.project_id == project_id,
-        TestResult.executed_at >= today_start,
-        TestResult.status.in_(['fail', 'failed'])
+    # Get defects logged today from the defects table (actual defects, not failed runs)
+    defects_found_today = db.query(Defect).filter(
+        Defect.project_id == project_id,
+        Defect.created_at >= today_start
     ).count()
     
     # Get team performance data for the selected period. Prefer actual executors; fallback to assigned runs.
@@ -2215,13 +2233,26 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
         TestCase.status.in_(['pending_review', 'draft'])
     ).count()
     
-    # Release deadline - database doesn't have target_end_date column in test_plans
-    # Return N/A until database schema is updated
+    # Release deadline - derived from the nearest upcoming, not-yet-finished milestone.
     release_deadline = "N/A"
+    try:
+        from .models import Milestone, MilestoneStatus
+        upcoming_milestone = db.query(Milestone).filter(
+            Milestone.project_id == project_id,
+            Milestone.target_date.isnot(None),
+            Milestone.target_date >= datetime.now(),
+            Milestone.status.notin_([MilestoneStatus.COMPLETED, MilestoneStatus.CANCELLED]),
+        ).order_by(Milestone.target_date.asc()).first()
+        if upcoming_milestone and upcoming_milestone.target_date:
+            release_deadline = upcoming_milestone.target_date.strftime("%Y-%m-%d")
+    except Exception as exc:
+        print(f"Could not determine release deadline for project {project_id}: {exc}")
+        release_deadline = "N/A"
     
     return {
         "project_id": project_id,
         "time_period": time_period,
+        "generated_at": datetime.now().isoformat(),
         "kpi_data": {
             "coverage": calculate_trend(kpis["coverage"], previous_kpis["coverage"]),
             "passRate": calculate_trend(kpis["pass_rate"], previous_kpis["pass_rate"]),

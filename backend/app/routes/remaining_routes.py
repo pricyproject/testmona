@@ -2,9 +2,9 @@
 Remaining routes for execution environments, additional analytics endpoints, and audit trails.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 import re
 
@@ -113,18 +113,38 @@ def register_remaining_routes(app):
         covered_requirements = len([requirement_id for requirement_id, linked_ids in linked_test_case_ids.items() if linked_ids])
         coverage_percentage = (covered_requirements / total_requirements * 100) if total_requirements else 0
 
-        priority_definitions = db.query(PriorityDefinition).filter(PriorityDefinition.is_active == True).order_by(PriorityDefinition.value.desc()).all()
-        priority_names = [priority.name.lower() for priority in priority_definitions] or ["critical", "high", "medium", "low"]
-        priority_coverage = {priority_name: 0 for priority_name in priority_names}
+        # Build priority buckets from the priority values actually carried by the
+        # project's requirements. The PriorityDefinition table is not authoritative
+        # here: a requirement's priority (e.g. "high") may not exist as an active
+        # PriorityDefinition, and keying off the definitions silently dropped those
+        # requirements from the report. Fall back to the standard set when empty.
         linked_requirement_ids = {requirement_id for requirement_id, linked_ids in linked_test_case_ids.items() if linked_ids}
+        priority_order = ["critical", "high", "medium", "low"]
+        present_priorities = []
+        for requirement in requirements:
+            name = str(enum_value(requirement.priority) or "").strip().lower()
+            if name and name not in present_priorities:
+                present_priorities.append(name)
+        priority_names = sorted(
+            present_priorities,
+            key=lambda name: priority_order.index(name) if name in priority_order else len(priority_order),
+        ) or priority_order
+        priority_coverage = {}
         for priority_name in priority_names:
             priority_requirements = [
                 requirement for requirement in requirements
-                if str(enum_value(requirement.priority) or "").lower() == priority_name
+                if str(enum_value(requirement.priority) or "").strip().lower() == priority_name
             ]
-            if priority_requirements:
-                covered_priority = len([requirement for requirement in priority_requirements if requirement.id in linked_requirement_ids])
-                priority_coverage[priority_name] = round((covered_priority / len(priority_requirements)) * 100, 2)
+            covered_priority = len([
+                requirement for requirement in priority_requirements
+                if requirement.id in linked_requirement_ids
+            ])
+            total_priority = len(priority_requirements)
+            priority_coverage[priority_name] = {
+                "coverage": round((covered_priority / total_priority) * 100, 2) if total_priority else 0,
+                "covered": covered_priority,
+                "total": total_priority,
+            }
 
         return {
             "id": f"COV-{datetime.now().strftime('%Y%m%d%H%M%S')}" if generated else "COV-DYNAMIC",
@@ -390,51 +410,73 @@ def register_remaining_routes(app):
     def get_granular_insights_get(
         project_id: int,
         filter_type: str = "all",
+        time_range: str = "7d",
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        """Get granular insights for a project"""
+        """Get granular quality insights with real period-over-period trends."""
+        if time_range not in {"24h", "7d", "30d", "90d"}:
+            raise HTTPException(status_code=400, detail="time_range must be one of 24h, 7d, 30d, or 90d")
+        if filter_type not in {"all", "failed", "slow"}:
+            raise HTTPException(status_code=400, detail="filter_type must be one of all, failed, or slow")
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        # Use real KPI data from CRUD
-        kpis = crud.calculate_project_kpis(db, project_id, "7d")
-        
+
+        # generate_dashboard_analytics already computes each metric together with a
+        # real trend (up/down/stable + change) by comparing the selected period to
+        # the one before it, so the insights carry genuine trends instead of "stable".
+        analytics = crud.generate_dashboard_analytics(db, project_id, time_range)
+        kpi = analytics["kpi_data"]
+
+        def insight(category, metric, metric_key, suffix, detail_unit):
+            data = kpi.get(metric_key) or {"current": 0, "trend": "stable", "change": 0}
+            change = data.get("change", 0)
+            return {
+                "category": category,
+                "metric": metric,
+                "value": f"{data.get('current', 0)}{suffix}",
+                "trend": data.get("trend", "stable"),
+                "change": change,
+                "details": f"{change}{detail_unit} vs the previous period",
+            }
+
+        insights = [
+            insight("Test Coverage", "Requirement Coverage", "coverage", "%", "%"),
+            insight("Test Execution", "Pass Rate", "passRate", "%", "%"),
+            insight("Test Execution", "Failure Rate", "failureTrends", "%", "%"),
+            insight("Test Stability", "Flakiness", "flakiness", "%", "%"),
+            insight("Test Execution", "Cycle Time", "cycleTime", "h", "h"),
+            insight("Defect Analysis", "Defect Density", "defectDensity", "", ""),
+        ]
+
+        # filter_type narrows the insights to the metrics relevant to that view.
+        if filter_type == "failed":
+            insights = [i for i in insights if i["metric"] in {"Failure Rate", "Flakiness"}]
+        elif filter_type == "slow":
+            insights = [i for i in insights if i["metric"] == "Cycle Time"]
+
         return {
             "project_id": project_id,
             "filter_type": filter_type,
-            "insights": [
-                {
-                    "category": "Test Execution",
-                    "metric": "Average Execution Time",
-                    "value": f"{kpis['avg_execution_time']}h",
-                    "trend": "stable",
-                    "details": "Based on recent test runs"
-                },
-                {
-                    "category": "Defect Analysis",
-                    "metric": "Defect Density",
-                    "value": str(kpis['defect_density']),
-                    "trend": "stable",
-                    "details": f"Defects per {kpis['total_tests']} tests"
-                },
-                {
-                    "category": "Test Coverage",
-                    "metric": "Coverage",
-                    "value": f"{kpis['coverage']}%",
-                    "trend": "stable",
-                    "details": f"{kpis['passed_tests']} passed out of {kpis['total_tests']}"
-                }
-            ]
+            "time_range": time_range,
+            "insights": insights,
         }
 
     @app.get("/analytics/traceability-matrix")
     def get_traceability_matrix_get(
         project_id: int,
+        priority: Optional[str] = Query(None, description="Filter by requirement priority (low/medium/high/critical)"),
+        coverage_status: Optional[str] = Query(None, description="'covered' or 'uncovered'"),
+        test_status: Optional[str] = Query(None, description="Show requirements that have a TC with this status"),
+        search: Optional[str] = Query(None, description="Substring match on requirement title or key"),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=200),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        """Get a detailed traceability matrix for the reports page, including latest execution run IDs."""
+        """Detailed traceability matrix with server-side filters and pagination.
+        Headline coverage numbers (total/covered/uncovered/coverage_percentage)
+        are always reported for the FULL project so filters don't distort them."""
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -514,13 +556,49 @@ def register_remaining_routes(app):
             })
 
         total_requirements = len(requirements)
+
+        # Apply filters (server-side so the UI stays fast on big projects).
+        filtered = detailed_requirements
+        if priority:
+            normalized_priority = priority.strip().lower()
+            filtered = [
+                r for r in filtered
+                if str(r["requirement_priority"] or "").strip().lower() == normalized_priority
+            ]
+        if coverage_status:
+            cs = coverage_status.strip().lower()
+            if cs == "covered":
+                filtered = [r for r in filtered if r["total_test_cases"] > 0]
+            elif cs == "uncovered":
+                filtered = [r for r in filtered if r["total_test_cases"] == 0]
+        if test_status:
+            ts = test_status.strip().lower()
+            filtered = [
+                r for r in filtered
+                if any(tc["status"] == ts for tc in r["test_cases"])
+            ]
+        if search:
+            q = search.strip().lower()
+            if q:
+                filtered = [
+                    r for r in filtered
+                    if q in str(r["requirement_title"] or "").lower()
+                    or q in str(r["requirement_key"] or "").lower()
+                ]
+
+        matched_requirements = len(filtered)
+        page = filtered[skip:skip + limit]
+
         return {
             "project_id": project_id,
             "total_requirements": total_requirements,
             "covered_requirements": covered_requirements,
             "uncovered_requirements": max(total_requirements - covered_requirements, 0),
             "coverage_percentage": round((covered_requirements / total_requirements * 100) if total_requirements else 0, 2),
-            "requirements": detailed_requirements,
+            "matched_requirements": matched_requirements,
+            "skip": skip,
+            "limit": limit,
+            "requirements": page,
         }
 
     @app.get("/analytics/coverage-reports")
@@ -629,17 +707,22 @@ def register_remaining_routes(app):
         
         # Use real root cause analyses from CRUD
         analyses = crud.get_root_cause_analyses(db, project_id=project_id)
-        
-        # Convert to response format
+
+        # Convert to response format using the actual RootCauseAnalysis model fields
         return [
             {
-                "id": f"RCA-{analysis.id}",
-                "title": analysis.title or f"Root Cause Analysis {analysis.id}",
-                "created_at": analysis.created_at.isoformat() if analysis.created_at else datetime.now().isoformat(),
-                "defect_id": analysis.defect_id,
+                "id": analysis.id,
+                "analysis_title": analysis.analysis_title,
                 "root_cause": analysis.root_cause,
+                "impact_assessment": analysis.impact_assessment,
+                "resolution_time_hours": analysis.resolution_time_hours,
+                "fix_commit_hash": analysis.fix_commit_hash,
+                "status": analysis.status,
                 "severity": analysis.severity,
-                "recommendations": analysis.recommendations or []
+                "defect_id": analysis.defect_id,
+                "requirement_id": analysis.requirement_id,
+                "test_case_id": analysis.test_case_id,
+                "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
             }
             for analysis in analyses
         ]
