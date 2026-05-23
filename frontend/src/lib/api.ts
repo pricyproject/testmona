@@ -742,7 +742,7 @@ export const analyticsAPI = {
     const response = await api.get(`/analytics/dashboard/analytics${params}`);
     return response.data;
   },
-  getGranularInsights: async (params: { project_id: number; filter_type: string }) => {
+  getGranularInsights: async (params: { project_id: number; filter_type: string; time_range?: string }) => {
     const response = await api.get(`/analytics/granular-insights`, { params });
     return response.data;
   },
@@ -754,12 +754,57 @@ export const analyticsAPI = {
     const response = await api.post('/analytics/shareable-reports', report);
     return response.data;
   },
+  downloadShareableReport: async (reportId: number) => {
+    const response = await api.get(`/analytics/shareable-reports/${reportId}/download`);
+    return response.data;
+  },
+  // Dashboard widget persistence — used so layout syncs across devices for a user.
+  getDashboardWidgets: async (projectId: number) => {
+    const response = await api.get(`/analytics/dashboard-widgets/${projectId}`);
+    return response.data;
+  },
+  createDashboardWidget: async (widget: any) => {
+    const response = await api.post('/analytics/dashboard-widgets', widget);
+    return response.data;
+  },
+  updateDashboardWidget: async (widgetId: number, widget: any) => {
+    const response = await api.put(`/analytics/dashboard-widgets/${widgetId}`, widget);
+    return response.data;
+  },
   getRootCauseAnalyses: async (projectId: number) => {
     const response = await api.get(`/analytics/root-cause-analyses?project_id=${projectId}`);
     return response.data;
   },
-  getTraceabilityMatrix: async (projectId: number) => {
-    const response = await api.get(`/analytics/traceability-matrix?project_id=${projectId}`);
+  createRootCauseAnalysis: async (analysis: any) => {
+    const response = await api.post('/analytics/root-cause-analysis', analysis);
+    return response.data;
+  },
+  updateRootCauseAnalysis: async (analysisId: number, analysis: any) => {
+    const response = await api.put(`/analytics/root-cause-analysis/${analysisId}`, analysis);
+    return response.data;
+  },
+  deleteRootCauseAnalysis: async (analysisId: number) => {
+    const response = await api.delete(`/analytics/root-cause-analysis/${analysisId}`);
+    return response.data;
+  },
+  // Public viewer — works without authentication (the share token gates access).
+  getSharedReport: async (shareToken: string) => {
+    const response = await api.get(`/analytics/shareable-reports/shared/${shareToken}`);
+    return response.data;
+  },
+  getTraceabilityMatrix: async (
+    projectId: number,
+    filters?: { priority?: string; coverage_status?: string; test_status?: string; search?: string; skip?: number; limit?: number },
+  ) => {
+    const params: Record<string, string> = { project_id: String(projectId) };
+    if (filters) {
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          params[key] = String(value);
+        }
+      });
+    }
+    const response = await api.get(`/analytics/traceability-matrix`, { params });
     return response.data;
   },
   getCoverageReports: async (projectId: number) => {
