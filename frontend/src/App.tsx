@@ -33,6 +33,7 @@ const TestRunDetail = lazyPage(() => import('@/pages/TestRunDetail'), 'TestRunDe
 const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunReport');
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
 const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
+const SharedReportViewer = lazyPage(() => import('@/pages/SharedReportViewer'), 'SharedReportViewer');
 const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
 const CustomFields = lazyPage(() => import('@/pages/CustomFields'), 'CustomFields');
 const SharedSteps = lazyPage(() => import('@/pages/SharedSteps'), 'SharedSteps');
@@ -98,6 +99,18 @@ function AppWithRouter() {
     );
   }
   
+  // The shared-report viewer is fully public and should render without the app
+  // chrome (no Layout, no auth gate) in either auth state.
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/shared-reports/')) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/shared-reports/:token" element={<SharedReportViewer />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
       <Suspense fallback={<PageFallback />}>
