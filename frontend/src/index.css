@@ -4,6 +4,9 @@
 /* Import Noto Sans Arabic font for Arabic */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@100;200;300;400;500;600;700;800;900&display=swap');
 
+/* highlight.js theme for ContentEditor code blocks */
+@import 'highlight.js/styles/github-dark.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -1402,4 +1405,77 @@ html[data-ui-density="compact"] {
 .dark [data-rich-text-editor] .rich-text-preview ul[data-type="taskList"] li[data-checked="true"] > label {
   background: #3b82f6;
   border-color: #3b82f6;
+}
+
+/* ContentEditor — placeholder + write-area focus polish */
+[data-content-editor] .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+[dir="rtl"] [data-content-editor] .ProseMirror p.is-editor-empty:first-child::before {
+  float: right;
+}
+
+[data-content-editor] .ProseMirror {
+  outline: none;
+  caret-color: #2563eb;
+}
+
+[data-content-editor] .ProseMirror :first-child {
+  margin-top: 0;
+}
+
+[data-content-editor] .ProseMirror :last-child {
+  margin-bottom: 0;
+}
+
+[data-content-editor] .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid #2563eb;
+  border-radius: 0.5rem;
+}
+
+/* ContentEditor — code blocks (lowlight + highlight.js) */
+[data-content-editor] .ProseMirror pre,
+[data-content-editor] .rich-text-preview pre {
+  background: #0d1117;
+  color: #e6edf3;
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+[data-content-editor] .ProseMirror pre code,
+[data-content-editor] .rich-text-preview pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  white-space: pre;
+}
+
+[data-content-editor] .ProseMirror code:not(pre code),
+[data-content-editor] .rich-text-preview code:not(pre code) {
+  background: rgba(148, 163, 184, 0.18);
+  color: #0f172a;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.dark [data-content-editor] .ProseMirror code:not(pre code),
+.dark [data-content-editor] .rich-text-preview code:not(pre code) {
+  background: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
 }

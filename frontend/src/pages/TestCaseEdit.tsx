@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { MarkdownEditor } from '@/components/ui/markdown-editor';
+import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw } from 'lucide-react';
 import { testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI } from '@/lib/api';
@@ -740,22 +740,24 @@ export function TestCaseEdit() {
 
           <div>
             <Label htmlFor="description">{t('description')}</Label>
-            <MarkdownEditor
+            <ContentEditor
               value={formData.description}
               onChange={(value) => handleInputChange('description', value)}
               placeholder={t('enterTestCaseDescription')}
-              rows={3}
+              format="markdown"
+              minHeight="120px"
               className="mt-1"
             />
           </div>
 
           <div>
             <Label htmlFor="preconditions">{t('preconditions')}</Label>
-            <MarkdownEditor
+            <ContentEditor
               value={formData.preconditions}
               onChange={(value) => handleInputChange('preconditions', value)}
               placeholder={t('describePreconditions')}
-              rows={3}
+              format="markdown"
+              minHeight="120px"
               className="mt-1"
             />
           </div>
@@ -903,11 +905,12 @@ export function TestCaseEdit() {
               </div>
             </div>
             {!formData.is_multistep ? (
-              <MarkdownEditor
+              <ContentEditor
                 value={formData.steps}
                 onChange={(value) => handleInputChange('steps', value)}
                 placeholder={t('stepOneTwoThree')}
-                rows={5}
+                format="markdown"
+                minHeight="180px"
                 className="mt-1"
               />
             ) : (
@@ -982,11 +985,12 @@ export function TestCaseEdit() {
           {!formData.is_multistep && (
             <div>
               <Label htmlFor="expected_result">{t('expectedResult')}</Label>
-              <MarkdownEditor
+              <ContentEditor
                 value={formData.expected_result}
                 onChange={(value) => handleInputChange('expected_result', value)}
                 placeholder={t('describeExpectedOutcome')}
-                rows={4}
+                format="markdown"
+                minHeight="150px"
                 className="mt-1"
               />
             </div>

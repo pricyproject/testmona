@@ -83,7 +83,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
-import { MarkdownEditor } from '@/components/ui/markdown-editor';
+import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { customFieldsAPI } from '@/lib/api';
 import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
@@ -3239,20 +3239,22 @@ export function TestCases() {
                   <h3 className="text-lg font-semibold">{t('testDetails')}</h3>
                   <div className="space-y-2">
                     <Label htmlFor="description">{t('testCaseDescription')}</Label>
-                    <MarkdownEditor
+                    <ContentEditor
                       value={testCaseForm.description}
                       onChange={(value) => handleFieldChange('description', value)}
                       placeholder={t('describeTestCase')}
-                      rows={3}
+                      format="markdown"
+                      minHeight="120px"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="precondition">{t('fieldPreconditions')}</Label>
-                    <MarkdownEditor
+                    <ContentEditor
                       value={testCaseForm.preconditions}
                       onChange={(value) => handleFieldChange('preconditions', value)}
                       placeholder={t('describePreconditions')}
-                      rows={3}
+                      format="markdown"
+                      minHeight="120px"
                     />
                   </div>
                   <div className="space-y-2">
@@ -3283,11 +3285,12 @@ export function TestCases() {
                       </div>
                     </div>
                     {!testCaseForm.is_multistep ? (
-                      <MarkdownEditor
+                      <ContentEditor
                         value={testCaseForm.steps}
                         onChange={(value) => handleFieldChange('steps', value)}
                         placeholder={t('stepPlaceholder')}
-                        rows={5}
+                        format="markdown"
+                        minHeight="180px"
                       />
                     ) : (
                       <div className="space-y-4">
@@ -3374,11 +3377,12 @@ export function TestCases() {
                   {!testCaseForm.is_multistep && (
                     <div className="space-y-2">
                       <Label htmlFor="expected-results">{t('fieldExpectedResult')}</Label>
-                      <MarkdownEditor
+                      <ContentEditor
                         value={testCaseForm.expected_result}
                         onChange={(value) => handleFieldChange('expected_result', value)}
                         placeholder={t('describeExpectedOutcome')}
-                        rows={3}
+                        format="markdown"
+                        minHeight="150px"
                       />
                     </div>
                   )}

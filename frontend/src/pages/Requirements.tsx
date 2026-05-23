@@ -38,7 +38,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI } from '@/lib/api';
 import { Requirement, RequirementCreate, RequirementUpdate } from '@/types';
-import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { ContentEditor } from '@/components/ui/content-editor';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { diffWords } from 'diff';
 
@@ -922,13 +922,13 @@ export function Requirements() {
           </div>
         </div>
       ) : (
-        <RichTextEditor
+        <ContentEditor
           value={reqAcceptanceCriteria}
           onChange={setReqAcceptanceCriteria}
           placeholder={t('enterAcceptanceCriteria')}
-          mentions={[{ id: 'current-user', label: 'You' }]}
+          format="html"
           dir={isRTL ? 'rtl' : 'ltr'}
-          className="min-h-[170px]"
+          minHeight="170px"
         />
       )}
       <p className="text-xs text-gray-500">
@@ -1033,13 +1033,13 @@ export function Requirements() {
         </Label>
         <span className="text-xs text-gray-500">{getPlainTextLength(reqDescription)} {t('chars')}</span>
       </div>
-      <RichTextEditor
+      <ContentEditor
         value={reqDescription}
         onChange={setReqDescription}
         placeholder={t('enterRequirementDescription')}
-        mentions={[{ id: 'current-user', label: 'You' }]}
+        format="html"
         dir={isRTL ? 'rtl' : 'ltr'}
-        className="min-h-[220px]"
+        minHeight="220px"
       />
       <p className="text-xs text-gray-500">{t('descriptionHelper')}</p>
     </div>

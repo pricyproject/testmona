@@ -23,7 +23,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { isGherkinText } from '@/components/requirements/gherkin';
-import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { ContentEditor } from '@/components/ui/content-editor';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
@@ -1375,12 +1375,13 @@ export function RequirementDetail() {
 
               <div className="space-y-2">
                 <Label>{t('description')}</Label>
-                <RichTextEditor
+                <ContentEditor
                   value={editForm.description}
                   onChange={(value) => setEditForm((current) => ({ ...current, description: value }))}
                   placeholder={t('enterRequirementDescription')}
+                  format="html"
                   dir={isRTL ? 'rtl' : 'ltr'}
-                  className="min-h-[200px]"
+                  minHeight="200px"
                 />
               </div>
 
@@ -1418,12 +1419,13 @@ export function RequirementDetail() {
                     </div>
                   </div>
                 ) : (
-                  <RichTextEditor
+                  <ContentEditor
                     value={editForm.acceptance_criteria}
                     onChange={(value) => setEditForm((current) => ({ ...current, acceptance_criteria: value }))}
                     placeholder={t('enterAcceptanceCriteria')}
+                    format="html"
                     dir={isRTL ? 'rtl' : 'ltr'}
-                    className="min-h-[160px]"
+                    minHeight="160px"
                   />
                 )}
                 <p className="text-xs text-slate-500">{t('acceptanceCriteriaHelper')}</p>
