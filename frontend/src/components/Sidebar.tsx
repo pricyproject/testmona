@@ -195,7 +195,7 @@ export function Sidebar({
         `}
       >
         {/* Sidebar Header */}
-        <div className={`flex items-center h-16 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 transition-all duration-300 ease-in-out ${
+        <div className={`flex items-center h-16 border-b border-gray-200 dark:border-gray-700 shrink-0 transition-all duration-300 ease-in-out ${
           showCollapsed ? 'justify-center px-2' : 'justify-between px-6'
         }`}>
           <Link
@@ -204,7 +204,7 @@ export function Sidebar({
             title={appName}
             className="flex items-center gap-2 overflow-hidden rounded-lg transition-opacity hover:opacity-80"
           >
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
               {appLogoUrl ? (
                 <img src={appLogoUrl} alt={appName} className="h-full w-full rounded-lg object-cover" />
               ) : (
@@ -262,7 +262,7 @@ export function Sidebar({
                             `}
                             title={showCollapsed ? item.disabledReason || item.name : item.disabledReason}
                           >
-                            <Icon className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out flex-shrink-0`} />
+                            <Icon className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out shrink-0`} />
                             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${
                               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'
                             }`}>
@@ -275,14 +275,14 @@ export function Sidebar({
                             className={`
                               group flex items-center py-2.5 text-sm font-medium rounded-lg transition-all duration-300 ease-in-out relative overflow-hidden
                               ${isItemActive
-                                ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700 shadow-sm dark:bg-blue-900/20 dark:text-blue-400'
-                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
+                                ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700 shadow-xs dark:bg-blue-900/20 dark:text-blue-400'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:shadow-xs dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
                               }
                               ${showCollapsed ? 'justify-center px-1' : 'px-3'}
                             `}
                             title={showCollapsed ? item.name : undefined}
                           >
-                            <Icon className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out flex-shrink-0`} />
+                            <Icon className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out shrink-0`} />
                             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${
                               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'
                             }`}>
@@ -298,9 +298,9 @@ export function Sidebar({
                 {/* Inline Group Separator - subtle dot line */}
                 {!showCollapsed && groupIndex < navigation.length - 1 && (
                   <div className="flex items-center justify-center py-2">
-                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent dark:via-gray-600"></div>
+                    <div className="flex-1 h-px bg-linear-to-r from-transparent via-gray-300 to-transparent dark:via-gray-600"></div>
                     <div className="w-1 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-2"></div>
-                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gray-300 to-transparent dark:via-gray-600"></div>
+                    <div className="flex-1 h-px bg-linear-to-r from-transparent via-gray-300 to-transparent dark:via-gray-600"></div>
                   </div>
                 )}
               </div>
@@ -309,7 +309,7 @@ export function Sidebar({
         </nav>
 
         {/* Sidebar Footer */}
-        <div className={`flex-shrink-0 border-t border-gray-200 dark:border-gray-700 space-y-3 transition-all duration-300 ease-in-out ${
+        <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 space-y-3 transition-all duration-300 ease-in-out ${
           showCollapsed ? 'p-2' : 'p-4'
         }`}>
           {/* Collapse/Expand button for desktop */}
@@ -340,7 +340,7 @@ export function Sidebar({
             onClick={logout}
             title={showCollapsed ? t('logout') : undefined}
           >
-            <LogOut className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out flex-shrink-0`} />
+            <LogOut className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out shrink-0`} />
             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${
               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'
             }`}>

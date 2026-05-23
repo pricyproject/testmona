@@ -135,7 +135,7 @@ export function Navbar({
   const iconButtonClass = 'h-9 w-9 rounded-lg p-0 text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white';
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/80 shadow-sm backdrop-blur-md dark:border-gray-800 dark:bg-gray-900/80">
+    <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/80 shadow-xs backdrop-blur-md dark:border-gray-800 dark:bg-gray-900/80">
       <div className="mx-auto flex h-16 max-w-[2000px] items-center gap-3 px-3 sm:px-4 lg:px-6">
         {/* Left: navigation toggles + brand + breadcrumbs */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
@@ -167,12 +167,12 @@ export function Navbar({
               return (
                 <Fragment key={`${crumb.label}-${index}`}>
                   {index > 0 && (
-                    <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 text-gray-300 dark:text-gray-600 ${isRTL ? 'rotate-180' : ''}`} />
+                    <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-gray-300 dark:text-gray-600 ${isRTL ? 'rotate-180' : ''}`} />
                   )}
                   {crumb.href && !isLast ? (
                     <Link
                       to={crumb.href}
-                      className="flex-shrink-0 rounded px-1 font-medium text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                      className="shrink-0 rounded px-1 font-medium text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
                     >
                       {index === 0 ? (
                         <span className="flex items-center gap-1.5">
@@ -195,7 +195,7 @@ export function Navbar({
         </div>
 
         {/* Right: project selector + actions + user menu */}
-        <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {projects.length > 0 && (
             <>
               <div className="hidden max-w-[180px] sm:block lg:max-w-[240px]">
@@ -229,7 +229,7 @@ export function Navbar({
               >
                 <Avatar className="h-9 w-9 ring-2 ring-gray-200 ring-offset-2 ring-offset-white dark:ring-gray-700 dark:ring-offset-gray-900">
                   <AvatarImage src="" alt={user?.username || 'User'} />
-                  <AvatarFallback className="bg-gradient-to-br from-blue-600 to-blue-700 text-sm font-semibold text-white">
+                  <AvatarFallback className="bg-linear-to-br from-blue-600 to-blue-700 text-sm font-semibold text-white">
                     {(user?.full_name || user?.username || 'U').charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
@@ -239,7 +239,7 @@ export function Navbar({
               <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-3 dark:bg-gray-800/50">
                 <Avatar className="h-10 w-10 ring-2 ring-blue-500/20">
                   <AvatarImage src="" alt={user?.username || 'User'} />
-                  <AvatarFallback className="bg-gradient-to-br from-blue-600 to-blue-700 text-sm font-semibold text-white">
+                  <AvatarFallback className="bg-linear-to-br from-blue-600 to-blue-700 text-sm font-semibold text-white">
                     {(user?.full_name || user?.username || 'U').charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>

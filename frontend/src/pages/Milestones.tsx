@@ -273,7 +273,7 @@ export function Milestones() {
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="relative overflow-hidden rounded-[2rem] border border-border bg-card text-card-foreground shadow-sm">
+      <div className="relative overflow-hidden rounded-4xl border border-border bg-card text-card-foreground shadow-xs">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.12),transparent_30%),radial-gradient(circle_at_bottom_left,hsl(var(--accent)/0.18),transparent_32%)]" />
         <div className="relative p-6 sm:p-8">
           <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -444,7 +444,7 @@ export function Milestones() {
             const days = getDaysRemaining(milestone.target_date);
 
             return (
-              <Card key={milestone.id} className="overflow-hidden border-slate-200 dark:border-slate-700 shadow-sm">
+              <Card key={milestone.id} className="overflow-hidden border-slate-200 dark:border-slate-700 shadow-xs">
                 <div className={`h-1.5 ${getHealthBarClass(milestone.health)}`} />
                 <CardHeader className="space-y-4">
                   <div className="flex items-start justify-between gap-3">

@@ -1106,7 +1106,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
   if (isParsing) {
     return (
       <div className="flex min-h-72 items-center justify-center py-10" dir={isRTL ? 'rtl' : 'ltr'}>
-        <div className="rounded-2xl border bg-card p-8 text-center text-card-foreground shadow-sm">
+        <div className="rounded-2xl border bg-card p-8 text-center text-card-foreground shadow-xs">
           <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-primary" />
           <div className="font-semibold">{t('importParsingCsv')}</div>
           <div className="mt-1 text-sm text-muted-foreground">{file.name}</div>
@@ -1277,7 +1277,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card p-2 text-sm shadow-sm">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card p-2 text-sm shadow-xs">
             {[
               { label: t('totalRows'), value: stats.total, className: 'bg-muted text-muted-foreground' },
               { label: t('validRows'), value: stats.valid, className: 'bg-primary/10 text-primary' },
@@ -1297,7 +1297,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
               <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap gap-1.5">
                   <Button variant="outline" size="sm" onClick={() => setStep('mapping')}><RotateCcw className="mr-2 h-4 w-4" />{t('remapColumns')}</Button>
-                  <Button variant={issueFilter === 'all' ? 'outline' : 'default'} size="sm" onClick={() => setIssueFilter(issueFilter === 'all' ? 'invalid' : 'all')}><Eye className="mr-2 h-4 w-4" />{issueFilter === 'all' ? t('showOnlyIssues') : t('showAllRows')}</Button>
+                  <Button variant={issueFilter === 'all' ? 'outline-solid' : 'default'} size="sm" onClick={() => setIssueFilter(issueFilter === 'all' ? 'invalid' : 'all')}><Eye className="mr-2 h-4 w-4" />{issueFilter === 'all' ? t('showOnlyIssues') : t('showAllRows')}</Button>
                   <Button variant="outline" size="sm" onClick={resetEdits} disabled={stats.edited === 0}><RotateCcw className="mr-2 h-4 w-4" />{t('resetEdits')}</Button>
                 </div>
 	                <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
@@ -1340,7 +1340,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
 	          </Card>
 
 	          <Card className="border-primary/20 bg-primary/5">
-	            <CardContent className="grid gap-2 p-3 text-sm [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
+	            <CardContent className="grid gap-2 p-3 text-sm grid-cols-[repeat(auto-fit,minmax(130px,1fr))]">
 	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryNew')}</div><div className="text-xl font-semibold">{importSummary.newRows}</div></div>
 	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryDuplicates')}</div><div className="text-xl font-semibold">{importSummary.duplicates}</div></div>
 	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryInvalid')}</div><div className="text-xl font-semibold">{importSummary.invalid}</div></div>
@@ -1457,7 +1457,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                     ['missing_required', t('missingRequiredFields'), issueCounts.missing_required],
                     ['custom_field_errors', t('customFieldErrors'), issueCounts.custom_field_errors],
                   ] as Array<[IssueFilter, string, number]>).map(([filter, label, count]) => (
-                    <Button key={filter} variant={issueFilter === filter ? 'default' : 'outline'} size="sm" onClick={() => setIssueFilter(filter)}>
+                    <Button key={filter} variant={issueFilter === filter ? 'default' : 'outline-solid'} size="sm" onClick={() => setIssueFilter(filter)}>
                       {label} <Badge variant="secondary" className="ml-2">{count}</Badge>
                     </Button>
                   ))}
@@ -1478,7 +1478,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                         return (
                           <div
                             key={row.id}
-                            className={`rounded-xl border bg-card shadow-sm transition-colors [contain-intrinsic-size:220px] [content-visibility:auto] ${row.isValid ? 'border-border' : 'border-destructive/40 bg-destructive/5'} ${row.isEdited ? 'ring-1 ring-primary/50' : ''}`}
+                            className={`rounded-xl border bg-card shadow-xs transition-colors [contain-intrinsic-size:220px] [content-visibility:auto] ${row.isValid ? 'border-border' : 'border-destructive/40 bg-destructive/5'} ${row.isEdited ? 'ring-1 ring-primary/50' : ''}`}
                           >
                             <div className="flex flex-col gap-2 border-b bg-background/80 px-3 py-2 md:flex-row md:items-center md:justify-between">
                               <div className="flex min-w-0 items-center gap-2.5">
@@ -1515,12 +1515,12 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                             </div>
                             <div className="space-y-3 p-3">
                               {primaryPreviewColumns.length > 0 && (
-                                <div className="grid gap-x-3 gap-y-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))]">
+                                <div className="grid gap-x-3 gap-y-2 grid-cols-[repeat(auto-fit,minmax(min(100%,190px),1fr))]">
                                   {primaryPreviewColumns.map((column) => renderPreviewField(row, column, true))}
                                 </div>
                               )}
                               {detailPreviewColumns.length > 0 && (
-                                <div className="grid gap-x-3 gap-y-2 border-t pt-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))]">
+                                <div className="grid gap-x-3 gap-y-2 border-t pt-3 grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))]">
                                   {detailPreviewColumns.map((column) => renderPreviewField(row, column))}
                                 </div>
                               )}
@@ -1535,7 +1535,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
             </CardContent>
           </Card>
 
-          <div className="sticky bottom-0 z-30 rounded-2xl border bg-background/95 p-3 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="sticky bottom-0 z-30 rounded-2xl border bg-background/95 p-3 shadow-2xl backdrop-blur-sm supports-backdrop-filter:bg-background/80">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Button variant="outline" size="sm" onClick={() => setStep('mapping')} disabled={isImporting}><RotateCcw className="mr-2 h-4 w-4" />{t('back')}</Button>

@@ -433,7 +433,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
           </Button>
         </DropdownMenuTrigger>
         {unreadCount > 0 && (
-          <span className={`pointer-events-none absolute -top-0.5 z-10 h-[18px] min-w-[18px] rounded-full bg-red-500 px-1 text-[10px] font-bold leading-[18px] text-white shadow-sm ring-2 ring-white dark:ring-slate-950 ${isRTL ? '-left-0.5' : '-right-0.5'}`}>
+          <span className={`pointer-events-none absolute -top-0.5 z-10 h-[18px] min-w-[18px] rounded-full bg-red-500 px-1 text-[10px] font-bold leading-[18px] text-white shadow-xs ring-2 ring-white dark:ring-slate-950 ${isRTL ? '-left-0.5' : '-right-0.5'}`}>
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
@@ -588,7 +588,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
               <div>
                 {Object.entries(groupNotificationsByDate(notifications)).map(([groupName, groupNotifs]) => (
                   <div key={groupName}>
-                    <div className="sticky top-0 z-[1] border-y border-slate-100 bg-slate-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-400">
+                    <div className="sticky top-0 z-1 border-y border-slate-100 bg-slate-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-400">
                       {groupName}
                     </div>
                     <div className="divide-y divide-slate-100 dark:divide-slate-900">
@@ -794,7 +794,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
         )}
 
         {showClearConfirm && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-xs">
             <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
               <h3 className="text-sm font-bold text-slate-950 dark:text-white">{t('clearAllNotificationsTitle')}</h3>
               <p className="mt-2 text-sm leading-5 text-slate-600 dark:text-slate-300">{t('clearAllNotificationsDesc')}</p>

@@ -477,7 +477,7 @@ export function TestSuites() {
     <div className={`relative -m-6 min-h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 p-4 text-slate-950 dark:bg-slate-950 dark:text-slate-50 sm:p-6 lg:p-8 ${isRTL ? 'rtl' : 'ltr'}`}>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.22),transparent_34%),radial-gradient(circle_at_top_right,rgba(37,99,235,0.18),transparent_30%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_34%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.15),transparent_30%)]" />
       <div className="relative mx-auto max-w-7xl space-y-6">
-        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white/90 shadow-xl shadow-slate-200/70 backdrop-blur dark:border-white/10 dark:bg-gradient-to-br dark:from-slate-950 dark:via-blue-950 dark:to-slate-900 dark:shadow-2xl dark:shadow-blue-950/20">
+        <section className="overflow-hidden rounded-4xl border border-slate-200 bg-white/90 shadow-xl shadow-slate-200/70 backdrop-blur-sm dark:border-white/10 dark:bg-linear-to-br dark:from-slate-950 dark:via-blue-950 dark:to-slate-900 dark:shadow-2xl dark:shadow-blue-950/20">
           <div className="relative p-6 sm:p-8">
             <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(14,165,233,0.10),transparent_30%),radial-gradient(circle_at_85%_20%,rgba(37,99,235,0.12),transparent_24%)] dark:bg-[linear-gradient(120deg,rgba(255,255,255,0.12),transparent_30%),radial-gradient(circle_at_85%_20%,rgba(125,211,252,0.24),transparent_24%)]" />
             <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -526,7 +526,7 @@ export function TestSuites() {
                     </DialogHeader>
 
                     <div className="grid gap-5 p-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
-                      <Card className="border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                      <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
                         <CardHeader className="pb-4">
                           <CardTitle className="flex items-center text-lg">
                             <Layers3 className={`h-5 w-5 text-blue-600 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -587,7 +587,7 @@ export function TestSuites() {
                         </CardContent>
                       </Card>
 
-                      <Card className="border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                      <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
                         <CardHeader className="pb-4">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
@@ -678,14 +678,14 @@ export function TestSuites() {
                                       onClick={() => toggleSectionExpansion('all')}
                                       className="flex min-w-0 items-center gap-2 text-start"
                                     >
-                                      <span className="rounded-lg bg-white p-1.5 shadow-sm dark:bg-slate-900">
+                                      <span className="rounded-lg bg-white p-1.5 shadow-xs dark:bg-slate-900">
                                         {expandedSections.has('all') ? (
                                           <ChevronDown className="h-4 w-4 text-slate-500" />
                                         ) : (
                                           <ChevronRight className={`h-4 w-4 text-slate-500 ${isRTL ? 'rotate-180' : ''}`} />
                                         )}
                                       </span>
-                                      <Folder className="h-4 w-4 flex-shrink-0 text-blue-600" />
+                                      <Folder className="h-4 w-4 shrink-0 text-blue-600" />
                                       <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                                         {t('allTestCases')}
                                       </span>
@@ -713,9 +713,9 @@ export function TestSuites() {
                                           <Checkbox
                                             checked={selectedTestCases.includes(testCase.id)}
                                             onCheckedChange={() => toggleTestCaseSelection(testCase.id)}
-                                            className="flex-shrink-0"
+                                            className="shrink-0"
                                           />
-                                          <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                                          <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                                           <span className="min-w-0 flex-1 overflow-hidden">
                                             <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">
                                               {testCase.title}
@@ -727,7 +727,7 @@ export function TestSuites() {
                                             )}
                                           </span>
                                           {testCase.priority && (
-                                            <Badge variant="outline" className="flex-shrink-0 border-slate-200 text-xs dark:border-slate-700">
+                                            <Badge variant="outline" className="shrink-0 border-slate-200 text-xs dark:border-slate-700">
                                               {t(testCase.priority)}
                                             </Badge>
                                           )}
@@ -753,14 +753,14 @@ export function TestSuites() {
                                           onClick={() => toggleSectionExpansion(sectionKey)}
                                           className="flex min-w-0 items-center gap-2 text-start"
                                         >
-                                          <span className="rounded-lg bg-white p-1.5 shadow-sm dark:bg-slate-900">
+                                          <span className="rounded-lg bg-white p-1.5 shadow-xs dark:bg-slate-900">
                                             {expandedSections.has(sectionKey) ? (
                                               <ChevronDown className="h-4 w-4 text-slate-500" />
                                             ) : (
                                               <ChevronRight className={`h-4 w-4 text-slate-500 ${isRTL ? 'rotate-180' : ''}`} />
                                             )}
                                           </span>
-                                          <Folder className="h-4 w-4 flex-shrink-0 text-blue-600" />
+                                          <Folder className="h-4 w-4 shrink-0 text-blue-600" />
                                           <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                                             {section.name}
                                           </span>
@@ -788,9 +788,9 @@ export function TestSuites() {
                                               <Checkbox
                                                 checked={selectedTestCases.includes(testCase.id)}
                                                 onCheckedChange={() => toggleTestCaseSelection(testCase.id)}
-                                                className="flex-shrink-0"
+                                                className="shrink-0"
                                               />
-                                              <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                                              <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                                               <span className="min-w-0 flex-1 overflow-hidden">
                                                 <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">
                                                   {testCase.title}
@@ -802,7 +802,7 @@ export function TestSuites() {
                                                 )}
                                               </span>
                                               {testCase.priority && (
-                                                <Badge variant="outline" className="flex-shrink-0 border-slate-200 text-xs dark:border-slate-700">
+                                                <Badge variant="outline" className="shrink-0 border-slate-200 text-xs dark:border-slate-700">
                                                   {t(testCase.priority)}
                                                 </Badge>
                                               )}
@@ -857,8 +857,8 @@ export function TestSuites() {
                       </div>
                     )}
 
-                    <DialogFooter className="sticky bottom-0 flex-col gap-3 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 sm:flex-row">
-                      <div className="text-xs text-slate-500 sm:mr-auto rtl:sm:ml-auto rtl:sm:mr-0">
+                    <DialogFooter className="sticky bottom-0 flex-col gap-3 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95 sm:flex-row">
+                      <div className="text-xs text-slate-500 sm:mr-auto sm:rtl:ml-auto sm:rtl:mr-0">
                         {t('toSubmit')}
                       </div>
                       <Button variant="outline" onClick={() => handleDialogClose(false)} className="rounded-xl">
@@ -910,14 +910,14 @@ export function TestSuites() {
             const Icon = stat.icon;
 
             return (
-              <Card key={stat.label} className="overflow-hidden border-white bg-white/90 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
+              <Card key={stat.label} className="overflow-hidden border-white bg-white/90 shadow-xs backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{stat.label}</p>
                       <p className="mt-2 text-3xl font-black tracking-tight text-slate-950 dark:text-white">{stat.value}</p>
                     </div>
-                    <div className={`rounded-2xl bg-gradient-to-br ${stat.accent} p-3 text-white shadow-lg`}>
+                    <div className={`rounded-2xl bg-linear-to-br ${stat.accent} p-3 text-white shadow-lg`}>
                       <Icon className="h-5 w-5" />
                     </div>
                   </div>
@@ -927,7 +927,7 @@ export function TestSuites() {
           })}
         </section>
 
-        <section className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <section className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <div className="border-b border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900 sm:p-6">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div>
@@ -993,7 +993,7 @@ export function TestSuites() {
           ) : testSuites.length === 0 ? (
             <div className="flex min-h-[420px] items-center justify-center p-8">
               <div className="max-w-md text-center">
-                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[2rem] bg-blue-50 text-blue-600 dark:bg-blue-950/40">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-4xl bg-blue-50 text-blue-600 dark:bg-blue-950/40">
                   <TestTube className="h-10 w-10" />
                 </div>
                 <h3 className="mt-5 text-xl font-black text-slate-950 dark:text-white">{t('noTestSuites')}</h3>
@@ -1036,12 +1036,12 @@ export function TestSuites() {
                 return (
                   <Card
                     key={suite.id}
-                    className="group overflow-hidden border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-950/10 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-blue-800"
+                    className="group overflow-hidden border-slate-200 bg-white shadow-xs transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-xl hover:shadow-blue-950/10 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-blue-800"
                   >
                     <CardHeader className="space-y-4 pb-4">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex min-w-0 gap-3">
-                          <div className="mt-0.5 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 transition-colors group-hover:bg-blue-600 group-hover:text-white dark:bg-blue-950/50 dark:text-blue-300">
+                          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 transition-colors group-hover:bg-blue-600 group-hover:text-white dark:bg-blue-950/50 dark:text-blue-300">
                             <FolderOpen className="h-5 w-5" />
                           </div>
                           <div className="min-w-0">
@@ -1058,7 +1058,7 @@ export function TestSuites() {
                           </div>
                         </div>
 
-                        <div className="flex flex-shrink-0 items-center gap-2">
+                        <div className="flex shrink-0 items-center gap-2">
                           <Badge
                             variant={suite.status === 'active' ? 'default' : 'secondary'}
                             className={suite.status === 'active' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}

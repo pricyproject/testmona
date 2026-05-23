@@ -60,7 +60,7 @@ export function Signup() {
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
           {appLogoUrl && (
-            <img src={appLogoUrl} alt={appName} className="mx-auto mb-3 h-14 w-14 rounded-2xl object-cover shadow-sm" />
+            <img src={appLogoUrl} alt={appName} className="mx-auto mb-3 h-14 w-14 rounded-2xl object-cover shadow-xs" />
           )}
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{appName}</h1>
           <p className="mt-2 text-gray-600 dark:text-gray-400">{t('createYourAccount')}</p>

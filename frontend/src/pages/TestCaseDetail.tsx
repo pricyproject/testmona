@@ -426,10 +426,10 @@ export function TestCaseDetail() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-white px-4 py-6 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-white px-4 py-6 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_34%),linear-gradient(135deg,_rgba(15,23,42,0.04),_transparent)] p-6 dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_34%),linear-gradient(135deg,_rgba(255,255,255,0.04),_transparent)]">
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+          <div className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_34%),linear-gradient(135deg,rgba(15,23,42,0.04),transparent)] p-6 dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent)]">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-4">
                 <Button variant="ghost" onClick={navigateBack} className="-mx-3 h-9 text-slate-600 dark:text-slate-300">
@@ -483,7 +483,7 @@ export function TestCaseDetail() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="space-y-6">
-            <Card className="border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
                   <span className="rounded-lg bg-amber-100 p-1.5 dark:bg-amber-900/30">
@@ -494,14 +494,14 @@ export function TestCaseDetail() {
               </CardHeader>
               <CardContent className="pt-0">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
-                  <p className="whitespace-pre-wrap break-words text-[15px] leading-7 text-slate-700 dark:text-slate-300">
+                  <p className="whitespace-pre-wrap wrap-break-word text-[15px] leading-7 text-slate-700 dark:text-slate-300">
                     {testCase.preconditions || t('noPreconditions')}
                   </p>
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
               <CardHeader className="pb-3">
                 <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
                   <span className="rounded-lg bg-blue-100 p-1.5 dark:bg-blue-900/30">
@@ -536,13 +536,13 @@ export function TestCaseDetail() {
                           <div className="space-y-3">
                             <div>
                               <h5 className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">{t('action')}</h5>
-                              <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-600 dark:text-slate-300">
+                              <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-600 dark:text-slate-300">
                                 {step.action || t('noStepsDefined')}
                               </p>
                             </div>
                             <div>
                               <h5 className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">{t('expectedResult')}</h5>
-                              <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-600 dark:text-slate-300">
+                              <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-600 dark:text-slate-300">
                                 {step.expected_result || t('noExpectedResults')}
                               </p>
                             </div>
@@ -558,7 +558,7 @@ export function TestCaseDetail() {
                   )
                 ) : testCase.steps ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
-                    <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-700 dark:text-slate-300">
+                    <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-700 dark:text-slate-300">
                       {testCase.steps}
                     </p>
                   </div>
@@ -572,7 +572,7 @@ export function TestCaseDetail() {
             </Card>
 
             {!isMultistepCase && (
-              <Card className="border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
                     <span className="rounded-lg bg-emerald-100 p-1.5 dark:bg-emerald-900/30">
@@ -584,7 +584,7 @@ export function TestCaseDetail() {
                 <CardContent className="pt-0">
                   {testCase.expected_result ? (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
-                      <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-700 dark:text-slate-300">
+                      <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-700 dark:text-slate-300">
                         {testCase.expected_result}
                       </p>
                     </div>
@@ -601,7 +601,7 @@ export function TestCaseDetail() {
           </div>
 
           <aside className="space-y-6">
-            <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+            <Card className="border-slate-200 shadow-xs dark:border-slate-800">
               <CardHeader>
                 <CardTitle className="text-base">{t('properties')}</CardTitle>
               </CardHeader>
@@ -638,7 +638,7 @@ export function TestCaseDetail() {
               </CardContent>
             </Card>
 
-            <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+            <Card className="border-slate-200 shadow-xs dark:border-slate-800">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -677,7 +677,7 @@ export function TestCaseDetail() {
                               <Badge>{requirement.priority}</Badge>
                               <Badge variant="secondary">{requirement.status}</Badge>
                             </div>
-                            <h3 className="break-words text-sm font-semibold text-slate-950 dark:text-white">
+                            <h3 className="wrap-break-word text-sm font-semibold text-slate-950 dark:text-white">
                               {requirementPath ? (
                                 <Link to={requirementPath} className="text-blue-600 hover:underline dark:text-blue-400">
                                   {requirement.title}
@@ -694,7 +694,7 @@ export function TestCaseDetail() {
             </Card>
 
             {tags.length > 0 && (
-              <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+              <Card className="border-slate-200 shadow-xs dark:border-slate-800">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Tag className="h-4 w-4 text-slate-500" />
@@ -710,7 +710,7 @@ export function TestCaseDetail() {
             )}
 
             {hasCustomFieldRows && (
-              <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+              <Card className="border-slate-200 shadow-xs dark:border-slate-800">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Tag className="h-4 w-4 text-blue-600" />
@@ -738,7 +738,7 @@ export function TestCaseDetail() {
               </Card>
             )}
 
-            <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+            <Card className="border-slate-200 shadow-xs dark:border-slate-800">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -794,7 +794,7 @@ export function TestCaseDetail() {
             </Card>
 
             {(revisionsLoading || revisions.length > 0) && (
-              <Card id="revision-history" className="border-slate-200 shadow-sm dark:border-slate-800">
+              <Card id="revision-history" className="border-slate-200 shadow-xs dark:border-slate-800">
                 <CardHeader className="flex flex-row items-center justify-between gap-3">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <History className="h-4 w-4 text-amber-600" />
@@ -880,9 +880,9 @@ function CustomFieldValueRow({
     <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="break-words text-sm font-semibold text-slate-900 dark:text-white">{displayName}</p>
+          <p className="wrap-break-word text-sm font-semibold text-slate-900 dark:text-white">{displayName}</p>
           {row.field?.description && (
-            <p className="mt-1 break-words text-xs leading-5 text-slate-500 dark:text-slate-400">{row.field.description}</p>
+            <p className="mt-1 wrap-break-word text-xs leading-5 text-slate-500 dark:text-slate-400">{row.field.description}</p>
           )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-1">
@@ -933,7 +933,7 @@ function CustomFieldValueDisplay({
     return <Badge variant="secondary">{knownOption}</Badge>;
   }
 
-  return <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700 dark:text-slate-300">{value}</p>;
+  return <p className="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-slate-700 dark:text-slate-300">{value}</p>;
 }
 
 function PropertyRow({ label, value }: { label: string; value: ReactNode }) {

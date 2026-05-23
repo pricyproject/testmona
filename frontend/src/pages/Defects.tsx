@@ -1169,7 +1169,7 @@ export function Defects() {
                 <div className="sticky top-0 space-y-4">
                   <div>
                     <h3 className="text-sm font-semibold uppercase text-gray-600 dark:text-gray-300">{t('defectModalSummary')}</h3>
-                    <p className="mt-2 break-words text-lg font-semibold text-gray-950 dark:text-gray-100">
+                    <p className="mt-2 wrap-break-word text-lg font-semibold text-gray-950 dark:text-gray-100">
                       {defectTitle.trim() || t('defectModalUntitled')}
                     </p>
                   </div>
@@ -1248,7 +1248,7 @@ export function Defects() {
       </div>
 
       {/* Search Bar */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-4">
+      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
           <Input
@@ -1397,7 +1397,7 @@ export function Defects() {
             </Card>
           ))
         ) : (
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <Bug className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
@@ -1418,7 +1418,7 @@ export function Defects() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow mt-4">
+        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mt-4">
           <div className="text-sm text-gray-600 dark:text-gray-400">
             {t('showingDefects', { start: startIndex + 1, end: Math.min(startIndex + itemsPerPage, filteredDefects.length), total: filteredDefects.length })}
           </div>

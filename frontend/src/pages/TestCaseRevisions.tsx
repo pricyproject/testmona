@@ -190,7 +190,7 @@ export function TestCaseRevisions() {
     const previousRevision = revisions.find(r => r.revision_number === revision.revision_number - 1);
     
     return (
-      <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
+      <Card className="shadow-xs border-0 bg-white dark:bg-gray-800">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
@@ -514,7 +514,7 @@ export function TestCaseRevisions() {
     // Don't show error message, just redirect back or show empty state
     return (
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xs border border-gray-200 dark:border-gray-700 p-4">
           <div className="flex items-center gap-4">
               <Button 
                 variant="ghost" 
@@ -536,7 +536,7 @@ export function TestCaseRevisions() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xs border border-gray-200 dark:border-gray-700 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
               <Button 
@@ -584,7 +584,7 @@ export function TestCaseRevisions() {
 
       {/* Comparison View */}
       {!selectedRevision && showDifferences && compareRevision1 && compareRevision2 && (
-        <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
+        <Card className="shadow-xs border-0 bg-white dark:bg-gray-800">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <GitCompare className="h-5 w-5" />
@@ -613,7 +613,7 @@ export function TestCaseRevisions() {
 
       {/* Revisions List */}
       {!selectedRevision && (
-        <Card className="shadow-sm border-0 bg-white dark:bg-gray-800">
+        <Card className="shadow-xs border-0 bg-white dark:bg-gray-800">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <History className="h-5 w-5" />

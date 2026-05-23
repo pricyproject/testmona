@@ -37,7 +37,7 @@ export function GherkinViewer({ value, emptyLabel }: GherkinViewerProps) {
           <Badge className="bg-indigo-600 text-white hover:bg-indigo-600">Feature</Badge>
           {parsed.tags.map((tag) => <Badge key={tag} variant="outline">{tag}</Badge>)}
         </div>
-        <h3 className="mt-3 break-words text-lg font-semibold text-slate-950 dark:text-white">{parsed.feature || 'Feature'}</h3>
+        <h3 className="mt-3 wrap-break-word text-lg font-semibold text-slate-950 dark:text-white">{parsed.feature || 'Feature'}</h3>
         {parsed.description.length > 0 && (
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600 dark:text-slate-300">
             {parsed.description.join('\n')}
@@ -48,10 +48,10 @@ export function GherkinViewer({ value, emptyLabel }: GherkinViewerProps) {
       {parsed.blocks.map((block, index) => (
         <section key={`${block.type}-${block.title}-${index}`} className="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={block.type === 'Background' ? 'secondary' : 'outline'}>{block.type}</Badge>
+            <Badge variant={block.type === 'Background' ? 'secondary' : 'outline-solid'}>{block.type}</Badge>
             {block.tags.map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
           </div>
-          <h4 className="mt-3 break-words text-base font-semibold text-slate-950 dark:text-white">{block.title}</h4>
+          <h4 className="mt-3 wrap-break-word text-base font-semibold text-slate-950 dark:text-white">{block.title}</h4>
 
           <ol className="mt-3 space-y-1.5">
             {block.steps.map((step, stepIndex) => (
@@ -59,7 +59,7 @@ export function GherkinViewer({ value, emptyLabel }: GherkinViewerProps) {
                 <span className={`inline-flex shrink-0 items-center justify-center rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide sm:w-16 ${getStepKeywordTone(step.keyword)}`}>
                   {step.keyword}
                 </span>
-                <span className="min-w-0 break-words leading-6 text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
+                <span className="min-w-0 wrap-break-word leading-6 text-slate-700 wrap-anywhere dark:text-slate-300">
                   {step.text}
                   {step.argument.length > 0 && (
                     <pre className="mt-2 overflow-x-auto rounded-md border border-slate-200 bg-white p-2 text-xs leading-5 dark:border-slate-800 dark:bg-slate-900">

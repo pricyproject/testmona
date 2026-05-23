@@ -640,7 +640,7 @@ export function TestRuns() {
               type="button"
               variant="ghost"
               size="sm"
-              className="h-7 w-7 flex-shrink-0 rounded-lg p-0"
+              className="h-7 w-7 shrink-0 rounded-lg p-0"
               onClick={() => toggleSectionExpansion(section.id.toString())}
             >
               {isExpanded ? (
@@ -654,13 +654,13 @@ export function TestRuns() {
               onCheckedChange={() => toggleSectionSelection(section)}
               className={isPartiallySelected && !isAllSelected ? "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500" : ""}
             />
-            <Folder className="h-4 w-4 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+            <Folder className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
             <span className="truncate text-sm font-semibold text-slate-900 dark:text-white" title={section.name}>{section.name}</span>
-            <Badge variant="secondary" className="flex-shrink-0 bg-slate-100 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <Badge variant="secondary" className="shrink-0 bg-slate-100 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
               {sectionTestCases.length} {t('cases')}
             </Badge>
           </div>
-          <div className="flex flex-shrink-0 gap-2">
+          <div className="flex shrink-0 gap-2">
             <Button
               type="button"
               variant="ghost"
@@ -695,9 +695,9 @@ export function TestRuns() {
                   <Checkbox
                     checked={selectedTestCases.includes(testCase.id)}
                     onCheckedChange={() => toggleTestCaseSelection(testCase.id)}
-                    className="flex-shrink-0"
+                    className="shrink-0"
                   />
-                  <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                  <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-slate-900 dark:text-white" title={testCase.title}>{testCase.title}</div>
                     {testCase.description && (
@@ -706,7 +706,7 @@ export function TestRuns() {
                       </div>
                     )}
                   </div>
-                  <Badge variant="outline" className="flex-shrink-0 border-slate-200 text-xs dark:border-slate-700">
+                  <Badge variant="outline" className="shrink-0 border-slate-200 text-xs dark:border-slate-700">
                     {t(testCase.priority)}
                   </Badge>
                 </label>
@@ -752,7 +752,7 @@ export function TestRuns() {
             </DialogHeader>
             <div className="grid gap-5 p-6 lg:grid-cols-2">
               {/* Basic Information */}
-              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                 <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-950 dark:text-white">
                   <Target className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   {t('basicInformation')}
@@ -803,7 +803,7 @@ export function TestRuns() {
               </div>
 
               {/* Scheduling and Assignment */}
-              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                 <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-950 dark:text-white">
                   <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   {t('schedulingAssignment')}
@@ -857,7 +857,7 @@ export function TestRuns() {
               </div>
 
               {/* Test Configuration */}
-              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                 <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-950 dark:text-white">
                   <Target className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   {t('testConfiguration')}
@@ -907,7 +907,7 @@ export function TestRuns() {
               </div>
               
               {/* Test Case Selection */}
-              <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
+              <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem] sm:items-start" dir={isRTL ? 'rtl' : 'ltr'}>
                   <div className="min-w-0" dir={isRTL ? 'rtl' : 'ltr'}>
                     <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-950 dark:text-white" style={{ justifyContent: 'flex-start' }}>
@@ -1040,13 +1040,13 @@ export function TestRuns() {
                                     onCheckedChange={() => toggleTestSuiteSelection(suite.id)}
                                     className={`h-3.5 w-3.5 ${isPartiallySelected && !isAllSelected ? "data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500" : ""}`}
                                   />
-                                  <Folder className="h-4 w-4 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+                                  <Folder className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                                   <span className="truncate text-sm font-semibold text-slate-900 dark:text-white" title={suite.name}>{suite.name}</span>
-                                  <Badge variant="secondary" className="h-5 flex-shrink-0 bg-slate-100 px-2 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                                  <Badge variant="secondary" className="h-5 shrink-0 bg-slate-100 px-2 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                                     {suiteTestCases.length}
                                   </Badge>
                                 </div>
-                                <div className="flex flex-shrink-0 gap-2">
+                                <div className="flex shrink-0 gap-2">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -1077,9 +1077,9 @@ export function TestRuns() {
                                       <Checkbox
                                         checked={selectedTestCases.includes(testCase.id)}
                                         onCheckedChange={() => toggleTestCaseSelection(testCase.id)}
-                                        className="flex-shrink-0"
+                                        className="shrink-0"
                                       />
-                                      <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                                      <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                                       <div className="flex-1 min-w-0">
                                         <span className="block truncate text-sm font-medium text-slate-900 dark:text-white" title={testCase.title}>{testCase.title}</span>
                                         {testCase.description && (
@@ -1088,7 +1088,7 @@ export function TestRuns() {
                                           </p>
                                         )}
                                       </div>
-                                      <Badge variant="outline" className="flex-shrink-0 border-slate-200 text-xs dark:border-slate-700">
+                                      <Badge variant="outline" className="shrink-0 border-slate-200 text-xs dark:border-slate-700">
                                         {t(testCase.priority)}
                                       </Badge>
                                     </label>
@@ -1121,9 +1121,9 @@ export function TestRuns() {
                                 <Checkbox
                                   checked={selectedTestCases.includes(testCase.id)}
                                   onCheckedChange={() => toggleTestCaseSelection(testCase.id)}
-                                  className="flex-shrink-0"
+                                  className="shrink-0"
                                 />
-                                <FileText className="h-4 w-4 flex-shrink-0 text-slate-400" />
+                                <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                                 <div className="flex-1 min-w-0">
                                   <span className="block truncate text-sm font-medium text-slate-900 dark:text-white" title={testCase.title}>{testCase.title}</span>
                                   {testCase.description && (
@@ -1132,7 +1132,7 @@ export function TestRuns() {
                                     </p>
                                   )}
                                 </div>
-                                <Badge variant="outline" className="flex-shrink-0 border-slate-200 text-xs dark:border-slate-700">
+                                <Badge variant="outline" className="shrink-0 border-slate-200 text-xs dark:border-slate-700">
                                   {t(testCase.priority)}
                                 </Badge>
                               </label>
@@ -1152,7 +1152,7 @@ export function TestRuns() {
             )}
             
             <DialogFooter
-              className="sticky bottom-0 grid grid-cols-1 gap-3 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95 sm:grid-cols-[minmax(0,1fr)_auto]"
+              className="sticky bottom-0 grid grid-cols-1 gap-3 border-t border-slate-200 bg-white/95 px-6 py-4 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95 sm:grid-cols-[minmax(0,1fr)_auto]"
               dir={isRTL ? 'rtl' : 'ltr'}
             >
               <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-950/70 dark:text-slate-400" style={{ textAlign: isRTL ? 'right' : 'left' }}>
@@ -1203,7 +1203,7 @@ export function TestRuns() {
         </Dialog>
       </div>
 
-      <Card className="border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <Card className="border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-950">
         <CardContent className="p-4">
           <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px_220px_auto] lg:items-end">
             <div className="space-y-2">
@@ -1292,7 +1292,7 @@ export function TestRuns() {
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 type="button"
-                variant={assigneeFilter === String(currentUser.id) ? 'default' : 'outline'}
+                variant={assigneeFilter === String(currentUser.id) ? 'default' : 'outline-solid'}
                 size="sm"
                 onClick={() => setAssigneeFilter(getAssigneeFilterValue('me'))}
               >
@@ -1350,10 +1350,10 @@ export function TestRuns() {
               return (
                 <Card
                   key={run.id}
-                  className="group relative cursor-pointer overflow-hidden border-slate-200/80 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl dark:border-slate-800 dark:bg-slate-950"
+                  className="group relative cursor-pointer overflow-hidden border-slate-200/80 bg-white shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl dark:border-slate-800 dark:bg-slate-950"
                   onClick={() => setSelectedTestRun(run)}
                 >
-                  <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${statusMeta.accentClass}`} />
+                  <div className={`absolute inset-x-0 top-0 h-1 bg-linear-to-r ${statusMeta.accentClass}`} />
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-2">
@@ -1447,7 +1447,7 @@ export function TestRuns() {
             })}
           </div>
 
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-950 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-slate-600 dark:text-slate-300">
               {t('showing', { start: paginationStart, end: paginationEnd, total: testRuns.length })}
             </div>

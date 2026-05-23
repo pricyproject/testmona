@@ -1798,26 +1798,26 @@ export function Settings() {
 
       <Tabs defaultValue="general" className="space-y-6">
         <TabsList className="inline-flex h-12 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-full">
-          <TabsTrigger value="general" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
+          <TabsTrigger value="general" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <Globe className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('general')}
           </TabsTrigger>
-          <TabsTrigger value="test-management" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
+          <TabsTrigger value="test-management" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <FileText className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('testManagement')}
           </TabsTrigger>
-          <TabsTrigger value="integrations" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
+          <TabsTrigger value="integrations" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <Link className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('integrations')}
           </TabsTrigger>
           {isAdminUser(user) && (
-            <TabsTrigger value="users" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
+            <TabsTrigger value="users" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
               <Users className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('users')}
             </TabsTrigger>
           )}
           {isAdminUser(user) && (
-            <TabsTrigger value="audit" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
+            <TabsTrigger value="audit" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
               <History className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('auditTrails')}
             </TabsTrigger>
@@ -1825,8 +1825,8 @@ export function Settings() {
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
-          <Card className="settings-density-card overflow-hidden border-slate-200/80 shadow-sm dark:border-slate-800">
-            <CardHeader className="border-b border-slate-100 bg-gradient-to-br from-slate-50 via-white to-cyan-50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-cyan-950/30">
+          <Card className="settings-density-card overflow-hidden border-slate-200/80 shadow-xs dark:border-slate-800">
+            <CardHeader className="border-b border-slate-100 bg-linear-to-br from-slate-50 via-white to-cyan-50 dark:border-slate-800 dark:from-slate-950 dark:via-slate-950 dark:to-cyan-950/30">
               <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1837,7 +1837,7 @@ export function Settings() {
                   </div>
                   <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-300">{t('compactModeDesc')}</p>
                 </div>
-                <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-xs dark:border-slate-800 dark:bg-slate-950">
                   <Button
                     type="button"
                     variant={!compactMode ? 'default' : 'ghost'}
@@ -2110,11 +2110,11 @@ export function Settings() {
 
         <TabsContent value="test-management" className="space-y-6">
           {/* Test Types Management */}
-          <Card className="border-0 shadow-sm">
+          <Card className="border-0 shadow-xs">
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3 rtl:space-x-reverse">
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 bg-linear-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
                     <Tag className="h-5 w-5 text-white" />
                   </div>
                   <div>
@@ -2264,7 +2264,7 @@ export function Settings() {
                   {testTypes.filter(type => type.is_active).map((type) => (
                     <div key={type.id} className="group relative bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 hover:shadow-lg transition-all duration-200 hover:border-blue-300 dark:hover:border-blue-500">
                     <div className="flex items-start justify-between mb-4">
-                      <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl shadow-sm" style={{ backgroundColor: type.color }}>
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl shadow-xs" style={{ backgroundColor: type.color }}>
                         {type.icon}
                       </div>
                       <DropdownMenu>
@@ -2319,11 +2319,11 @@ export function Settings() {
           </Card>
 
           {/* Priorities Management */}
-          <Card className="border-0 shadow-sm">
+          <Card className="border-0 shadow-xs">
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3 rtl:space-x-reverse">
-                  <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 bg-linear-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center">
                     <AlertCircle className="h-5 w-5 text-white" />
                   </div>
                   <div>
@@ -3431,7 +3431,7 @@ export function Settings() {
 
                   {!auditTrailEnabled && (
                     <div className="flex items-start gap-3 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                      <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                      <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" />
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
                           {t('auditTrailsDisabled')}
@@ -3444,7 +3444,7 @@ export function Settings() {
                   )}
 
                   <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                     <div className="flex-1 space-y-2">
                       <div>
                         <p className="text-sm font-medium text-red-800 dark:text-red-200">

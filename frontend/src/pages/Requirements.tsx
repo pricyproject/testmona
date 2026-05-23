@@ -1227,7 +1227,7 @@ export function Requirements() {
       </div>
 
       {/* Enhanced Search and Filters */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-4">
+      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-4">
         <div className="flex gap-4 items-center">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
@@ -1357,7 +1357,7 @@ export function Requirements() {
             </Card>
           ))
         ) : (
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <FileText className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
@@ -1474,7 +1474,7 @@ export function Requirements() {
 
       {/* Pagination */}
       {totalPages > 1 && filteredRequirements.length > 0 && (
-        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow mt-4">
+        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mt-4">
           <div className="text-sm text-gray-600 dark:text-gray-400">
             {t('showingRequirements', { start: startIndex + 1, end: Math.min(startIndex + itemsPerPage, filteredRequirements.length), total: filteredRequirements.length })}
           </div>

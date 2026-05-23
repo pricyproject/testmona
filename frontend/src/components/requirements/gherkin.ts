@@ -63,7 +63,7 @@ export const parseGherkin = (value: string): ParsedGherkin => {
     if (blockMatch) {
       const blockType = blockMatch[1].toLowerCase() === 'background'
         ? 'Background'
-        : blockMatch[1].toLowerCase() === 'scenario outline'
+        : blockMatch[1].toLowerCase() === 'scenario outline-solid'
           ? 'Scenario Outline'
           : 'Scenario';
       currentBlock = {

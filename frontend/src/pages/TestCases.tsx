@@ -1166,13 +1166,13 @@ export function TestCases() {
         {/* Make the entire area droppable by adding a transparent overlay when dragging */}
         {isDraggingTestCases && (
           <div
-            className="absolute inset-0 z-[5]"
+            className="absolute inset-0 z-5"
             style={{ pointerEvents: 'auto' }}
           />
         )}
 
         {/* Content with lower z-index so overlay is on top when dragging */}
-        <div className="relative z-[1]">
+        <div className="relative z-1">
           {children}
         </div>
 
@@ -1227,14 +1227,14 @@ export function TestCases() {
             <div className="flex items-center mr-1.5 rtl:mr-0 rtl:ml-1.5">
               {hasChildren ? (
                 isExpanded ? (
-                  <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                  <ChevronDown className="h-3 w-3 text-gray-400 shrink-0" />
                 ) : (
-                  <ChevronRight className="h-3 w-3 text-gray-400 flex-shrink-0 rtl:rotate-180" />
+                  <ChevronRight className="h-3 w-3 text-gray-400 shrink-0 rtl:rotate-180" />
                 )
               ) : (
-                <div className="w-3 h-3 flex-shrink-0" />
+                <div className="w-3 h-3 shrink-0" />
               )}
-              <Folder className={`h-3.5 w-3.5 ml-0.5 rtl:ml-0 rtl:mr-0.5 flex-shrink-0 ${isRoot ? 'text-blue-500' : level === 1 ? 'text-gray-500' : 'text-gray-400'}`} />
+              <Folder className={`h-3.5 w-3.5 ml-0.5 rtl:ml-0 rtl:mr-0.5 shrink-0 ${isRoot ? 'text-blue-500' : level === 1 ? 'text-gray-500' : 'text-gray-400'}`} />
             </div>
             <span className="flex-1 text-left rtl:text-right min-w-0 truncate" title={`${section.name}${section.test_suite_name ? ` (${section.test_suite_name})` : ''}`}>
               {level > 0 && <span className="text-gray-400 mr-1 rtl:mr-0 rtl:ml-1">└─</span>}
@@ -1243,7 +1243,7 @@ export function TestCases() {
                 <span className="text-xs text-gray-500 ml-1 rtl:ml-0 rtl:mr-1">({section.test_suite_name})</span>
               )}
             </span>
-            <div className="ml-auto flex items-center gap-1 flex-shrink-0">
+            <div className="ml-auto flex items-center gap-1 shrink-0">
               {hasSubsections && (
                 <span
                   className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded cursor-help"
@@ -3532,7 +3532,7 @@ export function TestCases() {
         <div className="flex gap-6">
           {/* Sections Sidebar */}
         {sectionsPanelCollapsed ? (
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             <Button
               variant="outline"
               onClick={() => setSectionsPanelCollapsed(false)}
@@ -3544,7 +3544,7 @@ export function TestCases() {
             </Button>
           </div>
         ) : (
-        <div className="w-64 flex-shrink-0">
+        <div className="w-64 shrink-0">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-semibold flex items-center justify-between">
@@ -3691,7 +3691,7 @@ export function TestCases() {
           {(() => {
             const breadcrumbPath = getBreadcrumbPath();
             return breadcrumbPath.length >= 1 ? (
-              <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow">
+              <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm">
                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                   <span className="font-medium">Navigation:</span>
                   {breadcrumbPath.map((section, index) => (
@@ -3735,7 +3735,7 @@ export function TestCases() {
           })()}
 
           {/* Search Bar and Bulk Actions */}
-          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <div className="flex flex-1">
                 <div className="relative flex-1 max-w-md">
@@ -3927,7 +3927,7 @@ export function TestCases() {
           </Card>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow mt-4">
+          <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mt-4">
             <div className="flex items-center gap-4">
               <div className="text-sm text-gray-600">
                 {t('showing', { start: filteredAndSortedTestCases.length > 0 ? startIndex + 1 : 0, end: endIndex, total: filteredAndSortedTestCases.length })}
@@ -3993,7 +3993,7 @@ export function TestCases() {
             ) : (
               revisions.map((rev) => (
                 <div key={rev.id || rev.revision_number} className={`relative pb-6 border-l-2 border-gray-100 last:border-0 last:pb-0 ${isRTL ? 'pr-6 pl-0 border-r-2 border-l-0' : 'pl-6 pr-0 border-l-2'}`}>
-                  <div className={`absolute top-0 w-4 h-4 rounded-full bg-white border-2 border-blue-500 ${isRTL ? '-right-[9px] left-auto' : '-left-[9px] right-auto'}`} />
+                  <div className={`absolute top-0 w-4 h-4 rounded-full bg-white border-2 border-blue-500 ${isRTL ? 'right-[-9px] left-auto' : 'left-[-9px] right-auto'}`} />
                   <div className="flex items-center justify-between mb-1">
                     <Badge variant="secondary">{t('revision')} #{rev.revision_number || rev.version}</Badge>
                     <span className="text-xs text-gray-500 flex items-center">
@@ -4221,7 +4221,7 @@ export function TestCases() {
             )}
             {!importFile && (
               <div className="mx-auto max-w-2xl py-8" dir={isRTL ? 'rtl' : 'ltr'}>
-                <div className="rounded-3xl border border-dashed bg-card p-8 text-center text-card-foreground shadow-sm">
+                <div className="rounded-3xl border border-dashed bg-card p-8 text-center text-card-foreground shadow-xs">
                   <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
                     <Upload className="h-8 w-8" />
                   </div>

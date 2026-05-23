@@ -47,7 +47,7 @@ const StatCard = ({ title, value, icon: Icon, color, trend, onClick }: StatCardP
   <Card 
     role={onClick ? 'button' : undefined}
     tabIndex={onClick ? 0 : undefined}
-    className="hover:shadow-lg transition-shadow duration-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    className="hover:shadow-lg transition-shadow duration-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     onClick={onClick}
     onKeyDown={handleKeyDown}
   >
@@ -453,7 +453,7 @@ export function Dashboard() {
       </div>
 
       {/* Recent Activity */}
-      <Card className="border-gray-200 dark:border-gray-800 shadow-sm">
+      <Card className="border-gray-200 dark:border-gray-800 shadow-xs">
         <CardHeader className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">{t('recentActivity')}</CardTitle>
@@ -494,7 +494,7 @@ export function Dashboard() {
                   className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-all duration-150 group"
                   onClick={() => handleActivityClick(activity)}
                 >
-                  <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-800 group-hover:scale-105 transition-transform">
+                  <div className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-800 group-hover:scale-105 transition-transform">
                     <ActivityIcon activity={activity} />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -507,7 +507,7 @@ export function Dashboard() {
                       {formatDateTime(activity.created_at, t('unknownTime'))}
                     </p>
                   </div>
-                  <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <ExternalLink className="h-4 w-4 text-gray-400 dark:text-gray-500" />
                   </div>
                 </div>

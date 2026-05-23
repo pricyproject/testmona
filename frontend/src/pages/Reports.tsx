@@ -661,7 +661,7 @@ export function Reports() {
         <div className="h-full relative group">
           {isEditMode && (
             <div
-              className="absolute top-2 left-2 z-10 p-1 bg-white dark:bg-gray-800 rounded-md shadow-sm border border-gray-200 dark:border-gray-700"
+              className="absolute top-2 left-2 z-10 p-1 bg-white dark:bg-gray-800 rounded-md shadow-xs border border-gray-200 dark:border-gray-700"
               {...attributes}
               {...listeners}
             >
@@ -856,7 +856,7 @@ export function Reports() {
             </SelectContent>
           </Select>
           <Button
-            variant={isEditMode ? "default" : "outline"}
+            variant={isEditMode ? "default" : "outline-solid"}
             onClick={handleToggleEditMode}
           >
             <Settings className="h-4 w-4 mr-2" />
@@ -1144,7 +1144,7 @@ export function Reports() {
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="text-xs text-gray-500">{share}%</span>
-                              <Badge variant="secondary" className="min-w-[3rem] justify-center">
+                              <Badge variant="secondary" className="min-w-12 justify-center">
                                 {count}
                               </Badge>
                             </div>
@@ -1183,7 +1183,7 @@ export function Reports() {
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="text-xs text-gray-500">{share}%</span>
-                              <Badge variant="secondary" className="min-w-[3rem] justify-center">
+                              <Badge variant="secondary" className="min-w-12 justify-center">
                                 {count}
                               </Badge>
                             </div>
@@ -1864,7 +1864,7 @@ export function Reports() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant={report.report_type === 'executive' ? 'secondary' : 'outline'} className="capitalize">
+                      <Badge variant={report.report_type === 'executive' ? 'secondary' : 'outline-solid'} className="capitalize">
                         {report.report_type}
                       </Badge>
                       <div className="flex items-center gap-1 text-sm text-gray-600">
@@ -2367,7 +2367,7 @@ export function Reports() {
                   onClick={() => setActiveTab(tab.key)}
                   className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all whitespace-nowrap ${
                     activeTab === tab.key
-                      ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400'
+                      ? 'bg-white dark:bg-gray-700 shadow-xs text-blue-600 dark:text-blue-400'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
                   }`}
                 >
@@ -2492,7 +2492,7 @@ export function Reports() {
           </div>
 
           {/* Filter Bar — search and dropdowns are server-side; pagination resets on change */}
-          <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border dark:border-gray-700">
+          <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-xs border dark:border-gray-700">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
               <div className="md:col-span-4 relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -2595,7 +2595,7 @@ export function Reports() {
               {(traceabilityData?.requirements || [])
                 .map((item: any) => (
                 <Card key={item.requirement_id} className="overflow-hidden">
-                  <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-800/50 py-4">
+                  <CardHeader className="bg-linear-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-800/50 py-4">
                     {/* Header stacks vertically on mobile so the per-status counts
                         don't crowd the title. */}
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -2604,7 +2604,7 @@ export function Reports() {
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2 mb-1">
                             <span className="font-mono text-sm font-bold text-blue-600">{item.requirement_key || `REQ-${item.requirement_id}`}</span>
-                            <Badge variant={item.requirement_status === 'approved' ? 'default' : 'outline'} className="capitalize">
+                            <Badge variant={item.requirement_status === 'approved' ? 'default' : 'outline-solid'} className="capitalize">
                               {item.requirement_status}
                             </Badge>
                             {item.requirement_priority && (
@@ -2613,7 +2613,7 @@ export function Reports() {
                               </Badge>
                             )}
                           </div>
-                          <CardTitle className="text-base font-semibold break-words">
+                          <CardTitle className="text-base font-semibold wrap-break-word">
                             <Link
                               to={`/projects/${selectedProject}/requirements/${item.requirement_id}`}
                               className="text-gray-900 underline-offset-4 hover:text-blue-700 hover:underline dark:text-white dark:hover:text-blue-300"
@@ -2739,7 +2739,7 @@ export function Reports() {
                                     >
                                       TC-{tc.id}
                                     </Link>
-                                    <div className="font-medium break-words">
+                                    <div className="font-medium wrap-break-word">
                                       <Link
                                         to={`/projects/${selectedProject}/test-cases/${tc.id}`}
                                         className="text-gray-900 dark:text-white"

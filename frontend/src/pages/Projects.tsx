@@ -1002,7 +1002,7 @@ export function Projects() {
         <Card className={`${!isOnline ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20' : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'}`}>
           <CardContent className="pt-6">
             <div className="flex items-start space-x-4">
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 {!isOnline ? (
                   <WifiOff className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
                 ) : (
@@ -1068,7 +1068,7 @@ export function Projects() {
         <Card className="border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-900/20">
           <CardContent className="pt-6">
             <div className="flex items-start space-x-4">
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 <AlertTriangle className="h-6 w-6 text-orange-600 dark:text-orange-400" />
               </div>
               <div className="flex-1 min-w-0">
@@ -1106,9 +1106,9 @@ export function Projects() {
         </Card>
       )}
 
-      <section className="relative overflow-hidden rounded-[2rem] border border-border bg-card text-card-foreground shadow-2xl shadow-muted/50">
+      <section className="relative overflow-hidden rounded-4xl border border-border bg-card text-card-foreground shadow-2xl shadow-muted/50">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.16),transparent_34%),radial-gradient(circle_at_bottom_right,hsl(var(--accent)/0.42),transparent_30%)]" />
-        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full border border-border bg-muted/30 blur-sm" />
+        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full border border-border bg-muted/30 blur-xs" />
         <div className="absolute -bottom-24 left-16 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
 
         <div className="relative p-6 sm:p-8">
@@ -1176,23 +1176,23 @@ export function Projects() {
           </div>
 
           <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
+            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('allProjects')}</div>
               <div className="mt-2 text-3xl font-black">{projects.length}</div>
             </div>
-            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
+            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('activeProjects')}</div>
               <div className="mt-2 text-3xl font-black text-primary">{projectSummary.active}</div>
             </div>
-            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
+            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalSuites')}</div>
               <div className="mt-2 text-3xl font-black text-primary">{projectSummary.suites}</div>
             </div>
-            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
+            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalCases')}</div>
               <div className="mt-2 text-3xl font-black text-primary">{projectSummary.cases}</div>
             </div>
-            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur">
+            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalRuns')}</div>
               <div className="mt-2 text-3xl font-black text-primary">{projectSummary.runs}</div>
             </div>
@@ -1202,10 +1202,10 @@ export function Projects() {
 
       {/* Bulk Operations Bar */}
       {isBulkMode && projects.length > 0 && (
-        <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
+        <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-xs">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2 rounded-full bg-card px-3 py-2 shadow-sm">
+              <div className="flex items-center gap-2 rounded-full bg-card px-3 py-2 shadow-xs">
                 <Checkbox
                   checked={selectedProjects.size === projects.length}
                   onCheckedChange={toggleAllProjects}
@@ -1265,7 +1265,7 @@ export function Projects() {
 
         {/* Search, filter & sort toolbar */}
         {!isLoading && !isBackendDown && projects.length > 0 && (
-          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm lg:flex-row lg:items-center">
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-xs lg:flex-row lg:items-center">
             <div className="relative flex-1">
               <Search className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
               <Input
@@ -1331,7 +1331,7 @@ export function Projects() {
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {isLoading ? (
-          <div className="col-span-full overflow-hidden rounded-[2rem] border border-border bg-card shadow-sm">
+          <div className="col-span-full overflow-hidden rounded-4xl border border-border bg-card shadow-xs">
             <div className="flex items-center justify-center px-6 py-16">
               <div className="text-center">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
@@ -1349,7 +1349,7 @@ export function Projects() {
               tabIndex={0}
               aria-label={t('openProjectAria', { name: project.name })}
               aria-pressed={selectedProject?.id === project.id}
-              className={`group relative cursor-pointer overflow-hidden rounded-[1.75rem] border-border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-2xl hover:shadow-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
+              className={`group relative cursor-pointer overflow-hidden rounded-[1.75rem] border-border bg-card shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-2xl hover:shadow-muted/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
                 selectedProject?.id === project.id ? 'ring-2 ring-primary shadow-xl shadow-muted' : ''
               } ${
                 selectedProjects.has(project.id) ? 'ring-2 ring-primary/70 shadow-xl shadow-muted' : ''
@@ -1383,14 +1383,14 @@ export function Projects() {
                       className="mt-1"
                     />
                   )}
-                  <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:scale-105">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs transition-transform group-hover:scale-105">
                     <FolderOpen className="h-5 w-5" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <CardTitle className="truncate text-base font-bold tracking-tight text-foreground">{project.name}</CardTitle>
                       {selectedProject?.id === project.id && !isBulkMode && (
-                        <ChevronRight className={`h-4 w-4 flex-shrink-0 text-primary ${isRTL ? 'rotate-180' : ''}`} />
+                        <ChevronRight className={`h-4 w-4 shrink-0 text-primary ${isRTL ? 'rotate-180' : ''}`} />
                       )}
                     </div>
                     <p className="mt-0.5 line-clamp-1 text-xs leading-5 text-muted-foreground">
@@ -1404,7 +1404,7 @@ export function Projects() {
                   </Badge>
                   {(project.owner_name || project.owner_id) && (
                     <Badge variant="outline" className="flex items-center gap-1 border-border bg-muted px-2 py-0 text-[11px] text-muted-foreground">
-                      <UserIcon className="h-3 w-3 flex-shrink-0" />
+                      <UserIcon className="h-3 w-3 shrink-0" />
                       <span className="max-w-[120px] truncate">{project.owner_name || t('ownerIdLabel', { id: project.owner_id })}</span>
                     </Badge>
                   )}
@@ -1417,7 +1417,7 @@ export function Projects() {
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleViewTestSuites(project); }}
                     title={t('suites')}
-                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <TestTube className="h-3.5 w-3.5 text-primary" />
                     <span className="text-lg font-bold leading-none text-foreground">{project.test_suites_count ?? 0}</span>
@@ -1427,7 +1427,7 @@ export function Projects() {
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleViewTestCases(project); }}
                     title={t('cases')}
-                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <FileText className="h-3.5 w-3.5 text-primary" />
                     <span className="text-lg font-bold leading-none text-foreground">{project.test_cases_count ?? 0}</span>
@@ -1437,7 +1437,7 @@ export function Projects() {
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleViewTestRuns(project); }}
                     title={t('runs')}
-                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <PlayCircle className="h-3.5 w-3.5 text-primary" />
                     <span className="text-lg font-bold leading-none text-foreground">{project.test_runs_count ?? 0}</span>
@@ -1511,7 +1511,7 @@ export function Projects() {
           ))
         ) : projects.length > 0 ? (
           <div className="col-span-full">
-            <Card className="overflow-hidden rounded-[2rem] border-dashed border-border bg-muted/40">
+            <Card className="overflow-hidden rounded-4xl border-dashed border-border bg-muted/40">
               <CardContent className="px-6 py-14">
                 <div className="mx-auto max-w-md text-center">
                   <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -1529,7 +1529,7 @@ export function Projects() {
           </div>
         ) : isBackendDown ? (
           <div className="col-span-full">
-            <Card className="overflow-hidden rounded-[2rem] border-dashed border-border bg-muted/40">
+            <Card className="overflow-hidden rounded-4xl border-dashed border-border bg-muted/40">
               <CardContent className="px-6 py-14">
                 <div className="mx-auto max-w-lg text-center">
                   <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-destructive/10 text-destructive">
@@ -1554,7 +1554,7 @@ export function Projects() {
                       {t('checkStatus')}
                     </Button>
                   </div>
-                  <div className="mt-6 rounded-2xl bg-card p-4 text-sm text-muted-foreground shadow-sm">
+                  <div className="mt-6 rounded-2xl bg-card p-4 text-sm text-muted-foreground shadow-xs">
                     <p className="font-semibold text-foreground">{t('possibleCauses')}</p>
                     <div className="mt-2 space-y-1">
                       <p>{t('causeBackendNotRunning')}</p>
@@ -1568,7 +1568,7 @@ export function Projects() {
           </div>
         ) : (
           <div className="col-span-full">
-            <Card className="relative overflow-hidden rounded-[2rem] border-dashed border-border bg-card">
+            <Card className="relative overflow-hidden rounded-4xl border-dashed border-border bg-card">
               <div className="absolute left-8 top-8 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
               <div className="absolute bottom-8 right-8 h-32 w-32 rounded-full bg-accent/40 blur-2xl" />
               <CardContent className="relative px-6 py-16">

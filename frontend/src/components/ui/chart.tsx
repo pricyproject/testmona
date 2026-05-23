@@ -69,7 +69,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-xl backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+    <div className="rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-xl backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/95">
       {label && <div className="mb-2 font-semibold text-slate-900 dark:text-slate-100">{label}</div>}
       <div className="space-y-1.5">
         {payload.map((item: any) => (
@@ -107,7 +107,7 @@ export function TestRunPieChart({ data, title, onChartClick }: TestRunChartProps
   };
 
   return (
-    <Card className="overflow-hidden border-slate-200/80 bg-gradient-to-br from-white to-slate-50 shadow-sm dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
+    <Card className="overflow-hidden border-slate-200/80 bg-linear-to-br from-white to-slate-50 shadow-xs dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -196,7 +196,7 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
   };
 
   return (
-    <Card className="overflow-hidden border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+    <Card className="overflow-hidden border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-950">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -280,7 +280,7 @@ export function TestRunTrendChart({ data, title }: { data: TrendData[]; title: s
   const delta = latest && first ? latest.passRate - first.passRate : 0;
 
   return (
-    <Card className="overflow-hidden border-slate-200/80 bg-[radial-gradient(circle_at_top_right,_rgba(37,99,235,0.16),_transparent_32%),linear-gradient(180deg,_#fff,_#f8fafc)] shadow-sm dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_right,_rgba(59,130,246,0.2),_transparent_32%),linear-gradient(180deg,_#020617,_#0f172a)]">
+    <Card className="overflow-hidden border-slate-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_32%),linear-gradient(180deg,#fff,#f8fafc)] shadow-xs dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.2),transparent_32%),linear-gradient(180deg,#020617,#0f172a)]">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -315,11 +315,11 @@ export function TestRunTrendChart({ data, title }: { data: TrendData[]; title: s
               </AreaChart>
             </ResponsiveContainer>
             <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-white/80 p-3 text-sm shadow-sm dark:bg-slate-950/60">
+              <div className="rounded-xl bg-white/80 p-3 text-sm shadow-xs dark:bg-slate-950/60">
                 <div className="text-xs text-slate-500 dark:text-slate-400">{t('latestPassRate')}</div>
                 <div className="text-2xl font-black text-slate-950 dark:text-slate-50">{latest?.passRate ?? 0}%</div>
               </div>
-              <div className="rounded-xl bg-white/80 p-3 text-sm shadow-sm dark:bg-slate-950/60">
+              <div className="rounded-xl bg-white/80 p-3 text-sm shadow-xs dark:bg-slate-950/60">
                 <div className="text-xs text-slate-500 dark:text-slate-400">{t('trendChange')}</div>
                 <div className={`text-2xl font-black ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                   {delta >= 0 ? '+' : ''}{delta}%

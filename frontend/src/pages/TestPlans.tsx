@@ -589,7 +589,7 @@ export function TestPlans() {
           </>
         )}
         {pages.map(p => (
-          <Button key={p} variant={p === safeCurrentPage ? 'default' : 'outline'} size="sm" className="h-8 w-8 p-0" onClick={() => setCurrentPage(p)}>{p}</Button>
+          <Button key={p} variant={p === safeCurrentPage ? 'default' : 'outline-solid'} size="sm" className="h-8 w-8 p-0" onClick={() => setCurrentPage(p)}>{p}</Button>
         ))}
         {safeCurrentPage + delta < totalPages && (
           <>

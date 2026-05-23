@@ -109,28 +109,28 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-4 gap-4">
-        <Card className="border-0 shadow-md bg-gradient-to-br from-blue-50 to-blue-100">
+        <Card className="border-0 shadow-md bg-linear-to-br from-blue-50 to-blue-100">
           <CardContent className="p-4 text-center">
             <div className="text-3xl font-bold text-blue-700 mb-1">{total_rows}</div>
             <div className="text-sm font-medium text-blue-600">Total Rows</div>
           </CardContent>
         </Card>
         
-        <Card className="border-0 shadow-md bg-gradient-to-br from-green-50 to-green-100">
+        <Card className="border-0 shadow-md bg-linear-to-br from-green-50 to-green-100">
           <CardContent className="p-4 text-center">
             <div className="text-3xl font-bold text-green-700 mb-1">{valid_rows}</div>
             <div className="text-sm font-medium text-green-600">Valid Rows</div>
           </CardContent>
         </Card>
         
-        <Card className="border-0 shadow-md bg-gradient-to-br from-red-50 to-red-100">
+        <Card className="border-0 shadow-md bg-linear-to-br from-red-50 to-red-100">
           <CardContent className="p-4 text-center">
             <div className="text-3xl font-bold text-red-700 mb-1">{invalid_rows}</div>
             <div className="text-sm font-medium text-red-600">Invalid Rows</div>
           </CardContent>
         </Card>
         
-        <Card className="border-0 shadow-md bg-gradient-to-br from-yellow-50 to-yellow-100">
+        <Card className="border-0 shadow-md bg-linear-to-br from-yellow-50 to-yellow-100">
           <CardContent className="p-4 text-center">
             <div className="text-3xl font-bold text-yellow-700 mb-1">{conflicts.length}</div>
             <div className="text-sm font-medium text-yellow-600">Conflicts</div>
@@ -185,7 +185,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
 
       {/* Data Preview Table */}
       <Card className="shadow-lg">
-        <CardHeader className="bg-gradient-to-r from-gray-50 to-gray-100 border-b">
+        <CardHeader className="bg-linear-to-r from-gray-50 to-gray-100 border-b">
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg">Data Preview</CardTitle>

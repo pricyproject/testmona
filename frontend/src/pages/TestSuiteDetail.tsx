@@ -461,7 +461,7 @@ export function TestSuiteDetail() {
       case 'critical': return 'destructive';
       case 'high': return 'default';
       case 'medium': return 'secondary';
-      case 'low': return 'outline';
+      case 'low': return 'outline-solid';
       default: return 'secondary';
     }
   };
@@ -470,7 +470,7 @@ export function TestSuiteDetail() {
     switch (status) {
       case 'active': return 'default';
       case 'draft': return 'secondary';
-      case 'deprecated': return 'outline';
+      case 'deprecated': return 'outline-solid';
       default: return 'secondary';
     }
   };
@@ -718,11 +718,11 @@ export function TestSuiteDetail() {
                       <Checkbox
                         checked={selectedTestCases.includes(testCase.id)}
                         onCheckedChange={() => toggleTestCaseSelection(testCase.id)}
-                        className="mt-1 flex-shrink-0"
+                        className="mt-1 shrink-0"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-2">
-                          <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          <FileText className="h-4 w-4 text-gray-400 shrink-0" />
                           <h4 className="font-medium text-gray-900 dark:text-white truncate">
                             {testCase.title}
                           </h4>
@@ -761,7 +761,7 @@ export function TestSuiteDetail() {
                         variant="outline" 
                         size="sm"
                         onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
-                        className="flex-shrink-0"
+                        className="shrink-0"
                       >
                         {t('viewDetails')}
                       </Button>
@@ -803,7 +803,7 @@ export function TestSuiteDetail() {
                         return (
                           <Button
                             key={pageNum}
-                            variant={currentPage === pageNum ? "default" : "outline"}
+                            variant={currentPage === pageNum ? "default" : "outline-solid"}
                             size="sm"
                             onClick={() => handlePageChange(pageNum)}
                             className="h-8 w-8 p-0 text-xs"

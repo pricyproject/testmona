@@ -1430,7 +1430,7 @@ export function TestCaseExecution() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-cyan-50 to-slate-100 p-5 text-slate-950 shadow-xl shadow-slate-200/70 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 dark:text-white dark:shadow-black/30 sm:p-6">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-linear-to-br from-white via-cyan-50 to-slate-100 p-5 text-slate-950 shadow-xl shadow-slate-200/70 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 dark:text-white dark:shadow-black/30 sm:p-6">
         <div className="pointer-events-none absolute -top-24 h-56 w-56 rounded-full bg-cyan-300/40 blur-3xl dark:bg-cyan-400/20 ltr:right-10 rtl:left-10" />
         <div className="pointer-events-none absolute -bottom-24 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-300/10 ltr:left-10 rtl:right-10" />
 
@@ -1448,13 +1448,13 @@ export function TestCaseExecution() {
 
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-3">
-                <Badge className="border border-cyan-200 bg-cyan-100/80 px-3 py-1 text-cyan-800 shadow-sm backdrop-blur dark:border-cyan-200/30 dark:bg-cyan-300/15 dark:text-cyan-50">
+                <Badge className="border border-cyan-200 bg-cyan-100/80 px-3 py-1 text-cyan-800 shadow-xs backdrop-blur-sm dark:border-cyan-200/30 dark:bg-cyan-300/15 dark:text-cyan-50">
                   {t('testCaseExecution')}
                 </Badge>
-                <Badge className={`${executionStatusBadgeClass} px-3 py-1 shadow-sm backdrop-blur`}>
+                <Badge className={`${executionStatusBadgeClass} px-3 py-1 shadow-xs backdrop-blur-sm`}>
                   {selectedStatus?.label || executionStatus}
                 </Badge>
-                <Badge className="border border-emerald-200 bg-emerald-100/80 px-3 py-1 text-emerald-800 shadow-sm backdrop-blur dark:border-emerald-200/30 dark:bg-emerald-300/15 dark:text-emerald-50">
+                <Badge className="border border-emerald-200 bg-emerald-100/80 px-3 py-1 text-emerald-800 shadow-xs backdrop-blur-sm dark:border-emerald-200/30 dark:bg-emerald-300/15 dark:text-emerald-50">
                   {progressLabel}
                 </Badge>
               </div>
@@ -1467,7 +1467,7 @@ export function TestCaseExecution() {
                   title={testCaseTitle}
                 >
                   <span className="truncate">{testCaseTitle}</span>
-                  <Link className="h-4 w-4 flex-shrink-0 opacity-60 transition-opacity group-hover:opacity-100" />
+                  <Link className="h-4 w-4 shrink-0 opacity-60 transition-opacity group-hover:opacity-100" />
                 </button>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm leading-6 text-slate-600 dark:text-slate-200 sm:text-base">
                   <span className="font-semibold text-slate-700 dark:text-slate-100">{t('testRunLabel')}:</span>
@@ -1478,13 +1478,13 @@ export function TestCaseExecution() {
                     title={testRunName}
                   >
                     <span className="truncate">{testRunName}</span>
-                    <Link className="h-3.5 w-3.5 flex-shrink-0" />
+                    <Link className="h-3.5 w-3.5 shrink-0" />
                   </button>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-white/10 dark:ring-white/10">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <FileText className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('testCaseLabel')}: TC-{testCaseId}
                 </span>
@@ -1664,8 +1664,8 @@ export function TestCaseExecution() {
           </Card>
 
           {/* Execution Form */}
-          <Card className="overflow-hidden border-slate-200/80 shadow-sm dark:border-slate-800">
-            <CardHeader className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-cyan-50/60 to-white pb-4 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+          <Card className="overflow-hidden border-slate-200/80 shadow-xs dark:border-slate-800">
+            <CardHeader className="border-b border-slate-100 bg-linear-to-r from-slate-50 via-cyan-50/60 to-white pb-4 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-950 dark:text-slate-50">
@@ -1676,14 +1676,14 @@ export function TestCaseExecution() {
                     {t('executionDetailsDescription')}
                   </p>
                 </div>
-                <Badge className={`w-fit ${executionStatusBadgeClass} px-3 py-1 shadow-sm`}>
+                <Badge className={`w-fit ${executionStatusBadgeClass} px-3 py-1 shadow-xs`}>
                   {selectedStatus?.label || executionStatus}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-5 p-4 sm:p-5">
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/60">
+                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-xs dark:border-slate-800 dark:bg-slate-950/60">
                   <Label htmlFor="status" className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {t('executionStatusLabel')}
                   </Label>
@@ -1703,7 +1703,7 @@ export function TestCaseExecution() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/60">
+                <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-xs dark:border-slate-800 dark:bg-slate-950/60">
                   <Label htmlFor="assignee" className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {t('assigneeLabel')}
                   </Label>
@@ -1737,7 +1737,7 @@ export function TestCaseExecution() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-cyan-200 bg-cyan-50/80 p-3 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/30">
+              <div className="rounded-xl border border-cyan-200 bg-cyan-50/80 p-3 shadow-xs dark:border-cyan-900/60 dark:bg-cyan-950/30">
                 <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
                   {t('elapsedTimeLabel')}
                 </p>
@@ -1825,7 +1825,7 @@ export function TestCaseExecution() {
 
               {/* Show link fields only when failed or blocked */}
               {(executionStatus === 'failed' || executionStatus === 'blocked') && (
-                <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-orange-50 p-4 shadow-sm dark:border-red-900/60 dark:from-red-950/30 dark:to-orange-950/20">
+                <div className="rounded-xl border border-red-200 bg-linear-to-br from-red-50 to-orange-50 p-4 shadow-xs dark:border-red-900/60 dark:from-red-950/30 dark:to-orange-950/20">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-red-800 dark:text-red-200">
                     <AlertTriangle className="h-4 w-4" />
                     {t('failureContext')}

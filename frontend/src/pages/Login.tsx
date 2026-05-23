@@ -86,7 +86,7 @@ export function Login() {
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
           {appLogoUrl && (
-            <img src={appLogoUrl} alt={appName} className="mx-auto mb-3 h-14 w-14 rounded-2xl object-cover shadow-sm" />
+            <img src={appLogoUrl} alt={appName} className="mx-auto mb-3 h-14 w-14 rounded-2xl object-cover shadow-xs" />
           )}
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{appName}</h1>
           <p className="mt-2 text-gray-600 dark:text-gray-400">{t('signInToAccount')}</p>
@@ -187,7 +187,7 @@ export function Login() {
         </Card>
 
         {showDemoCredentials && (
-          <div className="rounded-lg border border-gray-200 bg-white/80 px-4 py-3 text-center text-sm text-gray-600 shadow-sm backdrop-blur-sm dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-300">
+          <div className="rounded-lg border border-gray-200 bg-white/80 px-4 py-3 text-center text-sm text-gray-600 shadow-xs backdrop-blur-xs dark:border-gray-700 dark:bg-gray-800/80 dark:text-gray-300">
             <p className="font-medium text-gray-800 dark:text-gray-100">{t('demoCredentials')}</p>
             <p className="mt-1">{t('emailLabelValue', { value: 'demo@testmona.com' })}</p>
             <p>{t('passwordLabelValue', { value: 'demo123' })}</p>

@@ -223,7 +223,7 @@ export function ContentEditor({
     },
     editorProps: {
       attributes: {
-        class: 'prose prose-sm dark:prose-invert max-w-none focus:outline-none px-4 py-3 min-h-[140px]',
+        class: 'prose prose-sm dark:prose-invert max-w-none focus:outline-hidden px-4 py-3 min-h-[140px]',
         dir: resolvedDir,
       },
       handleDrop: (_view, event) => {
@@ -380,7 +380,7 @@ export function ContentEditor({
   const Divider = () => <div className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />;
 
   const shellClass = cn(
-    'rounded-xl border border-slate-200 bg-white shadow-sm transition-all dark:border-slate-800 dark:bg-slate-950',
+    'rounded-xl border border-slate-200 bg-white shadow-xs transition-all dark:border-slate-800 dark:bg-slate-950',
     'focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900/30',
     className
   );
@@ -407,7 +407,7 @@ export function ContentEditor({
               className={cn(
                 'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
                 viewMode === 'write'
-                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-white'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
               )}
             >
@@ -419,7 +419,7 @@ export function ContentEditor({
               className={cn(
                 'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
                 viewMode === 'source'
-                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-white'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
               )}
             >
@@ -431,7 +431,7 @@ export function ContentEditor({
               className={cn(
                 'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors',
                 viewMode === 'preview'
-                  ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white'
+                  ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-800 dark:text-white'
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
               )}
             >

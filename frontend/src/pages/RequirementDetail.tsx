@@ -762,7 +762,7 @@ export function RequirementDetail() {
                 <Badge className={`capitalize ${getPriorityBadge(requirement.priority)}`}>{requirement.priority}</Badge>
                 {hasGherkin && <Badge className="bg-indigo-600 text-white hover:bg-indigo-600">{t('gherkinSyntax')}</Badge>}
               </div>
-              <h1 className="max-w-3xl break-words text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
+              <h1 className="max-w-3xl wrap-break-word text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-3xl">
                 {requirement.title}
               </h1>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
@@ -840,7 +840,7 @@ export function RequirementDetail() {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">{t('sourceDocument')}</p>
-                    <h2 className="mt-1 break-words text-lg font-semibold text-slate-950 dark:text-white">{sourceDocument.heading}</h2>
+                    <h2 className="mt-1 wrap-break-word text-lg font-semibold text-slate-950 dark:text-white">{sourceDocument.heading}</h2>
                   </div>
                   {sourceDocument.sourceUrl && (
                     <a
@@ -855,7 +855,7 @@ export function RequirementDetail() {
                   )}
                 </div>
                 {sourceDocument.body && (
-                  <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
+                  <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 wrap-anywhere dark:text-slate-300">
                     {sourceDocument.body}
                   </p>
                 )}
@@ -869,7 +869,7 @@ export function RequirementDetail() {
               </h2>
               {hasDescription ? (
                 sourceDocument ? (
-                  <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
+                  <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 wrap-anywhere dark:text-slate-300">
                     {sourceDocument.intro}
                   </p>
                 ) : (
@@ -1001,7 +1001,7 @@ export function RequirementDetail() {
                             </div>
                             <button
                               type="button"
-                              className={`block min-w-0 break-words text-sm font-medium leading-6 text-blue-700 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-blue-300 dark:focus-visible:ring-offset-slate-900 ${isRTL ? 'text-right' : 'text-left'}`}
+                              className={`block min-w-0 wrap-break-word text-sm font-medium leading-6 text-blue-700 wrap-anywhere hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-blue-300 dark:focus-visible:ring-offset-slate-900 ${isRTL ? 'text-right' : 'text-left'}`}
                               onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
                             >
                               {testCase.title}
@@ -1016,7 +1016,7 @@ export function RequirementDetail() {
                               </Badge>
                             )}
                           </div>
-                          <p className="min-w-0 break-words text-xs leading-5 text-slate-500 xl:truncate">
+                          <p className="min-w-0 wrap-break-word text-xs leading-5 text-slate-500 xl:truncate">
                             {testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}
                           </p>
                           <div className={`absolute top-3 ${isRTL ? 'left-3' : 'right-3'}`}>
@@ -1103,7 +1103,7 @@ export function RequirementDetail() {
                                 <Badge variant={item.action === 'link' ? 'default' : 'secondary'}>
                                   {item.action === 'link' ? t('linked') : t('unlinked')}
                                 </Badge>
-                                <span className="break-words [overflow-wrap:anywhere]">
+                                <span className="wrap-break-word wrap-anywhere">
                                   {item.test_case_id ? `TC-${String(item.test_case_id).padStart(3, '0')}` : t('testCase')} {item.test_case_title || ''}
                                 </span>
                               </span>
@@ -1195,7 +1195,7 @@ export function RequirementDetail() {
                         onCheckedChange={() => toggleAvailableSelection(testCase.id)}
                       />
                       <span className="min-w-0">
-                        <span className="block font-medium text-slate-900 [overflow-wrap:anywhere] dark:text-white">TC-{String(testCase.id).padStart(3, '0')} · {testCase.title}</span>
+                        <span className="block font-medium text-slate-900 wrap-anywhere dark:text-white">TC-{String(testCase.id).padStart(3, '0')} · {testCase.title}</span>
                         <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
                       </span>
                     </label>
@@ -1480,7 +1480,7 @@ function RichTextContent({ html }: { html: string }) {
 
   if (!isHtml) {
     return (
-      <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300">
+      <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 wrap-anywhere dark:text-slate-300">
         {html}
       </p>
     );
@@ -1488,7 +1488,7 @@ function RichTextContent({ html }: { html: string }) {
   return (
     <div data-rich-text-editor>
       <div
-        className="rich-text-preview max-w-[72ch] text-[15px] leading-[1.8] text-slate-700 [overflow-wrap:anywhere] dark:text-slate-300"
+        className="rich-text-preview max-w-[72ch] text-[15px] leading-[1.8] text-slate-700 wrap-anywhere dark:text-slate-300"
         dangerouslySetInnerHTML={{ __html: safeHtml }}
       />
     </div>
@@ -1533,7 +1533,7 @@ function MetaRow({ label, value, icon }: { label: string; value: ReactNode; icon
         {icon}
         {label}
       </span>
-      <span className="max-w-[170px] break-words text-end font-medium text-slate-900 [overflow-wrap:anywhere] dark:text-white">{value}</span>
+      <span className="max-w-[170px] wrap-break-word text-end font-medium text-slate-900 wrap-anywhere dark:text-white">{value}</span>
     </div>
   );
 }

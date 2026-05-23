@@ -1200,7 +1200,7 @@ export function TestRunDetail() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-cyan-50 to-slate-100 p-5 text-slate-950 shadow-xl shadow-slate-200/70 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 dark:text-white dark:shadow-black/30 sm:p-6">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-linear-to-br from-white via-cyan-50 to-slate-100 p-5 text-slate-950 shadow-xl shadow-slate-200/70 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 dark:text-white dark:shadow-black/30 sm:p-6">
         <div className="pointer-events-none absolute -top-24 h-56 w-56 rounded-full bg-cyan-300/40 blur-3xl dark:bg-cyan-400/20 ltr:right-10 rtl:left-10" />
         <div className="pointer-events-none absolute -bottom-24 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-300/10 ltr:left-10 rtl:right-10" />
 
@@ -1218,13 +1218,13 @@ export function TestRunDetail() {
 
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-3">
-                <Badge className="border border-cyan-200 bg-cyan-100/80 px-3 py-1 text-cyan-800 shadow-sm backdrop-blur dark:border-cyan-200/30 dark:bg-cyan-300/15 dark:text-cyan-50">
+                <Badge className="border border-cyan-200 bg-cyan-100/80 px-3 py-1 text-cyan-800 shadow-xs backdrop-blur-sm dark:border-cyan-200/30 dark:bg-cyan-300/15 dark:text-cyan-50">
                   {t('runId')}: {testRun.id}
                 </Badge>
-                <Badge className={`${getStatusBadge(testRun.status)} px-3 py-1 shadow-sm backdrop-blur`}>
+                <Badge className={`${getStatusBadge(testRun.status)} px-3 py-1 shadow-xs backdrop-blur-sm`}>
                   {formattedRunStatus}
                 </Badge>
-                <Badge className="border border-emerald-200 bg-emerald-100/80 px-3 py-1 text-emerald-800 shadow-sm backdrop-blur dark:border-emerald-200/30 dark:bg-emerald-300/15 dark:text-emerald-50">
+                <Badge className="border border-emerald-200 bg-emerald-100/80 px-3 py-1 text-emerald-800 shadow-xs backdrop-blur-sm dark:border-emerald-200/30 dark:bg-emerald-300/15 dark:text-emerald-50">
                   {t('passRateWithValue', { value: passRate })}
                 </Badge>
               </div>
@@ -1239,19 +1239,19 @@ export function TestRunDetail() {
               </div>
 
               <div className="flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-white/10 dark:ring-white/10">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <Calendar className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('createdLabel')}: {formattedCreatedDate}
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-white/10 dark:ring-white/10">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <RefreshCw className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('lastUpdated')}: {formattedUpdatedDate}
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-white/10 dark:ring-white/10">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <BarChart3 className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('totalTestsWithCount', { count: totalTests })}
                 </span>
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-sm ring-1 ring-slate-200/80 backdrop-blur dark:bg-white/10 dark:ring-white/10">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <User className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   <span className="shrink-0">{t('assignedToLabel')}:</span>
                   <Select
@@ -1495,8 +1495,8 @@ export function TestRunDetail() {
       </div>
 
       {/* Test Results */}
-      <Card className="overflow-hidden border-slate-200/80 shadow-sm dark:border-slate-800">
-        <CardHeader className="border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
+      <Card className="overflow-hidden border-slate-200/80 shadow-xs dark:border-slate-800">
+        <CardHeader className="border-b border-slate-100 bg-linear-to-r from-slate-50 to-white dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
@@ -1929,7 +1929,7 @@ export function TestRunDetail() {
                                     onClick={() => handleUnlinkDefect(result, link.id)}
                                     title={t('unlinkDefect')}
                                     aria-label={`${t('unlinkDefect')} ${link.defect?.defect_id || ''}`}
-                                    className="rounded text-slate-400 hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400"
+                                    className="rounded text-slate-400 hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-red-400"
                                   >
                                     <Unlink className="h-3 w-3" />
                                   </button>
@@ -2216,7 +2216,7 @@ export function TestRunDetail() {
                               type="checkbox"
                               checked={selectedTestCasesToAdd.includes(testCase.id)}
                               onChange={() => {}}
-                              className="h-4 w-4 flex-shrink-0 ml-6"
+                              className="h-4 w-4 shrink-0 ml-6"
                             />
                             <div className="flex-1 min-w-0">
                               <div className="text-sm font-medium truncate">{testCase.title}</div>

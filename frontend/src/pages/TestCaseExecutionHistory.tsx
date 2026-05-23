@@ -158,9 +158,9 @@ export function TestCaseExecutionHistory() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-white px-4 py-6 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-white px-4 py-6 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xs dark:border-slate-800 dark:bg-slate-900">
           <Button variant="ghost" onClick={backToTestCase} className="-mx-3 mb-4 h-9 text-slate-600 dark:text-slate-300">
             {isRTL ? <ArrowRight className="ml-2 h-4 w-4" /> : <ArrowLeft className="mr-2 h-4 w-4" />}
             {t('backToTestCase')}
@@ -173,7 +173,7 @@ export function TestCaseExecutionHistory() {
                 {testCase?.title || t('testCase')} · {t('executionHistoryDescription')}
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 overflow-x-auto pb-1 text-center sm:grid-cols-4 lg:min-w-[36rem]">
+            <div className="grid grid-cols-2 gap-2 overflow-x-auto pb-1 text-center sm:grid-cols-4 lg:min-w-xl">
               <Summary label={t('totalRuns')} value={groupedRuns.length.toString()} />
               <Summary label={t('totalExecutions')} value={history.length.toString()} />
               <Summary label={t('uniqueExecutors')} value={executorCount.toString()} />
@@ -189,7 +189,7 @@ export function TestCaseExecutionHistory() {
         ) : (
           <div className="space-y-4">
             {groupedRuns.map((run) => (
-              <Card key={run.runId} className="overflow-hidden border-slate-200 shadow-sm dark:border-slate-800">
+              <Card key={run.runId} className="overflow-hidden border-slate-200 shadow-xs dark:border-slate-800">
                 <CardHeader className="border-b bg-slate-50/80 dark:bg-slate-900/60">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div className="min-w-0">
@@ -241,7 +241,7 @@ export function TestCaseExecutionHistory() {
 
 function Summary({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-[8.5rem] rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-950">
+    <div className="min-w-34 rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-950">
       <p className="whitespace-nowrap text-xl font-semibold text-slate-950 dark:text-white">{value}</p>
       <p className="mt-1 whitespace-nowrap text-[11px] text-slate-500">{label}</p>
     </div>

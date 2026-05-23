@@ -763,7 +763,7 @@ export function TestCaseEdit() {
           </div>
 
           {(customFieldsLoading || customFields.length > 0) && (
-            <Card className="border-slate-200 shadow-sm dark:border-slate-800">
+            <Card className="border-slate-200 shadow-xs dark:border-slate-800">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold">{t('customFields')}</CardTitle>
                 {customFieldsLoading && (

@@ -247,7 +247,7 @@ export const VersionComparison: React.FC<VersionComparisonProps> = ({
             <CardTitle>Comparison Results</CardTitle>
             <div className="flex gap-2">
               <Button
-                variant={viewMode === 'side-by-side' ? 'default' : 'outline'}
+                variant={viewMode === 'side-by-side' ? 'default' : 'outline-solid'}
                 size="sm"
                 onClick={() => setViewMode('side-by-side')}
               >
@@ -255,7 +255,7 @@ export const VersionComparison: React.FC<VersionComparisonProps> = ({
                 Side by Side
               </Button>
               <Button
-                variant={viewMode === 'unified' ? 'default' : 'outline'}
+                variant={viewMode === 'unified' ? 'default' : 'outline-solid'}
                 size="sm"
                 onClick={() => setViewMode('unified')}
               >
