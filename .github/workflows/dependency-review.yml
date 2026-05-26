@@ -1,0 +1,29 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    paths:
+      - backend/requirements.txt
+      - frontend/package.json
+      - frontend/package-lock.json
+      - .github/workflows/dependency-review.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime, development
+          show-openssf-scorecard: true
+          show-patched-versions: true
