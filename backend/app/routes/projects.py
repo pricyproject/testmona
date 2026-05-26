@@ -325,11 +325,38 @@ def register_project_routes(app):
     ):
         if not rbac.can_assign_users(current_user, assignment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
+        project = db.query(models.Project).filter(models.Project.id == assignment.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        user = db.query(models.User).filter(models.User.id == assignment.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if not user.is_active:
+            raise HTTPException(status_code=400, detail="Cannot assign an inactive user")
+
+        # The project owner already has implicit admin access — a redundant
+        # row would just confuse the UI and the role-edit flow.
+        if project.owner_id == assignment.user_id:
+            raise HTTPException(status_code=400, detail="Project owner already has full access")
+
+        existing = db.query(models.ProjectAssignment).filter(
+            models.ProjectAssignment.project_id == assignment.project_id,
+            models.ProjectAssignment.user_id == assignment.user_id,
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="User is already a member of this project")
+
         if assignment.assigned_by is None:
             assignment.assigned_by = current_user.id
-        
-        return crud_rbac.create_project_assignment(db=db, assignment=assignment)
+
+        created = crud_rbac.create_project_assignment(db=db, assignment=assignment)
+        _record_project_audit(
+            db, current_user, AuditAction.CREATE.value, assignment.project_id,
+            f"User {user.username} added as {rbac.role_value(assignment.role)}"
+        )
+        return created
 
     @app.get("/project-assignments", response_model=List[schemas.ProjectAssignment])
     def read_project_assignments(
@@ -350,6 +377,49 @@ def register_project_routes(app):
         
         return crud_rbac.get_project_assignments(db, project_id=project_id, user_id=user_id, skip=skip, limit=limit)
 
+    @app.put("/project-assignments/{assignment_id}", response_model=schemas.ProjectAssignment)
+    def update_project_assignment(
+        assignment_id: int,
+        payload: schemas.ProjectAssignmentUpdate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        assignment = crud_rbac.get_project_assignment(db, assignment_id=assignment_id)
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Assignment not found")
+
+        if not rbac.can_assign_users(current_user, assignment.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # Prevent a manager from accidentally demoting themselves and losing
+        # the ability to manage the project mid-flight. Global admins still
+        # get their global privileges, so this only bites project-scoped
+        # admins/managers — exactly the case we want to protect.
+        if assignment.user_id == current_user.id and not getattr(current_user, "is_superuser", False) \
+                and rbac.normalize_role(getattr(current_user, "role", None)) not in {models.Role.ADMIN, models.Role.MANAGER}:
+            raise HTTPException(status_code=400, detail="You cannot change your own role on this project")
+
+        # Moving an assignment between projects or users would silently change
+        # who has access where; only role edits are accepted here. Removing and
+        # re-adding is the path for the other cases.
+        if payload.project_id is not None and payload.project_id != assignment.project_id:
+            raise HTTPException(status_code=400, detail="Cannot move an assignment to a different project")
+        if payload.user_id is not None and payload.user_id != assignment.user_id:
+            raise HTTPException(status_code=400, detail="Cannot reassign to a different user")
+        if payload.role is None:
+            raise HTTPException(status_code=400, detail="Role is required")
+
+        updated = crud_rbac.update_project_assignment(
+            db,
+            assignment_id=assignment_id,
+            assignment=schemas.ProjectAssignmentUpdate(role=payload.role),
+        )
+        _record_project_audit(
+            db, current_user, AuditAction.UPDATE.value, assignment.project_id,
+            f"Assignment {assignment_id} role updated to {rbac.role_value(payload.role)}"
+        )
+        return updated
+
     @app.delete("/project-assignments/{assignment_id}")
     def delete_project_assignment(
         assignment_id: int,
@@ -359,12 +429,85 @@ def register_project_routes(app):
         assignment = crud_rbac.get_project_assignment(db, assignment_id=assignment_id)
         if not assignment:
             raise HTTPException(status_code=404, detail="Assignment not found")
-        
+
         if not rbac.can_assign_users(current_user, assignment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
+        # Block self-removal for project-scoped admins/managers (global
+        # admins/managers still retain access via their global role).
+        if assignment.user_id == current_user.id and not getattr(current_user, "is_superuser", False) \
+                and rbac.normalize_role(getattr(current_user, "role", None)) not in {models.Role.ADMIN, models.Role.MANAGER}:
+            raise HTTPException(status_code=400, detail="You cannot remove yourself from this project")
+
         crud_rbac.delete_project_assignment(db, assignment_id=assignment_id)
+        _record_project_audit(
+            db, current_user, AuditAction.DELETE.value, assignment.project_id,
+            f"Assignment {assignment_id} removed"
+        )
         return {"message": "Project assignment deleted successfully"}
+
+    @app.get("/projects/{project_id}/members", response_model=List[schemas.ProjectMember])
+    def read_project_members(
+        project_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Members of a project, joined with user info. Includes the implicit
+        owner row so the UI can show them even when no assignment row exists."""
+        project = db.query(models.Project).filter(models.Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        assignments = crud_rbac.get_project_assignments(db, project_id=project_id, limit=10000)
+        user_ids = {assignment.user_id for assignment in assignments}
+        if project.owner_id:
+            user_ids.add(project.owner_id)
+        users_by_id = {
+            user.id: user
+            for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all()
+        } if user_ids else {}
+
+        members: List[schemas.ProjectMember] = []
+        seen_users: set[int] = set()
+        for assignment in assignments:
+            user = users_by_id.get(assignment.user_id)
+            if not user:
+                continue
+            members.append(schemas.ProjectMember(
+                assignment_id=assignment.id,
+                user_id=user.id,
+                project_id=project_id,
+                username=user.username,
+                email=user.email,
+                full_name=user.full_name,
+                role=rbac.normalize_role(assignment.role) or models.Role.TESTER,
+                is_owner=(user.id == project.owner_id),
+                assigned_at=assignment.assigned_at,
+                assigned_by=assignment.assigned_by,
+            ))
+            seen_users.add(user.id)
+
+        if project.owner_id and project.owner_id not in seen_users:
+            owner = users_by_id.get(project.owner_id)
+            if owner:
+                # Owners always have full admin on their project regardless of
+                # their global role, so the synthetic row reflects effective
+                # access, not the owner's directory-level role.
+                members.insert(0, schemas.ProjectMember(
+                    assignment_id=None,
+                    user_id=owner.id,
+                    project_id=project_id,
+                    username=owner.username,
+                    email=owner.email,
+                    full_name=owner.full_name,
+                    role=models.Role.ADMIN,
+                    is_owner=True,
+                    assigned_at=None,
+                    assigned_by=None,
+                ))
+        return members
 
     @app.get("/my-projects")
     def get_my_projects(

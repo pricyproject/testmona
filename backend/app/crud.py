@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy import func, or_, text
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 from . import schemas
 from .services.execution_timing import apply_test_result_execution_timing
@@ -17,7 +18,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -221,17 +222,60 @@ def get_test_suite(db: Session, test_suite_id: int):
 
 def get_test_suites(db: Session, project_id: Optional[int] = None, skip: int = 0, limit: int = 100):
     query = db.query(TestSuite)
-    if project_id:
+    # Explicit None check so callers can scope to project_id=0 without it being silently ignored
+    if project_id is not None:
         query = query.filter(TestSuite.project_id == project_id)
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(TestSuite.created_at.desc(), TestSuite.id.desc()).offset(skip).limit(limit).all()
 
 
 def create_test_suite(db: Session, test_suite: TestSuiteCreate):
-    db_test_suite = TestSuite(**test_suite.model_dump())
+    payload = test_suite.model_dump()
+    # test_case_ids is handled separately below; remove it before constructing the model
+    requested_case_ids = payload.pop("test_case_ids", None) or []
+
+    db_test_suite = TestSuite(**payload)
     db.add(db_test_suite)
     safe_commit(db)
     db.refresh(db_test_suite)
+
+    if requested_case_ids:
+        # Only move cases that live in the same project and aren't soft-deleted.
+        valid_case_ids = [
+            row[0]
+            for row in db.query(TestCase.id)
+            .join(TestSuite, TestCase.test_suite_id == TestSuite.id)
+            .filter(
+                TestCase.id.in_(requested_case_ids),
+                TestSuite.project_id == db_test_suite.project_id,
+                ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+            )
+            .all()
+        ]
+        if valid_case_ids:
+            db.query(TestCase).filter(TestCase.id.in_(valid_case_ids)).update(
+                {"test_suite_id": db_test_suite.id, "section_id": None},
+                synchronize_session=False,
+            )
+            safe_commit(db)
+            db.refresh(db_test_suite)
+
     return db_test_suite
+
+
+def get_test_case_counts_by_suite(db: Session, suite_ids: List[int]) -> dict:
+    """Return {suite_id: count_of_non_deleted_test_cases} for a list of suite ids."""
+    if not suite_ids:
+        return {}
+    rows = (
+        db.query(TestCase.test_suite_id, func.count(TestCase.id))
+        .filter(
+            TestCase.test_suite_id.in_(suite_ids),
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        )
+        .group_by(TestCase.test_suite_id)
+        .all()
+    )
+    return {sid: int(cnt or 0) for sid, cnt in rows}
 
 
 def update_test_suite(db: Session, test_suite_id: int, test_suite: TestSuiteUpdate):
@@ -246,9 +290,13 @@ def update_test_suite(db: Session, test_suite_id: int, test_suite: TestSuiteUpda
 
 def delete_test_suite(db: Session, test_suite_id: int):
     db_test_suite = db.query(TestSuite).filter(TestSuite.id == test_suite_id).first()
-    if db_test_suite:
-        db.delete(db_test_suite)
-        safe_commit(db)
+    if not db_test_suite:
+        return None
+    # Bare delete fails with an integrity error when test_cases/sections still
+    # reference this suite — the route is expected to enforce the "must be empty"
+    # rule via a 409 before we reach this point.
+    db.delete(db_test_suite)
+    safe_commit(db)
     return db_test_suite
 
 
@@ -263,16 +311,16 @@ def get_test_case(db: Session, test_case_id: int):
 
 def get_test_cases(db: Session, test_suite_id: Optional[int] = None, section_id: Optional[int] = None, skip: int = 0, limit: int = 100):
     from sqlalchemy.orm import joinedload
-    
+
     query = db.query(TestCase).options(
         joinedload(TestCase.test_suite).joinedload(TestSuite.project),
         joinedload(TestCase.section),
         joinedload(TestCase.creator),
         selectinload(TestCase.custom_field_values)
     )
-    if test_suite_id:
+    if test_suite_id is not None:
         query = query.filter(TestCase.test_suite_id == test_suite_id)
-    if section_id:
+    if section_id is not None:
         query = query.filter(TestCase.section_id == section_id)
     return query.offset(skip).limit(limit).all()
 
@@ -496,13 +544,49 @@ def create_test_suite_run(db: Session, test_suite: TestSuite, test_cases: List[T
     return db_test_run
 
 
+def _normalize_run_status(value) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
 def update_test_run(db: Session, test_run_id: int, test_run: TestRunUpdate):
     db_test_run = db.query(TestRun).filter(TestRun.id == test_run_id).first()
     if db_test_run:
+        prior_status = _normalize_run_status(db_test_run.status)
         for key, value in test_run.model_dump(exclude_unset=True).items():
             setattr(db_test_run, key, value)
         safe_commit(db)
         db.refresh(db_test_run)
+        # Emit ``test_run.completed`` exactly once per transition into the
+        # completed state. Failures are swallowed inside emit_event so we
+        # never block the update path on webhook delivery.
+        new_status = _normalize_run_status(db_test_run.status)
+        if new_status == "completed" and prior_status != "completed":
+            try:
+                from .services.webhook_service import emit_event
+                emit_event(
+                    db,
+                    project_id=db_test_run.project_id,
+                    event="test_run.completed",
+                    payload={
+                        "event": "test_run.completed",
+                        "test_run": {
+                            "id": db_test_run.id,
+                            "name": db_test_run.name,
+                            "project_id": db_test_run.project_id,
+                            "test_plan_id": getattr(db_test_run, "test_plan_id", None),
+                            "milestone_id": getattr(db_test_run, "milestone_id", None),
+                            "status": db_test_run.status,
+                            "started_at": getattr(db_test_run, "started_at", None).isoformat()
+                            if getattr(db_test_run, "started_at", None) else None,
+                            "completed_at": getattr(db_test_run, "completed_at", None).isoformat()
+                            if getattr(db_test_run, "completed_at", None) else None,
+                        },
+                    },
+                )
+            except Exception:
+                # Log but never propagate.
+                import logging
+                logging.getLogger(__name__).exception("Failed to emit test_run.completed")
     return db_test_run
 
 
@@ -666,8 +750,9 @@ def create_custom_field_definition(db: Session, field: CustomFieldDefinitionCrea
         audit_data = AuditTrailCreate(
             user_id=user_id,
             action="create",
-            entity_type="custom_field_definition",
+            entity_type=EntityType.CUSTOM_FIELD,
             entity_id=db_field.id,
+            project_id=db_field.project_id,
             description=f"Created custom field definition '{db_field.name}' in project {db_field.project_id}",
             ip_address=None,
             user_agent=None
@@ -729,8 +814,9 @@ def update_custom_field_definition(db: Session, field_id: int, field: CustomFiel
             audit_data = AuditTrailCreate(
                 user_id=user_id,
                 action="update",
-                entity_type="custom_field_definition",
+                entity_type=EntityType.CUSTOM_FIELD,
                 entity_id=db_field.id,
+                project_id=db_field.project_id,
                 description=f"Updated custom field definition '{db_field.name}' in project {db_field.project_id}. Changes: {changes}",
                 ip_address=None,
                 user_agent=None
@@ -758,8 +844,9 @@ def delete_custom_field_definition(db: Session, field_id: int, user_id: Optional
             audit_data = AuditTrailCreate(
                 user_id=user_id,
                 action="delete",
-                entity_type="custom_field_definition",
+                entity_type=EntityType.CUSTOM_FIELD,
                 entity_id=field_id,
+                project_id=project_id,
                 description=f"Deleted custom field definition '{field_name}' from project {project_id}",
                 ip_address=None,
                 user_agent=None
@@ -776,13 +863,100 @@ def get_custom_field_value(db: Session, value_id: int):
     return db.query(CustomFieldValue).filter(CustomFieldValue.id == value_id).first()
 
 
-def get_custom_field_values(db: Session, test_case_id: Optional[int] = None, field_definition_id: Optional[int] = None):
+_CUSTOM_FIELD_ENTITY_COLUMNS = {
+    "test_case": "test_case_id",
+    "test_run": "test_run_id",
+    "defect": "defect_id",
+    "requirement": "requirement_id",
+}
+
+
+def get_custom_field_values(
+    db: Session,
+    test_case_id: Optional[int] = None,
+    field_definition_id: Optional[int] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    test_run_id: Optional[int] = None,
+    defect_id: Optional[int] = None,
+    requirement_id: Optional[int] = None,
+):
+    """Fetch custom field values, filterable by any of the four entity owners.
+
+    Callers can use either the legacy keyword (``test_case_id``) or the
+    polymorphic pair (``entity_type``, ``entity_id``).
+    """
     query = db.query(CustomFieldValue)
-    if test_case_id:
+    if test_case_id is not None:
         query = query.filter(CustomFieldValue.test_case_id == test_case_id)
+    if test_run_id is not None:
+        query = query.filter(CustomFieldValue.test_run_id == test_run_id)
+    if defect_id is not None:
+        query = query.filter(CustomFieldValue.defect_id == defect_id)
+    if requirement_id is not None:
+        query = query.filter(CustomFieldValue.requirement_id == requirement_id)
+    if entity_type and entity_id is not None:
+        column_name = _CUSTOM_FIELD_ENTITY_COLUMNS.get(entity_type)
+        if column_name:
+            query = query.filter(getattr(CustomFieldValue, column_name) == entity_id)
     if field_definition_id:
         query = query.filter(CustomFieldValue.field_definition_id == field_definition_id)
     return query.all()
+
+
+def _resolve_custom_field_owner(db: Session, value):
+    """Return ``(entity_type, project_id)`` for whichever entity owns the
+    value. Raises ``ValueError`` if no owner or the owner can't be
+    resolved to a project.
+    """
+    from .models import TestCase, TestRun, Defect, Requirement, TestSuite
+
+    if value.test_case_id is not None:
+        owner = db.query(TestCase).filter(TestCase.id == value.test_case_id).first()
+        if not owner:
+            raise ValueError(f"Test case {value.test_case_id} not found")
+        suite = db.query(TestSuite).filter(TestSuite.id == owner.test_suite_id).first()
+        return "test_case", (suite.project_id if suite else None)
+    if value.test_run_id is not None:
+        owner = db.query(TestRun).filter(TestRun.id == value.test_run_id).first()
+        if not owner:
+            raise ValueError(f"Test run {value.test_run_id} not found")
+        return "test_run", owner.project_id
+    if value.defect_id is not None:
+        owner = db.query(Defect).filter(Defect.id == value.defect_id).first()
+        if not owner:
+            raise ValueError(f"Defect {value.defect_id} not found")
+        return "defect", owner.project_id
+    if value.requirement_id is not None:
+        owner = db.query(Requirement).filter(Requirement.id == value.requirement_id).first()
+        if not owner:
+            raise ValueError(f"Requirement {value.requirement_id} not found")
+        return "requirement", owner.project_id
+    raise ValueError("Custom field value has no entity owner")
+
+
+def _format_custom_field_value_owner(value: CustomFieldValue) -> str:
+    if value.test_case_id is not None:
+        return f"test_case={value.test_case_id}"
+    if value.test_run_id is not None:
+        return f"test_run={value.test_run_id}"
+    if value.defect_id is not None:
+        return f"defect={value.defect_id}"
+    if value.requirement_id is not None:
+        return f"requirement={value.requirement_id}"
+    return "unknown entity"
+
+
+def field_definition_applies_to(field_definition: CustomFieldDefinition, entity_type: str) -> bool:
+    """Whether a definition is applicable to the given entity type.
+
+    Legacy definitions (``entity_types`` NULL/empty) implicitly apply to
+    test cases only, matching the pre-unification behavior so existing
+    data and queries keep working.
+    """
+    if not field_definition.entity_types:
+        return entity_type == "test_case"
+    return entity_type in field_definition.entity_types
 
 
 def validate_custom_field_value(value: Optional[str], field_definition: CustomFieldDefinition) -> Optional[str]:
@@ -902,30 +1076,31 @@ def create_custom_field_value(db: Session, value: CustomFieldValueCreate, user_i
     field_definition = db.query(CustomFieldDefinition).filter(
         CustomFieldDefinition.id == value.field_definition_id
     ).first()
-    
     if not field_definition:
         raise ValueError(f"Custom field definition with id {value.field_definition_id} does not exist")
-    
-    # Get test case to verify project match
-    from .models import TestCase
-    test_case = db.query(TestCase).filter(TestCase.id == value.test_case_id).first()
-    
-    if not test_case:
-        raise ValueError(f"Test case with id {value.test_case_id} does not exist")
-    
-    # Verify field definition belongs to the same project as the test case
-    if field_definition.project_id != test_case.project_id:
+
+    # Resolve which entity owns this value and the project it lives in.
+    entity_type, owner_project_id = _resolve_custom_field_owner(db, value)
+    if owner_project_id is None:
+        raise ValueError("Could not resolve project for the entity that owns this custom field value")
+
+    if field_definition.project_id != owner_project_id:
         raise ValueError(
-            f"Field definition belongs to project {field_definition.project_id} but test case belongs to project {test_case.project_id}. "
-            "Cross-project field assignment is not allowed."
+            f"Field definition belongs to project {field_definition.project_id} but the target "
+            f"{entity_type} belongs to project {owner_project_id}. Cross-project field assignment is not allowed."
         )
-    
+    if not field_definition_applies_to(field_definition, entity_type):
+        raise ValueError(
+            f"Custom field '{field_definition.name}' does not apply to {entity_type}. "
+            "Update the definition's entity_types to include it."
+        )
+
     # Validate value against field definition rules
     validation_error = validate_custom_field_value(value.value, field_definition)
     if validation_error:
         raise ValueError(validation_error)
-    
-    db_value = CustomFieldValue(**value.model_dump())
+
+    db_value = CustomFieldValue(**value.model_dump(exclude_none=True))
     db.add(db_value)
     safe_commit(db)
     db.refresh(db_value)
@@ -935,12 +1110,14 @@ def create_custom_field_value(db: Session, value: CustomFieldValueCreate, user_i
         from .services.audit_service import get_audit_service
         from .schemas_audit import AuditTrailCreate
         audit_service = get_audit_service(db)
+        owner_summary = _format_custom_field_value_owner(db_value)
         audit_data = AuditTrailCreate(
             user_id=user_id,
             action="create",
-            entity_type="custom_field_value",
+            entity_type=EntityType.CUSTOM_FIELD,
             entity_id=db_value.id,
-            description=f"Created custom field value for field '{field_definition.name}' on test case {test_case.id} in project {field_definition.project_id}",
+            project_id=field_definition.project_id,
+            description=f"Created custom field value for field '{field_definition.name}' on {owner_summary} in project {field_definition.project_id}",
             ip_address=None,
             user_agent=None
         )
@@ -964,54 +1141,40 @@ def update_custom_field_value(db: Session, value_id: int, value: CustomFieldValu
     if not field_definition:
         raise ValueError(f"Custom field definition with id {db_value.field_definition_id} does not exist")
     
+    # Updates only touch ``value``. Re-assigning ownership across entity
+    # types would break referential semantics — callers create a new row
+    # against the new entity and delete the old one.
     value_data = value.model_dump(exclude_unset=True)
-    new_test_case_id = value_data.get("test_case_id")
-
-    # If updating test_case_id, verify project match
-    if new_test_case_id is not None and new_test_case_id != db_value.test_case_id:
-        from .models import TestCase
-        test_case = db.query(TestCase).filter(TestCase.id == new_test_case_id).first()
-        
-        if not test_case:
-            raise ValueError(f"Test case with id {new_test_case_id} does not exist")
-        
-        # Verify field definition belongs to the same project as the new test case
-        if field_definition.project_id != test_case.project_id:
-            raise ValueError(
-                f"Field definition belongs to project {field_definition.project_id} but test case belongs to project {test_case.project_id}. "
-                "Cross-project field assignment is not allowed."
-            )
-    
-    # Validate new value against field definition rules
     if "value" in value_data:
         validation_error = validate_custom_field_value(value_data.get("value"), field_definition)
         if validation_error:
             raise ValueError(validation_error)
-    
+
     for key, val in value_data.items():
         setattr(db_value, key, val)
     safe_commit(db)
     db.refresh(db_value)
-    
-    # Create audit trail
+
     try:
         from .services.audit_service import get_audit_service
         from .schemas_audit import AuditTrailCreate
         audit_service = get_audit_service(db)
         changes = ', '.join([f"{k}={v}" for k, v in value_data.items()])
+        owner_summary = _format_custom_field_value_owner(db_value)
         audit_data = AuditTrailCreate(
             user_id=user_id,
             action="update",
-            entity_type="custom_field_value",
+            entity_type=EntityType.CUSTOM_FIELD,
             entity_id=value_id,
-            description=f"Updated custom field value for field '{field_definition.name}' on test case {db_value.test_case_id}. Changes: {changes}",
+            project_id=field_definition.project_id,
+            description=f"Updated custom field value for '{field_definition.name}' on {owner_summary}. Changes: {changes}",
             ip_address=None,
             user_agent=None
         )
         audit_service.create_audit_trail(audit_data)
     except Exception as e:
         print(f"Failed to create audit trail for custom field value update: {e}")
-    
+
     return db_value
 
 
@@ -1024,7 +1187,8 @@ def delete_custom_field_value(db: Session, value_id: int, user_id: Optional[int]
         ).first()
         
         field_name = field_definition.name if field_definition else "unknown"
-        test_case_id = db_value.test_case_id
+        project_id = field_definition.project_id if field_definition else None
+        owner_summary = _format_custom_field_value_owner(db_value)
         
         db.delete(db_value)
         safe_commit(db)
@@ -1037,9 +1201,10 @@ def delete_custom_field_value(db: Session, value_id: int, user_id: Optional[int]
             audit_data = AuditTrailCreate(
                 user_id=user_id,
                 action="delete",
-                entity_type="custom_field_value",
+                entity_type=EntityType.CUSTOM_FIELD,
                 entity_id=value_id,
-                description=f"Deleted custom field value for field '{field_name}' on test case {test_case_id}",
+                project_id=project_id,
+                description=f"Deleted custom field value for field '{field_name}' on {owner_summary}",
                 ip_address=None,
                 user_agent=None
             )
@@ -1139,10 +1304,24 @@ def get_requirement(db: Session, requirement_id: int):
     return db.query(Requirement).filter(Requirement.id == requirement_id).first()
 
 
-def get_requirements(db: Session, project_id: int = None, skip: int = 0, limit: int = 100):
+def get_requirements(
+    db: Session,
+    project_id: int = None,
+    skip: int = 0,
+    limit: int = 100,
+    milestone_id: int = None,
+):
     query = db.query(Requirement)
     if project_id:
         query = query.filter(Requirement.project_id == project_id)
+    if milestone_id:
+        query = (
+            query
+            .join(requirement_test_plan_links, requirement_test_plan_links.c.requirement_id == Requirement.id)
+            .join(TestPlan, TestPlan.id == requirement_test_plan_links.c.test_plan_id)
+            .filter(TestPlan.milestone_id == milestone_id)
+            .distinct()
+        )
     return query.offset(skip).limit(limit).all()
 
 
@@ -1251,12 +1430,30 @@ def get_defects(
     limit: int = 100,
     search: str = None,
     status: str = None,
+    milestone_id: int = None,
 ):
     query = db.query(Defect)
     if project_id:
         query = query.filter(Defect.project_id == project_id)
     if status:
         query = query.filter(Defect.status == status)
+    if milestone_id:
+        milestone_plan_ids = (
+            db.query(TestPlan.id)
+            .filter(TestPlan.milestone_id == milestone_id)
+            .subquery()
+        )
+        milestone_run_ids = (
+            db.query(TestRun.id)
+            .filter(
+                or_(
+                    TestRun.milestone_id == milestone_id,
+                    TestRun.test_plan_id.in_(milestone_plan_ids),
+                )
+            )
+            .subquery()
+        )
+        query = query.filter(Defect.test_run_id.in_(milestone_run_ids))
     if search:
         # Escape LIKE wildcards so user input is matched literally
         escaped = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
@@ -1274,6 +1471,33 @@ def create_defect(db: Session, defect: DefectCreate):
     db.add(db_defect)
     safe_commit(db)
     db.refresh(db_defect)
+    try:
+        from .services.webhook_service import emit_event
+        emit_event(
+            db,
+            project_id=db_defect.project_id,
+            event="defect.created",
+            payload={
+                "event": "defect.created",
+                "defect": {
+                    "id": db_defect.id,
+                    "defect_id": db_defect.defect_id,
+                    "title": db_defect.title,
+                    "status": getattr(db_defect.status, "value", db_defect.status),
+                    "severity": getattr(db_defect.severity, "value", db_defect.severity),
+                    "priority": getattr(db_defect.priority, "value", db_defect.priority),
+                    "project_id": db_defect.project_id,
+                    "test_case_id": db_defect.test_case_id,
+                    "test_run_id": db_defect.test_run_id,
+                    "requirement_id": db_defect.requirement_id,
+                    "reported_by": db_defect.reported_by,
+                    "assigned_to": db_defect.assigned_to,
+                },
+            },
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Failed to emit defect.created")
     return db_defect
 
 
@@ -1290,6 +1514,34 @@ def update_defect(db: Session, defect_id: int, defect: DefectUpdate):
         # should be re-verified (fix landed, or the bug is back).
         if 'status' in update_data and db_defect.status != old_status:
             flag_linked_results_for_retest(db, defect_id)
+        try:
+            from .services.webhook_service import emit_event
+            emit_event(
+                db,
+                project_id=db_defect.project_id,
+                event="defect.updated",
+                payload={
+                    "event": "defect.updated",
+                    "changed_fields": sorted(update_data.keys()),
+                    "defect": {
+                        "id": db_defect.id,
+                        "defect_id": db_defect.defect_id,
+                        "title": db_defect.title,
+                        "status": getattr(db_defect.status, "value", db_defect.status),
+                        "severity": getattr(db_defect.severity, "value", db_defect.severity),
+                        "priority": getattr(db_defect.priority, "value", db_defect.priority),
+                        "project_id": db_defect.project_id,
+                        "test_case_id": db_defect.test_case_id,
+                        "test_run_id": db_defect.test_run_id,
+                        "requirement_id": db_defect.requirement_id,
+                        "reported_by": db_defect.reported_by,
+                        "assigned_to": db_defect.assigned_to,
+                    },
+                },
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Failed to emit defect.updated")
     return db_defect
 
 
@@ -1329,6 +1581,8 @@ def link_defect_to_test_result(
     defect_id: int,
     link_type: str = None,
     created_by: int = None,
+    result_snapshot: dict = None,
+    failing_step_snapshot: dict = None,
 ):
     """Link a defect to a test result. Idempotent on (test_result_id, defect_id)."""
     link_type = link_type or DefectLinkType.FOUND.value
@@ -1337,8 +1591,20 @@ def link_defect_to_test_result(
         TestResultDefectLink.defect_id == defect_id,
     ).first()
     if existing:
+        changed = False
         if existing.link_type != link_type:
             existing.link_type = link_type
+            changed = True
+        # Legacy links created before snapshots existed can be initialized once,
+        # but existing immutable snapshots are never overwritten.
+        if existing.result_snapshot is None and result_snapshot is not None:
+            existing.result_snapshot = result_snapshot
+            existing.snapshot_created_at = existing.snapshot_created_at or datetime.now(timezone.utc)
+            changed = True
+        if existing.failing_step_snapshot is None and failing_step_snapshot is not None:
+            existing.failing_step_snapshot = failing_step_snapshot
+            changed = True
+        if changed:
             safe_commit(db)
         db.refresh(existing)
         return existing
@@ -1346,6 +1612,8 @@ def link_defect_to_test_result(
         test_result_id=test_result_id,
         defect_id=defect_id,
         link_type=link_type,
+        result_snapshot=result_snapshot,
+        failing_step_snapshot=failing_step_snapshot,
         created_by=created_by,
     )
     db.add(link)
@@ -1474,7 +1742,8 @@ def get_test_plans(
     from .models import TestStatus as TS
 
     query = db.query(TestPlan).options(joinedload(TestPlan.milestone))
-    if project_id:
+    # Use explicit None check so project_id=0 is treated as a filter, not as "no filter"
+    if project_id is not None:
         query = query.filter(TestPlan.project_id == project_id)
     if milestone_id is not None:
         query = query.filter(TestPlan.milestone_id == milestone_id)
@@ -1537,7 +1806,8 @@ def get_milestone(db: Session, milestone_id: int):
 
 def get_milestones(db: Session, project_id: int = None, skip: int = 0, limit: int = 100):
     query = db.query(Milestone)
-    if project_id:
+    # Filter on any explicit project_id (including 0), only skip filter when caller passes None
+    if project_id is not None:
         query = query.filter(Milestone.project_id == project_id)
     return query.offset(skip).limit(limit).all()
 
@@ -3022,39 +3292,72 @@ def get_priority_definition(db: Session, priority_id: int):
 def ensure_default_priority_and_test_type_definitions(db: Session, created_by: int):
     """
     Ensure default priority and test type definitions exist in the database.
-    If they don't exist, create them automatically.
+
+    Backfills the standard set by *name* rather than checking ``count == 0``
+    so that a single ad-hoc entry (e.g. an imported ``Lowest`` priority)
+    doesn't keep the rest of the standard set from being seeded — which is
+    what previously caused list-page filters to show only one option.
+
+    Behavior contract:
+    - Idempotent on name. Already-present standards (any case) are left alone.
+    - Concurrency-safe. The seeder runs on every ``create_test_case`` so two
+      simultaneous calls can race on the unique-name index; that's swallowed
+      and we move on without poisoning the caller's transaction.
+    - Default-aware. Standard defaults (``Medium`` priority, ``Manual`` test
+      type) are only inserted as defaults when no other default already
+      exists for that table, so existing user choices win.
     """
-    # Check if any priority definitions exist
-    priority_count = db.query(PriorityDefinition).count()
-    if priority_count == 0:
-        # Create default priority definitions
-        default_priorities = [
-            {"name": "Critical", "value": 4, "color": "#DC2626", "description": "Critical priority - immediate attention required", "is_default": False},
-            {"name": "High", "value": 3, "color": "#F97316", "description": "High priority - urgent attention required", "is_default": False},
-            {"name": "Medium", "value": 2, "color": "#F59E0B", "description": "Medium priority - normal attention required", "is_default": True},
-            {"name": "Low", "value": 1, "color": "#6B7280", "description": "Low priority - can be addressed later", "is_default": False},
-        ]
-        for priority_data in default_priorities:
-            priority = PriorityDefinitionCreate(**priority_data, created_by=created_by)
+    default_priorities = [
+        {"name": "Critical", "value": 4, "color": "#DC2626", "description": "Critical priority - immediate attention required", "is_default": False},
+        {"name": "High", "value": 3, "color": "#F97316", "description": "High priority - urgent attention required", "is_default": False},
+        {"name": "Medium", "value": 2, "color": "#F59E0B", "description": "Medium priority - normal attention required", "is_default": True},
+        {"name": "Low", "value": 1, "color": "#6B7280", "description": "Low priority - can be addressed later", "is_default": False},
+    ]
+    existing_priority_names = {
+        (name or "").strip().lower()
+        for (name,) in db.query(PriorityDefinition.name).all()
+    }
+    priority_default_taken = db.query(PriorityDefinition.id).filter(PriorityDefinition.is_default == True).first() is not None  # noqa: E712
+    for priority_data in default_priorities:
+        if priority_data["name"].strip().lower() in existing_priority_names:
+            continue
+        payload = dict(priority_data)
+        if priority_default_taken:
+            payload["is_default"] = False
+        try:
+            priority = PriorityDefinitionCreate(**payload, created_by=created_by)
             create_priority_definition(db, priority)
-    
-    # Check if any test type definitions exist
-    test_type_count = db.query(TestTypeDefinition).count()
-    if test_type_count == 0:
-        # Create default test type definitions
-        default_test_types = [
-            {"name": "Manual", "description": "Manual testing - executed by human testers", "color": "#3B82F6", "icon": "🖱️"},
-            {"name": "Automated", "description": "Automated testing - executed by scripts/tools", "color": "#10B981", "icon": "🤖"},
-            {"name": "Smoke", "description": "Smoke testing - basic functionality checks", "color": "#6B7280", "icon": "💨"},
-            {"name": "Regression", "description": "Regression testing - verify existing functionality", "color": "#F97316", "icon": "🔄"},
-            {"name": "Integration", "description": "Integration testing - test component interactions", "color": "#8B5CF6", "icon": "🔗"},
-            {"name": "Security", "description": "Security testing - identify vulnerabilities", "color": "#EF4444", "icon": "🔒"},
-            {"name": "Performance", "description": "Performance testing - measure system performance", "color": "#F59E0B", "icon": "⚡"},
-            {"name": "Usability", "description": "Usability testing - evaluate user experience", "color": "#EC4899", "icon": "👥"},
-        ]
-        for test_type_data in default_test_types:
+            if payload.get("is_default"):
+                priority_default_taken = True
+        except IntegrityError:
+            # Another concurrent caller inserted this row first. Rollback the
+            # failed insert only — don't poison the surrounding transaction.
+            db.rollback()
+            existing_priority_names.add(priority_data["name"].strip().lower())
+
+    default_test_types = [
+        {"name": "Manual", "description": "Manual testing - executed by human testers", "color": "#3B82F6", "icon": "🖱️"},
+        {"name": "Automated", "description": "Automated testing - executed by scripts/tools", "color": "#10B981", "icon": "🤖"},
+        {"name": "Smoke", "description": "Smoke testing - basic functionality checks", "color": "#6B7280", "icon": "💨"},
+        {"name": "Regression", "description": "Regression testing - verify existing functionality", "color": "#F97316", "icon": "🔄"},
+        {"name": "Integration", "description": "Integration testing - test component interactions", "color": "#8B5CF6", "icon": "🔗"},
+        {"name": "Security", "description": "Security testing - identify vulnerabilities", "color": "#EF4444", "icon": "🔒"},
+        {"name": "Performance", "description": "Performance testing - measure system performance", "color": "#F59E0B", "icon": "⚡"},
+        {"name": "Usability", "description": "Usability testing - evaluate user experience", "color": "#EC4899", "icon": "👥"},
+    ]
+    existing_test_type_names = {
+        (name or "").strip().lower()
+        for (name,) in db.query(TestTypeDefinition.name).all()
+    }
+    for test_type_data in default_test_types:
+        if test_type_data["name"].strip().lower() in existing_test_type_names:
+            continue
+        try:
             test_type = TestTypeDefinitionCreate(**test_type_data, created_by=created_by)
             create_test_type_definition(db, test_type)
+        except IntegrityError:
+            db.rollback()
+            existing_test_type_names.add(test_type_data["name"].strip().lower())
 
 
 def ensure_default_environment_definitions(db: Session, project_id: int, created_by: int):
@@ -3145,6 +3448,14 @@ def get_shared_step_template(db: Session, template_id: int):
     return db.query(SharedStepTemplate).filter(
         SharedStepTemplate.id == template_id,
         SharedStepTemplate.is_active == True
+    ).first()
+
+
+def get_shared_step_template_by_name(db: Session, name: str):
+    normalized_name = name.strip().lower()
+    return db.query(SharedStepTemplate).filter(
+        SharedStepTemplate.is_active == True,
+        func.lower(SharedStepTemplate.name) == normalized_name
     ).first()
 
 

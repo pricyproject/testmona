@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
     allowed_origins: str = "http://localhost:3000"
     test_database_url: str = "sqlite:///./test_test.db"
+    webhook_allow_private_urls: bool = False
     
     @field_validator('secret_key', mode='before')
     @classmethod

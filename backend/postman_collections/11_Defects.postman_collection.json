@@ -49,7 +49,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -228,6 +228,44 @@
               "    pm.test(\"Defect not found - get skipped\", function () {",
               "        console.log(\"Defect ID not set or not found\");",
               "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Defect Detail",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/defects/{{defectId}}/detail",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "defects",
+            "{{defectId}}",
+            "detail"
+          ]
+        },
+        "description": "Get a defect detail payload with ownership, linked entities, and result snapshots"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 404\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('defect');",
+              "    pm.expect(jsonData).to.have.property('result_links');",
+              "    pm.expect(jsonData.result_links).to.be.an('array');",
               "}"
             ],
             "type": "text/javascript"

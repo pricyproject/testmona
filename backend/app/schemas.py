@@ -1,7 +1,7 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from .models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType
+from .models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity
 import re
 import html
 
@@ -20,6 +20,7 @@ from .schema_modules.versioning import (
     VersionTagBase,
     VersionTagCreate,
 )
+from .services.webhook_security import normalize_webhook_url
 
 
 class ProjectBase(BaseModel):
@@ -121,6 +122,9 @@ class TestSuiteBase(BaseModel):
 
 class TestSuiteCreate(TestSuiteBase):
     project_id: int
+    # Optional bulk-move of existing test cases into the new suite. Cases that don't
+    # exist or live in another project are skipped rather than failing the whole create.
+    test_case_ids: Optional[List[int]] = None
 
 
 class TestSuiteUpdate(BaseModel):
@@ -144,6 +148,9 @@ class TestSuite(TestSuiteBase):
     project_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # Populated by the routes for list/detail responses; the model attribute is set in
+    # the route handler so SQLAlchemy doesn't need an additional column.
+    test_case_count: int = 0
 
     class Config:
         from_attributes = True
@@ -762,6 +769,24 @@ class ProjectAssignmentUpdate(BaseModel):
         return role_value(value)
 
 
+class ProjectMember(BaseModel):
+    """Flattened member view for the per-project roles UI."""
+    assignment_id: Optional[int] = None  # None for the implicit owner row
+    user_id: int
+    project_id: int
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    role: Role
+    is_owner: bool = False
+    assigned_at: Optional[datetime] = None
+    assigned_by: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+        use_enum_values = True
+
+
 class TestScheduleBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -883,6 +908,30 @@ class CustomFieldDefinitionBase(BaseModel):
     default_value: Optional[str] = None
     options: Optional[Union[List[str], Dict[str, Any]]] = None
     validation_rules: Optional[Dict[str, Any]] = None
+    # Which entities this field applies to. None => legacy behavior (test_case
+    # only). Valid keys: "test_case", "test_run", "defect", "requirement".
+    entity_types: Optional[List[str]] = None
+
+    @field_validator("entity_types")
+    @classmethod
+    def _validate_entity_types(cls, value):
+        if value is None:
+            return value
+        allowed = {"test_case", "test_run", "defect", "requirement"}
+        cleaned: List[str] = []
+        seen: set = set()
+        for raw in value:
+            if not isinstance(raw, str):
+                continue
+            key = raw.strip().lower()
+            if key in allowed and key not in seen:
+                seen.add(key)
+                cleaned.append(key)
+        if not cleaned:
+            raise ValueError(
+                "entity_types must contain at least one of: test_case, test_run, defect, requirement"
+            )
+        return cleaned
 
     @model_validator(mode='before')
     @classmethod
@@ -1053,6 +1102,28 @@ class CustomFieldDefinitionUpdate(BaseModel):
     default_value: Optional[str] = None
     options: Optional[Union[List[str], Dict[str, Any]]] = None
     validation_rules: Optional[Dict[str, Any]] = None
+    entity_types: Optional[List[str]] = None
+
+    @field_validator("entity_types")
+    @classmethod
+    def _validate_entity_types(cls, value):
+        if value is None:
+            return value
+        allowed = {"test_case", "test_run", "defect", "requirement"}
+        cleaned: List[str] = []
+        seen: set = set()
+        for raw in value:
+            if not isinstance(raw, str):
+                continue
+            key = raw.strip().lower()
+            if key in allowed and key not in seen:
+                seen.add(key)
+                cleaned.append(key)
+        if not cleaned:
+            raise ValueError(
+                "entity_types must contain at least one of: test_case, test_run, defect, requirement"
+            )
+        return cleaned
 
     @model_validator(mode='before')
     @classmethod
@@ -1222,7 +1293,14 @@ class CustomFieldDefinition(CustomFieldDefinitionBase):
 
 class CustomFieldValueBase(BaseModel):
     field_definition_id: int
-    test_case_id: int
+    # Polymorphic ownership. Exactly one of these four ids must be set —
+    # enforced in CustomFieldValueCreate's validator below. The base form
+    # leaves them all optional so callers reading existing rows don't see a
+    # value field disappear when ownership moves between entity types.
+    test_case_id: Optional[int] = None
+    test_run_id: Optional[int] = None
+    defect_id: Optional[int] = None
+    requirement_id: Optional[int] = None
     value: Optional[str] = None
 
     @model_validator(mode='before')
@@ -1230,33 +1308,43 @@ class CustomFieldValueBase(BaseModel):
     def sanitize_html(cls, data):
         """Sanitize HTML in string fields to prevent XSS attacks"""
         if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str):
-                    data[key] = html.escape(value)
+            for key, val in data.items():
+                if isinstance(val, str):
+                    data[key] = html.escape(val)
         return data
 
 
 class CustomFieldValueCreate(CustomFieldValueBase):
-    pass
+    @model_validator(mode='after')
+    def _require_exactly_one_owner(self):
+        owners = [self.test_case_id, self.test_run_id, self.defect_id, self.requirement_id]
+        set_count = sum(1 for owner in owners if owner is not None)
+        if set_count == 0:
+            raise ValueError("Exactly one of test_case_id, test_run_id, defect_id, requirement_id is required")
+        if set_count > 1:
+            raise ValueError("Only one entity owner may be set per custom field value")
+        return self
 
 
 class CustomFieldValueUpdate(BaseModel):
-    test_case_id: Optional[int] = None
     value: Optional[str] = None
 
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
         if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str):
-                    data[key] = html.escape(value)
+            for key, val in data.items():
+                if isinstance(val, str):
+                    data[key] = html.escape(val)
         return data
 
 
 class CustomFieldValue(CustomFieldValueBase):
     id: int
+    # Echoed read-only properties so the API caller can branch on what kind
+    # of entity this value belongs to without inspecting four nullable FKs.
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -1459,12 +1547,12 @@ class PriorityDefinition(PriorityDefinitionBase):
 class SharedStepTemplateBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=500)
-    category: str
-    tags: Optional[List[str]] = []
-    complexity: str
+    category: StepCategory
+    tags: List[str] = Field(default_factory=list, max_length=50)
+    complexity: StepComplexity
     estimated_time: int = Field(1, ge=1, le=1440)
-    prerequisites: Optional[List[str]] = []
-    related_steps: Optional[List[str]] = []
+    prerequisites: List[str] = Field(default_factory=list, max_length=50)
+    related_steps: List[str] = Field(default_factory=list, max_length=50)
     is_active: bool = True
 
     @field_validator('name')
@@ -1475,18 +1563,51 @@ class SharedStepTemplateBase(BaseModel):
             raise ValueError('Shared step template name is required')
         return cleaned
 
+    @field_validator('description')
+    @classmethod
+    def validate_shared_step_template_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator('tags', 'prerequisites', 'related_steps', mode='before')
+    @classmethod
+    def normalize_shared_step_template_list(cls, value: Optional[List[str]]) -> List[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError('Value must be a list')
+
+        normalized: List[str] = []
+        seen = set()
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError('List values must be strings')
+            cleaned = item.strip()
+            if not cleaned:
+                continue
+            if len(cleaned) > 100:
+                raise ValueError('List values must be 100 characters or less')
+            duplicate_key = cleaned.lower()
+            if duplicate_key in seen:
+                continue
+            seen.add(duplicate_key)
+            normalized.append(cleaned)
+        return normalized
+
 class SharedStepTemplateCreate(SharedStepTemplateBase):
     pass
 
 class SharedStepTemplateUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=500)
-    category: Optional[str] = None
-    tags: Optional[List[str]] = None
-    complexity: Optional[str] = None
+    category: Optional[StepCategory] = None
+    tags: Optional[List[str]] = Field(None, max_length=50)
+    complexity: Optional[StepComplexity] = None
     estimated_time: Optional[int] = Field(None, ge=1, le=1440)
-    prerequisites: Optional[List[str]] = None
-    related_steps: Optional[List[str]] = None
+    prerequisites: Optional[List[str]] = Field(None, max_length=50)
+    related_steps: Optional[List[str]] = Field(None, max_length=50)
     is_active: Optional[bool] = None
 
     @field_validator('name')
@@ -1498,6 +1619,21 @@ class SharedStepTemplateUpdate(BaseModel):
         if not cleaned:
             raise ValueError('Shared step template name is required')
         return cleaned
+
+    @field_validator('description')
+    @classmethod
+    def validate_shared_step_template_update_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator('tags', 'prerequisites', 'related_steps', mode='before')
+    @classmethod
+    def normalize_shared_step_template_update_list(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        return SharedStepTemplateBase.normalize_shared_step_template_list(value)
 
 class SharedStepTemplate(SharedStepTemplateBase):
     id: int
@@ -1997,6 +2133,34 @@ class RequirementRelationshipSummary(BaseModel):
 
 
 # Defect Schemas
+# Fields that hold structured / non-displayable values where HTML escaping
+# would corrupt the data (URLs with `&`, enum codes, sync state, etc).
+_DEFECT_SANITIZE_SKIP = frozenset({
+    'status',
+    'severity',
+    'priority',
+    'external_issue_url',
+    'external_issue_id',
+    'external_sync_status',
+})
+
+
+def _sanitize_defect_strings(data):
+    """Idempotently escape HTML in user-supplied string fields.
+
+    Skips URL/identifier fields where escaping would mangle valid input
+    (e.g. query strings containing ``&``).
+    """
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, str) and key not in _DEFECT_SANITIZE_SKIP:
+                # Unescape before escaping so re-saving an already-stored value
+                # is idempotent — a bare ``html.escape`` would compound
+                # ``&lt;`` into ``&amp;lt;`` on every update.
+                data[key] = html.escape(html.unescape(value))
+    return data
+
+
 class DefectBase(BaseModel):
     title: str
     description: Optional[str] = None
@@ -2024,12 +2188,7 @@ class DefectBase(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str) and key not in ['status', 'severity', 'priority']:
-                    data[key] = html.escape(value)
-        return data
+        return _sanitize_defect_strings(data)
 
 
 class DefectCreate(DefectBase):
@@ -2064,18 +2223,19 @@ class DefectUpdate(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str) and key not in ['status', 'severity', 'priority']:
-                    data[key] = html.escape(value)
-        return data
+        return _sanitize_defect_strings(data)
 
 
 class Defect(DefectBase):
     id: int
     project_id: int
     reported_by: int
+    external_last_sync: Optional[datetime] = None
+    resolution: Optional[str] = None
+    root_cause: Optional[str] = None
+    fix_version: Optional[str] = None
+    found_in_version: Optional[str] = None
+    duplicate_of: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -2100,12 +2260,33 @@ class DefectSummary(BaseModel):
         use_enum_values = True
 
 
+class TestResultFailingStepSnapshot(BaseModel):
+    """User-selected failed/blocked step context to attach to the immutable link snapshot."""
+    step_id: Optional[int] = Field(None, ge=1)
+    step_number: Optional[int] = Field(None, ge=1)
+    status: Optional[str] = Field(None, max_length=20)
+    actual_result: Optional[str] = Field(None, max_length=5000)
+    notes: Optional[str] = Field(None, max_length=5000)
+
+    @model_validator(mode='after')
+    def require_step_reference(self):
+        if self.step_id is None and self.step_number is None:
+            raise ValueError("Provide either step_id or step_number")
+        if self.status:
+            normalized_status = self.status.strip().lower()
+            if normalized_status not in {"failed", "fail", "blocked", "block"}:
+                raise ValueError("Failing step status must be failed or blocked")
+            self.status = normalized_status
+        return self
+
+
 class TestResultDefectLinkCreate(BaseModel):
     """Link a defect to a test result. Provide either an existing defect_id
     or a new_defect payload to create and link in one call."""
     defect_id: Optional[int] = None
     link_type: DefectLinkType = DefectLinkType.FOUND
     new_defect: Optional[DefectCreate] = None
+    failing_step: Optional[TestResultFailingStepSnapshot] = None
 
     @model_validator(mode='after')
     def require_one_target(self):
@@ -2116,17 +2297,54 @@ class TestResultDefectLinkCreate(BaseModel):
         return self
 
 
+class TestResultDefectLinkSnapshotUpdate(BaseModel):
+    """Explicit correction payload for a stored result/step snapshot."""
+    failing_step: Optional[TestResultFailingStepSnapshot] = None
+    clear_failing_step: bool = False
+
+
 class TestResultDefectLink(BaseModel):
     id: int
     test_result_id: int
     defect_id: int
     link_type: str
+    result_snapshot: Optional[dict] = None
+    failing_step_snapshot: Optional[dict] = None
+    snapshot_created_at: Optional[datetime] = None
     created_by: Optional[int] = None
     created_at: datetime
     defect: Optional[DefectSummary] = None
 
     class Config:
         from_attributes = True
+
+
+class DefectUserSummary(BaseModel):
+    id: int
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DefectEntitySummary(BaseModel):
+    id: int
+    key: Optional[str] = None
+    title: Optional[str] = None
+    name: Optional[str] = None
+    status: Optional[str] = None
+
+
+class DefectDetail(BaseModel):
+    defect: Defect
+    reporter: Optional[DefectUserSummary] = None
+    assignee: Optional[DefectUserSummary] = None
+    test_case: Optional[DefectEntitySummary] = None
+    test_run: Optional[DefectEntitySummary] = None
+    requirement: Optional[DefectEntitySummary] = None
+    result_links: List[TestResultDefectLink] = Field(default_factory=list)
 
 
 class TestRunDefectCoverage(BaseModel):
@@ -2581,16 +2799,6 @@ class MilestoneBase(BaseModel):
             raise ValueError('Progress percentage must be between 0 and 100')
         return v
     
-    @model_validator(mode='before')
-    @classmethod
-    def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str) and key not in ['status']:
-                    data[key] = html.escape(value)
-        return data
-
 
 class MilestoneCreate(MilestoneBase):
     project_id: int
@@ -2630,16 +2838,6 @@ class MilestoneUpdate(BaseModel):
             raise ValueError('Progress percentage must be between 0 and 100')
         return v
     
-    @model_validator(mode='before')
-    @classmethod
-    def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str) and key not in ['status']:
-                    data[key] = html.escape(value)
-        return data
-
 
 class MilestoneLinkedTestPlan(BaseModel):
     id: int
@@ -3289,6 +3487,187 @@ class TestRunEnvironment(TestRunEnvironmentBase):
     test_run_id: int
     environment_id: int
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# API tokens
+# ---------------------------------------------------------------------------
+
+
+class ApiTokenCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    expires_at: Optional[datetime] = None
+
+
+class ApiTokenView(BaseModel):
+    """Token view safe to expose — never includes the raw secret."""
+    id: int
+    name: str
+    prefix: str
+    last_used_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ApiTokenCreated(ApiTokenView):
+    """One-time response that includes the raw secret."""
+    token: str
+
+
+# ---------------------------------------------------------------------------
+# Webhooks
+# ---------------------------------------------------------------------------
+
+
+class WebhookSubscriptionBase(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    url: str = Field(min_length=1, max_length=2048)
+    events: List[str] = Field(min_length=1)
+    is_active: bool = True
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str) -> str:
+        return normalize_webhook_url(value)
+
+
+class WebhookSubscriptionCreate(WebhookSubscriptionBase):
+    project_id: int
+
+
+class WebhookSubscriptionUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=120)
+    url: Optional[str] = Field(default=None, max_length=2048)
+    events: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    rotate_secret: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return normalize_webhook_url(value)
+
+
+class WebhookSubscriptionView(BaseModel):
+    """Public view of a subscription — never includes the secret."""
+    id: int
+    project_id: int
+    name: str
+    url: str
+    events: List[str]
+    is_active: bool
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WebhookSubscriptionCreated(WebhookSubscriptionView):
+    """One-time response that includes the secret so the user can copy it."""
+    secret: str
+
+
+class SavedFilterBase(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    scope: str = Field(min_length=1, max_length=32)
+    definition: Dict[str, Any]
+    is_default: bool = False
+    is_shared: bool = False
+
+
+class SavedFilterCreate(SavedFilterBase):
+    project_id: int
+
+
+class SavedFilterUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=120)
+    definition: Optional[Dict[str, Any]] = None
+    is_default: Optional[bool] = None
+    is_shared: Optional[bool] = None
+
+
+class SavedFilterView(SavedFilterBase):
+    id: int
+    user_id: int
+    project_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    owned_by_current_user: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Bulk edit
+# ---------------------------------------------------------------------------
+
+
+class BulkTestCaseUpdate(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=2000)
+    priority: Optional[Priority] = None
+    status: Optional[str] = Field(default=None, max_length=20)
+    test_type: Optional[str] = Field(default=None, max_length=20)
+    section_id: Optional[int] = None
+    tags: Optional[str] = Field(default=None, max_length=500)
+    add_tags: Optional[str] = Field(default=None, max_length=500)
+    remove_tags: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("status")
+    @classmethod
+    def _status_lower(cls, value):
+        if value is None:
+            return value
+        v = value.strip().lower()
+        return v or None
+
+    @field_validator("test_type")
+    @classmethod
+    def _type_lower(cls, value):
+        if value is None:
+            return value
+        v = value.strip().lower()
+        return v or None
+
+
+class BulkDefectUpdate(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=2000)
+    status: Optional[DefectStatus] = None
+    severity: Optional[DefectSeverity] = None
+    priority: Optional[DefectPriority] = None
+    assigned_to: Optional[int] = None
+    clear_assignee: bool = False
+
+
+class BulkUpdateResult(BaseModel):
+    updated: int
+    skipped_ids: List[int] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+class WebhookDeliveryView(BaseModel):
+    id: int
+    subscription_id: int
+    event: str
+    status: str
+    attempts: int
+    response_status: Optional[int] = None
+    response_body: Optional[str] = None
+    error: Optional[str] = None
+    delivered_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

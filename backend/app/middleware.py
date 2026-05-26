@@ -8,6 +8,27 @@ from starlette.requests import Request
 from collections import defaultdict
 from time import time
 
+from .services.request_context import (
+    get_request_client_ip,
+    get_request_user_agent,
+    reset_request_metadata,
+    set_request_metadata,
+)
+
+
+class RequestMetadataMiddleware(BaseHTTPMiddleware):
+    """Expose request metadata to service-layer audit logging."""
+
+    async def dispatch(self, request: Request, call_next):
+        tokens = set_request_metadata(
+            get_request_client_ip(request),
+            get_request_user_agent(request),
+        )
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_metadata(tokens)
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Simple in-memory rate limiting middleware"""
@@ -20,7 +41,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         # Get client IP
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = get_request_client_ip(request) or "unknown"
         
         # Get current time
         current_time = time()

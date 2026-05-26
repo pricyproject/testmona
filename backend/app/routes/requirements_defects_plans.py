@@ -5,7 +5,7 @@ Requirements, defects, test plans, and milestones routes for test planning and q
 import logging
 import re
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Path, Query
 from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
@@ -28,7 +28,47 @@ logger = logging.getLogger(__name__)
 
 
 FAILED_RESULT_STATUSES = {"fail", "failed"}
+
+
+def _explain_defect_integrity_error(error: IntegrityError) -> str:
+    """Translate database-level constraint violations into user-facing messages.
+
+    Different backends phrase these differently (SQLite: ``UNIQUE constraint failed:
+    defects.defect_id``, Postgres: ``duplicate key value violates unique constraint
+    "defects_defect_id_key"``, MySQL: ``Duplicate entry 'X' for key 'defects.defect_id'``).
+    We match on column references rather than a fixed phrase so the message is
+    consistent across drivers.
+    """
+    raw = str(getattr(error, "orig", error)).lower()
+    if "defect_id" in raw:
+        return "Defect ID already exists. Please use a unique ID."
+    if "foreign key" in raw or "violates foreign key" in raw:
+        return "One of the linked records (project, test case, test run, requirement, or user) does not exist."
+    if "not null" in raw or "null value" in raw:
+        return "A required field is missing."
+    if "unique" in raw or "duplicate" in raw:
+        return "This defect conflicts with an existing record."
+    return "Could not save defect due to a database constraint."
 BLOCKED_RESULT_STATUSES = {"block", "blocked"}
+
+
+def _is_auto_project_defect_id(value: str, project_id: int) -> bool:
+    return re.fullmatch(rf"P{project_id}-DEF-\d+", value.strip(), flags=re.IGNORECASE) is not None
+
+
+def _next_project_defect_id(db: Session, project_id: int) -> str:
+    prefix = f"P{project_id}-DEF-"
+    existing_ids = [
+        row[0] for row in db.query(models.Defect.defect_id)
+        .filter(models.Defect.defect_id.ilike(f"{prefix}%"))
+        .all()
+    ]
+    highest = 0
+    for defect_id in existing_ids:
+        suffix = str(defect_id or "")[len(prefix):]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return f"{prefix}{highest + 1:03d}"
 
 
 def _get_reference_tokens(value: Optional[str]) -> list[str]:
@@ -119,9 +159,17 @@ def _validate_defect_links(
             raise HTTPException(status_code=400, detail="Test case is not linked to this test run")
 
     if assigned_to is not None:
-        assigned_user = db.query(models.User.id).filter(models.User.id == assigned_to).first()
+        assigned_user = db.query(models.User).filter(models.User.id == assigned_to).first()
         if assigned_user is None:
             raise HTTPException(status_code=404, detail="Assigned user not found")
+        # Defect assignee must be able to read the project — admins/managers and
+        # project owners/assignees pass; everyone else is rejected so we don't
+        # quietly assign work to users who can't see the defect.
+        if not rbac.has_permission(assigned_user, "read", project_id, db):
+            raise HTTPException(
+                status_code=400,
+                detail="Assigned user does not have access to this project",
+            )
 
 
 def _linked_requirement_test_plan_ids(db: Session, requirement_id: int) -> set[int]:
@@ -413,13 +461,21 @@ def register_requirements_defects_plans_routes(app):
         project_id: int,
         skip: int = 0,
         limit: int = 100,
+        milestone_id: Optional[int] = Query(None, ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        return get_requirements(db, project_id=project_id, skip=skip, limit=limit)
+        if milestone_id is not None:
+            milestone = db.query(models.Milestone).filter(models.Milestone.id == milestone_id).first()
+            if milestone is None:
+                raise HTTPException(status_code=404, detail="Milestone not found")
+            if milestone.project_id != project_id:
+                raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
+
+        return get_requirements(db, project_id=project_id, skip=skip, limit=limit, milestone_id=milestone_id)
 
     @app.post("/requirements/fetch-external-document", response_model=schemas.RequirementExternalDocumentResponse)
     def fetch_external_requirement_document(
@@ -1132,9 +1188,8 @@ def register_requirements_defects_plans_routes(app):
             db_defect = create_defect(db=db, defect=defect)
         except IntegrityError as e:
             db.rollback()
-            if "defect_id" in str(e.orig) or "UNIQUE constraint failed" in str(e.orig):
-                raise HTTPException(status_code=400, detail="Defect ID already exists. Please use a unique ID.")
-            raise
+            logger.warning("IntegrityError creating defect: %s", e)
+            raise HTTPException(status_code=400, detail=_explain_defect_integrity_error(e))
         
         # Create audit trail
         try:
@@ -1163,11 +1218,19 @@ def register_requirements_defects_plans_routes(app):
         limit: int = 100,
         search: Optional[str] = None,
         status: Optional[str] = None,
+        milestone_id: Optional[int] = Query(None, ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        if milestone_id is not None:
+            milestone = db.query(models.Milestone).filter(models.Milestone.id == milestone_id).first()
+            if milestone is None:
+                raise HTTPException(status_code=404, detail="Milestone not found")
+            if milestone.project_id != project_id:
+                raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
 
         return get_defects(
             db,
@@ -1176,6 +1239,7 @@ def register_requirements_defects_plans_routes(app):
             limit=limit,
             search=search,
             status=status,
+            milestone_id=milestone_id,
         )
 
     @app.get("/defects/{defect_id}", response_model=schemas.Defect)
@@ -1192,6 +1256,82 @@ def register_requirements_defects_plans_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         return defect
+
+    @app.get("/defects/{defect_id}/detail", response_model=schemas.DefectDetail)
+    def read_defect_detail(
+        defect_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        defect = get_defect(db, defect_id=defect_id)
+        if defect is None:
+            raise HTTPException(status_code=404, detail="Defect not found")
+
+        if not rbac.has_permission(current_user, "read", defect.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        def user_summary(user_id: Optional[int]) -> Optional[dict]:
+            if not user_id:
+                return None
+            user = crud.get_user(db, user_id=user_id)
+            if not user:
+                return None
+            return {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "full_name": user.full_name,
+            }
+
+        test_case_summary = None
+        if defect.test_case_id:
+            test_case = crud.get_test_case(db, test_case_id=defect.test_case_id)
+            if test_case and test_case.project_id == defect.project_id:
+                test_case_summary = {
+                    "id": test_case.id,
+                    "key": f"TC-{test_case.id}",
+                    "title": test_case.title,
+                    "status": test_case.status,
+                }
+
+        test_run_summary = None
+        if defect.test_run_id:
+            test_run = crud.get_test_run(db, test_run_id=defect.test_run_id)
+            if test_run and test_run.project_id == defect.project_id:
+                test_run_summary = {
+                    "id": test_run.id,
+                    "name": test_run.name,
+                    "status": test_run.status,
+                }
+
+        requirement_summary = None
+        if defect.requirement_id:
+            requirement = get_requirement(db, requirement_id=defect.requirement_id)
+            if requirement and requirement.project_id == defect.project_id:
+                requirement_summary = {
+                    "id": requirement.id,
+                    "key": requirement.requirement_id,
+                    "title": requirement.title,
+                    "status": getattr(requirement.status, "value", requirement.status),
+                }
+
+        result_links = (
+            db.query(models.TestResultDefectLink)
+            .options(joinedload(models.TestResultDefectLink.defect))
+            .filter(models.TestResultDefectLink.defect_id == defect_id)
+            .order_by(models.TestResultDefectLink.created_at.desc())
+            .all()
+        )
+
+        return {
+            "defect": defect,
+            "reporter": user_summary(defect.reported_by),
+            "assignee": user_summary(defect.assigned_to),
+            "test_case": test_case_summary,
+            "test_run": test_run_summary,
+            "requirement": requirement_summary,
+            "result_links": result_links,
+        }
 
     @app.put("/defects/{defect_id}", response_model=schemas.Defect)
     def update_defect_endpoint(
@@ -1236,9 +1376,8 @@ def register_requirements_defects_plans_routes(app):
             db_defect = update_defect(db, defect_id=defect_id, defect=defect)
         except IntegrityError as e:
             db.rollback()
-            if "defect_id" in str(e.orig) or "UNIQUE constraint failed" in str(e.orig):
-                raise HTTPException(status_code=400, detail="Defect ID already exists. Please use a unique ID.")
-            raise
+            logger.warning("IntegrityError updating defect %s: %s", defect_id, e)
+            raise HTTPException(status_code=400, detail=_explain_defect_integrity_error(e))
         
         # Create audit trail
         try:
@@ -1300,6 +1439,30 @@ def register_requirements_defects_plans_routes(app):
         
         return {"message": "Defect deleted successfully"}
 
+    @app.get(
+        "/defects/{defect_id}/result-links",
+        response_model=List[schemas.TestResultDefectLink],
+    )
+    def read_defect_result_links(
+        defect_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        defect = get_defect(db, defect_id=defect_id)
+        if defect is None:
+            raise HTTPException(status_code=404, detail="Defect not found")
+
+        if not rbac.has_permission(current_user, "read", defect.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        return (
+            db.query(models.TestResultDefectLink)
+            .options(joinedload(models.TestResultDefectLink.defect))
+            .filter(models.TestResultDefectLink.defect_id == defect_id)
+            .order_by(models.TestResultDefectLink.created_at.desc())
+            .all()
+        )
+
     # Test Result <-> Defect Link Endpoints
 
     def _resolve_test_result_project(db: Session, test_result):
@@ -1308,6 +1471,107 @@ def register_requirements_defects_plans_routes(app):
             return None
         test_run = crud.get_test_run(db, test_run_id=test_result.test_run_id)
         return test_run.project_id if test_run else None
+
+    def _iso_or_none(value):
+        return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+    def _normalize_result_status(value) -> str:
+        if value is None:
+            return ""
+        if hasattr(value, "value"):
+            return str(value.value).strip().lower()
+        return str(value).strip().lower()
+
+    def _build_test_result_snapshot(db: Session, test_result) -> Dict:
+        """Freeze the result context at the moment a defect is linked."""
+        test_case = crud.get_test_case(db, test_case_id=test_result.test_case_id)
+        test_run = crud.get_test_run(db, test_run_id=test_result.test_run_id)
+        executor = None
+        if test_result.executed_by:
+            executor = crud.get_user(db, user_id=test_result.executed_by)
+
+        return {
+            "version": 1,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "test_result": {
+                "id": test_result.id,
+                "status": _normalize_result_status(test_result.status),
+                "actual_result": test_result.actual_result,
+                "comments": test_result.comments,
+                "execution_time": test_result.execution_time,
+                "execution_started_at": _iso_or_none(test_result.execution_started_at),
+                "executed_at": _iso_or_none(test_result.executed_at),
+                "defect_link": test_result.defect_link,
+                "custom_link": test_result.custom_link,
+                "retest_needed": bool(test_result.retest_needed),
+            },
+            "test_case": {
+                "id": test_case.id if test_case else test_result.test_case_id,
+                "title": test_case.title if test_case else None,
+                "priority": getattr(test_case.priority, "value", test_case.priority) if test_case else None,
+                "status": getattr(test_case.status, "value", test_case.status) if test_case else None,
+                "test_suite_id": test_case.test_suite_id if test_case else None,
+                "section_id": test_case.section_id if test_case else None,
+                "is_multistep": bool(test_case.is_multistep) if test_case else False,
+            },
+            "test_run": {
+                "id": test_run.id if test_run else test_result.test_run_id,
+                "name": test_run.name if test_run else None,
+                "status": getattr(test_run.status, "value", test_run.status) if test_run else None,
+                "test_plan_id": test_run.test_plan_id if test_run else None,
+                "milestone_id": test_run.milestone_id if test_run else None,
+                "environment_id": test_run.environment_id if test_run else None,
+            },
+            "executor": {
+                "id": executor.id if executor else test_result.executed_by,
+                "username": executor.username if executor else None,
+                "email": executor.email if executor else None,
+                "full_name": executor.full_name if executor else None,
+            } if test_result.executed_by else None,
+        }
+
+    def _build_failing_step_snapshot(db: Session, test_result, failing_step) -> Optional[Dict]:
+        if failing_step is None:
+            return None
+
+        # Prefer the status the client is asserting for the step. The schema
+        # already constrains failing_step.status to failed/blocked, so when it
+        # is present we can trust it even if the persisted test_result.status
+        # has not yet been updated (e.g. the user marks the test failed and
+        # reports a defect in the same interaction).
+        effective_status = _normalize_result_status(failing_step.status) or _normalize_result_status(test_result.status)
+        if effective_status not in FAILED_RESULT_STATUSES | BLOCKED_RESULT_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail="Failing step details can only be attached to failed or blocked test results",
+            )
+
+        query = db.query(models.TestCaseStep).filter(
+            models.TestCaseStep.test_case_id == test_result.test_case_id,
+        )
+        if failing_step.step_id is not None:
+            query = query.filter(models.TestCaseStep.id == failing_step.step_id)
+        else:
+            query = query.filter(models.TestCaseStep.step_number == failing_step.step_number)
+
+        step = query.first()
+        if not step:
+            raise HTTPException(status_code=404, detail="Failing step not found for this test case")
+        if failing_step.step_number is not None and step.step_number != failing_step.step_number:
+            raise HTTPException(status_code=400, detail="Failing step ID and step number do not match")
+
+        return {
+            "version": 1,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "step_id": step.id,
+            "step_number": step.step_number,
+            "step_type": step.step_type,
+            "action": step.action,
+            "expected_result": step.expected_result,
+            "status": effective_status,
+            "actual_result": failing_step.actual_result,
+            "notes": failing_step.notes,
+        }
 
     @app.get(
         "/test-results/{test_result_id}/defect-links",
@@ -1348,6 +1612,11 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        # Validate the failing step (and everything else we can check) BEFORE
+        # creating any defect rows. Otherwise a validation failure here would
+        # commit a defect with no link and leave an orphan in the database.
+        failing_step_snapshot = _build_failing_step_snapshot(db, test_result, payload.failing_step)
+
         if payload.new_defect is not None:
             new_defect = payload.new_defect
             if new_defect.project_id != project_id:
@@ -1370,13 +1639,35 @@ def register_requirements_defects_plans_routes(app):
                 "defect_id": new_defect.defect_id.strip(),
                 "title": new_defect.title.strip(),
             })
+            if _is_auto_project_defect_id(new_defect.defect_id, project_id):
+                duplicate = db.query(models.Defect.id).filter(
+                    models.Defect.defect_id == new_defect.defect_id
+                ).first()
+                if duplicate:
+                    new_defect = new_defect.model_copy(update={
+                        "defect_id": _next_project_defect_id(db, project_id),
+                    })
             try:
                 defect = create_defect(db=db, defect=new_defect)
             except IntegrityError as e:
                 db.rollback()
-                if "defect_id" in str(e.orig) or "UNIQUE constraint failed" in str(e.orig):
+                raw_error = str(e.orig)
+                if (
+                    ("defect_id" in raw_error or "UNIQUE constraint failed" in raw_error)
+                    and _is_auto_project_defect_id(new_defect.defect_id, project_id)
+                ):
+                    new_defect = new_defect.model_copy(update={
+                        "defect_id": _next_project_defect_id(db, project_id),
+                    })
+                    try:
+                        defect = create_defect(db=db, defect=new_defect)
+                    except IntegrityError as retry_error:
+                        db.rollback()
+                        raise HTTPException(status_code=400, detail=_explain_defect_integrity_error(retry_error))
+                elif "defect_id" in raw_error or "UNIQUE constraint failed" in raw_error:
                     raise HTTPException(status_code=400, detail="Defect ID already exists. Please use a unique ID.")
-                raise
+                else:
+                    raise
         else:
             defect = get_defect(db, defect_id=payload.defect_id)
             if defect is None:
@@ -1384,13 +1675,25 @@ def register_requirements_defects_plans_routes(app):
             if defect.project_id != project_id:
                 raise HTTPException(status_code=400, detail="Defect belongs to a different project")
 
+        # When the user is reporting a defect at the moment they mark the test
+        # as failed/blocked, the persisted status may still be stale. Sync it
+        # so the snapshot and future reads reflect the same reality the link
+        # is being created for. Done after defect creation so any rollback in
+        # the create path doesn't undo this change.
+        if failing_step_snapshot and _normalize_result_status(test_result.status) != failing_step_snapshot["status"]:
+            test_result.status = failing_step_snapshot["status"]
+            db.flush()
+
         link_type = getattr(payload.link_type, "value", None) or str(payload.link_type)
+        result_snapshot = _build_test_result_snapshot(db, test_result)
         link = crud.link_defect_to_test_result(
             db,
             test_result_id=test_result_id,
             defect_id=defect.id,
             link_type=link_type,
             created_by=current_user.id,
+            result_snapshot=result_snapshot,
+            failing_step_snapshot=failing_step_snapshot,
         )
 
         try:
@@ -1429,6 +1732,61 @@ def register_requirements_defects_plans_routes(app):
 
         crud.unlink_defect_from_test_result(db, link_id)
         return {"message": "Defect link removed"}
+
+    @app.put(
+        "/test-results/{test_result_id}/defect-links/{link_id}/snapshot",
+        response_model=schemas.TestResultDefectLink,
+    )
+    def update_test_result_defect_link_snapshot(
+        payload: schemas.TestResultDefectLinkSnapshotUpdate,
+        test_result_id: int = Path(..., ge=1),
+        link_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        link = crud.get_test_result_defect_link(db, link_id)
+        if link is None or link.test_result_id != test_result_id:
+            raise HTTPException(status_code=404, detail="Defect link not found")
+
+        test_result = crud.get_test_result(db, test_result_id=test_result_id)
+        if test_result is None:
+            raise HTTPException(status_code=404, detail="Test result not found")
+
+        project_id = _resolve_test_result_project(db, test_result)
+        if project_id is None:
+            raise HTTPException(status_code=400, detail="Test result is not associated with a project")
+        if not rbac.has_permission(current_user, "write", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        if payload.failing_step is not None and payload.clear_failing_step:
+            raise HTTPException(status_code=400, detail="Provide failing_step or clear_failing_step, not both")
+
+        link.result_snapshot = _build_test_result_snapshot(db, test_result)
+        if payload.clear_failing_step:
+            link.failing_step_snapshot = None
+        elif payload.failing_step is not None:
+            link.failing_step_snapshot = _build_failing_step_snapshot(db, test_result, payload.failing_step)
+        link.snapshot_created_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(link)
+
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            from ..models import AuditAction, EntityType
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=current_user.id if current_user else None,
+                action=AuditAction.UPDATE.value,
+                entity_type=EntityType.TEST_RESULT.value,
+                entity_id=test_result_id,
+                project_id=project_id,
+                description=f"Defect link snapshot corrected for link {link_id}",
+            ))
+        except Exception as e:
+            print(f"Failed to create audit trail for defect link snapshot correction: {e}")
+
+        return crud.get_test_result_defect_link(db, link_id)
 
     @app.get(
         "/test-runs/{test_run_id}/defect-coverage",
@@ -1509,18 +1867,18 @@ def register_requirements_defects_plans_routes(app):
 
     @app.get("/test-plans")
     def read_test_plans(
-        project_id: Optional[int] = None,
-        milestone_id: Optional[int] = None,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
-        sort_by: Optional[str] = "created_at",
-        sort_order: Optional[str] = "desc",
+        project_id: int = Query(..., ge=1, description="Project to list test plans for"),
+        milestone_id: Optional[int] = Query(None, ge=1),
+        status: Optional[str] = Query(None, max_length=32),
+        search: Optional[str] = Query(None, max_length=255),
+        sort_by: Optional[str] = Query("created_at", max_length=32),
+        sort_order: Optional[str] = Query("desc", pattern="^(asc|desc)$"),
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=500),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
+        if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         test_plans = get_test_plans(
@@ -1581,7 +1939,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.get("/test-plans/{test_plan_id}")
     def read_test_plan_endpoint(
-        test_plan_id: int,
+        test_plan_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1628,8 +1986,8 @@ def register_requirements_defects_plans_routes(app):
 
     @app.put("/test-plans/{test_plan_id}", response_model=schemas.TestPlan)
     def update_test_plan_endpoint(
-        test_plan_id: int,
         test_plan: schemas.TestPlanUpdate,
+        test_plan_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1673,7 +2031,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.delete("/test-plans/{test_plan_id}")
     def delete_test_plan_endpoint(
-        test_plan_id: int,
+        test_plan_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1689,13 +2047,17 @@ def register_requirements_defects_plans_routes(app):
         plan_title = db_test_plan.title
         project_id = db_test_plan.project_id
 
-        # Nullify test_plan_id on linked test runs so they are not orphaned
+        # Nullify test_plan_id on linked test runs so they are not orphaned.
+        # delete_test_plan() commits, which finalises both the update and the delete
+        # atomically (single SQLAlchemy session, single transaction).
         from ..models import TestRun as _TR
-        db.query(_TR).filter(_TR.test_plan_id == plan_id).update({"test_plan_id": None})
+        db.query(_TR).filter(_TR.test_plan_id == plan_id).update(
+            {"test_plan_id": None}, synchronize_session=False
+        )
 
         delete_test_plan(db, test_plan_id=test_plan_id)
-        
-        # Create audit trail
+
+        # Best-effort audit trail; failures must not break the user-visible operation
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
@@ -1710,9 +2072,9 @@ def register_requirements_defects_plans_routes(app):
                 description=f"Test plan deleted: {plan_title or 'Untitled'}",
             )
             audit_service.create_audit_trail(audit_data)
-        except Exception as e:
-            print(f"Failed to create audit trail for test plan deletion: {e}")
-        
+        except Exception:
+            logger.exception("Failed to create audit trail for test plan deletion")
+
         return {"message": "Test plan deleted successfully"}
 
     # Milestones Endpoints
@@ -1724,9 +2086,19 @@ def register_requirements_defects_plans_routes(app):
     ):
         if milestone.project_id <= 0:
             raise HTTPException(status_code=400, detail="Invalid project_id")
+        project = crud.get_project(db, milestone.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
 
         if not rbac.has_permission(current_user, "write", milestone.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        duplicate = db.query(models.Milestone.id).filter(
+            models.Milestone.project_id == milestone.project_id,
+            func.lower(models.Milestone.title) == milestone.title.strip().lower(),
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Milestone title already exists in this project")
 
         milestone_data = milestone.model_copy(update={"created_by": current_user.id})
         db_milestone = create_milestone(db=db, milestone=milestone_data)
@@ -1752,7 +2124,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.get("/milestones", response_model=List[schemas.Milestone])
     def read_milestones(
-        project_id: int,
+        project_id: int = Query(..., ge=1),
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=500),
         db: Session = Depends(get_db),
@@ -1766,7 +2138,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.get("/milestones/{milestone_id}", response_model=schemas.Milestone)
     def read_milestone_endpoint(
-        milestone_id: int,
+        milestone_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1781,8 +2153,8 @@ def register_requirements_defects_plans_routes(app):
 
     @app.put("/milestones/{milestone_id}", response_model=schemas.Milestone)
     def update_milestone_endpoint(
-        milestone_id: int,
         milestone: schemas.MilestoneUpdate,
+        milestone_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1794,10 +2166,35 @@ def register_requirements_defects_plans_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         update_data = milestone.model_dump(exclude_unset=True)
+        if "title" in update_data:
+            duplicate = db.query(models.Milestone.id).filter(
+                models.Milestone.project_id == db_milestone.project_id,
+                models.Milestone.id != db_milestone.id,
+                func.lower(models.Milestone.title) == str(update_data["title"]).strip().lower(),
+            ).first()
+            if duplicate:
+                raise HTTPException(status_code=400, detail="Milestone title already exists in this project")
         if update_data.get("status") == schemas.MilestoneStatus.COMPLETED:
+            current_health = enrich_milestone(db, db_milestone)
+            if (
+                getattr(current_health, "critical_defect_count", 0) > 0
+                or getattr(current_health, "failed_count", 0) > 0
+                or getattr(current_health, "blocked_count", 0) > 0
+                or getattr(current_health, "not_tested_count", 0) > 0
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Milestone cannot be completed while critical defects, failed, blocked, or not-tested results remain.",
+                )
             update_data.setdefault("progress_percentage", 100)
             if not update_data.get("actual_date") and not db_milestone.actual_date:
                 update_data["actual_date"] = datetime.now(timezone.utc)
+        elif update_data.get("status") in {
+            schemas.MilestoneStatus.PLANNED,
+            schemas.MilestoneStatus.IN_PROGRESS,
+            schemas.MilestoneStatus.CANCELLED,
+        } and "actual_date" not in update_data:
+            update_data["actual_date"] = None
         db_milestone = update_milestone(
             db,
             milestone_id=milestone_id,
@@ -1825,7 +2222,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.delete("/milestones/{milestone_id}")
     def delete_milestone_endpoint(
-        milestone_id: int,
+        milestone_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1840,6 +2237,11 @@ def register_requirements_defects_plans_routes(app):
             raise HTTPException(
                 status_code=409,
                 detail="Milestone has linked test plans. Unlink or move those plans before deleting it.",
+            )
+        if db.query(models.TestRun.id).filter(models.TestRun.milestone_id == milestone_id).first():
+            raise HTTPException(
+                status_code=409,
+                detail="Milestone has linked test runs. Unlink or move those runs before deleting it.",
             )
 
         milestone_id_val = db_milestone.id
@@ -1869,7 +2271,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.get("/milestones/stats/{project_id}")
     def get_milestone_stats(
-        project_id: int,
+        project_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1880,7 +2282,7 @@ def register_requirements_defects_plans_routes(app):
 
     @app.get("/milestones/{milestone_id}/test-plans")
     def get_milestone_test_plans(
-        milestone_id: int,
+        milestone_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -1905,3 +2307,41 @@ def register_requirements_defects_plans_routes(app):
             }
             for tp in test_plans
         ]
+
+    @app.get("/milestones/{milestone_id}/runs", response_model=List[schemas.TestRun])
+    def get_milestone_runs(
+        milestone_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Test runs related to this milestone — direct ``milestone_id`` link
+        plus indirect via test plans — with the same progress fields that
+        ``GET /test-runs`` returns so the milestone detail page can render
+        per-plan rollups client-side from a single fetch.
+        """
+        from ..models import Milestone, TestPlan, TestRun
+        from .test_management import _attach_test_run_progress
+
+        milestone = db.query(Milestone).filter(Milestone.id == milestone_id).first()
+        if not milestone:
+            raise HTTPException(status_code=404, detail="Milestone not found")
+
+        if not rbac.has_permission(current_user, "read", milestone.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        plan_ids = [row[0] for row in db.query(TestPlan.id).filter(TestPlan.milestone_id == milestone_id).all()]
+        direct_runs = db.query(TestRun).filter(TestRun.milestone_id == milestone_id).all()
+        plan_runs = (
+            db.query(TestRun).filter(TestRun.test_plan_id.in_(plan_ids)).all()
+            if plan_ids else []
+        )
+
+        # Dedupe — a run can be linked both directly and via its plan.
+        seen: set = set()
+        runs: List[TestRun] = []
+        for run in direct_runs + plan_runs:
+            if run.id not in seen:
+                seen.add(run.id)
+                runs.append(run)
+
+        return _attach_test_run_progress(db, runs)

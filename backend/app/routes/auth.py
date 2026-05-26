@@ -9,7 +9,7 @@ from datetime import timedelta
 from .. import crud, schemas, auth
 from ..database import get_db
 from ..config import settings
-from ..models import User, Role
+from ..models import User, Role, EntityType
 
 
 def register_auth_routes(app):
@@ -61,11 +61,9 @@ def register_auth_routes(app):
                         audit_data = AuditTrailCreate(
                             user_id=new_user.id,
                             action="update",
-                            entity_type="system_settings",
+                            entity_type=EntityType.SYSTEM_SETTING,
                             entity_id=existing_setting.id,
                             description=f"Signup automatically disabled after first user creation (user: {new_user.username})",
-                            ip_address="127.0.0.1",
-                            user_agent="System"
                         )
                         audit_service.create_audit_trail(audit_data)
                     except Exception as audit_error:
@@ -97,8 +95,6 @@ def register_auth_routes(app):
                 entity_type="user",
                 entity_id=user.id,
                 description=f"User {user.username} logged in via web interface",
-                ip_address="127.0.0.1",  # You might want to get this from request
-                user_agent="Web Client"
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:

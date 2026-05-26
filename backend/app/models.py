@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Float, JSON, Table, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from typing import Optional
 from .database import Base
 import enum
 
@@ -212,6 +213,10 @@ class CustomFieldDefinition(Base):
     default_value = Column(Text)
     options = Column(JSON)  # For select/multiselect fields
     validation_rules = Column(JSON)  # Validation rules like min_length, max_length, etc.
+    # Which entity types this definition applies to. Stored as a JSON list of
+    # short keys (``test_case``, ``test_run``, ``defect``, ``requirement``).
+    # Empty/None means legacy behavior: applies to test cases only.
+    entity_types = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -220,19 +225,54 @@ class CustomFieldDefinition(Base):
     values = relationship("CustomFieldValue", back_populates="field_definition")
 
 
+# Allowed entity types for the unified custom-field engine. Kept here as a
+# module constant so backend validation and the frontend admin form agree.
+CUSTOM_FIELD_ENTITY_TYPES = ("test_case", "test_run", "defect", "requirement")
+
+
 class CustomFieldValue(Base):
     __tablename__ = "custom_field_values"
 
     id = Column(Integer, primary_key=True, index=True)
     field_definition_id = Column(Integer, ForeignKey("custom_field_definitions.id"), nullable=False)
-    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    # Polymorphic ownership: exactly one of the following FKs is set. Real
+    # FKs (rather than (entity_type, entity_id) strings) so that deleting a
+    # test case / run / defect / requirement cascades to its custom values.
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=True)
+    test_run_id = Column(Integer, ForeignKey("test_runs.id"), nullable=True)
+    defect_id = Column(Integer, ForeignKey("defects.id"), nullable=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id"), nullable=True)
     value = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
     field_definition = relationship("CustomFieldDefinition", back_populates="values")
-    test_case = relationship("TestCase")
+    test_case = relationship("TestCase", foreign_keys=[test_case_id])
+    test_run = relationship("TestRun", foreign_keys=[test_run_id])
+    defect = relationship("Defect", foreign_keys=[defect_id])
+    requirement = relationship("Requirement", foreign_keys=[requirement_id])
+
+    @property
+    def entity_type(self) -> Optional[str]:
+        if self.test_case_id is not None:
+            return "test_case"
+        if self.test_run_id is not None:
+            return "test_run"
+        if self.defect_id is not None:
+            return "defect"
+        if self.requirement_id is not None:
+            return "requirement"
+        return None
+
+    @property
+    def entity_id(self) -> Optional[int]:
+        return (
+            self.test_case_id
+            or self.test_run_id
+            or self.defect_id
+            or self.requirement_id
+        )
 
 
 # Association table for requirement-test case links
@@ -342,9 +382,9 @@ class SharedStepTemplate(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False, index=True)
     description = Column(Text)
-    category = Column(Enum(StepCategory), nullable=False)
+    category = Column(Enum(StepCategory, values_callable=lambda enum_class: [item.value for item in enum_class]), nullable=False)
     tags = Column(JSON)  # Array of tags as JSON
-    complexity = Column(Enum(StepComplexity), nullable=False)
+    complexity = Column(Enum(StepComplexity, values_callable=lambda enum_class: [item.value for item in enum_class]), nullable=False)
     estimated_time = Column(Integer, nullable=False, default=1)  # in minutes
     prerequisites = Column(JSON)  # Array of prerequisites as JSON
     related_steps = Column(JSON)  # Array of related step IDs as JSON
@@ -960,6 +1000,9 @@ class TestResultDefectLink(Base):
     test_result_id = Column(Integer, ForeignKey("test_results.id"), nullable=False, index=True)
     defect_id = Column(Integer, ForeignKey("defects.id"), nullable=False, index=True)
     link_type = Column(String(20), default=DefectLinkType.FOUND.value)  # found, blocked_by, related
+    result_snapshot = Column(JSON)  # Immutable execution snapshot captured when the link is created
+    failing_step_snapshot = Column(JSON)  # Optional immutable failed/blocked step details
+    snapshot_created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1539,6 +1582,99 @@ class ImportOperation(Base):
     user = relationship("User")
     project = relationship("Project")
     test_suite = relationship("TestSuite")
+
+
+class SavedFilter(Base):
+    """User-owned saved filter for list pages.
+
+    ``scope`` namespaces filters per page (``test_cases``, ``defects``, …),
+    ``definition`` is whatever JSON shape the page understands. Filters are
+    private to the owning user unless ``is_shared`` is true, in which case
+    project members with read access can also apply them.
+    """
+    __tablename__ = "saved_filters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    scope = Column(String(32), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    definition = Column(JSON, nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_shared = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+    project = relationship("Project", foreign_keys=[project_id])
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_id", "scope", "name", name="uq_saved_filter_owner_scope_name"),
+    )
+
+
+class ApiToken(Base):
+    """Personal access tokens for CI/CD and scripted integrations.
+
+    We never store the raw token — only its sha256 hash. The ``prefix`` is a
+    short identifying snippet of the raw token kept so the UI can show a
+    recognizable handle ("tmona_xKf3…") for management.
+    """
+    __tablename__ = "api_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    prefix = Column(String(16), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    last_used_at = Column(DateTime(timezone=True))
+    expires_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class WebhookSubscription(Base):
+    """Outbound webhook target scoped to a project."""
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    name = Column(String(120), nullable=False)
+    url = Column(String(2048), nullable=False)
+    secret = Column(String(128), nullable=False)
+    # JSON list of subscribed event names, e.g. ["test_run.completed", "defect.created"].
+    # Stored as JSON for portability across SQLite/Postgres.
+    events = Column(JSON, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project", foreign_keys=[project_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class WebhookDelivery(Base):
+    """One attempted delivery of an event to a subscription. We persist these
+    so users can audit and redeliver failed events."""
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id", ondelete="CASCADE"), nullable=False, index=True)
+    event = Column(String(64), nullable=False, index=True)
+    payload = Column(JSON, nullable=False)
+    status = Column(String(20), nullable=False, default="pending")  # pending|success|failed
+    attempts = Column(Integer, nullable=False, default=0)
+    response_status = Column(Integer)
+    response_body = Column(Text)  # truncated
+    error = Column(Text)
+    delivered_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    subscription = relationship("WebhookSubscription")
 
 
 # Add relationships to versioning models (avoiding circular imports)

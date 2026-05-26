@@ -10,9 +10,12 @@ from .api.defect_management import router as defect_management_router
 from .openapi_config import get_openapi_config
 
 # Import middleware and utilities from separate modules
-from .middleware import RateLimitMiddleware, SecurityHeadersMiddleware
+from .middleware import RateLimitMiddleware, RequestMetadataMiddleware, SecurityHeadersMiddleware
 
 app = FastAPI(**get_openapi_config())
+
+# Capture request IP/user-agent for service-layer audit logging.
+app.add_middleware(RequestMetadataMiddleware)
 
 # Add security headers middleware (for CSRF protection)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -49,6 +52,8 @@ from .routes.notifications import register_notifications_routes
 from .routes.definitions import register_definitions_routes
 from .routes.custom_fields import register_custom_fields_routes
 from .routes.shared_steps import register_shared_steps_routes
+from .routes.tokens_webhooks import register_tokens_and_webhooks_routes
+from .routes.saved_filters_and_bulk import register_saved_filters_and_bulk_routes
 
 register_common_routes(app)
 register_auth_routes(app)
@@ -64,6 +69,8 @@ register_notifications_routes(app)
 register_definitions_routes(app)
 register_custom_fields_routes(app)
 register_shared_steps_routes(app)
+register_tokens_and_webhooks_routes(app)
+register_saved_filters_and_bulk_routes(app)
 
 
 @app.on_event("startup")

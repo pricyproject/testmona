@@ -1,0 +1,259 @@
+{
+  "info": {
+    "name": "28 Webhooks",
+    "description": "Project-scoped outbound webhook endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "webhookId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookDeliveryId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "List Supported Events",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/webhooks/supported-events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "webhooks",
+            "supported-events"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create Webhook",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"project_id\": {{testProjectId}},\n  \"name\": \"Release alerts\",\n  \"url\": \"https://example.com/webhook\",\n  \"events\": [\"test_run.completed\", \"defect.created\", \"defect.updated\"],\n  \"is_active\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks"
+          ]
+        },
+        "description": "Creates a webhook and returns the signing secret once."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 201) {",
+              "  const jsonData = pm.response.json();",
+              "  pm.collectionVariables.set(\"webhookId\", jsonData.id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reject Private Webhook URL",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"project_id\": {{testProjectId}},\n  \"name\": \"Private target\",\n  \"url\": \"http://localhost:9000/webhook\",\n  \"events\": [\"defect.created\"],\n  \"is_active\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks"
+          ]
+        },
+        "description": "Expected: 422 validation error for localhost/private webhook targets."
+      }
+    },
+    {
+      "name": "List Webhooks",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Webhook",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"is_active\": false\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks/{{webhookId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks",
+            "{{webhookId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Send Test Ping",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks/{{webhookId}}/test",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks",
+            "{{webhookId}}",
+            "test"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const jsonData = pm.response.json();",
+              "  pm.collectionVariables.set(\"webhookDeliveryId\", jsonData.id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Deliveries",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks/{{webhookId}}/deliveries?limit=50",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks",
+            "{{webhookId}}",
+            "deliveries"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "50"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Redeliver",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks/{{webhookId}}/deliveries/{{webhookDeliveryId}}/redeliver",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks",
+            "{{webhookId}}",
+            "deliveries",
+            "{{webhookDeliveryId}}",
+            "redeliver"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Delete Webhook",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{testProjectId}}/webhooks/{{webhookId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{testProjectId}}",
+            "webhooks",
+            "{{webhookId}}"
+          ]
+        }
+      }
+    }
+  ]
+}

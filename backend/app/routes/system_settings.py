@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from .. import crud, schemas, auth, rbac
 from ..database import get_db
 from ..auth import get_current_active_user, check_password_change_required
+from ..models import EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -536,11 +537,9 @@ def register_system_settings_routes(app):
                 audit_data = AuditTrailCreate(
                     user_id=current_user.id,
                     action="update",
-                    entity_type="system_settings",
+                    entity_type=EntityType.SYSTEM_SETTING,
                     entity_id=db_setting.id,
                     description=f"Signup setting changed from {old_value} to {new_value} by {current_user.username}",
-                    ip_address="127.0.0.1",
-                    user_agent="Web Client"
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as audit_error:

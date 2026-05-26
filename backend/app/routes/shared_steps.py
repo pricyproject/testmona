@@ -198,6 +198,10 @@ def register_shared_steps_routes(app):
         if not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        existing_template = crud.get_shared_step_template_by_name(db, template.name)
+        if existing_template is not None:
+            raise HTTPException(status_code=400, detail="Shared step template name already exists")
+
         template_data = template.model_dump()
         template_data["created_by"] = current_user.id
         db_template = crud.create_shared_step_template(db=db, template=template_data)
@@ -224,8 +228,8 @@ def register_shared_steps_routes(app):
 
     @app.get("/shared-step-templates/", response_model=List[schemas.SharedStepTemplate])
     def read_shared_step_templates(
-        skip: int = 0,
-        limit: int = 100,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=1000),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -236,7 +240,7 @@ def register_shared_steps_routes(app):
 
     @app.get("/shared-step-templates/{template_id}", response_model=schemas.SharedStepTemplate)
     def read_shared_step_template(
-        template_id: int,
+        template_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -251,8 +255,8 @@ def register_shared_steps_routes(app):
 
     @app.put("/shared-step-templates/{template_id}", response_model=schemas.SharedStepTemplate)
     def update_shared_step_template(
-        template_id: int,
         template: schemas.SharedStepTemplateUpdate,
+        template_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -262,6 +266,11 @@ def register_shared_steps_routes(app):
         
         if not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        if template.name is not None:
+            existing_template = crud.get_shared_step_template_by_name(db, template.name)
+            if existing_template is not None and existing_template.id != template_id:
+                raise HTTPException(status_code=400, detail="Shared step template name already exists")
 
         db_template = crud.update_shared_step_template(
             db,
@@ -291,7 +300,7 @@ def register_shared_steps_routes(app):
 
     @app.delete("/shared-step-templates/{template_id}")
     def delete_shared_step_template(
-        template_id: int,
+        template_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):

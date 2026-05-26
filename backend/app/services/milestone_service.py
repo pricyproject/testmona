@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Iterable, List
 
 from sqlalchemy import func
@@ -16,6 +16,7 @@ from ..models import (
     TestPlan,
     TestResult,
     TestRun,
+    requirement_test_plan_links,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,13 @@ def _is_overdue(milestone: Milestone) -> bool:
     target_date = milestone.target_date
     if target_date.tzinfo is None:
         target_date = target_date.replace(tzinfo=timezone.utc)
-    return target_date < datetime.now(timezone.utc)
+
+    # Targets stored at midnight UTC represent "by end of that day"; only flag overdue
+    # once the entire target day has elapsed, so a milestone due today isn't marked overdue.
+    if target_date.timetz() == time(0, 0, tzinfo=timezone.utc):
+        target_date = target_date + timedelta(days=1)
+
+    return target_date <= datetime.now(timezone.utc)
 
 
 def _derive_health(
@@ -69,12 +76,12 @@ def _derive_health(
 ) -> str:
     if milestone.status == MilestoneStatus.CANCELLED:
         return "cancelled"
-    if milestone.status == MilestoneStatus.COMPLETED or progress >= 100:
-        return "completed"
     if critical_defects > 0 or blocked_results > 0 or blocked_plans > 0:
         return "blocked"
     if _is_overdue(milestone) or failed_results > 0 or open_defects >= 5:
         return "at_risk"
+    if milestone.status == MilestoneStatus.COMPLETED or progress >= 100:
+        return "completed"
     if progress > 0 or milestone.status == MilestoneStatus.IN_PROGRESS:
         return "in_progress"
     return "planned"
@@ -123,14 +130,32 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
             or 0
         )
 
-    defect_query = db.query(Defect).filter(Defect.project_id == milestone.project_id)
+    # Scope defects to this milestone's runs. Without a run link there is no
+    # established relationship between the defect and the milestone, so we avoid
+    # mixing in every defect in the project (which would inflate every
+    # milestone's counts identically and mislead "quality risks").
     if test_run_ids:
-        defect_query = defect_query.filter(Defect.test_run_id.in_(test_run_ids))
-    defects: List[Defect] = defect_query.all()
+        defects: List[Defect] = (
+            db.query(Defect)
+            .filter(Defect.project_id == milestone.project_id)
+            .filter(Defect.test_run_id.in_(test_run_ids))
+            .all()
+        )
+    else:
+        defects = []
     open_defects = len([defect for defect in defects if defect.status in OPEN_DEFECT_STATUSES])
     critical_defects = len([defect for defect in defects if defect.severity == DefectSeverity.CRITICAL and defect.status in OPEN_DEFECT_STATUSES])
 
-    requirements: List[Requirement] = db.query(Requirement).filter(Requirement.project_id == milestone.project_id).all()
+    requirements: List[Requirement] = []
+    if test_plan_ids:
+        requirements = (
+            db.query(Requirement)
+            .join(requirement_test_plan_links, requirement_test_plan_links.c.requirement_id == Requirement.id)
+            .filter(requirement_test_plan_links.c.test_plan_id.in_(test_plan_ids))
+            .filter(Requirement.project_id == milestone.project_id)
+            .distinct()
+            .all()
+        )
     verified_requirements = len([requirement for requirement in requirements if requirement.status == RequirementStatus.VERIFIED])
 
     blocked_plans = len([plan for plan in test_plans if _normalize_status(plan.status) == "blocked"])

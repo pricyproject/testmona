@@ -29,6 +29,16 @@
       "key": "testResultId",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "defectId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "defectLinkId",
+      "value": "1",
+      "type": "string"
     }
   ],
   "auth": {
@@ -54,7 +64,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -241,6 +251,175 @@
               "    pm.expect(jsonData).to.have.property('execution_time');",
               "    pm.expect(jsonData).to.have.property('execution_started_at');",
               "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Link Defect With Result Snapshot",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"defect_id\": {{defectId}},\n  \"link_type\": \"found\",\n  \"failing_step\": {\n    \"step_number\": 1,\n    \"status\": \"failed\",\n    \"actual_result\": \"Observed failure while executing step 1\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/test-results/{{testResultId}}/defect-links",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-results",
+            "{{testResultId}}",
+            "defect-links"
+          ]
+        },
+        "description": "Link an existing defect to a test result and capture immutable result/failing-step snapshots"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 or expected validation error\", function () {",
+              "    pm.expect([200, 400, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('result_snapshot');",
+              "    pm.expect(jsonData.result_snapshot).to.have.property('test_result');",
+              "    pm.expect(jsonData).to.have.property('failing_step_snapshot');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Test Result Defect Links",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/test-results/{{testResultId}}/defect-links",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-results",
+            "{{testResultId}}",
+            "defect-links"
+          ]
+        },
+        "description": "List defects linked to a test result, including captured snapshots"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response is array\", function () {",
+              "    pm.expect(pm.response.json()).to.be.an('array');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Correct Defect Link Snapshot",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"failing_step\": {\n    \"step_number\": 1,\n    \"status\": \"failed\",\n    \"actual_result\": \"Corrected observed result for step 1\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/test-results/{{testResultId}}/defect-links/{{defectLinkId}}/snapshot",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-results",
+            "{{testResultId}}",
+            "defect-links",
+            "{{defectLinkId}}",
+            "snapshot"
+          ]
+        },
+        "description": "Explicitly correct the stored result snapshot and failing-step detail for a defect link"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 or expected validation error\", function () {",
+              "    pm.expect([200, 400, 403, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('result_snapshot');",
+              "    pm.expect(jsonData).to.have.property('snapshot_created_at');",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Defect Result Links",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/defects/{{defectId}}/result-links",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "defects",
+            "{{defectId}}",
+            "result-links"
+          ]
+        },
+        "description": "List execution result links and frozen snapshots for a defect"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status is 200 or defect not found\", function () {",
+              "    pm.expect([200, 404]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    pm.expect(pm.response.json()).to.be.an('array');",
+              "}"
             ],
             "type": "text/javascript"
           }

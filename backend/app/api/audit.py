@@ -12,6 +12,7 @@ from ..schemas_audit import (
 from .. import crud_rbac, rbac
 from ..auth import get_current_user
 from ..models import AuditAction, EntityType
+from ..services.request_context import get_request_client_ip, get_request_user_agent
 
 router = APIRouter()
 
@@ -292,8 +293,8 @@ async def create_audit_trail(
     This endpoint is typically used by other services to log actions.
     """
     # Extract client information
-    client_ip = request.client.host
-    user_agent = request.headers.get("user-agent")
+    client_ip = get_request_client_ip(request)
+    user_agent = get_request_user_agent(request)
     
     # Add client info to audit data
     audit_data["ip_address"] = client_ip

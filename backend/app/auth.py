@@ -98,6 +98,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # API tokens (``tmona_*``) are accepted alongside JWTs so CI/CD and other
+    # scripted callers can authenticate without spinning up a login flow.
+    from .services.api_token_service import looks_like_api_token, get_user_for_token
+    if looks_like_api_token(token):
+        api_user = get_user_for_token(db, token)
+        if api_user is None:
+            raise credentials_exception
+        return api_user
+
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         username: str = payload.get("sub")

@@ -1,11 +1,12 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, desc, func, cast, String
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta
 from fastapi import Depends
 import json
 
-from ..models import AuditTrail, User, Project
+from ..models import AuditTrail, User, Project, EntityType
+from .request_context import current_client_ip, current_user_agent
 from ..schemas_audit import (
     AuditTrailCreate, AuditTrailUpdate, AuditTrailResponse, 
     AuditTrailFilter, ActivitySummary, EntityHistory, 
@@ -17,7 +18,7 @@ class AuditService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _is_audit_enabled(self, entity_type: Optional[str] = None) -> bool:
+    def _is_audit_enabled(self, entity_type: Optional[Union[str, EntityType]] = None) -> bool:
         """Check if audit logging is enabled globally and for the specific entity type
         
         Critical entity types (SYSTEM_SETTING, USER) are always audited regardless of configuration
@@ -25,6 +26,7 @@ class AuditService:
         """
         # Critical entity types that must always be audited
         CRITICAL_ENTITY_TYPES = {"system_setting", "user"}
+        entity_type_value = entity_type.value if isinstance(entity_type, EntityType) else entity_type
         
         try:
             from ..crud import get_system_setting
@@ -44,7 +46,7 @@ class AuditService:
                 return True
             
             # Critical entity types are always audited
-            if entity_type and entity_type in CRITICAL_ENTITY_TYPES:
+            if entity_type_value and entity_type_value in CRITICAL_ENTITY_TYPES:
                 return True
             
             # Check global enabled flag first
@@ -57,13 +59,13 @@ class AuditService:
                 return False
             
             # Check entity-specific setting if provided
-            if entity_type:
+            if entity_type_value:
                 entity_settings = config_data.get("entity_settings", {})
                 if not isinstance(entity_settings, dict):
                     entity_settings = {}
                 # If entity type is explicitly set to False, disable it
                 # If not set or set to True, enable it (default behavior)
-                entity_enabled = entity_settings.get(entity_type, True)
+                entity_enabled = entity_settings.get(entity_type_value, True)
                 if not isinstance(entity_enabled, bool):
                     entity_enabled = True  # Default to True if invalid type
                 return entity_enabled
@@ -80,8 +82,11 @@ class AuditService:
         if not self._is_audit_enabled(audit_data.entity_type):
             # Audit is disabled for this entity type, skip logging
             return None
-        
-        audit_trail = AuditTrail(**audit_data.model_dump())
+
+        audit_payload = audit_data.model_dump()
+        audit_payload["ip_address"] = audit_payload.get("ip_address") or current_client_ip()
+        audit_payload["user_agent"] = audit_payload.get("user_agent") or current_user_agent()
+        audit_trail = AuditTrail(**audit_payload)
         self.db.add(audit_trail)
         self.db.commit()
         self.db.refresh(audit_trail)
