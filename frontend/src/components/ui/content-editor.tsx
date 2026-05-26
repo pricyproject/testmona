@@ -86,7 +86,13 @@ const RTL_CHARS =
 
 function detectDirection(text: string, hint: 'ltr' | 'rtl' | 'auto'): 'ltr' | 'rtl' {
   if (hint !== 'auto') return hint;
-  const stripped = text.replace(/<[^>]+>/g, '').replace(/\s/g, '');
+  let withoutTags = text;
+  let previous: string;
+  do {
+    previous = withoutTags;
+    withoutTags = withoutTags.replace(/<[^>]+>/g, '');
+  } while (withoutTags !== previous);
+  const stripped = withoutTags.replace(/\s/g, '');
   if (!stripped) return 'ltr';
   const rtl = (stripped.match(RTL_CHARS) || []).length;
   return rtl / stripped.length > 0.3 ? 'rtl' : 'ltr';
