@@ -71,7 +71,10 @@ def get_project(db: Session, project_id: int):
     project = db.query(Project).filter(Project.id == project_id).first()
     if project:
         # Add test case counts for the project
-        test_case_count = db.query(TestCase).join(TestSuite).filter(TestSuite.project_id == project.id).count()
+        test_case_count = db.query(TestCase).join(TestSuite).filter(
+            TestSuite.project_id == project.id,
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        ).count()
         test_suite_count = db.query(TestSuite).filter(TestSuite.project_id == project.id).count()
         test_run_count = db.query(TestRun).filter(TestRun.project_id == project.id).count()
         
@@ -317,6 +320,8 @@ def get_test_cases(db: Session, test_suite_id: Optional[int] = None, section_id:
         joinedload(TestCase.section),
         joinedload(TestCase.creator),
         selectinload(TestCase.custom_field_values)
+    ).filter(
+        ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)))
     )
     if test_suite_id is not None:
         query = query.filter(TestCase.test_suite_id == test_suite_id)
@@ -366,8 +371,9 @@ def update_test_case(db: Session, test_case_id: int, test_case: TestCaseUpdate):
 def delete_test_case(db: Session, test_case_id: int):
     db_test_case = db.query(TestCase).filter(TestCase.id == test_case_id).first()
     if db_test_case:
-        db.delete(db_test_case)
+        db_test_case.is_deleted = True
         safe_commit(db)
+        db.refresh(db_test_case)
     return db_test_case
 
 

@@ -879,7 +879,8 @@ def register_test_management_routes(app):
                 raise HTTPException(status_code=403, detail="Not authorized to access this project")
             
             query = db.query(models.TestCase).join(models.TestSuite).filter(
-                models.TestSuite.project_id == project_id
+                models.TestSuite.project_id == project_id,
+                ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
             )
             if test_suite_id:
                 query = query.filter(models.TestCase.test_suite_id == test_suite_id)
@@ -888,7 +889,9 @@ def register_test_management_routes(app):
             count = query.count()
         else:
             # Use existing logic from crud
-            query = db.query(models.TestCase)
+            query = db.query(models.TestCase).filter(
+                ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
+            )
             if test_suite_id:
                 query = query.filter(models.TestCase.test_suite_id == test_suite_id)
             if section_id:
