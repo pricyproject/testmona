@@ -110,7 +110,21 @@ export function ReferenceField({
   };
 
   const isJiraLink = (value: string) => {
-    return value.includes('jira') || value.includes('atlassian.net') || /^[A-Z]+-\d+$/.test(value);
+    if (/^[A-Z]+-\d+$/.test(value)) {
+      return true;
+    }
+
+    try {
+      const parsedUrl = new URL(value);
+      const host = parsedUrl.hostname.toLowerCase();
+      const isHttp = parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+      const isAtlassianHost = host === 'atlassian.net' || host.endsWith('.atlassian.net');
+      const isJiraHost = host === 'jira' || host.includes('.jira.');
+
+      return isHttp && (isAtlassianHost || isJiraHost);
+    } catch {
+      return false;
+    }
   };
 
   const renderJiraLink = (value: string) => {
