@@ -45,7 +45,7 @@ docker-compose up --build
 
 ```text
 Email: demo@testmona.com
-Password: 12345678
+Password: demo123
 ```
 
 ## Repository Layout
