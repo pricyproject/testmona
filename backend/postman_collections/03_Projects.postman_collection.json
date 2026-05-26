@@ -44,7 +44,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"12345678\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -130,7 +130,7 @@
               "",
               "pm.test(\"Status is valid\", function () {",
               "    var jsonData = pm.response.json();",
-              "    pm.expect(['active', 'archived', 'on_hold']).to.include(jsonData.status);",
+              "    pm.expect(['active', 'inactive', 'archived']).to.include(jsonData.status);",
               "});",
               "",
               "// Store project ID for subsequent tests",
@@ -148,7 +148,7 @@
       "request": {
         "method": "GET",
         "url": {
-          "raw": "{{baseUrl}}/projects/?skip=0&limit=100",
+          "raw": "{{baseUrl}}/projects/?skip=0&limit=100&include_archived=false",
           "host": [
             "{{baseUrl}}"
           ],
@@ -163,10 +163,14 @@
             {
               "key": "limit",
               "value": "100"
+            },
+            {
+              "key": "include_archived",
+              "value": "false"
             }
           ]
         },
-        "description": "Retrieve paginated list of projects"
+        "description": "Retrieve paginated list of non-archived projects"
       },
       "event": [
         {
@@ -194,6 +198,61 @@
               "pm.test(\"Pagination works correctly\", function () {",
               "    var jsonData = pm.response.json();",
               "    pm.expect(jsonData.length).to.be.at.most(100);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Archived Projects",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/projects/?skip=0&limit=100&status=archived",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects"
+          ],
+          "query": [
+            {
+              "key": "skip",
+              "value": "0"
+            },
+            {
+              "key": "limit",
+              "value": "100"
+            },
+            {
+              "key": "status",
+              "value": "archived"
+            }
+          ]
+        },
+        "description": "Retrieve archived projects for the archived-projects toggle"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response is an array\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.be.an('array');",
+              "});",
+              "",
+              "pm.test(\"All returned projects are archived\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    jsonData.forEach(function (project) {",
+              "        pm.expect(project.status).to.eql('archived');",
+              "    });",
               "});"
             ],
             "type": "text/javascript"

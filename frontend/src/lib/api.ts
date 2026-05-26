@@ -235,9 +235,22 @@ export const authAPI = {
 
 
 // Projects API
+type ProjectStatusFilter = 'active' | 'inactive' | 'archived';
+
 export const projectsAPI = {
-  getAll: async (skip = 0, limit = 100) => {
-    const response = await api.get(`/projects?skip=${skip}&limit=${limit}`);
+  getAll: async (
+    skip = 0,
+    limit = 100,
+    filters: { status?: ProjectStatusFilter; includeArchived?: boolean } = {}
+  ) => {
+    const params = new URLSearchParams({
+      skip: skip.toString(),
+      limit: limit.toString(),
+    });
+    if (filters.status) params.append('status', filters.status);
+    if (filters.includeArchived !== undefined) params.append('include_archived', String(filters.includeArchived));
+
+    const response = await api.get(`/projects?${params}`);
     return response.data;
   },
   getById: async (id: number, signal?: AbortSignal) => {

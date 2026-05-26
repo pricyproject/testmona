@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Plus, FolderOpen, Settings, Trash2, TestTube, FileText, PlayCircle, ChevronRight, AlertTriangle, Edit, WifiOff, RefreshCw, Archive, Copy, Clock, CheckCircle2, Download, Upload, FileDown, FileUp, Filter, Eye, X, BarChart3, Layers3, Sparkles, Search, ArrowUpDown, User as UserIcon, ChevronLeft, Users } from 'lucide-react';
 import { useProjectStore, type Project } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
@@ -63,6 +64,10 @@ export function Projects() {
   const [isCreating, setIsCreating] = useState(false);
   const projectNameInputRef = useRef<HTMLInputElement>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
+  const [isArchivedLoading, setIsArchivedLoading] = useState(false);
+  const [archivedError, setArchivedError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBackendDown, setIsBackendDown] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +122,34 @@ export function Projects() {
   const userRole = normalizeRole(user?.role);
   const canImportExport = isAdminUser(user) || userRole === USER_ROLES.MANAGER;
 
+  const fetchArchivedProjects = useCallback(async () => {
+    setIsArchivedLoading(true);
+    setArchivedError(null);
+
+    const result = await enhancedApiCall(
+      () => projectsAPI.getAll(0, 100, { status: 'archived' }),
+      {
+        maxRetries: 3,
+        retryDelay: 1000,
+        timeout: 30000,
+        onRetry: (attempt, error) => {
+          console.log(`Retrying archived projects fetch (attempt ${attempt}):`, error);
+          setRetryCount(attempt);
+        },
+      }
+    );
+
+    if (result.data) {
+      setArchivedProjects(result.data);
+    } else {
+      console.error('Failed to fetch archived projects:', result.error);
+      setArchivedProjects([]);
+      setArchivedError(result.error?.message || t('archivedProjectsFetchFailed'));
+    }
+
+    setIsArchivedLoading(false);
+  }, [enhancedApiCall, t]);
+
   // Initialize projects on component mount with enhanced error handling
   useEffect(() => {
     const initializeProjects = async () => {
@@ -126,7 +159,7 @@ export function Projects() {
       setRetryCount(0);
 
       const result = await enhancedApiCall(
-        () => projectsAPI.getAll(),
+        () => projectsAPI.getAll(0, 100, { includeArchived: false }),
         {
           maxRetries: 3,
           retryDelay: 1000,
@@ -158,6 +191,12 @@ export function Projects() {
 
     initializeProjects();
   }, [enhancedApiCall, setStoreProjects]);
+
+  useEffect(() => {
+    if (showArchivedProjects && !isBackendDown) {
+      fetchArchivedProjects();
+    }
+  }, [fetchArchivedProjects, isBackendDown, showArchivedProjects]);
 
   // Monitor queue size
   useEffect(() => {
@@ -360,7 +399,9 @@ export function Projects() {
 
     if (result.data) {
       const updatedProjects = projects.filter(p => p.id !== projectToDelete.id);
+      const updatedArchivedProjects = archivedProjects.filter(p => p.id !== projectToDelete.id);
       setProjects(updatedProjects);
+      setArchivedProjects(updatedArchivedProjects);
       setStoreProjects(updatedProjects);
 
       toast({
@@ -420,7 +461,11 @@ export function Projects() {
       const updatedProjects = projects.map(p =>
         p.id === editingProject.id ? { ...p, name: projectName, description: projectDescription, updated_at: new Date().toISOString() } : p
       );
+      const updatedArchivedProjects = archivedProjects.map(p =>
+        p.id === editingProject.id ? { ...p, name: projectName, description: projectDescription, updated_at: new Date().toISOString() } : p
+      );
       setProjects(updatedProjects);
+      setArchivedProjects(updatedArchivedProjects);
       setStoreProjects(updatedProjects);
 
       toast({
@@ -561,10 +606,14 @@ export function Projects() {
         .map((result, index) => result.data ? Array.from(selectedProjects)[index] : null)
         .filter(id => id !== null) as number[];
 
-      const updatedProjects = projects.map(p =>
-        successfullyArchivedIds.includes(p.id) ? { ...p, status: 'archived' } : p
-      );
+      const archivedNow = projects
+        .filter(p => successfullyArchivedIds.includes(p.id))
+        .map(p => ({ ...p, status: 'archived' }));
+      const updatedProjects = projects.filter(p => !successfullyArchivedIds.includes(p.id));
       setProjects(updatedProjects);
+      if (showArchivedProjects) {
+        setArchivedProjects(prev => [...archivedNow, ...prev.filter(p => !successfullyArchivedIds.includes(p.id))]);
+      }
       setStoreProjects(updatedProjects);
 
       if (bulkResult.failureCount > 0) {
@@ -622,10 +671,18 @@ export function Projects() {
     setIsRetrying(false);
 
     if (result.data) {
-      const updatedProjects = projects.map(p =>
-        p.id === statusProject.id ? { ...p, status: newStatus } : p
-      );
+      const updatedProject = { ...statusProject, ...result.data, status: newStatus };
+      const updatedProjects = newStatus === 'archived'
+        ? projects.filter(p => p.id !== statusProject.id)
+        : projects.some(p => p.id === statusProject.id)
+          ? projects.map(p => p.id === statusProject.id ? updatedProject : p)
+          : [updatedProject, ...projects];
+      const updatedArchivedProjects = newStatus === 'archived'
+        ? [updatedProject, ...archivedProjects.filter(p => p.id !== statusProject.id)]
+        : archivedProjects.filter(p => p.id !== statusProject.id);
+
       setProjects(updatedProjects);
+      setArchivedProjects(updatedArchivedProjects);
       setStoreProjects(updatedProjects);
 
       toast({
@@ -678,7 +735,7 @@ export function Projects() {
 
     if (result.data) {
       // Refresh from the server so the clone's test suite/case counts are accurate.
-      const refreshResult = await enhancedApiCall(() => projectsAPI.getAll());
+      const refreshResult = await enhancedApiCall(() => projectsAPI.getAll(0, 100, { includeArchived: false }));
       if (refreshResult.data) {
         setProjects(refreshResult.data);
         setStoreProjects(refreshResult.data);
@@ -872,10 +929,13 @@ export function Projects() {
       });
 
       // Refresh projects list
-      const refreshResult = await enhancedApiCall(() => projectsAPI.getAll());
+      const refreshResult = await enhancedApiCall(() => projectsAPI.getAll(0, 100, { includeArchived: false }));
       if (refreshResult.data) {
         setProjects(refreshResult.data);
         setStoreProjects(refreshResult.data);
+      }
+      if (showArchivedProjects) {
+        fetchArchivedProjects();
       }
 
       setIsImportDialogOpen(false);
@@ -923,12 +983,12 @@ export function Projects() {
   const projectSummary = projects.reduce(
     (summary, project) => ({
       active: summary.active + (project.status === 'active' ? 1 : 0),
-      archived: summary.archived + (project.status === 'archived' ? 1 : 0),
+      inactive: summary.inactive + (project.status === 'inactive' ? 1 : 0),
       suites: summary.suites + (project.test_suites_count ?? 0),
       cases: summary.cases + (project.test_cases_count ?? 0),
       runs: summary.runs + (project.test_runs_count ?? 0),
     }),
-    { active: 0, archived: 0, suites: 0, cases: 0, runs: 0 }
+    { active: 0, inactive: 0, suites: 0, cases: 0, runs: 0 }
   );
 
   // Apply search, status filter and sort, then paginate (all client-side).
@@ -1175,7 +1235,7 @@ export function Projects() {
             </div>
           </div>
 
-          <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('allProjects')}</div>
               <div className="mt-2 text-3xl font-black">{projects.length}</div>
@@ -1183,6 +1243,10 @@ export function Projects() {
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('activeProjects')}</div>
               <div className="mt-2 text-3xl font-black text-primary">{projectSummary.active}</div>
+            </div>
+            <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
+              <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('inactiveProjects')}</div>
+              <div className="mt-2 text-3xl font-black text-muted-foreground">{projectSummary.inactive}</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalSuites')}</div>
@@ -1287,7 +1351,6 @@ export function Projects() {
                     <SelectItem value="all">{t('allStatuses')}</SelectItem>
                     <SelectItem value="active">{t('active')}</SelectItem>
                     <SelectItem value="inactive">{t('inactive')}</SelectItem>
-                    <SelectItem value="archived">{t('archived')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1342,14 +1405,19 @@ export function Projects() {
             </div>
           </div>
         ) : paginatedProjects.length > 0 ? (
-          paginatedProjects.map((project) => (
+          paginatedProjects.map((project) => {
+            const isInactiveProject = project.status === 'inactive';
+
+            return (
             <Card
               key={project.id}
               role="button"
               tabIndex={0}
               aria-label={t('openProjectAria', { name: project.name })}
               aria-pressed={selectedProject?.id === project.id}
-              className={`group relative cursor-pointer overflow-hidden rounded-[1.75rem] border-border bg-card shadow-xs transition-all duration-300 hover:-translate-y-1 hover:border-primary/30 hover:shadow-2xl hover:shadow-muted/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
+              className={`group relative cursor-pointer overflow-hidden rounded-[1.75rem] shadow-xs transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-muted/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 ${
+                isInactiveProject ? 'border-dashed border-muted-foreground/40 bg-muted/30 hover:border-muted-foreground/60' : 'border-border bg-card hover:border-primary/30'
+              } ${
                 selectedProject?.id === project.id ? 'ring-2 ring-primary shadow-xl shadow-muted' : ''
               } ${
                 selectedProjects.has(project.id) ? 'ring-2 ring-primary/70 shadow-xl shadow-muted' : ''
@@ -1372,7 +1440,7 @@ export function Projects() {
                 }
               }}
             >
-              <div className="absolute inset-x-0 top-0 h-0.5 bg-primary" />
+              <div className={`absolute inset-x-0 top-0 h-0.5 ${isInactiveProject ? 'bg-muted-foreground/50' : 'bg-primary'}`} />
               <CardHeader className="space-y-0 p-4 pb-3">
                 <div className="flex items-start gap-3">
                   {isBulkMode && (
@@ -1383,7 +1451,9 @@ export function Projects() {
                       className="mt-1"
                     />
                   )}
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-xs transition-transform group-hover:scale-105">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-xs transition-transform group-hover:scale-105 ${
+                    isInactiveProject ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'
+                  }`}>
                     <FolderOpen className="h-5 w-5" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -1417,9 +1487,9 @@ export function Projects() {
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleViewTestSuites(project); }}
                     title={t('suites')}
-                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
+                    className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <TestTube className="h-3.5 w-3.5 text-primary" />
+                    <TestTube className={`h-3.5 w-3.5 ${isInactiveProject ? 'text-muted-foreground' : 'text-primary'}`} />
                     <span className="text-lg font-bold leading-none text-foreground">{project.test_suites_count ?? 0}</span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('suites')}</span>
                   </button>
@@ -1429,7 +1499,7 @@ export function Projects() {
                     title={t('cases')}
                     className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
-                    <FileText className="h-3.5 w-3.5 text-primary" />
+                    <FileText className={`h-3.5 w-3.5 ${isInactiveProject ? 'text-muted-foreground' : 'text-primary'}`} />
                     <span className="text-lg font-bold leading-none text-foreground">{project.test_cases_count ?? 0}</span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('cases')}</span>
                   </button>
@@ -1439,7 +1509,7 @@ export function Projects() {
                     title={t('runs')}
                     className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
-                    <PlayCircle className="h-3.5 w-3.5 text-primary" />
+                    <PlayCircle className={`h-3.5 w-3.5 ${isInactiveProject ? 'text-muted-foreground' : 'text-primary'}`} />
                     <span className="text-lg font-bold leading-none text-foreground">{project.test_runs_count ?? 0}</span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('runs')}</span>
                   </button>
@@ -1520,7 +1590,8 @@ export function Projects() {
                 </div>
               </CardContent>
             </Card>
-          ))
+            );
+          })
         ) : projects.length > 0 ? (
           <div className="col-span-full">
             <Card className="overflow-hidden rounded-4xl border-dashed border-border bg-muted/40">
@@ -1641,6 +1712,139 @@ export function Projects() {
           </div>
         )}
       </section>
+
+      {!isLoading && !isBackendDown && (
+        <section className="space-y-4 rounded-2xl border border-border bg-card p-4 shadow-xs">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                <Archive className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold tracking-tight text-foreground">{t('archivedProjects')}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {showArchivedProjects
+                    ? t('archivedProjectsAreaDesc', { count: archivedProjects.length })
+                    : t('archivedProjectsToggleDesc')}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Label htmlFor="show-archived-projects" className="text-sm font-medium">
+                {t('showArchivedProjects')}
+              </Label>
+              <Switch
+                id="show-archived-projects"
+                checked={showArchivedProjects}
+                onCheckedChange={setShowArchivedProjects}
+                disabled={!isOnline || isBackendDown}
+                aria-label={t('showArchivedProjects')}
+              />
+            </div>
+          </div>
+
+          {showArchivedProjects && (
+            <div className="border-t border-border pt-4">
+              {isArchivedLoading ? (
+                <div className="flex items-center justify-center rounded-xl bg-muted/40 px-4 py-8 text-sm text-muted-foreground">
+                  <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} animate-spin`} />
+                  {t('loadingArchivedProjects')}
+                </div>
+              ) : archivedError ? (
+                <div className="flex flex-col gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
+                  <span>{archivedError}</span>
+                  <Button variant="outline" size="sm" onClick={fetchArchivedProjects}>
+                    <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                    {t('retryConnection')}
+                  </Button>
+                </div>
+              ) : archivedProjects.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-center">
+                  <h3 className="text-base font-semibold text-foreground">{t('noArchivedProjects')}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{t('noArchivedProjectsDesc')}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                  {archivedProjects.map((project) => (
+                    <Card key={project.id} className="overflow-hidden rounded-[1.25rem] border-dashed border-muted-foreground/30 bg-muted/30 shadow-none">
+                      <CardHeader className="space-y-0 p-4 pb-3">
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+                            <Archive className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="truncate text-base font-bold tracking-tight text-foreground">{project.name}</CardTitle>
+                            <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                              {project.description || t('noDescription')}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          <Badge variant="outline" className={`px-2 py-0 text-[11px] ${getProjectStatusClasses(project.status)}`}>
+                            {getProjectStatusLabel(project.status)}
+                          </Badge>
+                          <Badge variant="outline" className="border-border bg-background/60 px-2 py-0 text-[11px] text-muted-foreground">
+                            {t('created')}: {new Date(project.created_at).toLocaleDateString()}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-3 p-4 pt-0">
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="rounded-lg bg-background/70 py-2">
+                            <div className="text-sm font-bold text-foreground">{project.test_suites_count ?? 0}</div>
+                            <div className="text-[10px] uppercase text-muted-foreground">{t('suites')}</div>
+                          </div>
+                          <div className="rounded-lg bg-background/70 py-2">
+                            <div className="text-sm font-bold text-foreground">{project.test_cases_count ?? 0}</div>
+                            <div className="text-[10px] uppercase text-muted-foreground">{t('cases')}</div>
+                          </div>
+                          <div className="rounded-lg bg-background/70 py-2">
+                            <div className="text-sm font-bold text-foreground">{project.test_runs_count ?? 0}</div>
+                            <div className="text-[10px] uppercase text-muted-foreground">{t('runs')}</div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-1 border-t border-border pt-3">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setStatusProject(project);
+                              setNewStatus(project.status);
+                              setIsStatusDialogOpen(true);
+                            }}
+                            title={t('changeProjectStatus')}
+                            className="h-8 w-8 rounded-lg p-0"
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenEditDialog(project)}
+                            title={t('editProject')}
+                            className="h-8 w-8 rounded-lg p-0"
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenDeleteDialog(project)}
+                            className="h-8 w-8 rounded-lg p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            title={t('deleteProject')}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Create Project Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>

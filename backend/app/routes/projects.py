@@ -3,7 +3,7 @@ Project management routes for projects, assignments, schedules, and executions.
 """
 
 import logging
-from fastapi import Depends, HTTPException, Response
+from fastapi import Depends, HTTPException, Query, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -73,11 +73,18 @@ def register_project_routes(app):
         response: Response,
         skip: int = 0,
         limit: int = 100,
+        status: Optional[models.Status] = Query(None, description="Filter projects by status"),
+        include_archived: bool = Query(True, description="Include archived projects when no status filter is provided"),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         try:
             accessible = rbac.get_accessible_projects(current_user, db)
+            if status is not None:
+                accessible = [project for project in accessible if project.status == status]
+            elif not include_archived:
+                accessible = [project for project in accessible if project.status != models.Status.ARCHIVED]
+
             total = len(accessible)
             projects = accessible[skip:skip + limit]
 
