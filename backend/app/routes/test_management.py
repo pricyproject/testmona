@@ -1092,7 +1092,7 @@ def register_test_management_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         """Restore editable test case fields from a saved revision."""
-        user_role = str(current_user.role).upper()
+        user_role = str(getattr(current_user.role, "value", current_user.role)).upper()
         if user_role not in ["ADMIN", "MANAGER"]:
             raise HTTPException(
                 status_code=403,

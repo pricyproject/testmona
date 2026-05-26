@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { 
-  ArrowLeft, History, User, Calendar, GitCompare, 
-  FileText, AlertTriangle, CheckCircle, XCircle, Eye, EyeOff
+  ArrowLeft, ArrowRight, History, User, Calendar, GitCompare, 
+  Eye, EyeOff, RotateCcw
 } from 'lucide-react';
-import { testCasesAPI, api } from '@/lib/api';
+import { testCasesAPI, api, getApiErrorMessage } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useToast } from '@/hooks/use-toast';
 
 interface Revision {
   id: number;
@@ -43,12 +44,69 @@ interface TestCase {
   expected_result?: string;
   priority?: string;
   tags?: string;
+  test_suite?: {
+    id: number;
+    project_id: number;
+  };
 }
+
+const parsePositiveId = (value?: string): number | null => {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const decodeHtmlEntities = (input: string): string => {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  };
+
+  return input.replace(/&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, entity: string) => {
+    if (entity.startsWith('#x') || entity.startsWith('#X')) {
+      const codePoint = Number.parseInt(entity.slice(2), 16);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+
+    if (entity.startsWith('#')) {
+      const codePoint = Number.parseInt(entity.slice(1), 10);
+      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+    }
+
+    return namedEntities[entity] ?? match;
+  });
+};
+
+const toDisplayText = (value?: string | null): string => {
+  if (!value) return '';
+  const decoded = decodeHtmlEntities(decodeHtmlEntities(String(value)));
+  if (!/<[a-z][\s\S]*>/i.test(decoded)) {
+    return decoded.replace(/\s+/g, ' ').trim();
+  }
+
+  const htmlForText = decoded
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|li|h[1-6]|tr|blockquote|section)\s*>/gi, '\n');
+
+  if (typeof window === 'undefined') {
+    return htmlForText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  const parsed = new DOMParser().parseFromString(htmlForText, 'text/html');
+  return (parsed.body.textContent || decoded).replace(/\s+/g, ' ').trim();
+};
 
 export function TestCaseRevisions() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
+  const { toast } = useToast();
+  const testCaseId = useMemo(() => parsePositiveId(id), [id]);
+  const routeProjectId = useMemo(() => parsePositiveId(projectId), [projectId]);
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [currentTestCase, setCurrentTestCase] = useState<TestCase | null>(null);
   const [selectedRevisions, setSelectedRevisions] = useState<number[]>([]);
@@ -56,45 +114,70 @@ export function TestCaseRevisions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDifferences, setShowDifferences] = useState(false);
+  const [restoringRevisionNumber, setRestoringRevisionNumber] = useState<number | null>(null);
+  const BackIcon = isRTL ? ArrowRight : ArrowLeft;
+
+  const loadRevisions = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    if (!testCaseId) {
+      setCurrentTestCase(null);
+      setRevisions([]);
+      setError(t('invalidTestCaseId'));
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const [testCaseData, revisionsData] = await Promise.all([
+        testCasesAPI.getById(testCaseId),
+        api.get(`/test-cases/${testCaseId}/revisions`),
+      ]);
+
+      if (
+        routeProjectId &&
+        testCaseData?.test_suite?.project_id &&
+        Number(testCaseData.test_suite.project_id) !== routeProjectId
+      ) {
+        setCurrentTestCase(testCaseData);
+        setRevisions([]);
+        setError(t('invalidProjectId'));
+        return;
+      }
+
+      setCurrentTestCase(testCaseData);
+      setRevisions(Array.isArray(revisionsData.data) ? revisionsData.data : []);
+      setSelectedRevision(null);
+      setShowDifferences(false);
+    } catch (fetchError: unknown) {
+      console.error('Failed to fetch revisions:', fetchError);
+      setCurrentTestCase(null);
+      setRevisions([]);
+      setError(getApiErrorMessage(fetchError, t('failedToLoadTestCase')));
+    } finally {
+      setLoading(false);
+    }
+  }, [routeProjectId, t, testCaseId]);
 
   useEffect(() => {
-    const fetchRevisionsAndTestCase = async () => {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        // Fetch current test case
-        const testCaseData = await testCasesAPI.getById(parseInt(id || '1'));
-        setCurrentTestCase(testCaseData);
-
-        // Fetch revisions
-        const revisionsData = await api.get(`/test-cases/${id}/revisions`);
-        setRevisions(revisionsData.data || []);
-      } catch (error: any) {
-        console.error('Failed to fetch revisions:', error);
-        // Don't show error message, just don't display revisions section
-        setRevisions([]);
-        setError(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRevisionsAndTestCase();
-  }, [id]);
+    void loadRevisions();
+  }, [loadRevisions]);
 
   const handleBack = () => {
-    if (projectId) {
-      navigate(`/projects/${projectId}/test-cases/${id}`);
+    const targetTestCaseId = testCaseId ?? id;
+    const targetProjectId = routeProjectId ?? currentTestCase?.test_suite?.project_id;
+    if (targetProjectId) {
+      navigate(`/projects/${targetProjectId}/test-cases/${targetTestCaseId}`);
     } else {
-      navigate(`/test-cases/${id}`);
+      navigate(`/test-cases/${targetTestCaseId}`);
     }
   };
 
   const handleRevisionSelect = (revisionId: number) => {
     setSelectedRevisions(prev => {
       if (prev.includes(revisionId)) {
-        return prev.filter(id => id !== revisionId);
+        return prev.filter(selectedId => selectedId !== revisionId);
       } else if (prev.length < 2) {
         return [...prev, revisionId];
       } else {
@@ -114,7 +197,31 @@ export function TestCaseRevisions() {
 
   const handleCompare = () => {
     if (selectedRevisions.length === 2) {
+      setSelectedRevision(null);
       setShowDifferences(true);
+    }
+  };
+
+  const handleRestoreRevision = async (revision: Revision) => {
+    if (!testCaseId) {
+      toast({ title: t('error'), description: t('invalidTestCaseId'), variant: 'destructive' });
+      return;
+    }
+    if (!window.confirm(t('confirmRestoreRevision'))) return;
+
+    setRestoringRevisionNumber(revision.revision_number);
+    try {
+      await api.post(`/test-cases/${testCaseId}/revisions/${revision.revision_number}/restore`);
+      toast({ title: t('success'), description: t('revisionRestored') });
+      await loadRevisions();
+    } catch (restoreError: unknown) {
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(restoreError, t('failedToRestoreRevision')),
+        variant: 'destructive',
+      });
+    } finally {
+      setRestoringRevisionNumber(null);
     }
   };
 
@@ -136,8 +243,35 @@ export function TestCaseRevisions() {
     return revisions.find(r => r.id === revisionId);
   };
 
+  const getChangedFieldKeys = (revision: Revision): string[] => {
+    if (!revision.changed_fields || Array.isArray(revision.changed_fields) || typeof revision.changed_fields !== 'object') {
+      return [];
+    }
+    return Object.keys(revision.changed_fields).filter(Boolean);
+  };
+
+  const formatDateTime = (value?: string): string => {
+    if (!value) return t('nA');
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return t('nA');
+    return date.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const formatChangeReason = (value?: string): string => {
+    if (!value) return '';
+    return value.replace(/Updated fields/gi, t('updatedFields'));
+  };
+
   const renderFieldComparison = (field: string, oldValue: any, newValue: any) => {
     const hasChanged = oldValue !== newValue;
+    const oldDisplayValue = toDisplayText(oldValue) || t('nA');
+    const newDisplayValue = toDisplayText(newValue) || t('nA');
     
     return (
       <div key={field} className={`border rounded-lg p-4 ${hasChanged ? 'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/20' : 'border-gray-200 dark:border-gray-700'}`}>
@@ -155,13 +289,13 @@ export function TestCaseRevisions() {
             <div>
               <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{t('oldValue')}:</p>
               <div className="text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
-                <pre className="whitespace-pre-wrap text-xs">{oldValue || t('nA')}</pre>
+                <pre className="whitespace-pre-wrap text-xs">{oldDisplayValue}</pre>
               </div>
             </div>
             <div>
               <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{t('newValue')}:</p>
               <div className="text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
-                <pre className="whitespace-pre-wrap text-xs">{newValue || t('nA')}</pre>
+                <pre className="whitespace-pre-wrap text-xs">{newDisplayValue}</pre>
               </div>
             </div>
           </div>
@@ -170,13 +304,13 @@ export function TestCaseRevisions() {
             <div>
               <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{t('oldValue')}:</p>
               <div className="text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
-                {oldValue || t('nA')}
+                {oldDisplayValue}
               </div>
             </div>
             <div>
               <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{t('newValue')}:</p>
               <div className="text-sm bg-gray-100 dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
-                {newValue || t('nA')}
+                {newDisplayValue}
               </div>
             </div>
           </div>
@@ -188,6 +322,7 @@ export function TestCaseRevisions() {
   const renderSingleRevisionDetails = (revision: Revision) => {
     // Get the previous revision to show before/after comparison
     const previousRevision = revisions.find(r => r.revision_number === revision.revision_number - 1);
+    const changedFieldKeys = getChangedFieldKeys(revision);
     
     return (
       <Card className="shadow-xs border-0 bg-white dark:bg-gray-800">
@@ -198,14 +333,23 @@ export function TestCaseRevisions() {
               {t('revisionDetails')} #{revision.revision_number}
             </CardTitle>
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => handleRestoreRevision(revision)}
+                disabled={restoringRevisionNumber === revision.revision_number}
+                className="gap-2"
+              >
+                <RotateCcw className="h-4 w-4" />
+                {restoringRevisionNumber === revision.revision_number ? t('loading') : t('restore')}
+              </Button>
               {previousRevision && (
-                <Button variant="outline" onClick={() => setSelectedRevision(previousRevision)}>
-                  <ArrowLeft className={`h-4 w-4 ${isRTL ? 'mr-2' : 'ml-2'}`} />
+                <Button variant="outline" onClick={() => setSelectedRevision(previousRevision)} className="gap-2">
+                  <BackIcon className="h-4 w-4" />
                   {t('previousRevision')}
                 </Button>
               )}
-              <Button variant="outline" onClick={handleBackToList}>
-                <ArrowLeft className={`h-4 w-4 ${isRTL ? 'mr-2' : 'ml-2'}`} />
+              <Button variant="outline" onClick={handleBackToList} className="gap-2">
+                <BackIcon className="h-4 w-4" />
                 {t('backToList')}
               </Button>
             </div>
@@ -217,13 +361,7 @@ export function TestCaseRevisions() {
             </div>
             <div className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
-              {new Date(revision.created_at).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
+              {formatDateTime(revision.created_at)}
             </div>
           </div>
         </CardHeader>
@@ -232,16 +370,16 @@ export function TestCaseRevisions() {
             <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
               <h4 className="font-medium text-sm text-blue-900 dark:text-blue-100 mb-2">{t('changeReason')}</h4>
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                {revision.change_reason.replace(/Updated fields/gi, t('updatedFields'))}
+                {formatChangeReason(revision.change_reason)}
               </p>
             </div>
           )}
           
-          {revision.changed_fields && Object.keys(revision.changed_fields).length > 0 && (
+          {changedFieldKeys.length > 0 && (
             <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
               <h4 className="font-medium text-sm text-orange-900 dark:text-orange-100 mb-2">{t('changedFields')}</h4>
               <div className="flex flex-wrap gap-1">
-                {Object.keys(revision.changed_fields).map((field: string) => (
+                {changedFieldKeys.map((field: string) => (
                   <Badge 
                     key={field} 
                     className="px-2 py-1 text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300"
@@ -277,7 +415,7 @@ export function TestCaseRevisions() {
               </div>
               
               {/* Description */}
-              {(revision.description || (revision.changed_fields?.description && previousRevision?.description)) && (
+              {(toDisplayText(revision.description) || (revision.changed_fields?.description && toDisplayText(previousRevision?.description))) && (
                 <div className="border rounded-lg p-4 border-gray-200 dark:border-gray-700">
                   <h5 className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">{t('fieldDescription')}</h5>
                   {revision.changed_fields?.description && previousRevision ? (
@@ -285,19 +423,19 @@ export function TestCaseRevisions() {
                       <div>
                         <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">{t('before')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{previousRevision.description || t('nA')}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(previousRevision.description) || t('nA')}</pre>
                         </div>
                       </div>
                       <div>
                         <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{t('after')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{revision.description || t('nA')}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(revision.description) || t('nA')}</pre>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="text-sm text-gray-900 dark:text-gray-100">
-                      <pre className="whitespace-pre-wrap">{revision.description || t('noDescription')}</pre>
+                      <pre className="whitespace-pre-wrap">{toDisplayText(revision.description) || t('noDescription')}</pre>
                     </div>
                   )}
                 </div>
@@ -355,7 +493,7 @@ export function TestCaseRevisions() {
               </div>
               
               {/* Preconditions */}
-              {(revision.preconditions || (revision.changed_fields?.preconditions && previousRevision?.preconditions)) && (
+              {(toDisplayText(revision.preconditions) || (revision.changed_fields?.preconditions && toDisplayText(previousRevision?.preconditions))) && (
                 <div className="border rounded-lg p-4 border-gray-200 dark:border-gray-700">
                   <h5 className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">{t('fieldPreconditions')}</h5>
                   {revision.changed_fields?.preconditions && previousRevision ? (
@@ -363,26 +501,26 @@ export function TestCaseRevisions() {
                       <div>
                         <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">{t('before')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{previousRevision.preconditions || t('nA')}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(previousRevision.preconditions) || t('nA')}</pre>
                         </div>
                       </div>
                       <div>
                         <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{t('after')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{revision.preconditions}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(revision.preconditions) || t('nA')}</pre>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="text-sm text-gray-900 dark:text-gray-100">
-                      <pre className="whitespace-pre-wrap">{revision.preconditions}</pre>
+                      <pre className="whitespace-pre-wrap">{toDisplayText(revision.preconditions)}</pre>
                     </div>
                   )}
                 </div>
               )}
               
               {/* Test Steps */}
-              {(revision.steps || (revision.changed_fields?.steps && previousRevision?.steps)) && (
+              {(toDisplayText(revision.steps) || (revision.changed_fields?.steps && toDisplayText(previousRevision?.steps))) && (
                 <div className="border rounded-lg p-4 border-gray-200 dark:border-gray-700">
                   <h5 className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">{t('fieldSteps')}</h5>
                   {revision.changed_fields?.steps && previousRevision ? (
@@ -390,26 +528,26 @@ export function TestCaseRevisions() {
                       <div>
                         <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">{t('before')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{previousRevision.steps || t('nA')}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(previousRevision.steps) || t('nA')}</pre>
                         </div>
                       </div>
                       <div>
                         <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{t('after')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{revision.steps}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(revision.steps) || t('nA')}</pre>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="text-sm text-gray-900 dark:text-gray-100">
-                      <pre className="whitespace-pre-wrap">{revision.steps}</pre>
+                      <pre className="whitespace-pre-wrap">{toDisplayText(revision.steps)}</pre>
                     </div>
                   )}
                 </div>
               )}
               
               {/* Expected Result */}
-              {(revision.expected_result || (revision.changed_fields?.expected_result && previousRevision?.expected_result)) && (
+              {(toDisplayText(revision.expected_result) || (revision.changed_fields?.expected_result && toDisplayText(previousRevision?.expected_result))) && (
                 <div className="border rounded-lg p-4 border-gray-200 dark:border-gray-700">
                   <h5 className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">{t('fieldExpectedResult')}</h5>
                   {revision.changed_fields?.expected_result && previousRevision ? (
@@ -417,19 +555,19 @@ export function TestCaseRevisions() {
                       <div>
                         <p className="text-xs font-medium text-red-600 dark:text-red-400 mb-1">{t('before')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{previousRevision.expected_result || t('nA')}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(previousRevision.expected_result) || t('nA')}</pre>
                         </div>
                       </div>
                       <div>
                         <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">{t('after')}:</p>
                         <div className="text-sm text-gray-900 dark:text-gray-100">
-                          <pre className="whitespace-pre-wrap">{revision.expected_result}</pre>
+                          <pre className="whitespace-pre-wrap">{toDisplayText(revision.expected_result) || t('nA')}</pre>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="text-sm text-gray-900 dark:text-gray-100">
-                      <pre className="whitespace-pre-wrap">{revision.expected_result}</pre>
+                      <pre className="whitespace-pre-wrap">{toDisplayText(revision.expected_result)}</pre>
                     </div>
                   )}
                 </div>
@@ -492,7 +630,7 @@ export function TestCaseRevisions() {
     );
   };
 
-  const getPriorityBadge = (priority: string) => {
+  const getPriorityBadge = (priority?: string) => {
     const variants: Record<string, string> = {
       low: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
       medium: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
@@ -511,27 +649,31 @@ export function TestCaseRevisions() {
   }
 
   if (error) {
-    // Don't show error message, just redirect back or show empty state
     return (
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xs border border-gray-200 dark:border-gray-700 p-4">
-          <div className="flex items-center gap-4">
-              <Button 
-                variant="ghost" 
-                onClick={handleBack}
-                className="hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <ArrowLeft className={`h-4 w-4 ${isRTL ? 'mr-2' : 'ml-2'}`} />
-                {t('backToTestCase')}
-              </Button>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <Button 
+              variant="ghost" 
+              onClick={handleBack}
+              className="w-fit gap-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <BackIcon className="h-4 w-4" />
+              {t('backToTestCase')}
+            </Button>
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           </div>
         </div>
       </div>
     );
   }
 
-  const compareRevision1 = selectedRevisions[0] ? getRevisionById(selectedRevisions[0]) : null;
-  const compareRevision2 = selectedRevisions[1] ? getRevisionById(selectedRevisions[1]) : null;
+  const comparePair = selectedRevisions
+    .map((revisionId) => getRevisionById(revisionId))
+    .filter((revision): revision is Revision => Boolean(revision))
+    .sort((a, b) => a.revision_number - b.revision_number);
+  const compareRevision1 = comparePair[0] || null;
+  const compareRevision2 = comparePair[1] || null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -539,12 +681,12 @@ export function TestCaseRevisions() {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xs border border-gray-200 dark:border-gray-700 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 onClick={handleBack}
-                className="hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="gap-2 hover:bg-gray-100 dark:hover:bg-gray-700"
               >
-                <ArrowLeft className={`h-4 w-4 ${isRTL ? 'mr-2' : 'ml-2'}`} />
+                <BackIcon className="h-4 w-4" />
                 {t('backToTestCase')}
               </Button>
             <div>
@@ -592,9 +734,9 @@ export function TestCaseRevisions() {
             </CardTitle>
             <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
               <div className="flex items-center gap-2">
-                <span>Revision #{compareRevision1.revision_number}</span>
-                <span>→</span>
-                <span>Revision #{compareRevision2.revision_number}</span>
+                <span>{t('revision')} #{compareRevision1.revision_number}</span>
+                <span>-&gt;</span>
+                <span>{t('revision')} #{compareRevision2.revision_number}</span>
               </div>
             </div>
           </CardHeader>
@@ -626,7 +768,9 @@ export function TestCaseRevisions() {
           <CardContent>
             {revisions.length > 0 ? (
               <div className="space-y-3">
-                {revisions.map((revision) => (
+                {revisions.map((revision) => {
+                  const changedFieldKeys = getChangedFieldKeys(revision);
+                  return (
                   <div 
                     key={revision.id} 
                     className={`border rounded-lg p-4 cursor-pointer transition-colors ${
@@ -648,11 +792,11 @@ export function TestCaseRevisions() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2">
                             <h3 className="font-medium text-gray-900 dark:text-white">
-                              Revision #{revision.revision_number}
+                              {t('revision')} #{revision.revision_number}
                             </h3>
-                            {revision.changed_fields && Object.keys(revision.changed_fields).length > 0 && (
+                            {changedFieldKeys.length > 0 && (
                               <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 text-xs">
-                                {Object.keys(revision.changed_fields).length} {t('fieldsChanged')}
+                                {changedFieldKeys.length} {t('fieldsChanged')}
                               </Badge>
                             )}
                           </div>
@@ -664,19 +808,13 @@ export function TestCaseRevisions() {
                             </div>
                             <div className="flex items-center gap-1">
                               <Calendar className="h-3 w-3" />
-                              {new Date(revision.created_at).toLocaleDateString('en-US', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
+                              {formatDateTime(revision.created_at)}
                             </div>
                           </div>
 
-                          {revision.changed_fields && Object.keys(revision.changed_fields).length > 0 && (
+                          {changedFieldKeys.length > 0 && (
                             <div className="flex flex-wrap gap-1">
-                              {Object.keys(revision.changed_fields).map((field: string) => (
+                              {changedFieldKeys.map((field: string) => (
                                 <Badge 
                                   key={field} 
                                   variant="secondary" 
@@ -690,14 +828,28 @@ export function TestCaseRevisions() {
 
                           {revision.change_reason && (
                             <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                              {t('reason')}: {revision.change_reason.replace(/Updated fields/gi, t('updatedFields'))}
+                              {t('reason')}: {formatChangeReason(revision.change_reason)}
                             </p>
                           )}
                         </div>
                       </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleRestoreRevision(revision);
+                        }}
+                        disabled={restoringRevisionNumber === revision.revision_number}
+                        className="shrink-0 gap-2"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        {restoringRevisionNumber === revision.revision_number ? t('loading') : t('restore')}
+                      </Button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-gray-500 dark:text-gray-400">
