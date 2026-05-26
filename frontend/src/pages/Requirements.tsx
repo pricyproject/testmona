@@ -105,9 +105,9 @@ export function Requirements() {
       .replace(/\s+/g, ' ')
       .trim();
 
-  // Requirement description/acceptance is stored HTML-escaped; decode entities.
-  // Decoding twice also cleans up any legacy double-escaped rows.
-  // Do not reinterpret decoded text as HTML.
+  // Requirement description/acceptance is stored as rich-text HTML, sometimes
+  // escaped or double-escaped. Decode it, then show only readable text in the
+  // list/export views so wrapper tags like <p> are not displayed.
   const toDisplayText = (value?: string | null): string => {
     if (!value) return '';
     const decodeHtmlEntities = (input: string): string => {
@@ -136,7 +136,20 @@ export function Requirements() {
     };
 
     const decoded = decodeHtmlEntities(decodeHtmlEntities(value));
-    return decoded.replace(/\s+/g, ' ').trim();
+    if (!/<[a-z][\s\S]*>/i.test(decoded)) {
+      return decoded.replace(/\s+/g, ' ').trim();
+    }
+
+    const htmlForText = decoded
+      .replace(/<\s*br\s*\/?>/gi, '\n')
+      .replace(/<\/\s*(p|div|li|h[1-6]|tr|blockquote|section)\s*>/gi, '\n');
+
+    if (typeof window === 'undefined') {
+      return htmlForText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    const parsed = new DOMParser().parseFromString(htmlForText, 'text/html');
+    return (parsed.body.textContent || decoded).replace(/\s+/g, ' ').trim();
   };
 
   const gherkinTemplate = [
