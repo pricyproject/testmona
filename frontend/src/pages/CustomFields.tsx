@@ -81,6 +81,9 @@ export function CustomFields() {
   const [isRequired, setIsRequired] = useState(false);
   const [fieldOptions, setFieldOptions] = useState<string[]>([]);
   const [optionsInput, setOptionsInput] = useState('');
+  // Which entity types this field applies to. Defaults to test_case so
+  // existing admin habits keep working until they opt in to the others.
+  const [entityTypes, setEntityTypes] = useState<string[]>(['test_case']);
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   
@@ -268,10 +271,11 @@ export function CustomFields() {
         is_required: isRequired,
         slug: fieldSlug || generateSlug(fieldName),
         default_value: fieldType === 'boolean' && defaultValue && defaultValue !== 'none' ? defaultValue : undefined,
-        options: (fieldType === 'select' || fieldType === 'multiselect') && fieldOptions.length > 0 
-          ? fieldOptions 
+        options: (fieldType === 'select' || fieldType === 'multiselect') && fieldOptions.length > 0
+          ? fieldOptions
           : undefined,
         validation_rules: Object.keys(rules).length > 0 ? rules : undefined,
+        entity_types: entityTypes.length > 0 ? entityTypes : ['test_case'],
       });
 
       setCustomFields(prev => [...prev, newField]);
@@ -363,6 +367,8 @@ export function CustomFields() {
     setFieldDescription(field.description || '');
     setFieldSlug((field as any).slug || generateSlug(field.name));
     setIsRequired(field.is_required);
+    const existingTargets = Array.isArray((field as any).entity_types) ? (field as any).entity_types : null;
+    setEntityTypes(existingTargets && existingTargets.length > 0 ? existingTargets : ['test_case']);
     // Load existing options if available
     if (field.options && (field.field_type === 'select' || field.field_type === 'multiselect')) {
       const optionsValues = Array.isArray(field.options) ? field.options : [];
@@ -416,10 +422,11 @@ export function CustomFields() {
         is_required: isRequired,
         slug: fieldSlug,
         default_value: fieldType === 'boolean' && defaultValue && defaultValue !== 'none' ? defaultValue : undefined,
-        options: (fieldType === 'select' || fieldType === 'multiselect') && fieldOptions.length > 0 
-          ? fieldOptions 
+        options: (fieldType === 'select' || fieldType === 'multiselect') && fieldOptions.length > 0
+          ? fieldOptions
           : undefined,
         validation_rules: Object.keys(rules).length > 0 ? rules : undefined,
+        entity_types: entityTypes.length > 0 ? entityTypes : ['test_case'],
       });
 
       setCustomFields(prev => prev.map(f => f.id === editingField.id ? updatedField : f));
@@ -530,6 +537,7 @@ export function CustomFields() {
     setIsRequired(false);
     setFieldOptions([]);
     setOptionsInput('');
+    setEntityTypes(['test_case']);
     setTouchedFields({});
     setValidationErrors({});
     // Reset validation rules
@@ -886,6 +894,47 @@ export function CustomFields() {
                       />
                       <Label htmlFor="required" className="text-sm font-medium cursor-pointer">{t('thisFieldIsRequired')}</Label>
                     </div>
+
+                    {/* Entity types this field applies to */}
+                    <div className="space-y-2 pt-2 border-t">
+                      <Label className="text-sm font-medium">{t('appliesTo')}</Label>
+                      <p className="text-xs text-muted-foreground">{t('appliesToDescription')}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { key: 'test_case', label: t('testCase') },
+                          { key: 'test_run', label: t('testRun') },
+                          { key: 'defect', label: t('defect') },
+                          { key: 'requirement', label: t('requirement') },
+                        ] as const).map((target) => {
+                          const checked = entityTypes.includes(target.key);
+                          const isLastChecked = checked && entityTypes.length === 1;
+                          return (
+                            <label
+                              key={target.key}
+                              className={`flex items-center gap-2 rounded-md border p-2 text-sm cursor-pointer ${
+                                checked ? 'border-primary bg-primary/5' : 'border-input'
+                              } ${isLastChecked ? 'opacity-90' : ''}`}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(next) => {
+                                  setEntityTypes((prev) => {
+                                    if (next === true) {
+                                      return prev.includes(target.key) ? prev : [...prev, target.key];
+                                    }
+                                    // Prevent deselecting the last one — every field
+                                    // must apply to at least one entity.
+                                    if (prev.length === 1 && prev[0] === target.key) return prev;
+                                    return prev.filter((k) => k !== target.key);
+                                  });
+                                }}
+                              />
+                              <span>{target.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                   <DialogFooter className="flex-col sm:flex-row gap-2 pt-4">
                     <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
@@ -965,6 +1014,7 @@ export function CustomFields() {
                       <TableHead scope="col">{t('name')}</TableHead>
                       <TableHead scope="col">{t('type')}</TableHead>
                       <TableHead scope="col">{t('description')}</TableHead>
+                      <TableHead scope="col">{t('appliesTo')}</TableHead>
                       <TableHead scope="col">{t('required')}</TableHead>
                       <TableHead scope="col" className="w-12">{t('customFieldActions')}</TableHead>
                     </TableRow>
@@ -980,6 +1030,28 @@ export function CustomFields() {
                         </TableCell>
                         <TableCell className="max-w-xs truncate" title={field.description || ''}>
                           {field.description || '-'}
+                        </TableCell>
+                        <TableCell>
+                          {(() => {
+                            const targets: string[] = Array.isArray((field as any).entity_types) && (field as any).entity_types.length > 0
+                              ? (field as any).entity_types
+                              : ['test_case'];
+                            const labelFor: Record<string, string> = {
+                              test_case: t('testCase'),
+                              test_run: t('testRun'),
+                              defect: t('defect'),
+                              requirement: t('requirement'),
+                            };
+                            return (
+                              <div className="flex flex-wrap gap-1">
+                                {targets.map((target) => (
+                                  <Badge key={target} variant="outline" className="text-[10px]">
+                                    {labelFor[target] || target}
+                                  </Badge>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell>
                           {field.is_required && <Badge variant="secondary" aria-label={t('requiredBadge')}>

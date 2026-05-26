@@ -74,48 +74,18 @@ export function TestRunReport() {
   }, [projectId, testRunId]);
 
   useEffect(() => {
-    Promise.resolve().then(loadData);
-    
-    // Set up interval to check status every 3 seconds
-    const interval = setInterval(async () => {
-      if (!testRunId) return;
-      
-      try {
-        const [runData, resultsData] = await Promise.all([
-          testRunsAPI.getById(parseInt(testRunId)),
-          testResultsAPI.getAll(parseInt(testRunId))
-        ]);
-        
-        const currentStatus = runData.status?.toLowerCase().replace('-', '_');
-        if (currentStatus !== 'completed' && resultsData.length > 0) {
-          const allCompleted = resultsData.every((result: any) => {
-            const status = result.status.toLowerCase();
-            return status !== 'not_tested' && status !== 'pending';
-          });
-          
-          if (allCompleted) {
-            await testRunsAPI.update(parseInt(testRunId), {
-              status: 'completed',
-              completed_at: new Date().toISOString()
-            });
-            
-            const updatedTestRun = await testRunsAPI.getById(parseInt(testRunId));
-            setTestRun(updatedTestRun);
-            setTestResults(resultsData);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to check/update status:', error);
-      }
-    }, 3000);
-    
-    return () => clearInterval(interval);
-  }, [loadData, testRunId]);
+    loadData();
+    // Note: the report page is a snapshot — it does not poll. The previous
+    // implementation issued a hidden PUT to mark the run completed just from
+    // viewing the page, which raced between concurrent viewers and silently
+    // mutated state. Auto-completion belongs on the run detail page.
+  }, [loadData]);
 
   const getUserName = (userId: number | null) => {
-    if (!userId) return 'N/A';
+    if (!userId) return t('notAvailableShort');
     const user = users.find(u => u.id === userId);
-    return user ? user.username : `User ${userId}`;
+    if (!user) return `User ${userId}`;
+    return user.full_name || user.username || user.email || `User ${userId}`;
   };
 
   const getCustomFieldName = (fieldDefinitionId: number) => {
@@ -169,34 +139,63 @@ export function TestRunReport() {
     return statusKeyMap[normalizedStatus] ? t(statusKeyMap[normalizedStatus]) : (status || t('notAvailableShort'));
   };
 
-  const getStatusBadgeVariant = (status?: string) => {
+  const getStatusBadgeVariant = (status?: string): 'default' | 'destructive' | 'secondary' | 'outline' => {
     const normalizedStatus = normalizeResultStatus(status);
     if (normalizedStatus === 'pass') return 'default';
     if (normalizedStatus === 'fail') return 'destructive';
+    if (normalizedStatus === 'block') return 'outline';
     return 'secondary';
   };
 
-  const statusCounts = testResults.reduce((acc: any, result) => {
+  const statusCounts = testResults.reduce<Record<NormalizedResultStatus, number>>((acc, result) => {
     const status = normalizeResultStatus(result.status);
     acc[status] = (acc[status] || 0) + 1;
     return acc;
-  }, {});
+  }, { pass: 0, fail: 0, block: 0, skip: 0, not_tested: 0 });
 
   const totalTests = testResults.length;
-  const passedTests = (statusCounts.pass || 0) + (statusCounts.passed || 0);
-  const failedTests = (statusCounts.fail || 0) + (statusCounts.failed || 0);
-  const blockedTests = (statusCounts.block || 0) + (statusCounts.blocked || 0);
-  const skippedTests = (statusCounts.skip || 0) + (statusCounts.skipped || 0);
-  const notTestedTests = statusCounts.not_tested || 0;
+  const passedTests = statusCounts.pass;
+  const failedTests = statusCounts.fail;
+  const blockedTests = statusCounts.block;
+  const skippedTests = statusCounts.skip;
+  const notTestedTests = statusCounts.not_tested;
   const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
-  const totalExecutionSeconds = testResults.reduce((total, result) => total + (Number(result.execution_time) || 0), 0);
-  const executedResultsCount = testResults.filter((result) => result.execution_time != null && normalizeResultStatus(result.status) !== 'not_tested').length;
+
+  // Only count results that were actually executed when computing
+  // total/average execution time, so a stale execution_time on a not_tested
+  // row doesn't inflate the numerator while the denominator excludes it.
+  const executedResults = testResults.filter(
+    (result) => result.execution_time != null && normalizeResultStatus(result.status) !== 'not_tested',
+  );
+  const totalExecutionSeconds = executedResults.reduce(
+    (total, result) => total + (Number(result.execution_time) || 0),
+    0,
+  );
+  const executedResultsCount = executedResults.length;
   const averageExecutionSeconds = executedResultsCount > 0 ? Math.round(totalExecutionSeconds / executedResultsCount) : 0;
 
   const handleDownloadJSON = () => {
+    if (!testRun) return;
+
+    // Wall-clock duration from when the run actually started (fallback to
+    // created_at) until completion. ``null`` while the run is still in
+    // progress — downstream tools shouldn't see a mixed number/string field.
+    const startedAtRaw = testRun.started_at || testRun.created_at;
+    const startTime = startedAtRaw ? new Date(startedAtRaw).getTime() : NaN;
+    const endTime = testRun.completed_at ? new Date(testRun.completed_at).getTime() : NaN;
+    const wallClockSeconds = Number.isFinite(startTime) && Number.isFinite(endTime)
+      ? Math.max(0, Math.round((endTime - startTime) / 1000))
+      : null;
+
     const report = {
-      testRunName: testRun?.name,
-      testRunId: testRun?.id,
+      testRunName: testRun.name,
+      testRunId: testRun.id,
+      projectId: project?.id ?? (projectId ? Number(projectId) : null),
+      projectName: project?.name ?? null,
+      status: testRun.status ?? null,
+      createdAt: testRun.created_at ?? null,
+      startedAt: testRun.started_at ?? null,
+      completedAt: testRun.completed_at ?? null,
       generatedAt: new Date().toISOString(),
       summary: {
         totalTests,
@@ -208,31 +207,33 @@ export function TestRunReport() {
         passRate,
         totalExecutionTimeSeconds: totalExecutionSeconds,
         averageExecutionTimeSeconds: averageExecutionSeconds,
-        duration: testRun?.completed_at 
-          ? Math.round((new Date(testRun.completed_at).getTime() - new Date(testRun.created_at).getTime()) / 60000)
-          : 'In Progress'
+        wallClockSeconds,
       },
       results: testResults.map(result => ({
         testCaseId: result.test_case_id,
-        testCaseTitle: result.test_case?.title,
-        section: result.test_case?.section_id,
-        priority: result.test_case?.priority,
-        status: getStatusLabel(result.status),
-        executedBy: getUserName(result.executed_by),
-        executedById: result.executed_by,
-        executionStartedAt: result.execution_started_at,
-        executedAt: result.executed_at,
-        duration: result.execution_time,
+        testCaseTitle: result.test_case?.title ?? null,
+        sectionId: result.test_case?.section_id ?? null,
+        sectionName: result.test_case?.section?.name ?? null,
+        priority: result.test_case?.priority ?? null,
+        // Stable enum so downstream tooling can branch on status regardless
+        // of the viewer's UI locale.
+        status: normalizeResultStatus(result.status),
+        statusLabel: getStatusLabel(result.status),
+        executedById: result.executed_by ?? null,
+        executedByName: result.executed_by ? getUserName(result.executed_by) : null,
+        executionStartedAt: result.execution_started_at ?? null,
+        executedAt: result.executed_at ?? null,
+        executionTimeSeconds: result.execution_time ?? null,
         customFields: getResultCustomFieldMap(result),
-        comments: result.comments
-      }))
+        comments: result.comments ?? null,
+      })),
     };
 
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `test-run-${testRun?.id}-report.json`;
+    a.download = `test-run-${testRun.id}-report.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -374,15 +375,15 @@ export function TestRunReport() {
             </div>
             <div>
               <p className="text-gray-600 text-xs">{t('created')}</p>
-              <p className="font-medium">{testRun?.created_at ? new Date(testRun.created_at).toLocaleDateString() : 'N/A'}</p>
+              <p className="font-medium">{testRun?.created_at ? new Date(testRun.created_at).toLocaleString() : t('notAvailableShort')}</p>
             </div>
             <div>
               <p className="text-gray-600 text-xs">{t('started')}</p>
-              <p className="font-medium">{testRun?.started_at ? new Date(testRun.started_at).toLocaleDateString() : 'N/A'}</p>
+              <p className="font-medium">{testRun?.started_at ? new Date(testRun.started_at).toLocaleString() : t('notAvailableShort')}</p>
             </div>
             <div>
               <p className="text-gray-600 text-xs">{t('completedLabel')}</p>
-              <p className="font-medium">{testRun?.completed_at ? new Date(testRun.completed_at).toLocaleDateString() : t('inProgress')}</p>
+              <p className="font-medium">{testRun?.completed_at ? new Date(testRun.completed_at).toLocaleString() : t('inProgress')}</p>
             </div>
           </div>
         </CardContent>
@@ -518,7 +519,7 @@ export function TestRunReport() {
                     </td>
                     <td className="px-4 py-2 print:px-2 print:py-1 print:align-top">
                       <Badge variant="outline" className="text-xs print:border-gray-400">
-                        {result.test_case?.priority || 'N/A'}
+                        {result.test_case?.priority || t('notAvailableShort')}
                       </Badge>
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
@@ -537,10 +538,10 @@ export function TestRunReport() {
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{getUserName(result.executed_by)}</td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
-                      {result.execution_started_at ? new Date(result.execution_started_at).toLocaleString() : 'N/A'}
+                      {result.execution_started_at ? new Date(result.execution_started_at).toLocaleString() : t('notAvailableShort')}
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
-                      {result.executed_at ? new Date(result.executed_at).toLocaleString() : 'N/A'}
+                      {result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notAvailableShort')}
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{formatDurationSeconds(result.execution_time, t)}</td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{result.comments || '-'}</td>

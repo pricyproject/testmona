@@ -24,6 +24,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { isGherkinText } from '@/components/requirements/gherkin';
 import { ContentEditor } from '@/components/ui/content-editor';
+import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
@@ -1469,6 +1470,15 @@ export function RequirementDetail() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        {requirement?.project_id && requirement?.id && (
+          <div className="mt-6">
+            <CustomFieldsPanel
+              projectId={Number(requirement.project_id)}
+              entityType="requirement"
+              entityId={Number(requirement.id)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

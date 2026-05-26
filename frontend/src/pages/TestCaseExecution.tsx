@@ -64,6 +64,12 @@ const isValidHttpUrl = (value: string): boolean => {
   }
 };
 
+const formatSnapshotDate = (value?: string | null): string => {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+};
+
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 
 export function TestCaseExecution() {
@@ -78,6 +84,8 @@ export function TestCaseExecution() {
   const [assignee, setAssignee] = useState('');
   const [defectLink, setDefectLink] = useState('');
   const [customLink, setCustomLink] = useState('');
+  const [selectedFailureStepNumber, setSelectedFailureStepNumber] = useState('');
+  const [failureStepActual, setFailureStepActual] = useState('');
   const [defects, setDefects] = useState<any[]>([]);
   const [isDefectDialogOpen, setIsDefectDialogOpen] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
@@ -96,6 +104,17 @@ export function TestCaseExecution() {
   const [executionStartedAtRef, setExecutionStartedAtRef] = useState<string | null>(null);
   const [executionStartedAt, setExecutionStartedAt] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // Baseline for wall-clock-derived ticking. The interval below computes
+  // ``elapsed = baseline.seconds + (Date.now() - baseline.atMs) / 1000`` each
+  // tick so the timer stays accurate even when the browser throttles
+  // background-tab intervals. Every external change to elapsedSeconds
+  // (load/pause/resume/manual-add/reset) should go through ``rebaseTimer``.
+  const timerBaselineRef = useRef<{ seconds: number; atMs: number }>({ seconds: 0, atMs: Date.now() });
+  const rebaseTimer = (seconds: number) => {
+    const safeSeconds = Math.max(0, Number.isFinite(seconds) ? Math.round(seconds) : 0);
+    timerBaselineRef.current = { seconds: safeSeconds, atMs: Date.now() };
+    setElapsedSeconds(safeSeconds);
+  };
   const [isPaused, setIsPaused] = useState(false);
   const [pausedAt, setPausedAt] = useState<string | null>(null);
   const [totalPausedTime, setTotalPausedTime] = useState(0);
@@ -110,11 +129,13 @@ export function TestCaseExecution() {
   const [allTestCases, setAllTestCases] = useState<any[]>([]);
   const [testCase, setTestCase] = useState<any>(null);
   const [testSteps, setTestSteps] = useState<Array<{
+    id?: number;
     step_number: number;
     action: string;
     expected_result: string;
     step_type: string;
   }>>([]);
+  const [testStepsLoadError, setTestStepsLoadError] = useState(false);
   const [testRun, setTestRun] = useState<any>(null);
   const [executionHistory, setExecutionHistory] = useState<any[]>([]);
   const [historyLoadError, setHistoryLoadError] = useState(false);
@@ -129,7 +150,8 @@ export function TestCaseExecution() {
   const createExecutionDefectId = () => {
     const numericProjectId = Number(projectId);
     const prefix = `P${Number.isFinite(numericProjectId) ? numericProjectId : 'X'}-DEF-`;
-    const highest = defects.reduce((max, defect) => {
+    const projectDefects = availableDefects.length > 0 ? availableDefects : defects;
+    const highest = projectDefects.reduce((max, defect) => {
       const rawId = String(defect?.defect_id || '');
       if (!rawId.startsWith(prefix)) return max;
       const suffix = Number(rawId.slice(prefix.length));
@@ -163,9 +185,27 @@ export function TestCaseExecution() {
       // execution_time already includes manual_time_adjustment from backend calculation
       const totalTime = result.execution_time || 0;
       const manualAdjustment = result.manual_time_adjustment || 0;
-      setElapsedSeconds(totalTime);
+      const totalPaused = result.total_paused_time || 0;
+
+      // Backend doesn't recompute execution_time while a result is "running"
+      // (see services/execution_timing.py — it only updates on pause/resume/
+      // complete). If we land on a running result whose timer hasn't been
+      // saved recently, project to "now" so the user doesn't see a stale
+      // value snap upward on the next save.
+      const isRunningOnServer = result.execution_state === 'running';
+      const startedAtMs = existingStart ? new Date(existingStart).getTime() : NaN;
+      let baseline = totalTime;
+      if (isRunningOnServer && Number.isFinite(startedAtMs)) {
+        const projected = Math.max(
+          0,
+          (Date.now() - startedAtMs) / 1000 - totalPaused + manualAdjustment,
+        );
+        // max() so we never go backwards if the persisted value happens to be ahead.
+        baseline = Math.max(totalTime, projected);
+      }
+      rebaseTimer(baseline);
       setManualTimeAdjustment(manualAdjustment);
-      
+
       // Restore pause state based on backend execution_state
       const backendExecutionState = result.execution_state;
       if (backendExecutionState === 'paused') {
@@ -188,44 +228,33 @@ export function TestCaseExecution() {
   };
 
   useEffect(() => {
-    if (!executionStartedAt || isPaused || executionState === 'idle' || executionState === 'completed' || executionState === 'paused') return;
+    if (!executionStartedAt || isPaused || executionState !== 'running') return;
 
-    let secondsSinceLastSync = 0;
-    const intervalId = window.setInterval(() => {
-      // Debug: Log timer state to identify issues
-      if (isPaused) {
-        return;
-      }
-      
-      // Simply increment the existing elapsed time by 1 second
-      // This avoids timestamp calculation issues and trusts the backend's execution_time
-      setElapsedSeconds(prev => Math.max(0, prev + 1));
-      
-      // Sync with backend every 30 seconds to ensure consistency
-      // Only sync if not recently paused/resumed (to avoid overriding immediate state changes)
-      secondsSinceLastSync++;
-      if (secondsSinceLastSync >= 30 && testRunId && testCaseId && !isRecentlyPaused) {
-        secondsSinceLastSync = 0;
-        testResultsAPI.getAll(parseInt(testRunId), parseInt(testCaseId))
-          .then(results => {
-            if (results.length > 0) {
-              const result = results[0];
-              // Only sync if backend state matches current execution state
-              if (result.execution_state === executionState) {
-                setElapsedSeconds(result.execution_time || 0);
-                setManualTimeAdjustment(result.manual_time_adjustment || 0);
-                setTotalPausedTime(result.total_paused_time || 0);
-              }
-            }
-          })
-          .catch(error => console.error('Failed to sync timer:', error));
-      }
-    }, 1000);
+    // Derive elapsed from wall-clock + baseline, not a naive +1/tick. Browsers
+    // throttle background-tab setInterval (Chrome to ≥1s, Firefox down to
+    // ~once/min, Safari may suspend entirely), so the previous incrementer
+    // silently lost seconds whenever the tab wasn't focused.
+    const tick = () => {
+      const { seconds, atMs } = timerBaselineRef.current;
+      const wallDelta = (Date.now() - atMs) / 1000;
+      setElapsedSeconds(Math.max(0, Math.round(seconds + wallDelta)));
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+
+    // Catch up immediately when the tab regains visibility — otherwise the
+    // user sees the timer ``snap forward'' on the next 1-second tick.
+    const onVisible = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [executionStartedAt, isPaused, executionState, testRunId, testCaseId]);
+  }, [executionStartedAt, isPaused, executionState]);
 
   
   // When execution state changes to completed, load the final execution time from backend
@@ -242,7 +271,7 @@ export function TestCaseExecution() {
             // Use the backend's calculated execution_time which includes manual adjustments
             const totalTime = result.execution_time || 0;
             const manualAdjustment = result.manual_time_adjustment || 0;
-            setElapsedSeconds(totalTime);
+            rebaseTimer(totalTime);
             setManualTimeAdjustment(manualAdjustment);
           }
         } catch (error) {
@@ -308,12 +337,15 @@ export function TestCaseExecution() {
           try {
             const steps = await testCasesAPI.getSteps(currentTestCaseId);
             setTestSteps(steps);
+            setTestStepsLoadError(false);
           } catch (stepsError) {
             console.error('Failed to fetch test steps:', stepsError);
             setTestSteps([]);
+            setTestStepsLoadError(true);
           }
         } else {
           setTestSteps([]);
+          setTestStepsLoadError(false);
         }
         
         // Load execution history - handle auth errors gracefully
@@ -443,14 +475,9 @@ export function TestCaseExecution() {
             setIsPaused(false);
           }
           
-          // Restore elapsed time from database
-          // execution_time already includes manual_time_adjustment from backend calculation
-          const totalTime = result.execution_time || 0;
-          const manualAdjustment = result.manual_time_adjustment || 0;
-          setElapsedSeconds(totalTime);
-          setManualTimeAdjustment(manualAdjustment);
-          
-          // Restore pause state if applicable
+          // (Elapsed time + pause state already restored by
+          // ensureExecutionTimerStarted(result) above — don't overwrite the
+          // projected baseline with the raw persisted value.)
           if (result.paused_at) {
             setPausedAt(result.paused_at);
             setIsPaused(true);
@@ -542,6 +569,9 @@ export function TestCaseExecution() {
       setLinkType('blocked_by');
     } else if (executionStatus === 'failed') {
       setLinkType('found');
+    } else {
+      setSelectedFailureStepNumber('');
+      setFailureStepActual('');
     }
   }, [executionStatus]);
 
@@ -881,7 +911,7 @@ export function TestCaseExecution() {
       updatedExecutions.push(additionalData);
       localStorage.setItem('testExecutions', JSON.stringify(updatedExecutions));
       setExecutionStart(savedResult.execution_started_at || startedAt);
-      setElapsedSeconds(savedResult.execution_time ?? executionTimeSeconds);
+      rebaseTimer(savedResult.execution_time ?? executionTimeSeconds);
 
       try {
         const refreshedHistory = await testCasesAPI.getExecutionHistory(parseInt(testCaseId || '0'), 50);
@@ -917,7 +947,52 @@ export function TestCaseExecution() {
   };
 
   // Derive defect fields from the current execution context (for prefilling)
+  const isFailedOrBlockedStatus = executionStatus === 'failed' || executionStatus === 'blocked';
+  const selectedFailureStep = testSteps.find(
+    (step) => String(step.step_number) === selectedFailureStepNumber,
+  );
+
+  const requireFailureStepSelection = () => {
+    if (isFailedOrBlockedStatus && testStepsLoadError) {
+      toast({
+        title: t('error'),
+        description: t('testStepsLoadRequiredForDefect'),
+        variant: 'destructive',
+      });
+      return false;
+    }
+    if (isFailedOrBlockedStatus && testSteps.length > 0 && !selectedFailureStep) {
+      toast({
+        title: t('validationError'),
+        description: t('selectFailingStepRequired'),
+        variant: 'destructive',
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const buildFailingStepPayload = () => {
+    if (!isFailedOrBlockedStatus || !selectedFailureStep) return undefined;
+    const actualResult = failureStepActual.trim() || executionNotes.trim();
+    return {
+      step_id: selectedFailureStep.id,
+      step_number: selectedFailureStep.step_number,
+      status: executionStatus,
+      actual_result: actualResult || undefined,
+      notes: executionNotes.trim() || undefined,
+    };
+  };
+
   const buildDefectContext = () => {
+    const failingStepText = selectedFailureStep
+      ? [
+          `${t('failingStep')}: ${selectedFailureStep.step_number}`,
+          `${t('action')}: ${selectedFailureStep.action}`,
+          `${t('expectedResult')}: ${selectedFailureStep.expected_result}`,
+          failureStepActual.trim() ? `${t('actualResultLabel')}: ${failureStepActual.trim()}` : '',
+        ].filter(Boolean).join('\n')
+      : '';
     const stepsText = testSteps.length > 0
       ? testSteps.map(step => `${step.step_number}. ${step.action}`).join('\n')
       : (testCase?.steps || testCase?.test_steps || testCase?.preconditions || '');
@@ -932,21 +1007,28 @@ export function TestCaseExecution() {
       || testRun?.environment
       || '';
     const context: Record<string, string> = {};
-    if (stepsText) context.steps_to_reproduce = String(stepsText);
+    if (stepsText || failingStepText) {
+      context.steps_to_reproduce = [failingStepText, stepsText].filter(Boolean).join('\n\n');
+    }
     if (expectedText) context.expected_result = String(expectedText);
-    if (executionNotes.trim()) context.actual_result = executionNotes.trim();
+    if (failureStepActual.trim() || executionNotes.trim()) {
+      context.actual_result = failureStepActual.trim() || executionNotes.trim();
+    }
     if (environment) context.environment = String(environment);
     return context;
   };
 
   // Open the report-defect dialog with values prefilled from execution context
   const openDefectDialog = () => {
+    if (!requireFailureStepSelection()) return;
     const tcPriority = String(testCase?.priority || '').toLowerCase();
     const severity = ['low', 'medium', 'high', 'critical'].includes(tcPriority) ? tcPriority : 'medium';
     const statusLabel = executionStatus === 'blocked' ? t('blocked') : t('failed');
     setNewDefect({
       title: testCase?.title ? `[${statusLabel}] ${testCase.title}` : '',
-      description: executionNotes.trim(),
+      description: selectedFailureStep
+        ? `${t('failingStep')} ${selectedFailureStep.step_number}: ${selectedFailureStep.action}\n\n${failureStepActual.trim() || executionNotes.trim()}`
+        : executionNotes.trim(),
       severity,
       priority: 'high',
     });
@@ -955,6 +1037,7 @@ export function TestCaseExecution() {
 
   const handleLinkExistingDefect = async () => {
     if (!selectedDefectId) return;
+    if (!requireFailureStepSelection()) return;
     if (!testResultId) {
       toast({
         title: t('error'),
@@ -968,6 +1051,7 @@ export function TestCaseExecution() {
       await testResultsAPI.linkDefect(testResultId, {
         defect_id: parseInt(selectedDefectId),
         link_type: linkType,
+        failing_step: buildFailingStepPayload(),
       });
       setSelectedDefectId('');
       await loadResultDefectLinks(testResultId);
@@ -1006,6 +1090,26 @@ export function TestCaseExecution() {
     }
   };
 
+  const handleCorrectLinkSnapshot = async (linkId: number) => {
+    if (!testResultId) return;
+    if (!requireFailureStepSelection()) return;
+    try {
+      await testResultsAPI.updateDefectLinkSnapshot(testResultId, linkId, {
+        failing_step: buildFailingStepPayload(),
+        clear_failing_step: isFailedOrBlockedStatus && !selectedFailureStep,
+      });
+      await loadResultDefectLinks(testResultId);
+      toast({ title: t('success'), description: t('snapshotCorrectedSuccessfully') });
+    } catch (error) {
+      console.error('Failed to correct snapshot:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToCorrectSnapshot')),
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleCreateDefect = async () => {
     const currentProjectId = Number(projectId);
     const currentTestRunId = Number(testRunId);
@@ -1020,6 +1124,17 @@ export function TestCaseExecution() {
       });
       return;
     }
+
+    if (!testResultId) {
+      toast({
+        title: t('error'),
+        description: t('saveExecutionBeforeLinkingDefect'),
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!requireFailureStepSelection()) return;
 
     if (!trimmedTitle) {
       toast({
@@ -1060,18 +1175,14 @@ export function TestCaseExecution() {
         ...buildDefectContext(),
       };
 
-      let createdDefect: any = null;
-      if (testResultId) {
-        // Create the defect and link it to this execution result atomically
-        const link = await testResultsAPI.linkDefect(testResultId, {
-          new_defect: defectData,
-          link_type: linkType,
-        });
-        createdDefect = link?.defect || null;
-        await loadResultDefectLinks(testResultId);
-      } else {
-        createdDefect = await defectsAPI.create(defectData);
-      }
+      // Create the defect and link it to this execution result atomically.
+      const link = await testResultsAPI.linkDefect(testResultId, {
+        new_defect: defectData,
+        link_type: linkType,
+        failing_step: buildFailingStepPayload(),
+      });
+      const createdDefect: any = link?.defect || null;
+      await loadResultDefectLinks(testResultId);
 
       // Keep loose defect lists in sync for ID generation / duplicate checks
       if (createdDefect) {
@@ -1217,7 +1328,7 @@ export function TestCaseExecution() {
           );
           if (refreshedResults.length > 0) {
             const r = refreshedResults[0];
-            setElapsedSeconds(r.execution_time || 0);
+            rebaseTimer(r.execution_time || 0);
             setManualTimeAdjustment(r.manual_time_adjustment || 0);
             setTotalPausedTime(r.total_paused_time || 0);
           }
@@ -1245,7 +1356,7 @@ export function TestCaseExecution() {
           if (refreshedResults.length > 0) {
             const r = refreshedResults[0];
             setPausedAt(r.paused_at || new Date().toISOString());
-            setElapsedSeconds(r.execution_time || 0);
+            rebaseTimer(r.execution_time || 0);
             setManualTimeAdjustment(r.manual_time_adjustment || 0);
             setTotalPausedTime(r.total_paused_time || 0);
           }
@@ -1322,9 +1433,9 @@ export function TestCaseExecution() {
           // execution_time already includes manual_time_adjustment from backend calculation
           const totalTime = result.execution_time || 0;
           const manualAdjustment = result.manual_time_adjustment || 0;
-          setElapsedSeconds(totalTime);
+          rebaseTimer(totalTime);
           setManualTimeAdjustment(manualAdjustment);
-          
+
           // Also update other timing fields
           if (result.execution_state) {
             setExecutionState(result.execution_state);
@@ -1379,7 +1490,7 @@ export function TestCaseExecution() {
       await testResultsAPI.resetTime(currentResults[0].id);
       
       // Reset local state — go back to idle so user must explicitly restart
-      setElapsedSeconds(0);
+      rebaseTimer(0);
       setTotalPausedTime(0);
       setPausedAt(null);
       setManualTimeAdjustment(0);
@@ -1836,6 +1947,46 @@ export function TestCaseExecution() {
                       {t('defectRequiredHint')}
                     </div>
                   )}
+                  {testCase?.is_multistep && testStepsLoadError && (
+                    <div className="mb-3 flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 text-xs text-red-700 dark:bg-slate-950/40 dark:text-red-200">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      {t('testStepsLoadRequiredForDefect')}
+                    </div>
+                  )}
+                  {testSteps.length > 0 && (
+                    <div className="mb-3 grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                      <div>
+                        <Label htmlFor="failingStep" className="text-xs font-semibold text-red-700 dark:text-red-200">
+                          {t('failingStep')}
+                        </Label>
+                        <Select value={selectedFailureStepNumber} onValueChange={setSelectedFailureStepNumber}>
+                          <SelectTrigger id="failingStep" className="mt-1 h-9 border-red-200 bg-white/90 text-sm dark:border-red-900/70 dark:bg-slate-950/60">
+                            <SelectValue placeholder={t('selectFailingStep')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {testSteps.map((step) => (
+                              <SelectItem key={step.id || step.step_number} value={String(step.step_number)}>
+                                {t('stepNumberLabel', { number: step.step_number })}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="failureStepActual" className="text-xs font-semibold text-red-700 dark:text-red-200">
+                          {t('failureStepActual')}
+                        </Label>
+                        <Input
+                          id="failureStepActual"
+                          value={failureStepActual}
+                          onChange={(e) => setFailureStepActual(e.target.value)}
+                          placeholder={t('failureStepActualPlaceholder')}
+                          maxLength={5000}
+                          className="mt-1 h-9 border-red-200 bg-white/90 text-sm dark:border-red-900/70 dark:bg-slate-950/60"
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
                       <Label htmlFor="defectLink" className="text-xs font-semibold text-red-700 dark:text-red-200">
@@ -2015,6 +2166,40 @@ export function TestCaseExecution() {
                                 {t('openInTracker')}
                               </a>
                             )}
+                            {link.failing_step_snapshot && (
+                              <div className="mt-2 rounded-md border border-red-100 bg-red-50 px-2 py-1.5 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+                                <div className="font-semibold">
+                                  {t('failingStepSnapshot', {
+                                    number: link.failing_step_snapshot.step_number,
+                                  })}
+                                </div>
+                                <div className="mt-1 line-clamp-2">
+                                  {link.failing_step_snapshot.action}
+                                </div>
+                                {link.failing_step_snapshot.actual_result && (
+                                  <div className="mt-1 text-red-700 dark:text-red-300">
+                                    {t('actualResultLabel')}: {link.failing_step_snapshot.actual_result}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {link.result_snapshot?.test_result && (
+                              <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                                {t('resultSnapshotCaptured', {
+                                  status: link.result_snapshot.test_result.status || '-',
+                                  date: formatSnapshotDate(link.snapshot_created_at || link.result_snapshot.captured_at),
+                                })}
+                              </div>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCorrectLinkSnapshot(link.id)}
+                              className="mt-2 h-7 px-2 text-xs"
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                              {t('correctSnapshot')}
+                            </Button>
                           </div>
                           <Button
                             variant="outline"

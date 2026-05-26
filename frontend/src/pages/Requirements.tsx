@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -42,12 +42,19 @@ import { ContentEditor } from '@/components/ui/content-editor';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { diffWords } from 'diff';
 
+const parsePositiveQueryNumber = (value: string | null): number | undefined => {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
 
 export function Requirements() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -216,7 +223,9 @@ export function Requirements() {
     try {
       setLoading(true);
       // Fetch a high limit so projects with >100 requirements are not silently truncated.
-      const data = await requirementsAPI.getAll(parseInt(projectId), 0, 1000);
+      const data = await requirementsAPI.getAll(parseInt(projectId), 0, 1000, {
+        milestoneId: linkedMilestoneId,
+      });
       setRequirements(data);
     } catch (error) {
       console.error('Error loading requirements:', error);
@@ -228,7 +237,7 @@ export function Requirements() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, t, toast]);
+  }, [projectId, linkedMilestoneId, t, toast]);
 
   // Load requirements
   useEffect(() => {
