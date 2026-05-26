@@ -14,8 +14,9 @@ export const sanitizeInput = (input: string): string => {
     .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '') // Remove object tags
     .replace(/<embed\b[^>]*>/gi, '') // Remove embed tags
     .replace(/javascript:/gi, '') // Remove javascript: protocol
-    .replace(/on\w+\s*=/gi, '') // Remove event handlers like onclick, onload, etc.
     .replace(/data:/gi, '') // Remove data: protocol
+    .replace(/vbscript:/gi, '') // Remove vbscript: protocol
+    .replace(/on\w+\s*=/gi, '') // Remove event handlers like onclick, onload, etc.
     .trim();
 };
 
