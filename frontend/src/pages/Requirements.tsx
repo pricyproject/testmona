@@ -821,7 +821,7 @@ export function Requirements() {
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [isCreateDialogOpen, isEditDialogOpen, showUnsavedDialog, reqId, reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, selectedRequirement]);
 
   const renderExternalDocumentImport = (inputId: string) => (

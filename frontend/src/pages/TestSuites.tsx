@@ -129,7 +129,7 @@ export function TestSuites() {
       // Invalidate any in-flight request when the project changes / page unmounts
       loadRequestId.current++;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [currentProjectId]);
 
   // Load test cases when dialog opens. Reloads each open so a newly-created or moved
@@ -139,7 +139,7 @@ export function TestSuites() {
     loadTestCasesForSelection();
     const timer = window.setTimeout(() => nameInputRef.current?.focus(), 80);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [isDialogOpen, currentProjectId]);
 
   // Track unsaved changes

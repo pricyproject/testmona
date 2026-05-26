@@ -171,7 +171,7 @@ export function ProjectMembers() {
 
   useEffect(() => {
     loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [numericProjectId, currentUser?.id]);
 
   const assignableUsers = useMemo(() => {

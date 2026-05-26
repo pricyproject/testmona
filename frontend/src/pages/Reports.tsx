@@ -592,7 +592,7 @@ export function Reports() {
   // Load data when tab, project, time range, or tab-specific filters change.
   useEffect(() => {
     loadTabData(activeTab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [activeTab, selectedProject, timeRange, granularFilter, traceabilityFilters, traceabilityPage]);
 
   // Debounce free-text traceability search → applied filter (server-side).

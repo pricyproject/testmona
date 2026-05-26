@@ -150,7 +150,7 @@ export function Milestones() {
       // Invalidate any in-flight requests when project changes / unmount
       loadRequestId.current++;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [currentProjectId]);
 
   const filteredMilestones = useMemo(() => {

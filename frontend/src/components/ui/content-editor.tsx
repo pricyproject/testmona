@@ -202,7 +202,7 @@ export function ContentEditor({
     [value, dirMode, isRTL]
   );
 
-  const initialHtml = useMemo(() => valueToHtml(value || '', format), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const initialHtml = useMemo(() => valueToHtml(value || '', format), []);
 
   const editor = useEditor({
     extensions: [

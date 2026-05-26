@@ -88,8 +88,9 @@ export function TestCaseExecute() {
         if (!isMounted) return;
         setError(t('failedToPrepareExecutionFlow'));
       } finally {
-        if (!isMounted) return;
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 

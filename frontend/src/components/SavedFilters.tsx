@@ -82,7 +82,7 @@ export function SavedFilters({ projectId, scope, currentDefinition, hasActiveFil
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [projectId, scope]);
 
   const apply = (filter: SavedFilter) => {

@@ -117,7 +117,11 @@ export function TestRunDetail() {
   const toggleCol = (col: OptionalCol) => {
     setHiddenCols(prev => {
       const next = new Set(prev);
-      next.has(col) ? next.delete(col) : next.add(col);
+      if (next.has(col)) {
+        next.delete(col);
+      } else {
+        next.add(col);
+      }
       return next;
     });
   };
@@ -321,7 +325,7 @@ export function TestRunDetail() {
     sync('dir', sortColumn ? sortDir : '', '');
     sync('page', page > 1 ? String(page) : '', '');
     setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [filter, resultSearchQuery, sectionFilter, priorityFilter, assigneeFilter, attentionFilter, sortColumn, sortDir, page]);
 
   // Reset to the first page whenever the filter set changes (but not on mount,
@@ -337,7 +341,7 @@ export function TestRunDetail() {
     setPage(1);
     const visibleIds = new Set(filteredResults.map((r) => r.id));
     setSelectedTestCasesForRemoval((prev) => prev.filter((rid) => visibleIds.has(rid)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [filter, resultSearchQuery, sectionFilter, priorityFilter, assigneeFilter, attentionFilter]);
 
   const normalizeRunStatus = (status?: string | null) => (status || '').toLowerCase().replace(/[-\s]/g, '_');

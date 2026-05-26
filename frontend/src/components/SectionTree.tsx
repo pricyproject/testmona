@@ -129,7 +129,7 @@ export function SectionTree({
 
     let newParentId: number | null = null;
     if (dropTargetId === `root-of-suite-${suiteId}`) {
-      newParentId = null;
+      // Keep the default null parent for root moves.
     } else if (dropTargetId.startsWith('section-')) {
       const targetSectionId = Number(dropTargetId.replace('section-', ''));
       const target = findNode(sections, targetSectionId);

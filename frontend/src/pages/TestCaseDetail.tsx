@@ -314,7 +314,7 @@ export function TestCaseDetail() {
       isMounted = false;
     };
     // resetDetailState only closes over setters (stable), so it doesn't belong in deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [id, projectId]);
 
   const displaySteps = useMemo(() => {
