@@ -520,8 +520,8 @@ def register_traceability_coverage_routes(app):
             from ..jira_service import sync_jira_issue
             updated_issue = sync_jira_issue(db, issue)
             return {"status": "success", "issue": updated_issue}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        except Exception:
+            raise HTTPException(status_code=500, detail="Failed to sync Jira issue")
 
     @app.put("/jira-issues/{issue_id}", response_model=schemas.JiraIssue)
     def update_jira_issue(
