@@ -85,9 +85,16 @@ const unwrapElement = (element: Element) => {
 const sanitizePastedHtml = (rawHtml: string): string => {
   if (typeof window === 'undefined' || !rawHtml) return rawHtml;
 
+  let htmlWithoutComments = rawHtml;
+  let previousHtml: string;
+  do {
+    previousHtml = htmlWithoutComments;
+    htmlWithoutComments = htmlWithoutComments.replace(/<!--[\s\S]*?-->/g, '');
+  } while (htmlWithoutComments !== previousHtml);
+
   let documentValue: Document;
   try {
-    documentValue = new DOMParser().parseFromString(rawHtml.replace(/<!--[\s\S]*?-->/g, ''), 'text/html');
+    documentValue = new DOMParser().parseFromString(htmlWithoutComments, 'text/html');
   } catch {
     return rawHtml;
   }
