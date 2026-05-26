@@ -105,9 +105,9 @@ export function Requirements() {
       .replace(/\s+/g, ' ')
       .trim();
 
-  // Requirement description/acceptance is stored HTML-escaped; decode entities
-  // then strip tags so the list shows readable text, not raw "&lt;p&gt;" markup.
+  // Requirement description/acceptance is stored HTML-escaped; decode entities.
   // Decoding twice also cleans up any legacy double-escaped rows.
+  // Do not reinterpret decoded text as HTML.
   const toDisplayText = (value?: string | null): string => {
     if (!value) return '';
     const decode = (input: string): string => {
@@ -116,11 +116,7 @@ export function Requirements() {
       return textarea.value;
     };
     const decoded = decode(decode(value));
-    if (!/<[a-z][\s\S]*>/i.test(decoded)) {
-      return decoded.replace(/\s+/g, ' ').trim();
-    }
-    const parsed = new DOMParser().parseFromString(decoded, 'text/html');
-    return (parsed.body.textContent || '').replace(/\s+/g, ' ').trim();
+    return decoded.replace(/\s+/g, ' ').trim();
   };
 
   const gherkinTemplate = [
