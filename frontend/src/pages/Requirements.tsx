@@ -110,12 +110,32 @@ export function Requirements() {
   // Do not reinterpret decoded text as HTML.
   const toDisplayText = (value?: string | null): string => {
     if (!value) return '';
-    const decode = (input: string): string => {
-      const textarea = document.createElement('textarea');
-      textarea.innerHTML = input;
-      return textarea.value;
+    const decodeHtmlEntities = (input: string): string => {
+      const namedEntities: Record<string, string> = {
+        amp: '&',
+        lt: '<',
+        gt: '>',
+        quot: '"',
+        apos: "'",
+        nbsp: ' ',
+      };
+
+      return input.replace(/&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, entity: string) => {
+        if (entity.startsWith('#x') || entity.startsWith('#X')) {
+          const codePoint = Number.parseInt(entity.slice(2), 16);
+          return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+        }
+
+        if (entity.startsWith('#')) {
+          const codePoint = Number.parseInt(entity.slice(1), 10);
+          return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+        }
+
+        return namedEntities[entity] ?? match;
+      });
     };
-    const decoded = decode(decode(value));
+
+    const decoded = decodeHtmlEntities(decodeHtmlEntities(value));
     return decoded.replace(/\s+/g, ' ').trim();
   };
 
