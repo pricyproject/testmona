@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Layout } from '@/components/Layout';
 import { ProjectGuard } from '@/components/ProjectGuard';
 import { ThemeProvider } from '@/contexts/ThemeContext';
@@ -25,22 +25,33 @@ const TestCaseRevisions = lazyPage(() => import('@/pages/TestCaseRevisions'), 'T
 const TestCaseExecutionHistory = lazyPage(() => import('@/pages/TestCaseExecutionHistory'), 'TestCaseExecutionHistory');
 const TestCaseExecute = lazyPage(() => import('@/pages/TestCaseExecute'), 'TestCaseExecute');
 const TestCaseExecution = lazyPage(() => import('@/pages/TestCaseExecution'), 'TestCaseExecution');
-const SectionManagement = lazyPage(() => import('@/pages/SectionManagement'), 'SectionManagement');
+const SectionRedirect = lazyPage(() => import('@/pages/SectionRedirect'), 'SectionRedirect');
 const Environments = lazyPage(() => import('@/pages/Environments'), 'Environments');
 const TestPlans = lazyPage(() => import('@/pages/TestPlans'), 'TestPlans');
 const TestRuns = lazyPage(() => import('@/pages/TestRuns'), 'TestRuns');
 const TestRunDetail = lazyPage(() => import('@/pages/TestRunDetail'), 'TestRunDetail');
 const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunReport');
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
+const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetail');
 const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
+const TraceabilityMatrix = lazyPage(() => import('@/pages/TraceabilityMatrix'), 'TraceabilityMatrix');
 const SharedReportViewer = lazyPage(() => import('@/pages/SharedReportViewer'), 'SharedReportViewer');
 const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
+const MilestoneDetail = lazyPage(() => import('@/pages/MilestoneDetail'), 'MilestoneDetail');
 const CustomFields = lazyPage(() => import('@/pages/CustomFields'), 'CustomFields');
 const SharedSteps = lazyPage(() => import('@/pages/SharedSteps'), 'SharedSteps');
 const GlobalParameters = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParameters');
 const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 'ActivityManagement');
 const Settings = lazyPage(() => import('@/pages/Settings'), 'Settings');
 const Profile = lazyPage(() => import('@/pages/Profile'), 'Profile');
+const ProjectMembers = lazyPage(() => import('@/pages/ProjectMembers'), 'ProjectMembers');
+const ApiTokens = lazyPage(() => import('@/pages/ApiTokens'), 'ApiTokens');
+const Webhooks = lazyPage(() => import('@/pages/Webhooks'), 'Webhooks');
+
+function RedirectToTestSuites() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <Navigate to={`/projects/${projectId || ''}/test-suites`} replace />;
+}
 
 function PageFallback() {
   return (
@@ -194,14 +205,15 @@ function AppWithRouter() {
             <TestCaseExecution />
           </ProjectGuard>
         } />
-        <Route path="/projects/:projectId/sections" element={
-          <ProjectGuard>
-            <SectionManagement />
-          </ProjectGuard>
-        } />
+        {/* Sections were folded into TestSuiteDetail (?section=<id>); keep these
+            redirects so existing links keep working. */}
+        <Route
+          path="/projects/:projectId/sections"
+          element={<RedirectToTestSuites />}
+        />
         <Route path="/projects/:projectId/sections/:sectionId" element={
           <ProjectGuard>
-            <SectionManagement />
+            <SectionRedirect />
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/requirements" element={
@@ -219,6 +231,11 @@ function AppWithRouter() {
             <Defects />
           </ProjectGuard>
         } />
+        <Route path="/projects/:projectId/defects/:defectId" element={
+          <ProjectGuard>
+            <DefectDetail />
+          </ProjectGuard>
+        } />
         <Route path="/projects/:projectId/test-plans" element={
           <ProjectGuard>
             <TestPlans />
@@ -229,9 +246,24 @@ function AppWithRouter() {
             <Reports />
           </ProjectGuard>
         } />
+        <Route path="/projects/:projectId/traceability" element={
+          <ProjectGuard>
+            <TraceabilityMatrix />
+          </ProjectGuard>
+        } />
         <Route path="/projects/:projectId/milestones" element={
           <ProjectGuard>
             <Milestones />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/milestones/:milestoneId" element={
+          <ProjectGuard>
+            <MilestoneDetail />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/members" element={
+          <ProjectGuard>
+            <ProjectMembers />
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/custom-fields" element={
@@ -285,6 +317,12 @@ function AppWithRouter() {
         <Route path="/activity-management" element={<ActivityManagement />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/api-tokens" element={<ApiTokens />} />
+        <Route path="/projects/:projectId/webhooks" element={
+          <ProjectGuard>
+            <Webhooks />
+          </ProjectGuard>
+        } />
         <Route path="*" element={<Navigate to="/projects" replace />} />
         </Routes>
       </Suspense>

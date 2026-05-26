@@ -338,9 +338,10 @@ export const sectionsAPI = {
 
 // Requirements API
 export const requirementsAPI = {
-  getAll: async (projectId?: number, skip = 0, limit = 100) => {
+  getAll: async (projectId?: number, skip = 0, limit = 100, filters: { milestoneId?: number } = {}) => {
     const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
     if (projectId) params.append('project_id', projectId.toString());
+    if (filters.milestoneId) params.append('milestone_id', filters.milestoneId.toString());
     const response = await api.get(`/requirements?${params}`);
     return response.data;
   },
@@ -547,6 +548,20 @@ export const testRunsAPI = {
     const response = await api.get(`/test-runs/${id}/flakiness`);
     return response.data;
   },
+  importResults: async (
+    id: number,
+    file: File,
+    options: { format?: 'junit' | 'ctrf'; autoCreate?: boolean } = {},
+  ) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (options.format) formData.append('format', options.format);
+    if (options.autoCreate) formData.append('auto_create', 'true');
+    const response = await api.post(`/test-runs/${id}/import-results`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
 };
 
 // Test Execution Settings API
@@ -594,12 +609,36 @@ export const testResultsAPI = {
     const response = await api.get(`/test-results/${id}/defect-links`);
     return response.data;
   },
-  linkDefect: async (id: number, payload: { defect_id?: number; link_type?: string; new_defect?: any }) => {
+  linkDefect: async (id: number, payload: {
+    defect_id?: number;
+    link_type?: string;
+    new_defect?: any;
+    failing_step?: {
+      step_id?: number;
+      step_number?: number;
+      status?: string;
+      actual_result?: string;
+      notes?: string;
+    };
+  }) => {
     const response = await api.post(`/test-results/${id}/defect-links`, payload);
     return response.data;
   },
   unlinkDefect: async (id: number, linkId: number) => {
     const response = await api.delete(`/test-results/${id}/defect-links/${linkId}`);
+    return response.data;
+  },
+  updateDefectLinkSnapshot: async (id: number, linkId: number, payload: {
+    failing_step?: {
+      step_id?: number;
+      step_number?: number;
+      status?: string;
+      actual_result?: string;
+      notes?: string;
+    };
+    clear_failing_step?: boolean;
+  }) => {
+    const response = await api.put(`/test-results/${id}/defect-links/${linkId}/snapshot`, payload);
     return response.data;
   },
 };
@@ -628,23 +667,156 @@ export const usersAPI = {
   },
 };
 
+// Saved filters
+export type SavedFilterScope = 'test_cases' | 'defects';
+
+export interface SavedFilter {
+  id: number;
+  user_id: number;
+  project_id: number;
+  scope: SavedFilterScope;
+  name: string;
+  definition: Record<string, any>;
+  is_default: boolean;
+  is_shared: boolean;
+  owned_by_current_user: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export const savedFiltersAPI = {
+  list: async (projectId: number, scope: SavedFilterScope): Promise<SavedFilter[]> => {
+    const response = await api.get('/saved-filters', { params: { project_id: projectId, scope } });
+    return response.data;
+  },
+  create: async (payload: { project_id: number; scope: SavedFilterScope; name: string; definition: Record<string, any>; is_default?: boolean; is_shared?: boolean }): Promise<SavedFilter> => {
+    const response = await api.post('/saved-filters', payload);
+    return response.data;
+  },
+  update: async (id: number, payload: { name?: string; definition?: Record<string, any>; is_default?: boolean; is_shared?: boolean }): Promise<SavedFilter> => {
+    const response = await api.put(`/saved-filters/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/saved-filters/${id}`);
+  },
+};
+
+// Bulk edit
+export const bulkAPI = {
+  testCases: async (payload: { ids: number[]; priority?: string; status?: string; test_type?: string; section_id?: number; tags?: string; add_tags?: string; remove_tags?: string }) => {
+    const response = await api.patch('/test-cases/bulk', payload);
+    return response.data as { updated: number; skipped_ids: number[]; reason?: string | null };
+  },
+  defects: async (payload: { ids: number[]; status?: string; severity?: string; priority?: string; assigned_to?: number; clear_assignee?: boolean }) => {
+    const response = await api.patch('/defects/bulk', payload);
+    return response.data as { updated: number; skipped_ids: number[]; reason?: string | null };
+  },
+};
+
+// API tokens (personal)
+export const apiTokensAPI = {
+  list: async () => {
+    const response = await api.get('/api-tokens');
+    return response.data;
+  },
+  create: async (payload: { name: string; expires_at?: string | null }) => {
+    const response = await api.post('/api-tokens', payload);
+    return response.data;
+  },
+  revoke: async (id: number) => {
+    await api.delete(`/api-tokens/${id}`);
+  },
+};
+
+// Outbound webhooks (project-scoped)
+export const webhooksAPI = {
+  supportedEvents: async (): Promise<string[]> => {
+    const response = await api.get('/webhooks/supported-events');
+    return response.data;
+  },
+  list: async (projectId: number) => {
+    const response = await api.get(`/projects/${projectId}/webhooks`);
+    return response.data;
+  },
+  create: async (projectId: number, payload: { name: string; url: string; events: string[]; is_active?: boolean }) => {
+    const response = await api.post(`/projects/${projectId}/webhooks`, {
+      project_id: projectId,
+      ...payload,
+    });
+    return response.data;
+  },
+  update: async (
+    projectId: number,
+    id: number,
+    payload: { name?: string; url?: string; events?: string[]; is_active?: boolean; rotate_secret?: boolean },
+  ) => {
+    const response = await api.put(`/projects/${projectId}/webhooks/${id}`, payload);
+    return response.data;
+  },
+  remove: async (projectId: number, id: number) => {
+    await api.delete(`/projects/${projectId}/webhooks/${id}`);
+  },
+  deliveries: async (projectId: number, id: number, limit = 50) => {
+    const response = await api.get(`/projects/${projectId}/webhooks/${id}/deliveries?limit=${limit}`);
+    return response.data;
+  },
+  redeliver: async (projectId: number, webhookId: number, deliveryId: number) => {
+    const response = await api.post(`/projects/${projectId}/webhooks/${webhookId}/deliveries/${deliveryId}/redeliver`);
+    return response.data;
+  },
+  test: async (projectId: number, webhookId: number) => {
+    const response = await api.post(`/projects/${projectId}/webhooks/${webhookId}/test`);
+    return response.data;
+  },
+};
+
+// Project Assignments / Members API
+export const projectAssignmentsAPI = {
+  listMembers: async (projectId: number) => {
+    const response = await api.get(`/projects/${projectId}/members`);
+    return response.data;
+  },
+  add: async (projectId: number, userId: number, role: string) => {
+    const response = await api.post('/project-assignments', {
+      project_id: projectId,
+      user_id: userId,
+      role,
+    });
+    return response.data;
+  },
+  updateRole: async (assignmentId: number, role: string) => {
+    const response = await api.put(`/project-assignments/${assignmentId}`, { role });
+    return response.data;
+  },
+  remove: async (assignmentId: number) => {
+    const response = await api.delete(`/project-assignments/${assignmentId}`);
+    return response.data;
+  },
+};
+
 // Defects API
 export const defectsAPI = {
   getAll: async (
     projectId?: number,
     skip = 0,
     limit = 100,
-    filters: { search?: string; status?: string } = {},
+    filters: { search?: string; status?: string; milestoneId?: number } = {},
   ) => {
     const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
     if (projectId) params.append('project_id', projectId.toString());
     if (filters.search?.trim()) params.append('search', filters.search.trim());
     if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+    if (filters.milestoneId) params.append('milestone_id', filters.milestoneId.toString());
     const response = await api.get(`/defects?${params}`);
     return response.data;
   },
   getById: async (id: number) => {
     const response = await api.get(`/defects/${id}`);
+    return response.data;
+  },
+  getDetail: async (id: number, signal?: AbortSignal) => {
+    const response = await api.get(`/defects/${id}/detail`, { signal });
     return response.data;
   },
   create: async (defect: any) => {
@@ -657,6 +829,10 @@ export const defectsAPI = {
   },
   delete: async (id: number) => {
     const response = await api.delete(`/defects/${id}`);
+    return response.data;
+  },
+  getResultLinks: async (id: number) => {
+    const response = await api.get(`/defects/${id}/result-links`);
     return response.data;
   },
 };
@@ -693,6 +869,10 @@ export const milestonesAPI = {
     const response = await api.get(`/milestones/${id}/test-plans`);
     return response.data;
   },
+  getRuns: async (id: number) => {
+    const response = await api.get(`/milestones/${id}/runs`);
+    return response.data;
+  },
 };
 
 // Environments API
@@ -720,6 +900,8 @@ export const environmentsAPI = {
     return response.data;
   },
 };
+
+const traceabilityMatrixRequests = new Map<string, Promise<any>>();
 
 // Analytics API
 export const analyticsAPI = {
@@ -804,8 +986,18 @@ export const analyticsAPI = {
         }
       });
     }
-    const response = await api.get(`/analytics/traceability-matrix`, { params });
-    return response.data;
+    const requestKey = JSON.stringify(params);
+    const existingRequest = traceabilityMatrixRequests.get(requestKey);
+    if (existingRequest) return existingRequest;
+
+    const request = api
+      .get(`/analytics/traceability-matrix`, { params })
+      .then((response) => response.data)
+      .finally(() => {
+        traceabilityMatrixRequests.delete(requestKey);
+      });
+    traceabilityMatrixRequests.set(requestKey, request);
+    return request;
   },
   getCoverageReports: async (projectId: number) => {
     const response = await api.get(`/analytics/coverage-reports?project_id=${projectId}`);
@@ -863,6 +1055,15 @@ export const auditAPI = {
 };
 
 // Custom Fields API
+export type CustomFieldEntityType = 'test_case' | 'test_run' | 'defect' | 'requirement';
+
+export const CUSTOM_FIELD_ENTITY_TYPES: CustomFieldEntityType[] = [
+  'test_case',
+  'test_run',
+  'defect',
+  'requirement',
+];
+
 export const customFieldsAPI = {
   getAll: async (projectId?: number, skip = 0, limit = 100) => {
     const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
@@ -886,9 +1087,12 @@ export const customFieldsAPI = {
     const response = await api.delete(`/custom-fields/${id}`);
     return response.data;
   },
-  getDefinitions: async (projectId?: number) => {
-    const params = projectId ? `?project_id=${projectId}` : '';
-    const response = await api.get(`/custom-fields/definitions${params}`);
+  getDefinitions: async (projectId?: number, entityType?: CustomFieldEntityType) => {
+    const params = new URLSearchParams();
+    if (projectId) params.append('project_id', String(projectId));
+    if (entityType) params.append('entity_type', entityType);
+    const qs = params.toString();
+    const response = await api.get(`/custom-fields/definitions${qs ? `?${qs}` : ''}`);
     return response.data;
   },
   createDefinition: async (customField: any) => {
@@ -921,6 +1125,40 @@ export const customFieldsAPI = {
   deleteValue: async (id: number) => {
     const response = await api.delete(`/custom-field-values/${id}`);
     return response.data;
+  },
+  // Polymorphic engine: same endpoints regardless of entity type.
+  listEntityValues: async (entityType: CustomFieldEntityType, entityId: number) => {
+    const response = await api.get(`/custom-fields/entities/${entityType}/${entityId}/values`);
+    return response.data;
+  },
+  createEntityValue: async (
+    entityType: CustomFieldEntityType,
+    entityId: number,
+    fieldDefinitionId: number,
+    value: string | null,
+  ) => {
+    const body: Record<string, unknown> = {
+      field_definition_id: fieldDefinitionId,
+      [`${entityType}_id`]: entityId,
+      value,
+    };
+    const response = await api.post(`/custom-fields/entities/${entityType}/${entityId}/values`, body);
+    return response.data;
+  },
+  updateEntityValue: async (
+    entityType: CustomFieldEntityType,
+    entityId: number,
+    valueId: number,
+    value: string | null,
+  ) => {
+    const response = await api.put(
+      `/custom-fields/entities/${entityType}/${entityId}/values/${valueId}`,
+      { value },
+    );
+    return response.data;
+  },
+  deleteEntityValue: async (entityType: CustomFieldEntityType, entityId: number, valueId: number) => {
+    await api.delete(`/custom-fields/entities/${entityType}/${entityId}/values/${valueId}`);
   },
 };
 
@@ -1242,7 +1480,7 @@ export const testManagementAPI = {
     return response.data;
   },
   createSharedStepTemplate: async (template: any) => {
-    const response = await api.post('/shared-step-templates', template);
+    const response = await api.post('/shared-step-templates/', template);
     return response.data;
   },
   updateSharedStepTemplate: async (templateId: number, template: any) => {

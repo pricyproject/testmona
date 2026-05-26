@@ -30,6 +30,9 @@ export interface TestSuite {
   description?: string;
   project_id: number;
   status: 'active' | 'inactive' | 'archived';
+  // Backend-supplied number of non-deleted test cases that belong to this suite.
+  test_case_count?: number;
+  // Legacy local-only field; kept for callers that still read it but no longer hydrated by the API.
   test_case_ids?: number[];
   created_at: string;
   updated_at?: string;

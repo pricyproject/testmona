@@ -113,6 +113,37 @@ interface SharedStepTemplate {
   created_at: string;
 }
 
+interface SharedStepTemplateForm {
+  name: string;
+  description: string;
+  category: SharedStepTemplate['category'];
+  tags: string;
+  complexity: SharedStepTemplate['complexity'];
+  estimated_time: number | '';
+  prerequisites: string;
+  related_steps: string;
+}
+
+type SharedStepTemplateFormErrors = Partial<Record<keyof SharedStepTemplateForm, string>>;
+
+const SHARED_STEP_TEMPLATE_NAME_MAX_LENGTH = 200;
+const SHARED_STEP_TEMPLATE_DESCRIPTION_MAX_LENGTH = 500;
+const SHARED_STEP_TEMPLATE_LIST_MAX_ITEMS = 50;
+const SHARED_STEP_TEMPLATE_LIST_ITEM_MAX_LENGTH = 100;
+const SHARED_STEP_TEMPLATE_MIN_TIME = 1;
+const SHARED_STEP_TEMPLATE_MAX_TIME = 1440;
+
+const emptySharedStepTemplateForm = (): SharedStepTemplateForm => ({
+  name: '',
+  description: '',
+  category: 'setup',
+  tags: '',
+  complexity: 'simple',
+  estimated_time: 1,
+  prerequisites: '',
+  related_steps: ''
+});
+
 interface TestExecutionSettings {
   id?: number;
   project_id?: number;
@@ -492,6 +523,8 @@ export function Settings() {
   const [testTypeDialogOpen, setTestTypeDialogOpen] = useState(false);
   const [priorityDialogOpen, setPriorityDialogOpen] = useState(false);
   const [sharedStepDialogOpen, setSharedStepDialogOpen] = useState(false);
+  const [sharedStepSubmitting, setSharedStepSubmitting] = useState(false);
+  const [sharedStepFormErrors, setSharedStepFormErrors] = useState<SharedStepTemplateFormErrors>({});
   
   // Seamless UX states
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -515,16 +548,7 @@ export function Settings() {
   // Form states
   const [testTypeForm, setTestTypeForm] = useState({ name: '', description: '', color: '#3B82F6', icon: '🖱️' });
   const [priorityForm, setPriorityForm] = useState({ name: '', value: 2, color: '#F59E0B', description: '', is_default: false });
-  const [sharedStepForm, setSharedStepForm] = useState({ 
-    name: '', 
-    description: '', 
-    category: 'setup' as SharedStepTemplate['category'], 
-    tags: '', 
-    complexity: 'simple' as SharedStepTemplate['complexity'], 
-    estimated_time: 1,
-    prerequisites: '',
-    related_steps: ''
-  });
+  const [sharedStepForm, setSharedStepForm] = useState<SharedStepTemplateForm>(emptySharedStepTemplateForm());
   
   // Auto-focus on input when dialogs open
   useEffect(() => {
@@ -580,16 +604,8 @@ export function Settings() {
       if (!open) {
         setTestTypeForm({ name: '', description: '', color: '#3B82F6', icon: '🖱️' });
         setPriorityForm({ name: '', value: 2, color: '#F59E0B', description: '', is_default: false });
-        setSharedStepForm({ 
-          name: '', 
-          description: '', 
-          category: 'setup' as SharedStepTemplate['category'], 
-          tags: '', 
-          complexity: 'simple' as SharedStepTemplate['complexity'], 
-          estimated_time: 1,
-          prerequisites: '',
-          related_steps: ''
-        });
+        setSharedStepForm(emptySharedStepTemplateForm());
+        setSharedStepFormErrors({});
         setHasUnsavedChanges(false);
       }
     }
@@ -600,16 +616,8 @@ export function Settings() {
     if (discard) {
       setTestTypeForm({ name: '', description: '', color: '#3B82F6', icon: '🖱️' });
       setPriorityForm({ name: '', value: 2, color: '#F59E0B', description: '', is_default: false });
-      setSharedStepForm({ 
-        name: '', 
-        description: '', 
-        category: 'setup' as SharedStepTemplate['category'], 
-        tags: '', 
-        complexity: 'simple' as SharedStepTemplate['complexity'], 
-        estimated_time: 1,
-        prerequisites: '',
-        related_steps: ''
-      });
+      setSharedStepForm(emptySharedStepTemplateForm());
+      setSharedStepFormErrors({});
       setHasUnsavedChanges(false);
       setTestTypeDialogOpen(false);
       setPriorityDialogOpen(false);
@@ -1069,7 +1077,24 @@ export function Settings() {
 
   const getErrorDetail = (error: unknown, fallback: string) => {
     const apiError = error as any;
-    return apiError?.response?.data?.detail || apiError?.message || fallback;
+    const detail = apiError?.response?.data?.detail;
+
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object' && 'msg' in item) return String(item.msg);
+          return '';
+        })
+        .filter(Boolean);
+      if (messages.length > 0) return messages.join(', ');
+    }
+
+    if (detail && typeof detail === 'object' && 'msg' in detail) {
+      return String(detail.msg);
+    }
+
+    return (typeof detail === 'string' && detail) || apiError?.message || fallback;
   };
 
   const showSuccessToast = (description: string) => {
@@ -1085,6 +1110,108 @@ export function Settings() {
       description,
       variant: 'destructive',
     });
+  };
+
+  const resetSharedStepTemplateForm = () => {
+    setSharedStepForm(emptySharedStepTemplateForm());
+    setSharedStepFormErrors({});
+    setEditingSharedStep(null);
+    setIsEditMode(false);
+  };
+
+  const parseTemplateList = (value: string) => {
+    const seen = new Set<string>();
+    return value
+      .split(',')
+      .map(item => item.trim())
+      .filter((item) => {
+        if (!item) return false;
+        const key = item.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+
+  const validateTemplateList = (
+    value: string,
+    field: keyof SharedStepTemplateForm,
+    label: string,
+    errors: SharedStepTemplateFormErrors
+  ) => {
+    const items = parseTemplateList(value);
+    if (items.length > SHARED_STEP_TEMPLATE_LIST_MAX_ITEMS) {
+      errors[field] = t('sharedStepTemplateListTooLong', { field: label, max: SHARED_STEP_TEMPLATE_LIST_MAX_ITEMS });
+      return;
+    }
+
+    if (items.some(item => item.length > SHARED_STEP_TEMPLATE_LIST_ITEM_MAX_LENGTH)) {
+      errors[field] = t('sharedStepTemplateListItemTooLong', { field: label, max: SHARED_STEP_TEMPLATE_LIST_ITEM_MAX_LENGTH });
+    }
+  };
+
+  const validateSharedStepTemplateForm = () => {
+    const errors: SharedStepTemplateFormErrors = {};
+    const name = sharedStepForm.name.trim();
+    const description = sharedStepForm.description.trim();
+    const estimatedTime = Number(sharedStepForm.estimated_time);
+
+    if (!name) {
+      errors.name = t('fieldRequired', { field: t('name') });
+    } else if (name.length > SHARED_STEP_TEMPLATE_NAME_MAX_LENGTH) {
+      errors.name = t('sharedStepTemplateFieldTooLong', { field: t('name'), max: SHARED_STEP_TEMPLATE_NAME_MAX_LENGTH });
+    }
+
+    if (description.length > SHARED_STEP_TEMPLATE_DESCRIPTION_MAX_LENGTH) {
+      errors.description = t('sharedStepTemplateFieldTooLong', { field: t('description'), max: SHARED_STEP_TEMPLATE_DESCRIPTION_MAX_LENGTH });
+    }
+
+    if (!Number.isInteger(estimatedTime) || estimatedTime < SHARED_STEP_TEMPLATE_MIN_TIME || estimatedTime > SHARED_STEP_TEMPLATE_MAX_TIME) {
+      errors.estimated_time = t('sharedStepTemplateEstimatedTimeRange', {
+        min: SHARED_STEP_TEMPLATE_MIN_TIME,
+        max: SHARED_STEP_TEMPLATE_MAX_TIME
+      });
+    }
+
+    validateTemplateList(sharedStepForm.tags, 'tags', t('tags'), errors);
+    validateTemplateList(sharedStepForm.prerequisites, 'prerequisites', t('prerequisites'), errors);
+    validateTemplateList(sharedStepForm.related_steps, 'related_steps', t('relatedSteps'), errors);
+
+    setSharedStepFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const buildSharedStepTemplatePayload = () => ({
+    name: sharedStepForm.name.trim(),
+    description: sharedStepForm.description.trim() || null,
+    category: sharedStepForm.category,
+    tags: parseTemplateList(sharedStepForm.tags),
+    complexity: sharedStepForm.complexity,
+    estimated_time: Number(sharedStepForm.estimated_time),
+    prerequisites: parseTemplateList(sharedStepForm.prerequisites),
+    related_steps: parseTemplateList(sharedStepForm.related_steps)
+  });
+
+  const mapSharedStepTemplate = (template: any): SharedStepTemplate => ({
+    id: template.id.toString(),
+    name: template.name,
+    description: template.description || '',
+    category: template.category,
+    tags: template.tags || [],
+    complexity: template.complexity,
+    estimated_time: template.estimated_time,
+    prerequisites: template.prerequisites || [],
+    related_steps: template.related_steps || [],
+    usage_count: template.usage_count || 0,
+    is_active: template.is_active,
+    created_at: template.created_at
+  });
+
+  const handleSharedStepDialogOpenChange = (open: boolean) => {
+    setSharedStepDialogOpen(open);
+    if (!open) {
+      resetSharedStepTemplateForm();
+    }
   };
 
   const validateBrandingSettings = (): {
@@ -1400,49 +1527,25 @@ export function Settings() {
       handleUpdateSharedStep();
       return;
     }
+
+    if (!validateSharedStepTemplateForm()) {
+      showErrorToast(t('pleaseFixErrorsBeforeSaving'));
+      return;
+    }
     
     try {
-      const newSharedStep = await testManagementAPI.createSharedStepTemplate({
-        name: sharedStepForm.name,
-        description: sharedStepForm.description,
-        category: sharedStepForm.category,
-        tags: sharedStepForm.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-        complexity: sharedStepForm.complexity,
-        estimated_time: sharedStepForm.estimated_time,
-        prerequisites: sharedStepForm.prerequisites.split(',').map(prereq => prereq.trim()).filter(prereq => prereq),
-        related_steps: sharedStepForm.related_steps.split(',').map(step => step.trim()).filter(step => step)
-      });
+      setSharedStepSubmitting(true);
+      const newSharedStep = await testManagementAPI.createSharedStepTemplate(buildSharedStepTemplatePayload());
       
-      setSharedStepTemplates([...sharedStepTemplates, {
-        id: newSharedStep.id.toString(),
-        name: newSharedStep.name,
-        description: newSharedStep.description,
-        category: newSharedStep.category,
-        tags: newSharedStep.tags,
-        complexity: newSharedStep.complexity,
-        estimated_time: newSharedStep.estimated_time,
-        prerequisites: newSharedStep.prerequisites,
-        related_steps: newSharedStep.related_steps,
-        usage_count: newSharedStep.usage_count || 0,
-        is_active: newSharedStep.is_active,
-        created_at: newSharedStep.created_at
-      }]);
-      
-      setSharedStepForm({ 
-        name: '', 
-        description: '', 
-        category: 'setup', 
-        tags: '', 
-        complexity: 'simple', 
-        estimated_time: 1,
-        prerequisites: '',
-        related_steps: ''
-      });
+      setSharedStepTemplates(current => [...current, mapSharedStepTemplate(newSharedStep)]);
+      resetSharedStepTemplateForm();
       setSharedStepDialogOpen(false);
 	      showSuccessToast(t('sharedStepTemplateCreatedSuccessfully'));
-	    } catch (error) {
+	    } catch (error: any) {
 	      console.error('Failed to create shared step template:', error);
-	      showErrorToast(t('failedToCreateSharedStepTemplate'));
+	      showErrorToast(getErrorDetail(error, t('failedToCreateSharedStepTemplate')));
+	    } finally {
+	      setSharedStepSubmitting(false);
 	    }
 	  };
 
@@ -1660,13 +1763,14 @@ export function Settings() {
 
   const handleEditSharedStep = (step: SharedStepTemplate) => {
     setEditingSharedStep(step);
+    setSharedStepFormErrors({});
     setSharedStepForm({
       name: step.name,
       description: step.description,
       category: step.category,
       tags: step.tags.join(', '),
       complexity: step.complexity,
-      estimated_time: step.estimated_time,
+      estimated_time: step.estimated_time || 1,
       prerequisites: step.prerequisites.join(', '),
       related_steps: step.related_steps.join(', ')
     });
@@ -1676,13 +1780,14 @@ export function Settings() {
 
   const handleDuplicateSharedStep = (step: SharedStepTemplate) => {
     setEditingSharedStep(null);
+    setSharedStepFormErrors({});
     setSharedStepForm({
       name: `${step.name} (Copy)`,
       description: step.description,
       category: step.category,
       tags: step.tags.join(', '),
       complexity: step.complexity,
-      estimated_time: step.estimated_time,
+      estimated_time: step.estimated_time || 1,
       prerequisites: step.prerequisites.join(', '),
       related_steps: step.related_steps.join(', ')
     });
@@ -1698,50 +1803,41 @@ export function Settings() {
 
   const handleUpdateSharedStep = async () => {
     if (!editingSharedStep) return;
+
+    if (!validateSharedStepTemplateForm()) {
+      showErrorToast(t('pleaseFixErrorsBeforeSaving'));
+      return;
+    }
     
     try {
-      const updatedStep = await testManagementAPI.updateSharedStepTemplate(parseInt(editingSharedStep.id), {
-        name: sharedStepForm.name,
-        description: sharedStepForm.description,
-        category: sharedStepForm.category,
-        tags: sharedStepForm.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-        complexity: sharedStepForm.complexity,
-        estimated_time: sharedStepForm.estimated_time,
-        prerequisites: sharedStepForm.prerequisites.split(',').map(prereq => prereq.trim()).filter(prereq => prereq),
-        related_steps: sharedStepForm.related_steps.split(',').map(step => step.trim()).filter(step => step)
-      });
+      setSharedStepSubmitting(true);
+      const updatedStep = await testManagementAPI.updateSharedStepTemplate(
+        parseInt(editingSharedStep.id),
+        buildSharedStepTemplatePayload()
+      );
       
       setSharedStepTemplates(sharedStepTemplates.map(step => 
         step.id === editingSharedStep.id ? {
           ...step,
           name: updatedStep.name,
-          description: updatedStep.description,
+          description: updatedStep.description || '',
           category: updatedStep.category,
-          tags: updatedStep.tags,
+          tags: updatedStep.tags || [],
           complexity: updatedStep.complexity,
           estimated_time: updatedStep.estimated_time,
-          prerequisites: updatedStep.prerequisites,
-          related_steps: updatedStep.related_steps
+          prerequisites: updatedStep.prerequisites || [],
+          related_steps: updatedStep.related_steps || []
         } : step
       ));
       
-      setSharedStepForm({ 
-        name: '', 
-        description: '', 
-        category: 'setup', 
-        tags: '', 
-        complexity: 'simple', 
-        estimated_time: 1,
-        prerequisites: '',
-        related_steps: ''
-      });
-      setEditingSharedStep(null);
-      setIsEditMode(false);
+      resetSharedStepTemplateForm();
       setSharedStepDialogOpen(false);
 	      showSuccessToast(t('sharedStepTemplateUpdatedSuccessfully'));
-	    } catch (error) {
+	    } catch (error: any) {
 	      console.error('Failed to update shared step template:', error);
-	      showErrorToast(t('failedToUpdateSharedStepTemplate'));
+	      showErrorToast(getErrorDetail(error, t('failedToUpdateSharedStepTemplate')));
+	    } finally {
+	      setSharedStepSubmitting(false);
 	    }
   };
 
@@ -2502,9 +2598,9 @@ export function Settings() {
                   <Layers className="h-5 w-5 text-purple-600" />
                   <CardTitle>{t('sharedStepTemplates')}</CardTitle>
                 </div>
-                <Dialog open={sharedStepDialogOpen} onOpenChange={setSharedStepDialogOpen}>
+                <Dialog open={sharedStepDialogOpen} onOpenChange={handleSharedStepDialogOpenChange}>
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button onClick={resetSharedStepTemplateForm}>
                       <Plus className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
                       {t('addTemplate')}
                     </Button>
@@ -2519,24 +2615,47 @@ export function Settings() {
                     <div className="grid gap-4 py-4">
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="step-name" className="text-end">{t('name')}</Label>
-                        <Input
-                          id="step-name"
-                          value={sharedStepForm.name}
-                          onChange={(e) => setSharedStepForm({...sharedStepForm, name: e.target.value})}
-                          className="col-span-3"
-                          placeholder={t('sharedStepNamePlaceholder')}
-                        />
+                        <div className="col-span-3 space-y-1">
+                          <Input
+                            id="step-name"
+                            ref={sharedStepNameInputRef}
+                            value={sharedStepForm.name}
+                            onChange={(e) => {
+                              setSharedStepForm({...sharedStepForm, name: e.target.value});
+                              setSharedStepFormErrors(current => ({ ...current, name: undefined }));
+                            }}
+                            className={sharedStepFormErrors.name ? 'border-red-300 focus:border-red-500' : ''}
+                            placeholder={t('sharedStepNamePlaceholder')}
+                            maxLength={SHARED_STEP_TEMPLATE_NAME_MAX_LENGTH}
+                            aria-invalid={Boolean(sharedStepFormErrors.name)}
+                          />
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span className="text-red-600">{sharedStepFormErrors.name}</span>
+                            <span>{t('characterCount', { count: sharedStepForm.name.length, max: SHARED_STEP_TEMPLATE_NAME_MAX_LENGTH })}</span>
+                          </div>
+                        </div>
                       </div>
                       <div className="grid grid-cols-4 items-start gap-4">
                         <Label htmlFor="step-description" className="text-end pt-2">{t('description')}</Label>
-                        <Textarea
-                          id="step-description"
-                          value={sharedStepForm.description}
-                          onChange={(e) => setSharedStepForm({...sharedStepForm, description: e.target.value})}
-                          className="col-span-3"
-                          placeholder={t('stepDescriptionPlaceholder')}
-                          rows={2}
-                        />
+                        <div className="col-span-3 space-y-1">
+                          <Textarea
+                            id="step-description"
+                            value={sharedStepForm.description}
+                            onChange={(e) => {
+                              setSharedStepForm({...sharedStepForm, description: e.target.value});
+                              setSharedStepFormErrors(current => ({ ...current, description: undefined }));
+                            }}
+                            className={sharedStepFormErrors.description ? 'border-red-300 focus:border-red-500' : ''}
+                            placeholder={t('stepDescriptionPlaceholder')}
+                            rows={2}
+                            maxLength={SHARED_STEP_TEMPLATE_DESCRIPTION_MAX_LENGTH}
+                            aria-invalid={Boolean(sharedStepFormErrors.description)}
+                          />
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span className="text-red-600">{sharedStepFormErrors.description}</span>
+                            <span>{t('characterCount', { count: sharedStepForm.description.length, max: SHARED_STEP_TEMPLATE_DESCRIPTION_MAX_LENGTH })}</span>
+                          </div>
+                        </div>
                       </div>
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="step-category" className="text-end">{t('category')}</Label>
@@ -2575,62 +2694,83 @@ export function Settings() {
                           id="step-time"
                           type="number"
                           min="1"
+                          max={SHARED_STEP_TEMPLATE_MAX_TIME}
                           value={sharedStepForm.estimated_time}
-                          onChange={(e) => setSharedStepForm({...sharedStepForm, estimated_time: parseInt(e.target.value)})}
-                          className="col-span-3"
+                          onChange={(e) => {
+                            setSharedStepForm({
+                              ...sharedStepForm,
+                              estimated_time: e.target.value === '' ? '' : Number(e.target.value)
+                            });
+                            setSharedStepFormErrors(current => ({ ...current, estimated_time: undefined }));
+                          }}
+                          className={`col-span-3 ${sharedStepFormErrors.estimated_time ? 'border-red-300 focus:border-red-500' : ''}`}
+                          aria-invalid={Boolean(sharedStepFormErrors.estimated_time)}
                         />
+                        {sharedStepFormErrors.estimated_time && (
+                          <p className="col-span-3 col-start-2 text-xs text-red-600">{sharedStepFormErrors.estimated_time}</p>
+                        )}
                       </div>
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="step-tags" className="text-end">{t('tags')}</Label>
-                        <Input
-                          id="step-tags"
-                          value={sharedStepForm.tags}
-                          onChange={(e) => setSharedStepForm({...sharedStepForm, tags: e.target.value})}
-                          className="col-span-3"
-                          placeholder={t('tagsPlaceholder')}
-                        />
+                        <div className="col-span-3 space-y-1">
+                          <Input
+                            id="step-tags"
+                            value={sharedStepForm.tags}
+                            onChange={(e) => {
+                              setSharedStepForm({...sharedStepForm, tags: e.target.value});
+                              setSharedStepFormErrors(current => ({ ...current, tags: undefined }));
+                            }}
+                            className={sharedStepFormErrors.tags ? 'border-red-300 focus:border-red-500' : ''}
+                            placeholder={t('tagsPlaceholder')}
+                            aria-invalid={Boolean(sharedStepFormErrors.tags)}
+                          />
+                          {sharedStepFormErrors.tags && <p className="text-xs text-red-600">{sharedStepFormErrors.tags}</p>}
+                        </div>
                       </div>
                       <div className="grid grid-cols-4 items-start gap-4">
                         <Label htmlFor="step-prerequisites" className="text-end pt-2">{t('prerequisites')}</Label>
-                        <Textarea
-                          id="step-prerequisites"
-                          value={sharedStepForm.prerequisites}
-                          onChange={(e) => setSharedStepForm({...sharedStepForm, prerequisites: e.target.value})}
-                          className="col-span-3"
-                          placeholder={t('prerequisitesPlaceholder')}
-                          rows={2}
-                        />
+                        <div className="col-span-3 space-y-1">
+                          <Textarea
+                            id="step-prerequisites"
+                            value={sharedStepForm.prerequisites}
+                            onChange={(e) => {
+                              setSharedStepForm({...sharedStepForm, prerequisites: e.target.value});
+                              setSharedStepFormErrors(current => ({ ...current, prerequisites: undefined }));
+                            }}
+                            className={sharedStepFormErrors.prerequisites ? 'border-red-300 focus:border-red-500' : ''}
+                            placeholder={t('prerequisitesPlaceholder')}
+                            rows={2}
+                            aria-invalid={Boolean(sharedStepFormErrors.prerequisites)}
+                          />
+                          {sharedStepFormErrors.prerequisites && <p className="text-xs text-red-600">{sharedStepFormErrors.prerequisites}</p>}
+                        </div>
                       </div>
                       <div className="grid grid-cols-4 items-start gap-4">
                         <Label htmlFor="step-related" className="text-end pt-2">{t('relatedSteps')}</Label>
-                        <Textarea
-                          id="step-related"
-                          value={sharedStepForm.related_steps}
-                          onChange={(e) => setSharedStepForm({...sharedStepForm, related_steps: e.target.value})}
-                          className="col-span-3"
-                          placeholder={t('relatedStepsPlaceholder')}
-                          rows={2}
-                        />
+                        <div className="col-span-3 space-y-1">
+                          <Textarea
+                            id="step-related"
+                            value={sharedStepForm.related_steps}
+                            onChange={(e) => {
+                              setSharedStepForm({...sharedStepForm, related_steps: e.target.value});
+                              setSharedStepFormErrors(current => ({ ...current, related_steps: undefined }));
+                            }}
+                            className={sharedStepFormErrors.related_steps ? 'border-red-300 focus:border-red-500' : ''}
+                            placeholder={t('relatedStepsPlaceholder')}
+                            rows={2}
+                            aria-invalid={Boolean(sharedStepFormErrors.related_steps)}
+                          />
+                          {sharedStepFormErrors.related_steps && <p className="text-xs text-red-600">{sharedStepFormErrors.related_steps}</p>}
+                        </div>
                       </div>
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => {
-                        setSharedStepDialogOpen(false);
-                        setEditingSharedStep(null);
-                        setIsEditMode(false);
-                        setSharedStepForm({ 
-                          name: '', 
-                          description: '', 
-                          category: 'setup' as SharedStepTemplate['category'], 
-                          tags: '', 
-                          complexity: 'simple' as SharedStepTemplate['complexity'], 
-                          estimated_time: 1,
-                          prerequisites: '',
-                          related_steps: ''
-                        });
-                      }}>{t('cancel')}</Button>
-                      <Button onClick={handleCreateSharedStep} disabled={!sharedStepForm.name.trim()}>
-                        {isEditMode ? t('updateTemplate') : t('createTemplate')}
+                        handleSharedStepDialogOpenChange(false);
+                      }} disabled={sharedStepSubmitting}>{t('cancel')}</Button>
+                      <Button onClick={handleCreateSharedStep} disabled={sharedStepSubmitting || !sharedStepForm.name.trim()}>
+                        {sharedStepSubmitting && <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" />}
+                        {sharedStepSubmitting ? (isEditMode ? t('updating') : t('creating')) : (isEditMode ? t('updateTemplate') : t('createTemplate'))}
                       </Button>
                     </DialogFooter>
                   </DialogContent>

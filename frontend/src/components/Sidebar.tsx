@@ -14,13 +14,16 @@ import {
   Flag,
   ChevronLeft,
   Settings2,
-  FolderTree,
   User,
   Sparkles,
   Database,
   Layers,
   Wrench,
   ClipboardList,
+  Network,
+  Users,
+  Webhook,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
@@ -128,7 +131,6 @@ export function Sidebar({
           { name: t('testCases'), href: `/projects/${projectId}/test-cases`, icon: FileText },
           { name: t('testSuites'), href: `/projects/${projectId}/test-suites`, icon: TestTube },
           { name: t('testRuns'), href: `/projects/${projectId}/test-runs`, icon: PlayCircle },
-          { name: t('sections'), href: `/projects/${projectId}/sections`, icon: FolderTree },
         ]
       },
       {
@@ -142,15 +144,18 @@ export function Sidebar({
         name: t('management'),
         items: [
           { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug },
+          { name: t('traceability'), href: `/projects/${projectId}/traceability`, icon: Network },
           { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3 },
         ]
       },
       {
         name: t('configuration'),
         items: [
+          { name: t('projectMembers'), href: `/projects/${projectId}/members`, icon: Users },
           { name: t('customFields'), href: `/projects/${projectId}/custom-fields`, icon: Database },
           { name: t('sharedSteps'), href: `/projects/${projectId}/shared-steps`, icon: Layers },
           { name: t('globalParameters'), href: `/projects/${projectId}/global-parameters`, icon: Wrench },
+          { name: t('webhooks'), href: `/projects/${projectId}/webhooks`, icon: Webhook },
         ]
       },
       {
@@ -163,6 +168,7 @@ export function Sidebar({
         name: t('user'),
         items: [
           { name: t('profile'), href: '/profile', icon: User },
+          { name: t('apiTokens'), href: '/api-tokens', icon: KeyRound },
           { name: t('settings'), href: '/settings', icon: Settings2 },
         ]
       }
