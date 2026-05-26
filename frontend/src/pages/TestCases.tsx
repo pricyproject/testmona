@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
@@ -90,6 +90,8 @@ import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
 import { Section } from '@/types/testCases';
 import { ImportPreview } from '@/components/ImportPreview';
 import { SortableTestCaseRow } from '@/components/TestCases/SortableTestCaseRow';
+import { SavedFilters } from '@/components/SavedFilters';
+import { BulkEditTestCasesDialog } from '@/components/BulkEditTestCasesDialog';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 const CUSTOM_FIELD_FILTER_ALL = 'all';
@@ -98,7 +100,9 @@ const CUSTOM_FIELD_FILTER_ANY_VALUE = '__any__';
 export function TestCases() {
   const { t, isRTL } = useTranslation();
   const navigate = useNavigate();
-  const { projectId, sectionId: urlSectionId } = useParams<{ projectId?: string; sectionId?: string }>();
+  const { projectId } = useParams<{ projectId?: string }>();
+  const [searchParams] = useSearchParams();
+  const urlSectionId = searchParams.get('section');
   const { toast } = useToast();
   const currentProjectId = useMemo(() => {
     const parsedProjectId = Number(projectId);
@@ -238,6 +242,7 @@ export function TestCases() {
   // Bulk actions state
   const [selectedTestCases, setSelectedTestCases] = useState<number[]>([]);
   const [selectAll, setSelectAll] = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
 
   // Dialog states
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -246,10 +251,9 @@ export function TestCases() {
   const [selectedTestCaseForHistory, setSelectedTestCaseForHistory] = useState<TestCase | null>(null);
   const [revisions, setRevisions] = useState<any[]>([]);
   const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
-  const [sectionDialogOpen, setSectionDialogOpen] = useState(false);
-  const [newSectionName, setNewSectionName] = useState('');
-  const [newSectionParentId, setNewSectionParentId] = useState<string>('none');
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all', '29', '30', '31', '32', '33', '34', '35']));
+  // Only the 'all' bucket is pre-expanded; section ids are added as the API hierarchy
+  // loads so we don't bake any project's actual ids into source.
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all']));
   const [sectionsPanelCollapsed, setSectionsPanelCollapsed] = useState(false);
 
   // Move test case dialog state
@@ -343,34 +347,9 @@ export function TestCases() {
       try {
         const fields = await customFieldsAPI.getDefinitions(currentProjectId);
         setCustomFields(fields);
-
-        const loadTime = performance.now() - startTime;
-        console.log(`Custom fields loaded in ${loadTime.toFixed(2)}ms`);
       } catch (error) {
-        console.log('Using mock custom fields - API not available:', error);
-        // Mock custom fields for demonstration
-        const mockCustomFields: CustomFieldDefinition[] = [
-          {
-            id: 1,
-            name: 'Test Environment',
-            field_type: 'select',
-            description: 'Select the test environment',
-            project_id: currentProjectId,
-            is_required: true,
-            options: ['Development', 'Staging', 'Production'],
-            created_at: new Date().toISOString()
-          },
-          {
-            id: 2,
-            name: 'Estimated Duration',
-            field_type: 'number',
-            description: 'Estimated test duration in minutes',
-            project_id: currentProjectId,
-            is_required: false,
-            created_at: new Date().toISOString()
-          }
-        ];
-        setCustomFields(mockCustomFields);
+        console.error('Failed to load custom field definitions:', error);
+        setCustomFields([]);
       } finally {
         setIsCustomFieldsLoading(false);
       }
@@ -399,16 +378,12 @@ export function TestCases() {
     const loadEnums = async () => {
       try {
         setIsEnumsLoading(true);
-        const startTime = performance.now();
 
-        // Get token from localStorage
         const token = localStorage.getItem('token');
         if (!token) {
-          console.log('No authentication token, using fallback enums');
           throw new Error('No authentication token');
         }
 
-        // Load from new database endpoints
         const [prioritiesResponse, testTypesResponse] = await Promise.all([
           fetch(`${API_BASE_URL}/priority-definitions/`, {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -419,17 +394,15 @@ export function TestCases() {
         ]);
 
         if (!prioritiesResponse.ok || !testTypesResponse.ok) {
-          throw new Error('Failed to fetch from database');
+          throw new Error('Failed to fetch enum definitions');
         }
 
         const prioritiesData = await prioritiesResponse.json();
         const testTypesData = await testTypesResponse.json();
 
-        // Store raw database data for badges
         setDbPriorities(prioritiesData.filter((p: any) => p.is_active));
         setDbTestTypes(testTypesData.filter((t: any) => t.is_active));
 
-        // Transform database data to match the expected format
         const priorityOptions = prioritiesData
           .filter((p: any) => p.is_active)
           .sort((a: any, b: any) => b.value - a.value)
@@ -449,39 +422,22 @@ export function TestCases() {
         setTestTypeOptions(testTypeOptions);
         setTestTypes(testTypeOptions.map((option) => option.value));
 
-        // Set default priority from database
         const defaultPriority = prioritiesData.find((p: any) => p.is_default && p.is_active);
         if (defaultPriority) {
           setTestCaseForm(prev => ({ ...prev, priority: defaultPriority.name.toLowerCase() }));
         } else if (priorityOptions.length > 0) {
-          // Fallback to first priority if no default is set
           setTestCaseForm(prev => ({ ...prev, priority: priorityOptions[0].value }));
         }
-
-        const loadTime = performance.now() - startTime;
-        console.log(`Enums loaded from database in ${loadTime.toFixed(2)}ms`);
       } catch (error) {
-        console.log('Using fallback enums - API not available:', error);
-        // Fallback to basic options if API fails
-        const fallbackPriorities = [
-          { value: 'low', label: 'Low' },
-          { value: 'medium', label: 'Medium' },
-          { value: 'high', label: 'High' },
-          { value: 'critical', label: 'Critical' }
-        ];
-        const fallbackTestTypes = [
-          { value: 'manual', label: 'Manual' },
-          { value: 'automated', label: 'Automated' },
-          { value: 'smoke', label: 'Smoke' },
-          { value: 'regression', label: 'Regression' },
-          { value: 'integration', label: 'Integration' },
-          { value: 'security', label: 'Security' },
-          { value: 'performance', label: 'Performance' },
-          { value: 'usability', label: 'Usability' }
-        ];
-        setPriorityOptions(fallbackPriorities);
-        setTestTypeOptions(fallbackTestTypes);
-        setTestTypes(fallbackTestTypes.map((option) => option.value));
+        console.error('Failed to load enum definitions:', error);
+        setPriorityOptions([]);
+        setTestTypeOptions([]);
+        setTestTypes([]);
+        toast({
+          title: t('error'),
+          description: t('failedToLoadEnums'),
+          variant: 'destructive',
+        });
       } finally {
         setIsEnumsLoading(false);
       }
@@ -715,31 +671,16 @@ export function TestCases() {
 
       try {
         setIsEnvironmentsLoading(true);
-        const startTime = performance.now();
-
         const data = await environmentsAPI.getAll(currentProjectId);
-
-        // Transform environment data to match the expected format
         const transformedEnvironments = data.map((env: any) => ({
           id: env.id.toString(),
           name: env.name,
           description: env.description || `${env.name} environment`
         }));
-
         setEnvironments(transformedEnvironments);
-
-        const loadTime = performance.now() - startTime;
-        console.log(`Environments loaded in ${loadTime.toFixed(2)}ms`);
       } catch (error) {
-        console.log('Using fallback environments - API not available:', error);
-        // Fallback to basic environments if API fails
-        const fallbackEnvironments = [
-          { id: 'development', name: 'Development', description: 'Development environment for testing' },
-          { id: 'staging', name: 'Staging', description: 'Staging environment for pre-production testing' },
-          { id: 'production', name: 'Production', description: 'Production environment for live testing' },
-          { id: 'qa', name: 'QA', description: 'Quality assurance environment' }
-        ];
-        setEnvironments(fallbackEnvironments);
+        console.error('Failed to load environments:', error);
+        setEnvironments([]);
       } finally {
         setIsEnvironmentsLoading(false);
       }
@@ -757,39 +698,22 @@ export function TestCases() {
     requestAnimationFrame(() => {
       setIsDialogOpen(true);
       setIsModalOpening(false);
-
-      const openTime = performance.now() - startTime;
-      console.log(`Modal opened in ${openTime.toFixed(2)}ms`);
     });
   };
 
-  // Focus management with optimization
+  // Focus management
   useEffect(() => {
     if (isDialogOpen && titleInputRef.current && !isModalOpening) {
-      const focusStartTime = performance.now();
-
-      // Use setTimeout to ensure DOM is ready
       setTimeout(() => {
         titleInputRef.current?.focus();
-        const focusTime = performance.now() - focusStartTime;
-        console.log(`Focus set in ${focusTime.toFixed(2)}ms`);
-      }, 50); // Reduced from 100ms for faster focus
+      }, 50);
     }
   }, [isDialogOpen, isModalOpening]);
 
-  // Load test cases from API and when section selection changes
+  // Load test cases when project / sort changes; client-side filter handles selection.
   useEffect(() => {
-    // Load all test cases for the project
-    // Client-side filtering handles section selection, so no need to reload on selection change
     loadTestCases();
   }, [currentProjectId, sortField, sortDirection]);
-
-  // Add console logging for debugging
-  useEffect(() => {
-    console.log('TestCases component mounted with projectId:', projectId);
-    console.log('Current apiTestCases:', apiTestCases);
-    console.log('Current selectedTestSuite:', selectedTestSuite);
-  }, [projectId, apiTestCases, selectedTestSuite]);
 
   // Helper function to get all section IDs including children (recursive)
   const getAllSectionIds = (sectionId: string, sections: Section[]): number[] => {
@@ -825,33 +749,28 @@ export function TestCases() {
 
     setLoading(true);
     try {
-      // Load ALL test cases for the project to ensure accurate counts for all sections
-      // Client-side filtering will handle display filtering based on selectedTestSuite
-      console.log('Loading test cases for project:', currentProjectId);
-
+      // Load ALL cases for the project; selection is applied client-side.
       const [testCases, count] = await Promise.all([
         testCasesAPI.getAll(
           currentProjectId,
-          undefined, // Don't filter by test suite
-          undefined, // Don't filter by section
+          undefined,
+          undefined,
           sortField,
           sortDirection
         ),
         testCasesAPI.getCount(currentProjectId),
       ]);
 
-      console.log('Loaded test cases:', testCases.length);
       setApiTestCases(testCases);
       setTotalCount(count.count);
 
-      // Extract test types from loaded data
       const types = Array.from(new Set([
         ...testTypeOptions.map((option) => option.value),
         ...extractTestTypes(testCases),
       ])).sort();
       setTestTypes(types);
     } catch (error) {
-      console.log('Failed to load test cases from API:', error);
+      console.error('Failed to load test cases:', error);
       setApiTestCases([]);
       setTotalCount(0);
     } finally {
@@ -870,55 +789,10 @@ export function TestCases() {
     return Array.from(types).sort();
   };
 
-  // Mock sections with tree structure (updated with real section IDs)
-  const [mockSections, setMockSectionsState] = useState<Section[]>([
-    {
-      id: '1',
-      name: 'Authentication',
-      testCaseCount: 2,
-      expanded: true,
-      children: [
-        {
-          id: '2',
-          name: 'Login',
-          parentId: '1',
-          testCaseCount: 2,
-          expanded: false,
-        },
-        {
-          id: '3',
-          name: 'Register',
-          parentId: '1',
-          testCaseCount: 2,
-          expanded: false,
-        },
-      ],
-    },
-    {
-      id: '6',
-      name: 'User Management',
-      testCaseCount: 1,
-      expanded: true,
-      children: [
-        {
-          id: '9',
-          name: 'user management basics',
-          parentId: '6',
-          testCaseCount: 0,
-          expanded: false,
-        },
-      ],
-    },
-    {
-      id: '10',
-      name: 'Reporting',
-      testCaseCount: 0,
-      expanded: false,
-      children: [],
-    },
-  ]);
+  // Project-wide section tree, loaded from sectionsAPI.getProjectSectionHierarchy.
+  // Starts empty — no mock data is shown before the API responds or if it fails.
+  const [mockSections, setMockSectionsState] = useState<Section[]>([]);
 
-  // Custom setter to update both state and ref
   const setMockSections = (sections: Section[] | ((prev: Section[]) => Section[])) => {
     if (typeof sections === 'function') {
       setMockSectionsState(prev => {
@@ -934,16 +808,10 @@ export function TestCases() {
 
   // Load sections from API
   const loadSections = async () => {
-    if (!currentProjectId) {
-      console.log('No project ID available, skipping sections load');
-      return;
-    }
+    if (!currentProjectId) return;
 
     try {
-      // Use the project hierarchy API to get sections from all test suites
       const hierarchyData = await sectionsAPI.getProjectSectionHierarchy(currentProjectId);
-
-      console.log('Hierarchy data received:', hierarchyData);
 
       if (hierarchyData && hierarchyData.hierarchy && hierarchyData.hierarchy.length > 0) {
         // Transform API data directly to our Section interface without flattening
@@ -971,11 +839,7 @@ export function TestCases() {
           return sectionData;
         };
 
-        // Process each test suite
         hierarchyData.hierarchy.forEach((suiteData: any) => {
-          console.log(`Processing test suite: ${suiteData.test_suite.name} (ID: ${suiteData.test_suite.id})`);
-          console.log(`  Sections count: ${suiteData.sections?.length || 0}`);
-
           if (suiteData.sections && suiteData.sections.length > 0) {
             suiteData.sections.forEach((section: any) => {
               const transformedSection = transformSection(section, 0);
@@ -993,58 +857,16 @@ export function TestCases() {
           }
         });
 
-        console.log('Transformed sections:', allSections);
         setMockSections(allSections);
       } else {
-        // No test suites or hierarchy data
         setMockSections([]);
       }
     } catch (error) {
-      console.log('Using mock sections - API not available:', error);
-      // Keep using mock sections if API fails
+      console.error('Failed to load section hierarchy:', error);
+      setMockSections([]);
     }
   };
 
-  // Calculate cumulative test case count for a section (including all subsections)
-  const calculateCumulativeCount = (section: Section): number => {
-    let count = apiTestCases.filter(testCase => testCase.section_id === parseInt(section.id)).length;
-
-    if (section.children && section.children.length > 0) {
-      section.children.forEach(child => {
-        count += calculateCumulativeCount(child);
-      });
-    }
-
-    return count;
-  };
-
-  // Recalculate section test case counts when test cases change
-  // DISABLED: Counts are already calculated in loadSections and this was causing sections to disappear
-  // useEffect(() => {
-  //   if (mockSections.length > 0) {
-  //     const updatedSections = mockSections.map(section => {
-  //       const directCount = apiTestCases.filter(testCase => testCase.section_id === parseInt(section.id)).length;
-  //       const cumulativeCount = calculateCumulativeCount(section);
-  //
-  //       return {
-  //         ...section,
-  //         testCaseCount: directCount,
-  //         cumulativeCount: cumulativeCount,
-  //         children: section.children?.map(child => {
-  //           const childDirectCount = apiTestCases.filter(testCase => testCase.section_id === parseInt(child.id)).length;
-  //           const childCumulativeCount = calculateCumulativeCount(child);
-  //
-  //           return {
-  //             ...child,
-  //             testCaseCount: childDirectCount,
-  //             cumulativeCount: childCumulativeCount,
-  //           };
-  //         })
-  //       };
-  //     });
-  //     setMockSections(updatedSections);
-  //   }
-  // }, [apiTestCases, mockSections.length]); // Only depend on apiTestCases and mockSections.length, not mockSections itself
   useEffect(() => {
     const initializeData = async () => {
       // Clear sections when project changes
@@ -1053,7 +875,6 @@ export function TestCases() {
 
       await loadTestSuite();
       await loadTestCases();
-      // loadCustomFields();
     };
 
     initializeData();
@@ -1081,11 +902,11 @@ export function TestCases() {
       const testSuites = await testSuitesAPI.getAll(currentProjectId);
 
       if (testSuites && testSuites.length > 0) {
-        // Use the first test suite for this project
+        // Auto-select the first suite as the active context for "Add Test Case" /
+        // "Import / Export" actions. The user can still browse all suites' cases via
+        // the section panel (clicking sections changes the filter, not this default).
         setCurrentTestSuiteId(testSuites[0].id);
-        console.log('Loaded test suite for project:', testSuites[0].id);
       } else {
-        console.warn('No test suites found for project:', currentProjectId);
         setCurrentTestSuiteId(null);
       }
     } catch (error) {
@@ -1217,7 +1038,6 @@ export function TestCases() {
                   : 'hover:bg-gray-100 dark:hover:bg-gray-700'
               }`}
               onClick={() => {
-                console.log('Section clicked:', section.name, 'ID:', section.id);
                 setSelectedTestSuite(section.id);
                 if (hasChildren) {
                   toggleSectionExpansion(section.id);
@@ -1316,12 +1136,8 @@ export function TestCases() {
       if (selectedTestSuite === sectionId) {
         setSelectedTestSuite('all');
       }
-
-      console.log(`Section "${sectionName}" deleted successfully`);
     }
   };
-  // Mock test cases (not currently used - using API data instead)
-  // const mockTestCases: TestCase[] = [];
 
   const customFieldById = useMemo(() => {
     return customFields.reduce<Record<number, CustomFieldDefinition>>((fieldsById, field) => {
@@ -1437,11 +1253,9 @@ export function TestCases() {
 
   // Filtered and sorted test cases (client-side filtering only for search and filters)
   const filteredAndSortedTestCases = useMemo(() => {
-    console.log('Filtering test cases. selectedTestSuite:', selectedTestSuite);
-    // Use API data instead of mock data
     const normalizedSearchQuery = normalizeSearchValue(searchQuery);
 
-    let filtered = apiTestCases.filter(testCase => {
+    return apiTestCases.filter(testCase => {
       const standardSearchText = [
         testCase.title,
         testCase.description,
@@ -1456,17 +1270,15 @@ export function TestCases() {
 
       const matchesType = filterType === 'all' || normalizeSearchValue(testCase.test_type) === normalizeSearchValue(filterType);
       const matchesPriority = filterPriority === 'all' || testCase.priority === filterPriority;
+      // `selectedTestSuite` is set by the left-panel section tree, so it's always
+      // a section id (or 'all'). Matching it against `test_suite_id` too — as the
+      // previous version did — silently leaked rows whenever a suite happened to
+      // share its numeric id with an unrelated section.
       const matchesSuite = selectedTestSuite === 'all' ||
-                           testCase.test_suite_id === parseInt(selectedTestSuite) ||
                            testCase.section_id === parseInt(selectedTestSuite);
-
-      console.log('TestCase:', testCase.title, 'suite_id:', testCase.test_suite_id, 'section_id:', testCase.section_id, 'matchesSuite:', matchesSuite);
 
       return matchesSearch && matchesCustomField && matchesType && matchesPriority && matchesSuite;
     });
-
-    console.log('Filtered test cases count:', filtered.length);
-    return filtered;
   }, [apiTestCases, searchQuery, customFieldFilterId, customFieldFilterValue, filterType, filterPriority, selectedTestSuite, selectedCustomFieldFilter]);
 
   // Reset page when filters change
@@ -1900,9 +1712,6 @@ export function TestCases() {
     try {
       setIsCreating(true);
 
-      console.log('Creating test case:', newTestCase);
-
-      // Call the real API (test_steps are included in the request)
       const createdTestCase = await testCasesAPI.create(newTestCase);
       const customFieldValueRequests = Object.entries(customFieldValues)
         .filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -2408,55 +2217,6 @@ export function TestCases() {
     }
   };
 
-  const handleCreateSection = async () => {
-    if (!currentTestSuiteId) {
-      toast({
-        title: t('error'),
-        description: t('noTestSuiteFound'),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      console.log('Creating section:', {
-        name: newSectionName,
-        parent_id: newSectionParentId === 'none' ? null : newSectionParentId
-      });
-
-      // Create the section via API
-      const newSection = await sectionsAPI.create({
-        name: newSectionName,
-        test_suite_id: currentTestSuiteId,
-        parent_section_id: newSectionParentId === 'none' ? undefined : parseInt(newSectionParentId)
-      });
-
-      console.log('Section created successfully:', newSection);
-
-      // Reset form and close dialog
-      setNewSectionName('');
-      setNewSectionParentId('none');
-      setSectionDialogOpen(false);
-
-      // Immediately refresh sections to show the new section
-      await loadSections();
-
-      // Show success message
-      toast({
-        title: t('sectionCreated'),
-        description: t('sectionCreatedSuccessfully', {name: newSection.name}),
-      });
-
-    } catch (error) {
-      console.error('Failed to create section:', error);
-      toast({
-        title: t('error'),
-        description: t('failedToCreateSection'),
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleCreateTestSuiteForProject = async () => {
     const trimmedSuiteName = suiteName.trim();
 
@@ -2707,8 +2467,6 @@ export function TestCases() {
         ? selectedTestCases
         : [active.id as number];
 
-      console.log(`Moving ${testCasesToMove.length} test case(s) to section: ${sectionName}`);
-
       try {
         // Move each test case to the new section
         for (const testCaseId of testCasesToMove) {
@@ -2780,8 +2538,6 @@ export function TestCases() {
 
         // Force re-render by updating state
         setSelectedTestSuite(prev => prev === 'all' ? 'all' : selectedTestSuite);
-
-        console.log(`Test case "${movedTestCase.title}" moved from position ${oldIndex + 1} to ${newIndex + 1}`);
       }
     }
   };
@@ -2797,10 +2553,18 @@ export function TestCases() {
           <Button variant="outline" size="sm" onClick={loadTestCases} title="Refresh test cases">
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button variant="outline" onClick={() => setSectionDialogOpen(true)}>
-            <FolderPlus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            {t('newSection')}
-          </Button>
+          {currentTestSuiteId && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                navigate(`/projects/${currentProjectId}/test-suites/${currentTestSuiteId}`)
+              }
+              title={t('sectionsManagedInTestSuites')}
+            >
+              <FolderPlus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('openTestSuiteToManageSections')}
+            </Button>
+          )}
           <Button variant="outline" onClick={handleExportCSV}>
             <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             {t('exportCSV')}
@@ -3560,9 +3324,18 @@ export function TestCases() {
                   </Button>
                   {t('sections')}
                 </span>
-                <Button variant="ghost" size="sm" onClick={() => setSectionDialogOpen(true)} title={t('newSection')}>
-                  <Plus className="h-3 w-3" />
-                </Button>
+                {currentTestSuiteId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      navigate(`/projects/${currentProjectId}/test-suites/${currentTestSuiteId}`)
+                    }
+                    title={t('sectionsManagedInTestSuites')}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -3753,6 +3526,9 @@ export function TestCases() {
                   <span className="text-sm text-gray-600 dark:text-gray-400">
                     {selectedTestCases.length} selected
                   </span>
+                  <Button variant="outline" size="sm" onClick={() => setBulkEditOpen(true)}>
+                    <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('bulkEdit')}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={handleBulkExecute} className="text-blue-600">
                     <Play className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('execute')}
                   </Button>
@@ -3772,6 +3548,33 @@ export function TestCases() {
                 <Filter className="h-4 w-4 text-gray-500" />
                 <span className="text-sm font-medium">{t('filters')}</span>
               </div>
+              {currentProjectId && (
+                <SavedFilters
+                  projectId={currentProjectId}
+                  scope="test_cases"
+                  hasActiveFilters={
+                    searchQuery.trim() !== ''
+                    || filterType !== 'all'
+                    || filterPriority !== 'all'
+                    || customFieldFilterId !== CUSTOM_FIELD_FILTER_ALL
+                    || customFieldFilterValue !== CUSTOM_FIELD_FILTER_ANY_VALUE
+                  }
+                  currentDefinition={{
+                    searchQuery,
+                    filterType,
+                    filterPriority,
+                    customFieldFilterId,
+                    customFieldFilterValue,
+                  }}
+                  onApply={(def) => {
+                    if (typeof def.searchQuery === 'string') setSearchQuery(def.searchQuery);
+                    if (typeof def.filterType === 'string') setFilterType(def.filterType);
+                    if (typeof def.filterPriority === 'string') setFilterPriority(def.filterPriority);
+                    if (typeof def.customFieldFilterId === 'string') setCustomFieldFilterId(def.customFieldFilterId);
+                    if (typeof def.customFieldFilterValue === 'string') setCustomFieldFilterValue(def.customFieldFilterValue);
+                  }}
+                />
+              )}
               <Select value={filterType} onValueChange={setFilterType}>
                 <SelectTrigger className="w-32"><SelectValue placeholder={t('type')} /></SelectTrigger>
                 <SelectContent>
@@ -4021,40 +3824,6 @@ export function TestCases() {
               ))
             )}
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* New Section Dialog */}
-      <Dialog open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>
-        <DialogContent isRTL={isRTL}>
-          <DialogHeader>
-            <DialogTitle>{t('createNewSection')}</DialogTitle>
-            <DialogDescription>{t('createNewSectionDescription')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>{t('sectionName')}</Label>
-              <Input value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)} placeholder={t('sectionNamePlaceholder')} />
-            </div>
-            <div className="space-y-2">
-              <Label>{t('parentSectionOptional')}</Label>
-              <Select value={newSectionParentId} onValueChange={setNewSectionParentId}>
-                <SelectTrigger><SelectValue placeholder={t('selectParent')} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{t('noneRoot')}</SelectItem>
-                  {mockSections.map((section) => (
-                    <SelectItem key={section.id} value={section.id}>
-                      {section.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSectionDialogOpen(false)}>{t('cancel')}</Button>
-            <Button onClick={handleCreateSection} disabled={!newSectionName.trim()}>{t('createSection')}</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -4474,6 +4243,23 @@ export function TestCases() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BulkEditTestCasesDialog
+        open={bulkEditOpen}
+        onOpenChange={setBulkEditOpen}
+        ids={selectedTestCases}
+        priorityOptions={priorityOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
+        testTypeOptions={testTypes.map((tt) => ({
+          value: tt,
+          label: testTypeOptions.find((o) => o.value === tt)?.label || tt.charAt(0).toUpperCase() + tt.slice(1),
+        }))}
+        onApplied={() => {
+          // Refresh the list so updated rows reflect the new values, and
+          // clear the selection so users don't immediately re-apply.
+          loadTestCases();
+          setSelectedTestCases([]);
+        }}
+      />
     </div>
   );
 }

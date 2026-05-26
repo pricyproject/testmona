@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
@@ -85,7 +85,7 @@ export function Milestones() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
-  const currentProjectId = projectId ? Number(projectId) : null;
+  const currentProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
 
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [stats, setStats] = useState<MilestoneStats>(emptyStats);
@@ -99,25 +99,34 @@ export function Milestones() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [form, setForm] = useState<MilestoneFormState>(defaultForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const loadRequestId = useRef(0);
 
   const loadMilestones = async () => {
     if (!currentProjectId || Number.isNaN(currentProjectId)) {
       setError(t('invalidProjectId'));
+      setMilestones([]);
+      setStats(emptyStats);
       setIsLoading(false);
       return;
     }
 
+    const requestId = ++loadRequestId.current;
     try {
       setIsLoading(true);
       setError(null);
       const [milestoneData, statsData] = await Promise.all([
-        milestonesAPI.getAll(currentProjectId, 0, 500),
+        loadAllMilestones(currentProjectId),
         milestonesAPI.getStats(currentProjectId).catch(() => null),
       ]);
 
-      setMilestones(milestoneData || []);
-      setStats(statsData || calculateStats(milestoneData || []));
+      if (requestId !== loadRequestId.current) return;
+
+      const items = Array.isArray(milestoneData) ? milestoneData : [];
+      setMilestones(items);
+      setStats(statsData || calculateStats(items));
     } catch (err: any) {
+      if (requestId !== loadRequestId.current) return;
       console.error('Failed to load milestones:', err);
       if (err.response?.status === 403) {
         setError(t('permissionDeniedViewMilestones'));
@@ -129,12 +138,19 @@ export function Milestones() {
       setMilestones([]);
       setStats(emptyStats);
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestId.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     loadMilestones();
+    return () => {
+      // Invalidate any in-flight requests when project changes / unmount
+      loadRequestId.current++;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId]);
 
   const filteredMilestones = useMemo(() => {
@@ -164,6 +180,7 @@ export function Milestones() {
   const openCreateDialog = () => {
     setEditingMilestone(null);
     setForm(defaultForm);
+    setFormError(null);
     setIsDialogOpen(true);
   };
 
@@ -172,9 +189,10 @@ export function Milestones() {
     setForm({
       title: milestone.title,
       description: milestone.description || '',
-      targetDate: milestone.target_date ? milestone.target_date.slice(0, 10) : '',
+      targetDate: milestone.target_date ? toDateInputValue(milestone.target_date) : '',
       status: milestone.status,
     });
+    setFormError(null);
     setIsDialogOpen(true);
   };
 
@@ -183,26 +201,41 @@ export function Milestones() {
     setIsDialogOpen(false);
     setEditingMilestone(null);
     setForm(defaultForm);
+    setFormError(null);
   };
 
   const submitMilestone = async () => {
-    if (!currentProjectId || !form.title.trim()) return;
+    if (!currentProjectId) return;
+
+    const trimmedTitle = form.title.trim();
+    if (!trimmedTitle) {
+      setFormError(t('milestoneTitleRequired'));
+      return;
+    }
 
     try {
       setIsSubmitting(true);
       setError(null);
-      const payload = {
-        title: form.title.trim(),
-        description: form.description.trim() || undefined,
-        target_date: form.targetDate ? new Date(form.targetDate).toISOString() : undefined,
-        status: form.status,
-      };
+      setFormError(null);
+
+      // Build a base payload; only include target_date in update when actually changed
+      const description = form.description.trim() || null;
+      const targetDateIso = form.targetDate ? dateInputToIso(form.targetDate) : null;
 
       if (editingMilestone) {
-        await milestonesAPI.update(editingMilestone.id, payload);
+        const updatePayload: Record<string, unknown> = {
+          title: trimmedTitle,
+          description,
+          status: form.status,
+          target_date: targetDateIso,
+        };
+        await milestonesAPI.update(editingMilestone.id, updatePayload);
       } else {
         await milestonesAPI.create({
-          ...payload,
+          title: trimmedTitle,
+          description: description ?? undefined,
+          target_date: targetDateIso ?? undefined,
+          status: form.status,
           project_id: currentProjectId,
         });
       }
@@ -212,11 +245,13 @@ export function Milestones() {
     } catch (err: any) {
       console.error('Failed to save milestone:', err);
       if (err.response?.status === 403) {
-        setError(t('permissionDeniedSaveMilestone'));
+        setFormError(t('permissionDeniedSaveMilestone'));
       } else if (err.response?.data?.detail) {
-        setError(String(err.response.data.detail));
+        setFormError(typeof err.response.data.detail === 'string'
+          ? err.response.data.detail
+          : t('failedToSaveMilestone'));
       } else {
-        setError(t('failedToSaveMilestone'));
+        setFormError(t('failedToSaveMilestone'));
       }
     } finally {
       setIsSubmitting(false);
@@ -224,8 +259,8 @@ export function Milestones() {
   };
 
   const deleteMilestone = async (milestone: Milestone) => {
-    if (milestone.test_plan_count > 0) {
-      setError(t('unlinkPlansBeforeDelete'));
+    if (milestone.test_plan_count > 0 || milestone.test_run_count > 0) {
+      setError(t('unlinkMilestoneLinksBeforeDelete'));
       return;
     }
 
@@ -238,7 +273,7 @@ export function Milestones() {
     } catch (err: any) {
       console.error('Failed to delete milestone:', err);
       if (err.response?.status === 409) {
-        setError(t('unlinkPlansBeforeDelete'));
+        setError(err.response?.data?.detail || t('unlinkMilestoneLinksBeforeDelete'));
       } else if (err.response?.status === 403) {
         setError(t('permissionDeniedDeleteMilestone'));
       } else {
@@ -346,6 +381,12 @@ export function Milestones() {
                     </div>
                   </div>
                 </div>
+                {formError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{formError}</AlertDescription>
+                  </Alert>
+                )}
                 <DialogFooter>
                   <Button variant="outline" onClick={closeDialog} disabled={isSubmitting}>{t('cancel')}</Button>
                   <Button onClick={submitMilestone} disabled={!form.title.trim() || isSubmitting}>
@@ -459,7 +500,13 @@ export function Milestones() {
                           {status.label}
                         </Badge>
                       </div>
-                      <CardTitle className="truncate text-xl">{milestone.title}</CardTitle>
+                      <CardTitle
+                        className="truncate text-xl cursor-pointer hover:underline"
+                        onClick={() => navigate(`/projects/${currentProjectId}/milestones/${milestone.id}`)}
+                        title={t('openMilestoneDetail')}
+                      >
+                        {milestone.title}
+                      </CardTitle>
                       {milestone.description && <p className="line-clamp-2 text-sm text-slate-500">{milestone.description}</p>}
                     </div>
                     <div className="flex shrink-0 gap-1">
@@ -469,8 +516,9 @@ export function Milestones() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={milestone.test_plan_count > 0}
+                        disabled={milestone.test_plan_count > 0 || milestone.test_run_count > 0}
                         onClick={() => deleteMilestone(milestone)}
+                        title={(milestone.test_plan_count > 0 || milestone.test_run_count > 0) ? t('unlinkMilestoneLinksBeforeDelete') : undefined}
                         className="text-red-600 hover:bg-red-50 hover:text-red-700 disabled:text-slate-300"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -481,10 +529,10 @@ export function Milestones() {
                   <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/50 p-4">
                     <div className="mb-2 flex items-center justify-between text-sm">
                       <span className="font-medium text-slate-700 dark:text-slate-300">{t('executionProgress')}</span>
-                      <span className="font-semibold text-slate-900 dark:text-white">{milestone.execution_progress}%</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">{clampPercent(milestone.execution_progress)}%</span>
                     </div>
                     <div className="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                      <div className={`h-full rounded-full ${getProgressClass(milestone.execution_progress)}`} style={{ width: `${milestone.execution_progress}%` }} />
+                      <div className={`h-full rounded-full ${getProgressClass(milestone.execution_progress)}`} style={{ width: `${clampPercent(milestone.execution_progress)}%` }} />
                     </div>
                     <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
                       <ResultPill label={t('passed')} value={milestone.passed_count} className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" />
@@ -516,24 +564,28 @@ export function Milestones() {
                     </div>
                   </div>
 
-                  {milestone.linked_test_plans.length > 0 && (
+                  {(milestone.linked_test_plans || []).length > 0 && (
                     <div className="space-y-2">
                       <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('linkedTestPlans')}</p>
                       <div className="flex flex-wrap gap-2">
-                        {milestone.linked_test_plans.slice(0, 3).map((plan) => (
+                        {(milestone.linked_test_plans || []).slice(0, 3).map((plan) => (
                           <Badge key={plan.id} variant="outline" className="max-w-full truncate">
                             {plan.title}
                           </Badge>
                         ))}
-                        {milestone.linked_test_plans.length > 3 && (
-                          <Badge variant="outline">+{milestone.linked_test_plans.length - 3}</Badge>
+                        {(milestone.linked_test_plans || []).length > 3 && (
+                          <Badge variant="outline">+{(milestone.linked_test_plans || []).length - 3}</Badge>
                         )}
                       </div>
                     </div>
                   )}
 
                   <div className="flex flex-wrap gap-2 border-t pt-4">
-                    <Button size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}`)}>
+                    <Button size="sm" onClick={() => navigate(`/projects/${currentProjectId}/milestones/${milestone.id}`)}>
+                      {t('openMilestoneDetail')}
+                      <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}`)}>
                       {t('viewTestPlans')}
                       <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
                     </Button>
@@ -541,10 +593,10 @@ export function Milestones() {
                       {t('viewTestRuns')}
                       <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/defects`)}>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/defects?milestone_id=${milestone.id}`)}>
                       {t('viewDefects')}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/requirements`)}>
+                    <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/requirements?milestone_id=${milestone.id}`)}>
                       {t('viewRequirements')}
                     </Button>
                   </div>
@@ -622,8 +674,51 @@ function calculateStats(milestones: Milestone[]): MilestoneStats {
   };
 }
 
+function parsePositiveInteger(value?: string): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function loadAllMilestones(projectId: number): Promise<Milestone[]> {
+  const pageSize = 500;
+  const items: Milestone[] = [];
+  for (let skip = 0; skip < 5000; skip += pageSize) {
+    const page = await milestonesAPI.getAll(projectId, skip, pageSize);
+    if (!Array.isArray(page) || page.length === 0) break;
+    items.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return items;
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
 function getDateValue(value?: string) {
-  return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Convert an ISO timestamp from the API into a YYYY-MM-DD value for an <input type="date">,
+ * using the date portion of the original UTC timestamp so the value round-trips unchanged.
+ */
+function toDateInputValue(isoString: string): string {
+  // Server stores target_date as midnight UTC of the chosen day; slicing avoids local-tz drift
+  const head = isoString.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(head) ? head : '';
+}
+
+/**
+ * Convert a date-input value (YYYY-MM-DD) to an ISO timestamp anchored at noon UTC so that
+ * formatting it back to a local date never crosses a day boundary in either direction.
+ */
+function dateInputToIso(value: string): string {
+  return `${value}T12:00:00.000Z`;
 }
 
 function getRiskWeight(milestone: Milestone) {
@@ -640,11 +735,15 @@ function getRiskWeight(milestone: Milestone) {
 
 function getDaysRemaining(targetDate?: string) {
   if (!targetDate) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(targetDate);
-  target.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+  // Compare against the date portion in UTC so a target stored at UTC midnight
+  // isn't shown as "yesterday" / overdue for users west of UTC.
+  const datePart = targetDate.slice(0, 10);
+  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(datePart);
+  if (!parts) return null;
+  const targetUtc = Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((targetUtc - todayUtc) / 86400000);
 }
 
 function getScheduleText(days: number | null, milestone: Milestone, t: (key: any, params?: Record<string, string | number>) => string) {
@@ -676,9 +775,16 @@ function getHealthBarClass(health: MilestoneHealth) {
 }
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString();
+  // Render the UTC date portion in the user's locale without tz-shifting day boundaries
+  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (parts) {
+    const utcMidday = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
+    return utcMidday.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
+  const fallback = new Date(value);
+  return Number.isFinite(fallback.getTime()) ? fallback.toLocaleDateString() : '';
 }
 
 function getTotalRequirements(milestones: Milestone[]) {
-  return milestones.reduce((max, milestone) => Math.max(max, milestone.requirement_count), 0);
+  return milestones.reduce((sum, milestone) => sum + milestone.requirement_count, 0);
 }

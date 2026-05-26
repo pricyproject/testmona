@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +41,8 @@ import {
   Unlink,
   Zap,
   Filter,
+  Upload,
+  FileUp,
 } from 'lucide-react';
 import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import {
@@ -56,6 +58,7 @@ import { TestRunPieChart, TestRunBarChart, TestRunTrendChart } from '@/component
 import { useTranslation } from '@/hooks/useTranslation';
 import { defectsAPI, getApiErrorMessage, sectionsAPI, testCasesAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useToast } from '@/hooks/use-toast';
 import { TestResult } from '@/types/index';
 import { formatDurationSeconds } from '@/utils/timeFormat';
@@ -149,6 +152,14 @@ export function TestRunDetail() {
   const bumpDerived = () => setDerivedRefreshKey((k) => k + 1);
   // Server-side search term for the inline defect picker
   const [defectSearch, setDefectSearch] = useState('');
+
+  // CI result import
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importFormat, setImportFormat] = useState<'auto' | 'junit' | 'ctrf'>('auto');
+  const [importAutoCreate, setImportAutoCreate] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<any>(null);
 
   // Prepare chart data
   const prepareChartData = () => {
@@ -1059,28 +1070,73 @@ export function TestRunDetail() {
     navigate(`/projects/${projectId}/test-runs/${id}/report`);
   };
 
+  // RFC 4180 escape: wrap in quotes, double inner quotes. Also defuse CSV
+  // formula injection by prefixing a single quote when a value starts with a
+  // character spreadsheets treat as a formula opener.
+  const csvCell = (value: unknown): string => {
+    if (value === null || value === undefined) return '""';
+    let text = String(value);
+    if (/^[=+\-@\t\r]/.test(text)) {
+      text = `'${text}`;
+    }
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
   const handleExportResults = () => {
     if (!testRun) return;
 
-    // Create CSV content
-    const headers = ['Test Case ID', 'Test Case Title', 'Section', 'Priority', 'Status', 'Executed By', 'Executed At', 'Duration (s)', 'Comments'];
-    const csvContent = [
-      headers.join(','),
-      ...testResults.map(result => [
-        result.testCaseId,
-        `"${result.testCaseTitle}"`,
-        result.section || '',
-        result.priority || 'medium',
-        result.status,
-        result.executedBy || '',
-        result.executed_at || '',
-        result.execution_time ?? '',
-        `"${result.comments || ''}"`
-      ].join(','))
-    ].join('\n');
+    const statusLabel = (status?: string): string => {
+      const key = normalizeStatusKey(status);
+      const labels: Record<string, string> = {
+        pass: t('passed'),
+        passed: t('passed'),
+        fail: t('failed'),
+        failed: t('failed'),
+        block: t('blocked'),
+        blocked: t('blocked'),
+        skip: t('skipped'),
+        skipped: t('skipped'),
+        not_tested: t('notTested'),
+        pending: t('notTested'),
+      };
+      return labels[key] || status || '';
+    };
 
-    // Create and download CSV
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const headers = [
+      t('testCaseId'),
+      t('testCaseTitle'),
+      t('section'),
+      t('priority'),
+      t('status'),
+      t('executedBy'),
+      t('executedAt'),
+      t('duration'),
+      t('comments'),
+    ];
+
+    const rows = testResults.map((result) => [
+      result.test_case_id != null ? `TC-${result.test_case_id}` : '',
+      result.test_case?.title || '',
+      result.test_case?.section?.name || '',
+      result.test_case?.priority || '',
+      statusLabel(result.status),
+      getResultExecutorName(result),
+      result.executed_at || '',
+      result.execution_time != null && result.execution_time !== ''
+        ? formatDurationSeconds(result.execution_time, t)
+        : '',
+      result.comments || '',
+    ]);
+
+    // RFC 4180: CRLF line breaks, every field quoted. Prepend a UTF-8 BOM so
+    // Excel on Windows renders non-ASCII (Persian/Arabic) test case titles
+    // correctly instead of as mojibake.
+    const csvBody = [headers, ...rows]
+      .map((row) => row.map(csvCell).join(','))
+      .join('\r\n');
+    const csvContent = '﻿' + csvBody + '\r\n';
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1090,7 +1146,10 @@ export function TestRunDetail() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    alert('Results exported successfully!');
+    toast({
+      title: t('exportCompleted'),
+      description: t('resultsExportedSuccessfully', { count: String(rows.length) }),
+    });
   };
 
   const handleCancel = (resultId: string) => {
@@ -1122,13 +1181,67 @@ export function TestRunDetail() {
       const syncedTestRun = await syncTestRunStatus(updatedTestRun, updatedTestResults);
       setTestRun(syncedTestRun);
       setTestResults(updatedTestResults);
-      
-      alert('Test run time has been reset successfully');
+
+      toast({
+        title: t('success'),
+        description: t('testRunTimeResetSuccess'),
+      });
     } catch (error) {
       console.error('Failed to reset test run time:', error);
-      alert('Failed to reset test run time');
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToResetTestRunTime')),
+        variant: 'destructive',
+      });
     } finally {
       setIsResettingTime(false);
+    }
+  };
+
+  const resetImportDialog = () => {
+    setImportFile(null);
+    setImportFormat('auto');
+    setImportAutoCreate(false);
+    setImportSummary(null);
+  };
+
+  const handleImportResults = async () => {
+    if (!id || !importFile) return;
+    try {
+      setIsImporting(true);
+      setImportSummary(null);
+      const summary = await testRunsAPI.importResults(parseInt(id), importFile, {
+        format: importFormat === 'auto' ? undefined : importFormat,
+        autoCreate: importAutoCreate,
+      });
+      setImportSummary(summary);
+
+      // Reload run + results so the table reflects the new statuses.
+      const [updatedRun, updatedResults] = await Promise.all([
+        testRunsAPI.getById(parseInt(id)),
+        testResultsAPI.getAll(parseInt(id)),
+      ]);
+      const syncedRun = await syncTestRunStatus(updatedRun, updatedResults);
+      setTestRun(syncedRun);
+      setTestResults(updatedResults);
+      bumpDerived();
+
+      toast({
+        title: t('importCompleted'),
+        description: t('importResultsSummary', {
+          matched: String(summary.matched ?? 0),
+          unmatched: String(summary.unmatched ?? 0),
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to import results:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToImportResults')),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -1294,6 +1407,18 @@ export function TestRunDetail() {
             >
               <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('exportResults')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                resetImportDialog();
+                setIsImportOpen(true);
+              }}
+              className="h-11 justify-center rounded-xl border-slate-200 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-950 dark:border-white/20 dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:hover:text-white"
+            >
+              <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('importCIResults')}
             </Button>
             <Button
               variant="outline"
@@ -1923,7 +2048,12 @@ export function TestRunDetail() {
                                   title={link.defect?.title || ''}
                                 >
                                   <Bug className="h-3 w-3" />
-                                  {link.defect?.defect_id || `#${link.defect_id}`}
+                                  <Link
+                                    to={`/projects/${projectId}/defects/${link.defect?.id || link.defect_id}`}
+                                    className="font-mono text-blue-600 hover:underline focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-blue-400 dark:text-blue-300"
+                                  >
+                                    {link.defect?.defect_id || `#${link.defect_id}`}
+                                  </Link>
                                   <button
                                     type="button"
                                     onClick={() => handleUnlinkDefect(result, link.id)}
@@ -2307,6 +2437,133 @@ export function TestRunDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={isImportOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsImportOpen(false);
+            resetImportDialog();
+          }
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileUp className="h-5 w-5" />
+              {t('importCIResults')}
+            </DialogTitle>
+            <DialogDescription>{t('importCIResultsDescription')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="ci-import-file">
+                {t('resultsFile')}
+              </label>
+              <input
+                id="ci-import-file"
+                type="file"
+                accept=".xml,.json,.junit,application/xml,text/xml,application/json"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  setImportFile(file);
+                  setImportSummary(null);
+                }}
+                className="block w-full cursor-pointer rounded-md border border-input bg-background text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-2 file:text-sm hover:file:bg-muted/80"
+              />
+              <p className="text-xs text-muted-foreground">{t('importCIResultsHint')}</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="ci-import-format">
+                  {t('format')}
+                </label>
+                <Select value={importFormat} onValueChange={(value) => setImportFormat(value as any)}>
+                  <SelectTrigger id="ci-import-format">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">{t('autoDetect')}</SelectItem>
+                    <SelectItem value="junit">JUnit XML</SelectItem>
+                    <SelectItem value="ctrf">CTRF JSON</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t('newCases')}</label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={importAutoCreate}
+                    onCheckedChange={(value) => setImportAutoCreate(Boolean(value))}
+                  />
+                  <span>{t('importAutoCreateLabel')}</span>
+                </label>
+              </div>
+            </div>
+
+            {importSummary && (
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="mb-2 font-medium">
+                  {t('importSummaryTitle')} — {String(importSummary.format).toUpperCase()}
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-5">
+                  <div>{t('total')}: <strong>{importSummary.total}</strong></div>
+                  <div>{t('matched')}: <strong className="text-emerald-600">{importSummary.matched}</strong></div>
+                  <div>{t('updated')}: <strong>{importSummary.updated}</strong></div>
+                  <div>{t('created')}: <strong>{importSummary.created}</strong></div>
+                  <div>{t('unmatched')}: <strong className="text-amber-600">{importSummary.unmatched}</strong></div>
+                </div>
+                {Array.isArray(importSummary.results) && importSummary.results.length > 0 && (
+                  <div className="mt-3 max-h-48 overflow-auto rounded border bg-background p-2 font-mono text-[11px] leading-relaxed">
+                    {importSummary.results.map((row: any, idx: number) => (
+                      <div key={idx} className="flex justify-between gap-2 py-0.5">
+                        <span className="truncate" title={row.name}>{row.name}</span>
+                        <span
+                          className={
+                            row.action === 'updated' || row.action === 'created'
+                              ? 'text-emerald-600'
+                              : row.action === 'unmatched'
+                                ? 'text-amber-600'
+                                : 'text-muted-foreground'
+                          }
+                        >
+                          {row.action}{row.test_case_id ? ` → TC-${row.test_case_id}` : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsImportOpen(false);
+                resetImportDialog();
+              }}
+              disabled={isImporting}
+            >
+              {importSummary ? t('close') : t('cancel')}
+            </Button>
+            <Button onClick={handleImportResults} disabled={!importFile || isImporting} className="gap-2">
+              {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {isImporting ? t('importing') : t('importResults')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {testRun?.project_id && testRun?.id && (
+        <div className="mt-6">
+          <CustomFieldsPanel
+            projectId={Number(testRun.project_id)}
+            entityType="test_run"
+            entityId={Number(testRun.id)}
+          />
+        </div>
+      )}
     </div>
   );
 }

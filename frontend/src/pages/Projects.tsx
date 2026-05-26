@@ -27,7 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, FolderOpen, Settings, Trash2, TestTube, FileText, PlayCircle, ChevronRight, AlertTriangle, Edit, WifiOff, RefreshCw, Archive, Copy, Clock, CheckCircle2, Download, Upload, FileDown, FileUp, Filter, Eye, X, BarChart3, Layers3, Sparkles, Search, ArrowUpDown, User as UserIcon, ChevronLeft } from 'lucide-react';
+import { Plus, FolderOpen, Settings, Trash2, TestTube, FileText, PlayCircle, ChevronRight, AlertTriangle, Edit, WifiOff, RefreshCw, Archive, Copy, Clock, CheckCircle2, Download, Upload, FileDown, FileUp, Filter, Eye, X, BarChart3, Layers3, Sparkles, Search, ArrowUpDown, User as UserIcon, ChevronLeft, Users } from 'lucide-react';
 import { useProjectStore, type Project } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -1476,6 +1476,18 @@ export function Projects() {
                       className="h-8 w-8 rounded-lg p-0"
                     >
                       <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/projects/${project.id}/members`);
+                      }}
+                      title={t('manageMembers')}
+                      className="h-8 w-8 rounded-lg p-0"
+                    >
+                      <Users className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="outline"

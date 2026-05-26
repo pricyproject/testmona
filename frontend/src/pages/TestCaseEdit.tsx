@@ -87,103 +87,139 @@ export function TestCaseEdit() {
     }
   };
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [originalIsMultistep, setOriginalIsMultistep] = useState(false);
+
   useEffect(() => {
+    let isMounted = true;
+
     const fetchTestCase = async () => {
       setLoading(true);
       setIsValidatingProject(true);
+      setLoadError(null);
+
+      const numericId = Number(id);
+      if (!id || !Number.isFinite(numericId) || numericId <= 0) {
+        if (isMounted) {
+          setLoadError('invalidTestCaseId');
+          setLoading(false);
+          setIsValidatingProject(false);
+        }
+        return;
+      }
+
       try {
-        if (id) {
-          const testCaseData = await testCasesAPI.getById(parseInt(id || '1'));
-        
-          // Validate that the test case belongs to the specified project
-          if (projectId && testCaseData.test_suite_id) {
-            try {
-              const testSuiteData = await testSuitesAPI.getById(testCaseData.test_suite_id);
-              if (testSuiteData.project_id !== parseInt(projectId)) {
-                console.error('Test case does not belong to this project');
-                // Navigate to the correct project
-                navigate(`/projects/${testSuiteData.project_id}/test-cases/${id}/edit`);
-                return;
-              }
-            } catch (suiteError) {
-              console.error('Failed to validate test case project:', suiteError);
-              // If we can't validate, show error but continue
-            }
-          }
+        const testCaseData = await testCasesAPI.getById(numericId);
+        if (!isMounted) return;
 
-          const suiteId = (testCaseData as any).test_suite_id ?? null;
-          const sectionId = (testCaseData as any).section_id ?? null;
-          const existingCustomValues = ((testCaseData as any).custom_field_values || []).reduce(
-            (
-              values: {
-                fieldValues: Record<number, string>;
-                valueIds: Record<number, number>;
-              },
-              fieldValue: { id: number; field_definition_id: number; value?: string | null }
-            ) => {
-              values.fieldValues[fieldValue.field_definition_id] = fieldValue.value || '';
-              values.valueIds[fieldValue.field_definition_id] = fieldValue.id;
-              return values;
+        if (projectId && testCaseData.test_suite_id) {
+          try {
+            const testSuiteData = await testSuitesAPI.getById(testCaseData.test_suite_id);
+            if (!isMounted) return;
+            const requestedProjectId = Number(projectId);
+            const actualProjectId = Number(testSuiteData?.project_id);
+            if (
+              Number.isFinite(actualProjectId) &&
+              Number.isFinite(requestedProjectId) &&
+              actualProjectId !== requestedProjectId
+            ) {
+              navigate(`/projects/${actualProjectId}/test-cases/${numericId}/edit`, { replace: true });
+              return;
+            }
+          } catch (suiteError) {
+            console.error('Failed to validate test case project:', suiteError);
+            // Surface a non-blocking warning; user can still edit if the API recovers.
+          }
+        }
+
+        const suiteId = (testCaseData as any).test_suite_id ?? null;
+        const sectionId = (testCaseData as any).section_id ?? null;
+        const existingCustomValues = ((testCaseData as any).custom_field_values || []).reduce(
+          (
+            values: {
+              fieldValues: Record<number, string>;
+              valueIds: Record<number, number>;
             },
-            { fieldValues: {}, valueIds: {} }
-          );
-          
-          const isMultistep = parseBooleanFlag((testCaseData as any).is_multistep);
+            fieldValue: { id: number; field_definition_id: number; value?: string | null }
+          ) => {
+            values.fieldValues[fieldValue.field_definition_id] = fieldValue.value || '';
+            values.valueIds[fieldValue.field_definition_id] = fieldValue.id;
+            return values;
+          },
+          { fieldValues: {}, valueIds: {} }
+        );
 
-          setFormData({
-            title: testCaseData.title,
-            description: testCaseData.description || '',
-            preconditions: testCaseData.preconditions || '',
-            steps: testCaseData.steps || '',
-            expected_result: testCaseData.expected_result || '',
-            test_type: (testCaseData.test_type as TestCaseType) || 'manual',
-            priority: (testCaseData.priority as TestCasePriority) || 'medium',
-            status: (testCaseData.status as TestCaseStatus) || 'active',
-            tags: testCaseData.tags || '',
-            reference: testCaseData.reference || '',
-            test_suite_id: suiteId,
-            section_id: sectionId,
-            is_multistep: isMultistep,
-          });
-          setCustomFieldValues(existingCustomValues.fieldValues);
-          setExistingCustomFieldValueIds(existingCustomValues.valueIds);
-          
-          // If multistep, fetch the steps
-          if (isMultistep) {
-            const steps = await testCasesAPI.getSteps(parseInt(id));
-            setTestSteps(steps);
-          }
+        const isMultistep = parseBooleanFlag((testCaseData as any).is_multistep);
 
-          // Determine the project ID
-          let determinedProjectId: number | null = null;
-          
-          if (projectId) {
-            determinedProjectId = parseInt(projectId);
-          } else if (suiteId) {
-            try {
-              const suite = await testSuitesAPI.getById(suiteId);
-              determinedProjectId = suite?.project_id || null;
-            } catch (error) {
-              console.error('Failed to fetch test suite:', error);
-            }
-          }
+        if (!isMounted) return;
+        setFormData({
+          title: testCaseData.title || '',
+          description: testCaseData.description || '',
+          preconditions: testCaseData.preconditions || '',
+          steps: testCaseData.steps || '',
+          expected_result: testCaseData.expected_result || '',
+          test_type: (testCaseData.test_type as TestCaseType) || 'manual',
+          priority: (testCaseData.priority as TestCasePriority) || 'medium',
+          status: (testCaseData.status as TestCaseStatus) || 'active',
+          tags: testCaseData.tags || '',
+          reference: testCaseData.reference || '',
+          test_suite_id: suiteId,
+          section_id: sectionId,
+          is_multistep: isMultistep,
+        });
+        setCustomFieldValues(existingCustomValues.fieldValues);
+        setExistingCustomFieldValueIds(existingCustomValues.valueIds);
+        setOriginalIsMultistep(isMultistep);
 
-          if (determinedProjectId) {
-            setCurrentProjectId(determinedProjectId);
-            const proj = projects.find(p => p.id === determinedProjectId) || 
-                        await projectsAPI.getById(determinedProjectId).catch(() => null);
-            if (proj) setSelectedProject(proj);
+        if (isMultistep) {
+          try {
+            const steps = await testCasesAPI.getSteps(numericId);
+            if (isMounted) setTestSteps(Array.isArray(steps) ? steps : []);
+          } catch (stepsError) {
+            console.error('Failed to load test steps:', stepsError);
+            if (isMounted) setTestSteps([]);
           }
+        } else if (isMounted) {
+          setTestSteps([]);
+        }
+
+        let determinedProjectId: number | null = null;
+        if (projectId) {
+          const parsed = Number(projectId);
+          if (Number.isFinite(parsed) && parsed > 0) determinedProjectId = parsed;
+        } else if (suiteId) {
+          try {
+            const suite = await testSuitesAPI.getById(suiteId);
+            determinedProjectId = suite?.project_id || null;
+          } catch (error) {
+            console.error('Failed to fetch test suite:', error);
+          }
+        }
+
+        if (!isMounted) return;
+        if (determinedProjectId) {
+          setCurrentProjectId(determinedProjectId);
+          const projList = Array.isArray(projects) ? projects : [];
+          const proj = projList.find((p) => p.id === determinedProjectId)
+            || await projectsAPI.getById(determinedProjectId).catch(() => null);
+          if (isMounted && proj) setSelectedProject(proj);
         }
       } catch (error) {
         console.error('Failed to fetch test case:', error);
+        if (isMounted) setLoadError('failedToLoadTestCase');
       } finally {
-        setLoading(false);
-        setIsValidatingProject(false);
+        if (isMounted) {
+          setLoading(false);
+          setIsValidatingProject(false);
+        }
       }
     };
 
     fetchTestCase();
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, projectId]);
 
   useEffect(() => {
@@ -463,8 +499,8 @@ export function TestCaseEdit() {
     return errors;
   }, [customFields, customFieldValues, language]);
 
-  const syncCustomFieldValues = async (testCaseId: number) => {
-    await Promise.all(customFields.map(async (field) => {
+  const syncCustomFieldValues = async (testCaseId: number): Promise<{ failedFields: string[] }> => {
+    const results = await Promise.allSettled(customFields.map(async (field) => {
       const rawValue = customFieldValues[field.id];
       let value = field.field_type === 'boolean'
         ? (rawValue === 'true' || rawValue === 'false' ? rawValue : '')
@@ -494,58 +530,108 @@ export function TestCaseEdit() {
         });
       }
     }));
+
+    const failedFields: string[] = [];
+    results.forEach((outcome, index) => {
+      if (outcome.status === 'rejected') {
+        const fieldName = customFields[index]?.name || `Field #${customFields[index]?.id ?? '?'}`;
+        failedFields.push(fieldName);
+        console.error(`Failed to sync custom field "${fieldName}":`, outcome.reason);
+      }
+    });
+
+    return { failedFields };
   };
 
   const handleSave = async () => {
+    const numericId = Number(id);
+    if (!id || !Number.isFinite(numericId) || numericId <= 0) {
+      toast({
+        variant: 'destructive',
+        title: t('validationError'),
+        description: t('invalidTestCaseId'),
+      });
+      return;
+    }
+
+    if (!formData.title || formData.title.trim().length === 0) {
+      toast({
+        variant: 'destructive',
+        title: t('validationError'),
+        description: t('titleRequired'),
+      });
+      return;
+    }
+
+    if (formData.tags.length > 500) {
+      toast({
+        variant: 'destructive',
+        title: t('validationError'),
+        description: t('tagLengthExceeded', { max: 500 }),
+      });
+      return;
+    }
+
+    if (formData.test_suite_id === null) {
+      toast({
+        variant: 'destructive',
+        title: t('validationError'),
+        description: t('testSuiteRequired'),
+      });
+      return;
+    }
+
+    const customFieldError = customFields
+      .map(getCustomFieldValidationError)
+      .find(Boolean);
+
+    if (customFieldError) {
+      toast({
+        variant: 'destructive',
+        title: t('validationError'),
+        description: customFieldError,
+      });
+      return;
+    }
+
     setSaving(true);
     try {
-      if (id) {
-        if (formData.tags.length > 500) {
-          toast({
-            variant: 'destructive',
-            title: t('validationError'),
-            description: t('tagLengthExceeded', { max: 500 }),
-          });
-          return;
-        }
+      // Payload notes:
+      //   - test_suite_id: must be a number (backend column is non-nullable). Null was
+      //     blocked above.
+      //   - section_id: explicit null clears the assignment server-side, which would
+      //     otherwise be impossible because exclude_unset drops undefined fields.
+      const payload = {
+        ...formData,
+        title: formData.title.trim(),
+        test_suite_id: formData.test_suite_id,
+        section_id: formData.section_id,
+      };
 
-        const customFieldError = customFields
-          .map(getCustomFieldValidationError)
-          .find(Boolean);
+      await testCasesAPI.update(numericId, payload);
 
-        if (customFieldError) {
-          toast({
-            variant: 'destructive',
-            title: t('validationError'),
-            description: customFieldError,
-          });
-          return;
-        }
+      const { failedFields } = await syncCustomFieldValues(numericId);
 
-        const testCaseId = parseInt(id);
-        const payload = {
-          ...formData,
-          test_suite_id: formData.test_suite_id ?? undefined,
-          section_id: formData.section_id ?? undefined,
-        };
-        
-        // Update test case first
-        await testCasesAPI.update(testCaseId, payload);
-        await syncCustomFieldValues(testCaseId);
-        
-        // Sync step rows separately. An empty array clears existing multistep rows while preserving simple mode.
-        if (formData.is_multistep) {
-          // Backend handles test_case_id assignment, no need to add it here
-          await testCasesAPI.createWithSteps(testCaseId, testSteps);
-        } else {
-          // Clear steps when switching to simple mode
-          await testCasesAPI.createWithSteps(testCaseId, []);
-        }
+      // Avoid an extra round-trip when the user was never in multistep mode
+      // and didn't toggle on — there's nothing to clear.
+      if (formData.is_multistep) {
+        await testCasesAPI.createWithSteps(numericId, testSteps);
+      } else if (originalIsMultistep) {
+        await testCasesAPI.createWithSteps(numericId, []);
       }
+
+      if (failedFields.length > 0) {
+        toast({
+          variant: 'destructive',
+          title: t('saveFailed'),
+          description: t('customFieldsPartialFailure', { fields: failedFields.join(', ') }),
+        });
+        return;
+      }
+
       navigateBack();
     } catch (error) {
       console.error('Failed to save test case:', error);
-      // Show error to user
       toast({
         variant: 'destructive',
         title: t('saveFailed'),
@@ -563,6 +649,31 @@ export function TestCaseEdit() {
           <div className="h-8 bg-gray-200 rounded w-1/4 mb-4"></div>
           <div className="h-64 bg-gray-200 rounded"></div>
         </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="container mx-auto p-6" dir={isRTL ? 'rtl' : 'ltr'}>
+        <div className="flex items-center gap-4 mb-6">
+          <Button variant="ghost" size="sm" onClick={navigateBack}>
+            <ArrowLeft className={`h-4 w-4 ${isRTL ? 'mr-0 ml-2' : 'mr-2'}`} />
+            {t('back')}
+          </Button>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center space-y-4">
+            <AlertTriangle className="h-10 w-10 mx-auto text-amber-500" />
+            <p className="text-sm text-muted-foreground">
+              {t(loadError as 'invalidTestCaseId' | 'failedToLoadTestCase')}
+            </p>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2 mr-0' : 'mr-2'}`} />
+              {t('retry')}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -588,14 +699,21 @@ export function TestCaseEdit() {
         </CardHeader>
         <CardContent className="space-y-6">
           <div>
-            <Label htmlFor="title">{t('title')}</Label>
+            <Label htmlFor="title">
+              {t('title')}<span className="text-red-500 ml-1">*</span>
+            </Label>
             <Input
               id="title"
               value={formData.title}
               onChange={(e) => handleInputChange('title', e.target.value)}
               placeholder={t('enterTestCaseTitle')}
               className="w-full"
+              required
+              aria-invalid={formData.title.trim().length === 0}
             />
+            {formData.title.trim().length === 0 && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">{t('titleRequired')}</p>
+            )}
           </div>
 
           <ReferenceField
@@ -608,25 +726,22 @@ export function TestCaseEdit() {
             <div>
               <Label htmlFor="test_suite">{t('testSuite')} {currentProjectId && <span className="text-xs text-muted-foreground">({t('projectId')}: {currentProjectId})</span>}</Label>
               <Select
-                value={formData.test_suite_id === null ? 'none' : String(formData.test_suite_id)}
-                onValueChange={(value) => handleInputChange('test_suite_id', value === 'none' ? null : parseInt(value, 10))}
+                value={formData.test_suite_id === null ? '' : String(formData.test_suite_id)}
+                onValueChange={(value) => handleInputChange('test_suite_id', value ? parseInt(value, 10) : null)}
                 disabled={testSuitesLoading || !currentProjectId}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={
-                    testSuitesLoading 
-                      ? t('loadingTestSuites') 
-                      : !currentProjectId 
-                        ? t('noProjectSelected') 
-                        : testSuiteOptions.length === 0 
-                          ? t('noTestSuitesAvailable') 
+                    testSuitesLoading
+                      ? t('loadingTestSuites')
+                      : !currentProjectId
+                        ? t('noProjectSelected')
+                        : testSuiteOptions.length === 0
+                          ? t('noTestSuitesAvailable')
                           : t('selectTestSuite')
                   } />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">
-                    {t('noTestSuite')}
-                  </SelectItem>
                   {testSuiteOptions.map((suite) => (
                     <SelectItem key={suite.id} value={String(suite.id)}>
                       {suite.name}
@@ -634,6 +749,9 @@ export function TestCaseEdit() {
                   ))}
                 </SelectContent>
               </Select>
+              {formData.test_suite_id === null && (
+                <p className="text-xs text-red-600 dark:text-red-400 mt-1">{t('testSuiteRequired')}</p>
+              )}
               {!testSuitesLoading && !currentProjectId && (
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                   {t('ensureTestCaseBelongsToProject')}
@@ -1000,7 +1118,10 @@ export function TestCaseEdit() {
             <Button type="button" variant="outline" onClick={navigateBack}>
               {t('cancel')}
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button
+              onClick={handleSave}
+              disabled={saving || formData.title.trim().length === 0 || formData.test_suite_id === null}
+            >
               {saving ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>

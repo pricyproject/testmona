@@ -10,6 +10,8 @@ import {
   Eye,
   FileText,
   History,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   Share2,
   Tag,
@@ -25,6 +27,8 @@ import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSui
 
 type SectionCrumb = { id: number; name: string };
 type CustomFieldDisplayRow = { field: CustomFieldDefinition | null; value: string; valueId?: number; fieldDefinitionId: number };
+
+const SIDEBAR_VISIBLE_STORAGE_KEY = 'testCaseDetail.showSidebar';
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return 'N/A';
@@ -82,13 +86,34 @@ export function TestCaseDetail() {
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [customFieldsLoading, setCustomFieldsLoading] = useState(false);
   const [isValidatingProject, setIsValidatingProject] = useState(false);
+  const [showSidebar, setShowSidebar] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const stored = window.localStorage.getItem(SIDEBAR_VISIBLE_STORAGE_KEY);
+      return stored === null ? true : stored !== 'false';
+    } catch {
+      return true;
+    }
+  });
 
-  const isMultistepCase = useMemo(() => {
-    if (!testCase) return false;
-    const rawValue = (testCase as any).is_multistep;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(SIDEBAR_VISIBLE_STORAGE_KEY, showSidebar ? 'true' : 'false');
+    } catch {
+      // localStorage may be unavailable (private mode, quota); ignore.
+    }
+  }, [showSidebar]);
+
+  const parseIsMultistep = (rawValue: unknown): boolean => {
     if (typeof rawValue === 'boolean') return rawValue;
     if (typeof rawValue === 'string') return rawValue.toLowerCase() === 'true';
     return Boolean(rawValue);
+  };
+
+  const isMultistepCase = useMemo(() => {
+    if (!testCase) return false;
+    return parseIsMultistep((testCase as any).is_multistep);
   }, [testCase]);
 
   const effectiveProjectId = projectId || testSuite?.project_id?.toString() || (testCase as any)?.project_id?.toString();
@@ -101,6 +126,17 @@ export function TestCaseDetail() {
     navigate('/test-cases');
   };
 
+  const resetDetailState = () => {
+    setTestCase(null);
+    setTestSuite(null);
+    setTestSteps([]);
+    setSection(null);
+    setRevisions([]);
+    setTestRunHistory([]);
+    setLinkedRequirements([]);
+    setCustomFields([]);
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -110,14 +146,14 @@ export function TestCaseDetail() {
 
       const testCaseId = Number(id);
       if (!testCaseId || Number.isNaN(testCaseId)) {
-        setTestCase(null);
+        resetDetailState();
         setLoading(false);
         setIsValidatingProject(false);
         return;
       }
 
       try {
-        const testCaseData = await testCasesAPI.getById(testCaseId);
+        const testCaseData = await testCasesAPI.getById(testCaseId, { includeLinkedRequirements: true });
         let testSuiteData: TestSuite | null = null;
 
         if (testCaseData.test_suite_id) {
@@ -130,14 +166,14 @@ export function TestCaseDetail() {
 
         if (projectId && testSuiteData?.project_id && Number(projectId) !== Number(testSuiteData.project_id)) {
           if (!isMounted) return;
-          setTestCase(null);
+          resetDetailState();
           return;
         }
 
         if (!isMounted) return;
         setTestCase(testCaseData);
         setTestSuite(testSuiteData);
-        setLinkedRequirements([]);
+        setLinkedRequirements(Array.isArray(testCaseData.linked_requirements) ? testCaseData.linked_requirements : []);
 
         const projectForCustomFields = Number(projectId || testSuiteData?.project_id || testCaseData.test_suite?.project_id || (testCaseData as any).project_id);
         if (projectForCustomFields && !Number.isNaN(projectForCustomFields)) {
@@ -161,38 +197,54 @@ export function TestCaseDetail() {
         if (testCaseData.section_id && projectForSections) {
           try {
             const hierarchyData = await sectionsAPI.getProjectSectionHierarchy(Number(projectForSections));
-            const allSections: any[] = [];
+            const sectionsById = new Map<number, any>();
 
-            const flattenSections = (hierarchy: any[]) => {
-              hierarchy.forEach((item: any) => {
-                (item.sections || []).forEach((currentSection: any) => {
-                  allSections.push(currentSection);
-                  if (currentSection.sections?.length) {
-                    flattenSections([{ sections: currentSection.sections }]);
+            const flattenSections = (nodes: any[] | undefined) => {
+              if (!Array.isArray(nodes)) return;
+              for (const node of nodes) {
+                const subSections: any[] = Array.isArray(node?.sections) ? node.sections : [];
+                for (const candidate of subSections) {
+                  const candidateId = Number(candidate?.id);
+                  if (Number.isFinite(candidateId) && !sectionsById.has(candidateId)) {
+                    sectionsById.set(candidateId, candidate);
+                    if (Array.isArray(candidate.sections) && candidate.sections.length > 0) {
+                      flattenSections([candidate]);
+                    }
                   }
-                });
-              });
+                }
+              }
             };
 
             const findSectionPath = (sectionId: number): SectionCrumb[] => {
-              const currentSection = allSections.find((candidate) => Number(candidate.id) === Number(sectionId));
-              if (!currentSection) return [];
-              const currentCrumb = { id: Number(currentSection.id), name: currentSection.name };
-              if (!currentSection.parent_section_id) return [currentCrumb];
-              const parentPath = findSectionPath(currentSection.parent_section_id);
-              return parentPath.length > 0 ? [...parentPath, currentCrumb] : [currentCrumb];
+              const visited = new Set<number>();
+              const path: SectionCrumb[] = [];
+              let cursor: number | null | undefined = sectionId;
+              while (cursor != null && Number.isFinite(Number(cursor))) {
+                const numericId = Number(cursor);
+                if (visited.has(numericId)) break; // cycle guard
+                visited.add(numericId);
+                const node = sectionsById.get(numericId);
+                if (!node) break;
+                path.unshift({ id: numericId, name: node.name });
+                cursor = node.parent_section_id ?? null;
+              }
+              return path;
             };
 
-            flattenSections(hierarchyData.hierarchy || []);
-            let sectionPath = findSectionPath(testCaseData.section_id);
+            flattenSections(hierarchyData?.hierarchy || []);
+            let sectionPath = findSectionPath(Number(testCaseData.section_id));
 
             if (sectionPath.length === 0) {
-              const sectionData = await sectionsAPI.getSectionDetails(testCaseData.section_id);
-              const actualSection = sectionData.section || sectionData;
-              sectionPath = [
-                ...(sectionData.parent_section?.id ? [{ id: Number(sectionData.parent_section.id), name: sectionData.parent_section.name }] : []),
-                ...(actualSection?.id ? [{ id: Number(actualSection.id), name: actualSection.name }] : []),
-              ];
+              try {
+                const sectionData = await sectionsAPI.getSectionDetails(testCaseData.section_id);
+                const actualSection = sectionData?.section || sectionData;
+                sectionPath = [
+                  ...(sectionData?.parent_section?.id ? [{ id: Number(sectionData.parent_section.id), name: sectionData.parent_section.name }] : []),
+                  ...(actualSection?.id ? [{ id: Number(actualSection.id), name: actualSection.name }] : []),
+                ];
+              } catch (sectionFallbackError) {
+                console.error('Failed to fetch section fallback details:', sectionFallbackError);
+              }
             }
 
             if (isMounted) {
@@ -209,15 +261,10 @@ export function TestCaseDetail() {
           setSection(null);
         }
 
-        const rawIsMultistep = (testCaseData as any).is_multistep;
-        const isMultistep = typeof rawIsMultistep === 'string'
-          ? rawIsMultistep.toLowerCase() === 'true'
-          : Boolean(rawIsMultistep);
-
-        if (isMultistep) {
+        if (parseIsMultistep((testCaseData as any).is_multistep)) {
           try {
             const steps = await testCasesAPI.getSteps(testCaseId);
-            if (isMounted) setTestSteps(steps || []);
+            if (isMounted) setTestSteps(Array.isArray(steps) ? steps : []);
           } catch (stepsError) {
             console.error('Failed to fetch test steps:', stepsError);
             if (isMounted) setTestSteps([]);
@@ -229,10 +276,13 @@ export function TestCaseDetail() {
         setRevisionsLoading(true);
         api.get(`/test-cases/${testCaseId}/revisions`)
           .then((response) => {
-            if (isMounted) setRevisions(response.data || []);
+            if (isMounted) setRevisions(Array.isArray(response.data) ? response.data : []);
           })
           .catch((revisionError) => {
-            console.error('Failed to fetch revisions:', revisionError);
+            // 403 is expected for non-admin/manager users; keep silent in that case.
+            if (revisionError?.response?.status !== 403) {
+              console.error('Failed to fetch revisions:', revisionError);
+            }
             if (isMounted) setRevisions([]);
           })
           .finally(() => {
@@ -241,7 +291,7 @@ export function TestCaseDetail() {
 
         testCasesAPI.getExecutionHistory(testCaseId, 50)
           .then((historyData) => {
-            if (isMounted) setTestRunHistory(historyData || []);
+            if (isMounted) setTestRunHistory(Array.isArray(historyData) ? historyData : []);
           })
           .catch((historyError) => {
             console.error('Failed to fetch execution history:', historyError);
@@ -249,7 +299,7 @@ export function TestCaseDetail() {
           });
       } catch (error) {
         console.error('Failed to fetch test case:', error);
-        if (isMounted) setTestCase(null);
+        if (isMounted) resetDetailState();
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -263,66 +313,70 @@ export function TestCaseDetail() {
     return () => {
       isMounted = false;
     };
+    // resetDetailState only closes over setters (stable), so it doesn't belong in deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, projectId]);
 
-  const loadedTestCaseId = testCase?.id;
-
-  useEffect(() => {
-    let isMounted = true;
-    const testCaseId = Number(id);
-
-    const fetchLinkedRequirements = async () => {
-      if (!showLinkedRequirements || !testCaseId || Number.isNaN(testCaseId) || !loadedTestCaseId) {
-        setLinkedRequirements([]);
-        return;
-      }
-
-      setLinkedRequirementsLoading(true);
-      try {
-        const data = await testCasesAPI.getById(testCaseId, { includeLinkedRequirements: true });
-        if (isMounted) {
-          setLinkedRequirements(Array.isArray(data.linked_requirements) ? data.linked_requirements : []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch linked requirements:', error);
-        if (isMounted) setLinkedRequirements([]);
-      } finally {
-        if (isMounted) setLinkedRequirementsLoading(false);
-      }
-    };
-
-    fetchLinkedRequirements();
-    return () => {
-      isMounted = false;
-    };
-  }, [id, showLinkedRequirements, loadedTestCaseId]);
-
   const displaySteps = useMemo(() => {
-    if (isMultistepCase) return testSteps;
-    return (testCase?.steps || '')
-      .split('\n')
-      .map((step) => step.trim())
-      .filter(Boolean)
-      .map((step, index) => ({
-        step_number: index + 1,
-        action: step.replace(/^\d+\.\s*/, ''),
-        expected_result: testCase?.expected_result || '',
-        step_type: 'manual',
-      }));
+    const parseLegacyText = (text: string | undefined | null) =>
+      (text || '')
+        .split('\n')
+        .map((step) => step.trim())
+        .filter(Boolean)
+        .map((step, index) => ({
+          step_number: index + 1,
+          action: step.replace(/^(\d+[.)]|[-*])\s*/, ''),
+          // Only attach the test case's overall expected_result on the FINAL parsed
+          // step (or on the only step) so it isn't repeated misleadingly under each row.
+          expected_result: '',
+          step_type: 'manual',
+        }));
+
+    if (isMultistepCase) {
+      if (testSteps && testSteps.length > 0) return testSteps;
+      // Fall back to legacy free-text steps if the multistep load failed or returned empty.
+      return parseLegacyText(testCase?.steps);
+    }
+
+    const parsed = parseLegacyText(testCase?.steps);
+    if (parsed.length > 0) {
+      parsed[parsed.length - 1].expected_result = testCase?.expected_result || '';
+    }
+    return parsed;
   }, [isMultistepCase, testCase, testSteps]);
 
   const latestExecution = testRunHistory[0];
-  const uniqueRunCount = new Set(testRunHistory.map((item) => item.test_run_id).filter(Boolean)).size;
-  const uniqueExecutors = new Set(
-    testRunHistory
-      .map((item) => item.executed_by_full_name || item.executed_by || item.executed_by_email)
-      .filter(Boolean)
+  const uniqueRunCount = new Set(
+    testRunHistory.map((item) => item.test_run_id).filter((value) => value != null)
   ).size;
+  const uniqueExecutors = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of testRunHistory) {
+      const explicitId = item.executed_by_id ?? null;
+      if (explicitId != null) {
+        ids.add(`id:${explicitId}`);
+        continue;
+      }
+      const fallback = item.executed_by_email || item.executed_by || item.executed_by_full_name;
+      if (fallback) ids.add(`name:${fallback}`);
+    }
+    return ids.size;
+  }, [testRunHistory]);
 
   const testCaseTags = testCase?.tags;
   const tags = useMemo(() => {
     if (!testCaseTags) return [];
-    return testCaseTags.split(',').map((tag) => tag.trim()).filter(Boolean);
+    const seen = new Set<string>();
+    return testCaseTags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => {
+        if (!tag) return false;
+        const key = tag.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }, [testCaseTags]);
   const hasReference = Boolean(testCase?.reference?.trim());
 
@@ -392,6 +446,40 @@ export function TestCaseDetail() {
   const getLinkedRequirementPath = (requirement: Requirement) => (
     effectiveProjectId ? `/projects/${effectiveProjectId}/requirements/${requirement.id}` : null
   );
+  const renderReferenceValue = (reference: string) => {
+    const requirementsByKey = new Map(
+      linkedRequirements
+        .filter((requirement) => requirement.requirement_id)
+        .map((requirement) => [String(requirement.requirement_id).toLowerCase(), requirement]),
+    );
+
+    if (requirementsByKey.size === 0) return reference;
+
+    const parts = reference.split(/(\s+|[,;|/]+)/);
+    return (
+      <span className="wrap-break-word">
+        {parts.map((part, index) => {
+          const normalized = part.trim().replace(/^[()[\]{}"']+|[()[\]{}"',.]+$/g, '').toLowerCase();
+          const requirement = requirementsByKey.get(normalized);
+          const path = requirement ? getLinkedRequirementPath(requirement) : null;
+
+          if (!requirement || !path) {
+            return <span key={`${part}-${index}`}>{part}</span>;
+          }
+
+          return (
+            <Link
+              key={`${requirement.id}-${index}`}
+              to={path}
+              className="font-mono text-blue-600 hover:underline dark:text-blue-400"
+            >
+              {part}
+            </Link>
+          );
+        })}
+      </span>
+    );
+  };
   const openRevisionsPage = () => navigate(revisionsPath);
   const openExecutionHistoryPage = () => navigate(executionHistoryPath);
 
@@ -407,23 +495,23 @@ export function TestCaseDetail() {
     );
   }
 
-  if (!testCase || typeof testCase !== 'object') {
+  if (!testCase) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center px-4">
         <Card className="max-w-lg text-center">
           <CardHeader>
-            <CardTitle>{testCase ? t('invalidTestCaseData') : t('testCaseNotFound')}</CardTitle>
+            <CardTitle>{t('testCaseNotFound')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              {testCase ? t('unableToLoadDetails') : t('testCaseNotFoundDesc')}
-            </p>
+            <p className="text-sm text-muted-foreground">{t('testCaseNotFoundDesc')}</p>
             <Button onClick={navigateBack}>{t('backToTestCases')}</Button>
           </CardContent>
         </Card>
       </div>
     );
   }
+
+  const testCaseIdLabel = `TC-${String(testCase.id ?? '').padStart(3, '0')}`;
 
   return (
     <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-white px-4 py-6 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -439,7 +527,7 @@ export function TestCaseDetail() {
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className="rounded-full border-slate-300 bg-white/80 px-3 py-1 text-xs font-semibold dark:border-slate-700 dark:bg-slate-950/80">
-                      TC-{testCase.id.toString().padStart(3, '0')}
+                      {testCaseIdLabel}
                     </Badge>
                     <Badge className={`${getStatusBadge(testCase.status)} rounded-full px-3 py-1 text-xs font-semibold`}>
                       {formatStatusLabel(testCase.status)}
@@ -456,7 +544,7 @@ export function TestCaseDetail() {
                   </p>
                 </div>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[380px] lg:grid-cols-1">
+              <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[380px] lg:grid-cols-1">
                 <Button onClick={handleExecute} className="h-10 justify-center bg-blue-600 hover:bg-blue-700">
                   <Play className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                   {t('execute')}
@@ -468,6 +556,20 @@ export function TestCaseDetail() {
                 <Button variant="outline" onClick={handleShare} className="h-10 justify-center">
                   <Share2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                   {t('copyLink')}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSidebar((prev) => !prev)}
+                  className="h-10 justify-center"
+                  aria-pressed={showSidebar}
+                  title={showSidebar ? t('hideSidebar') : t('showSidebar')}
+                >
+                  {showSidebar ? (
+                    <PanelRightClose className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                  ) : (
+                    <PanelRightOpen className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                  )}
+                  {showSidebar ? t('hideSidebar') : t('showSidebar')}
                 </Button>
               </div>
             </div>
@@ -481,7 +583,7 @@ export function TestCaseDetail() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className={`grid gap-6 ${showSidebar ? 'lg:grid-cols-[minmax(0,1fr)_380px]' : 'lg:grid-cols-1'}`}>
           <div className="space-y-6">
             <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
               <CardHeader className="pb-3">
@@ -600,6 +702,7 @@ export function TestCaseDetail() {
 
           </div>
 
+          {showSidebar && (
           <aside className="space-y-6">
             <Card className="border-slate-200 shadow-xs dark:border-slate-800">
               <CardHeader>
@@ -614,12 +717,16 @@ export function TestCaseDetail() {
                       {section.path.map((crumb, index) => (
                         <span key={crumb.id} className="inline-flex items-center gap-1">
                           {index > 0 && <span className="text-slate-400">/</span>}
-                          <Link
-                            to={effectiveProjectId ? `/projects/${effectiveProjectId}/sections/${crumb.id}` : '/test-cases'}
-                            className="text-blue-600 hover:underline dark:text-blue-400"
-                          >
-                            {crumb.name}
-                          </Link>
+                          {effectiveProjectId ? (
+                            <Link
+                              to={`/projects/${effectiveProjectId}/sections/${crumb.id}`}
+                              className="text-blue-600 hover:underline dark:text-blue-400"
+                            >
+                              {crumb.name}
+                            </Link>
+                          ) : (
+                            <span>{crumb.name}</span>
+                          )}
                         </span>
                       ))}
                     </span>
@@ -629,7 +736,7 @@ export function TestCaseDetail() {
                 {hasReference && (
                   <PropertyRow
                     label={t('reference')}
-                    value={testCase.reference as string}
+                    value={renderReferenceValue(testCase.reference as string)}
                   />
                 )}
                 <PropertyRow label={t('createdBy')} value={testCase.creator?.full_name || testCase.creator?.username || t('unknown')} />
@@ -764,16 +871,17 @@ export function TestCaseDetail() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {testRunHistory.slice(0, 6).map((result) => (
-                      <Link
-                        key={result.id}
-                        to={`/projects/${result.project_id || effectiveProjectId}/test-runs/${result.test_run_id}/test-cases/${testCase.id}`}
-                        className="block rounded-2xl border border-slate-200 p-3 transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
-                      >
+                    {testRunHistory.slice(0, 6).map((result) => {
+                      const resultProjectId = result.project_id || effectiveProjectId;
+                      const linkTarget = resultProjectId && result.test_run_id
+                        ? `/projects/${resultProjectId}/test-runs/${result.test_run_id}/test-cases/${testCase.id}`
+                        : null;
+                      const rowClassName = 'block rounded-2xl border border-slate-200 p-3 transition hover:border-blue-300 hover:bg-blue-50/50 dark:border-slate-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20';
+                      const rowContents = (
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                              {result.test_run_name || `${t('testRun')} #${result.test_run_id}`}
+                              {result.test_run_name || `${t('testRun')} #${result.test_run_id ?? '?'}`}
                             </p>
                             <p className="mt-1 text-xs text-slate-500">
                               {result.executed_by_full_name || result.executed_by || t('unknown')} • {formatDateTime(result.executed_at || result.created_at)}
@@ -781,8 +889,17 @@ export function TestCaseDetail() {
                           </div>
                           <Badge className={getStatusBadgeClass(result.status)}>{formatStatusLabel(result.status)}</Badge>
                         </div>
-                      </Link>
-                    ))}
+                      );
+                      return linkTarget ? (
+                        <Link key={result.id} to={linkTarget} className={rowClassName}>
+                          {rowContents}
+                        </Link>
+                      ) : (
+                        <div key={result.id} className={rowClassName.replace('hover:border-blue-300 hover:bg-blue-50/50 dark:hover:border-blue-800 dark:hover:bg-blue-950/20', '')}>
+                          {rowContents}
+                        </div>
+                      );
+                    })}
                     {testRunHistory.length > 6 && (
                       <Button variant="outline" size="sm" className="w-full" onClick={openExecutionHistoryPage}>
                         +{testRunHistory.length - 6} {t('moreExecutions')}
@@ -835,6 +952,7 @@ export function TestCaseDetail() {
               </Card>
             )}
           </aside>
+          )}
         </div>
       </div>
     </div>
@@ -955,15 +1073,19 @@ function getPriorityBadge(priority: string) {
   return variants[priority] || variants.medium;
 }
 
-function getStatusBadge(status: string) {
+function getStatusBadge(status: string | undefined | null) {
+  const normalized = typeof status === 'string' ? status.toLowerCase() : '';
   const variants: Record<string, string> = {
     active: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
-    inactive: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-    archived: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-    draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
     ready: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+    approved: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+    inactive: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    under_review: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    obsolete: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    archived: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   };
-  return variants[status] || variants.inactive;
+  return variants[normalized] || variants.inactive;
 }
 
 function getStatusBadgeClass(status: string) {

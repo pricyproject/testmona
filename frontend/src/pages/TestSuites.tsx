@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import {
   AlertCircle,
+  AlertTriangle,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -44,7 +45,7 @@ import {
   TestTube,
   Trash2,
 } from 'lucide-react';
-import { testSuitesAPI, testCasesAPI, sectionsAPI, auditAPI } from '@/lib/api';
+import { testSuitesAPI, testCasesAPI, sectionsAPI } from '@/lib/api';
 import { TestSuite, TestCase } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -55,6 +56,22 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useTranslation } from '@/hooks/useTranslation';
+
+interface SectionNode {
+  id: number;
+  name: string;
+  test_suite_id: number;
+  test_case_count?: number;
+  subsections?: SectionNode[];
+}
+
+const collectSectionIds = (node: SectionNode): number[] => {
+  const ids: number[] = [node.id];
+  (node.subsections || []).forEach((child) => {
+    ids.push(...collectSectionIds(child));
+  });
+  return ids;
+};
 
 export function TestSuites() {
   const navigate = useNavigate();
@@ -73,12 +90,12 @@ export function TestSuites() {
   // Data states
   const [testSuites, setTestSuites] = useState<TestSuite[]>([]);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
-  const [sections, setSections] = useState<any[]>([]);
-  
+  const [sections, setSections] = useState<SectionNode[]>([]);
+
   // Selection states
   const [selectedTestCases, setSelectedTestCases] = useState<number[]>([]);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all']));
-  
+
   // Filter and search states
   const [searchQuery, setSearchQuery] = useState('');
   const [suiteSearchQuery, setSuiteSearchQuery] = useState('');
@@ -89,11 +106,18 @@ export function TestSuites() {
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingTestCases, setIsLoadingTestCases] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Pagination for test cases
   const [testCasePage, setTestCasePage] = useState(1);
   const testCasesPerPage = 50;
-  
+
+  // Delete confirmation
+  const [deleteTarget, setDeleteTarget] = useState<TestSuite | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const loadRequestId = useRef(0);
+  const dialogLoadRequestId = useRef(0);
+
   const currentProjectId = useMemo(() => {
     const parsedProjectId = Number(projectId);
     return projectId && Number.isInteger(parsedProjectId) && parsedProjectId > 0 ? parsedProjectId : null;
@@ -101,22 +125,28 @@ export function TestSuites() {
 
   useEffect(() => {
     loadData();
+    return () => {
+      // Invalidate any in-flight request when the project changes / page unmounts
+      loadRequestId.current++;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId]);
 
-  // Load test cases when dialog opens
+  // Load test cases when dialog opens. Reloads each open so a newly-created or moved
+  // case shows up; the previous version cached the list forever once seen.
   useEffect(() => {
-    if (isDialogOpen && testCases.length === 0) {
-      loadTestCasesForSelection();
-    }
-    // Auto-focus on name input when dialog opens
-    if (isDialogOpen && nameInputRef.current) {
-      setTimeout(() => nameInputRef.current?.focus(), 100);
-    }
-  }, [isDialogOpen]);
+    if (!isDialogOpen) return;
+    loadTestCasesForSelection();
+    const timer = window.setTimeout(() => nameInputRef.current?.focus(), 80);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDialogOpen, currentProjectId]);
 
   // Track unsaved changes
   useEffect(() => {
-    setHasUnsavedChanges(suiteName.trim() !== '' || suiteDescription.trim() !== '' || selectedTestCases.length > 0);
+    setHasUnsavedChanges(
+      suiteName.trim() !== '' || suiteDescription.trim() !== '' || selectedTestCases.length > 0,
+    );
   }, [suiteName, suiteDescription, selectedTestCases]);
 
   const loadData = async () => {
@@ -127,26 +157,29 @@ export function TestSuites() {
       return;
     }
 
+    const requestId = ++loadRequestId.current;
     try {
       setIsLoading(true);
       setError(null);
-      console.log('🔍 Loading test suites for project:', currentProjectId);
-      const testSuitesData = await testSuitesAPI.getAll(currentProjectId).catch((err) => {
-        console.error('❌ Failed to load test suites:', err);
-        return [];
-      });
-      console.log('✅ Test suites loaded:', testSuitesData);
-      setTestSuites(testSuitesData);
-    } catch (err) {
-      console.error('Failed to load data:', err);
-      setError(t('failedToLoadTestSuitesError'));
-      toast({
-        title: t('error'),
-        description: t('failedToLoadTestSuitesError'),
-        variant: "destructive",
-      });
+      const testSuitesData = await testSuitesAPI.getAll(currentProjectId, 0, 500);
+      if (requestId !== loadRequestId.current) return;
+      setTestSuites(Array.isArray(testSuitesData) ? testSuitesData : []);
+    } catch (err: any) {
+      if (requestId !== loadRequestId.current) return;
+      const status = err?.response?.status;
+      const message =
+        status === 401
+          ? t('authenticationRequired') || t('failedToLoadTestSuitesError')
+          : status === 403
+          ? t('permissionDeniedViewTestPlans') || t('failedToLoadTestSuitesError')
+          : status === 404
+          ? t('projectNotFound') || t('failedToLoadTestSuitesError')
+          : t('failedToLoadTestSuitesError');
+      setError(message);
+      setTestSuites([]);
+      toast({ title: t('error'), description: message, variant: 'destructive' });
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestId.current) setIsLoading(false);
     }
   };
 
@@ -157,47 +190,47 @@ export function TestSuites() {
       return;
     }
 
+    const requestId = ++dialogLoadRequestId.current;
     try {
       setIsLoadingTestCases(true);
       const [testCasesData, hierarchyData] = await Promise.all([
         testCasesAPI.getAll(currentProjectId).catch(() => []),
         sectionsAPI.getProjectSectionHierarchy(currentProjectId).catch(() => null),
       ]);
-      setTestCases(testCasesData);
-      setSections(
-        hierarchyData?.hierarchy?.flatMap((suiteData: any) =>
-          (suiteData.sections || []).map((section: any) => ({
-            ...section,
-            test_suite_id: suiteData.test_suite.id,
-          }))
-        ) || []
-      );
+      if (requestId !== dialogLoadRequestId.current) return;
+
+      setTestCases(Array.isArray(testCasesData) ? testCasesData : []);
+
+      // Flatten every section in the project, retaining the suite id so the
+      // grouping in the UI can filter by section_id (not by suite name).
+      const flatSections: SectionNode[] = [];
+      const walk = (nodes: any[], suiteId: number) => {
+        nodes.forEach((node) => {
+          flatSections.push({
+            id: node.id,
+            name: node.name,
+            test_suite_id: suiteId,
+            test_case_count: node.test_case_count,
+            subsections: node.subsections,
+          });
+          if (Array.isArray(node.subsections) && node.subsections.length > 0) {
+            walk(node.subsections, suiteId);
+          }
+        });
+      };
+      (hierarchyData?.hierarchy || []).forEach((suiteData: any) => {
+        walk(suiteData.sections || [], suiteData.test_suite?.id);
+      });
+      setSections(flatSections);
     } catch (err) {
-      console.error('Failed to load test cases:', err);
+      if (requestId !== dialogLoadRequestId.current) return;
       toast({
         title: t('warning'),
         description: t('failedToLoadTestCasesForSelectionError'),
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
-      setIsLoadingTestCases(false);
-    }
-  };
-
-  // Log activity to audit trail
-  const logActivity = async (action: string, entityType: string, entityId: number, description: string, newValues?: any) => {
-    try {
-      // Note: Audit logging disabled - API method not available
-      // await auditAPI.createAuditTrail({
-      //   action,
-      //   entity_type: entityType,
-      //   entity_id: entityId,
-      //   project_id: currentProjectId,
-      //   description,
-      //   new_values: newValues,
-      // });
-    } catch (error) {
-      console.error('Failed to log activity:', error);
+      if (requestId === dialogLoadRequestId.current) setIsLoadingTestCases(false);
     }
   };
 
@@ -295,7 +328,11 @@ export function TestSuites() {
   const suiteStats = useMemo(() => {
     const activeSuites = testSuites.filter((suite) => suite.status === 'active').length;
     const archivedSuites = testSuites.filter((suite) => suite.status === 'archived').length;
-    const totalCases = testSuites.reduce((sum, suite) => sum + (suite.test_case_ids?.length || 0), 0);
+    // Prefer the server-supplied count; fall back to the legacy local field if present
+    const totalCases = testSuites.reduce(
+      (sum, suite) => sum + (suite.test_case_count ?? suite.test_case_ids?.length ?? 0),
+      0,
+    );
 
     return {
       activeSuites,
@@ -331,111 +368,100 @@ export function TestSuites() {
     try {
       setIsCreating(true);
       setError(null);
-      
+
+      const trimmedName = suiteName.trim();
+      const trimmedDescription = suiteDescription.trim();
       const newTestSuite = await testSuitesAPI.create({
-        name: suiteName,
-        description: suiteDescription || undefined,
+        name: trimmedName,
+        description: trimmedDescription || undefined,
         project_id: currentProjectId,
         status: 'active',
         test_case_ids: selectedTestCases,
       });
-      
-      // Log activity
-      await logActivity(
-        'create',
-        'test_suite',
-        newTestSuite.id,
-        t('createdTestSuiteWithCases', { name: suiteName, count: selectedTestCases.length }),
-        {
-          name: suiteName,
-          description: suiteDescription,
-          test_case_count: selectedTestCases.length,
-        }
-      );
-      
-      setTestSuites([newTestSuite, ...testSuites]);
-      
-      // Reset form
+
+      // Reset form before navigating so reopening starts clean
       setSuiteName('');
       setSuiteDescription('');
       setSelectedTestCases([]);
       setSearchQuery('');
       setTestCasePage(1);
+      setHasUnsavedChanges(false);
       setIsDialogOpen(false);
-      
+
       toast({
         title: t('success'),
-        description: t('testSuiteCreatedSuccessfully', { name: suiteName }),
+        description: t('testSuiteCreatedSuccessfully', { name: trimmedName }),
       });
-      
+
       // Navigate to the new test suite detail page
       navigate(`/projects/${currentProjectId}/test-suites/${newTestSuite.id}`);
-    } catch (err) {
-      console.error('Failed to create test suite:', err);
-      setError(t('failedToCreateTestSuiteError'));
-      toast({
-        title: t('error'),
-        description: t('failedToCreateTestSuiteRetryError'),
-        variant: "destructive",
-      });
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const apiMessage = typeof detail === 'string' ? detail : null;
+      const message =
+        status === 403
+          ? apiMessage || t('permissionDeniedCreateTestPlans') || t('failedToCreateTestSuiteRetryError')
+          : status === 400 || status === 422
+          ? apiMessage || t('invalidDataProvided') || t('failedToCreateTestSuiteError')
+          : apiMessage || t('failedToCreateTestSuiteRetryError');
+      setError(message);
+      toast({ title: t('error'), description: message, variant: 'destructive' });
     } finally {
       setIsCreating(false);
     }
   };
 
-  const handleDeleteSuite = async (suite: TestSuite) => {
-    if (!confirm(t('areYouSureToDeleteSuite', { name: suite.name }))) {
-      return;
-    }
-    
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setIsDeleting(true);
     try {
-      await testSuitesAPI.delete(suite.id);
-      
-      // Log activity
-      await logActivity(
-        'delete',
-        'test_suite',
-        suite.id,
-        t('deletedTestSuite', { name: suite.name }),
-        { name: suite.name }
-      );
-      
-      setTestSuites(testSuites.filter(s => s.id !== suite.id));
-      
+      await testSuitesAPI.delete(target.id);
+      setTestSuites((prev) => prev.filter((s) => s.id !== target.id));
       toast({
         title: t('success'),
-        description: t('deletedTestSuite', { name: suite.name }),
+        description: t('deletedTestSuite', { name: target.name }),
       });
-    } catch (err) {
-      console.error('Failed to delete test suite:', err);
-      toast({
-        title: t('error'),
-        description: t('failedToDeleteTestSuite'),
-        variant: "destructive",
-      });
+      setDeleteTarget(null);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const apiMessage = typeof detail === 'string' ? detail : null;
+      const message =
+        status === 409
+          ? apiMessage || t('failedToDeleteTestSuite')
+          : status === 403
+          ? apiMessage || t('failedToDeleteTestSuite')
+          : status === 404
+          ? t('failedToDeleteTestSuite')
+          : apiMessage || t('failedToDeleteTestSuite');
+      toast({ title: t('error'), description: message, variant: 'destructive' });
+      setDeleteTarget(null);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   const handleDuplicateSuite = async (suite: TestSuite) => {
     try {
-      const newSuite = await testSuitesAPI.create({
+      await testSuitesAPI.create({
         name: t('suiteCopy', { name: suite.name }),
         description: suite.description,
         project_id: suite.project_id,
       });
-      
       toast({
         title: t('success'),
         description: t('testSuiteDuplicatedSuccessfully'),
       });
-      
       await loadData();
-    } catch (err) {
-      console.error('Failed to duplicate test suite:', err);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const apiMessage = typeof detail === 'string' ? detail : null;
       toast({
         title: t('error'),
-        description: t('failedToDuplicateTestSuite'),
-        variant: "destructive",
+        description: apiMessage || t('failedToDuplicateTestSuite'),
+        variant: 'destructive',
       });
     }
   };
@@ -546,11 +572,12 @@ export function TestSuites() {
                               onChange={(e) => setSuiteName(e.target.value)}
                               className={`h-12 rounded-xl bg-white text-base dark:bg-slate-950 ${suiteName.trim() === '' ? 'border-red-300 focus-visible:ring-red-500' : 'border-slate-200 dark:border-slate-700'}`}
                               placeholder={t('enterSuiteName')}
-                              maxLength={200}
+                              maxLength={255}
+                              autoComplete="off"
                             />
                             <div className="flex justify-between gap-3 text-xs text-slate-500">
                               <span>{t('enterSuiteName')}</span>
-                              <span>{suiteName.length}/200</span>
+                              <span>{suiteName.length}/255</span>
                             </div>
                           </div>
 
@@ -737,10 +764,12 @@ export function TestSuites() {
                                   )}
                                 </div>
 
-                                {sections.map((section: any) => {
+                                {sections.map((section) => {
                                   const sectionKey = String(section.id);
+                                  // Include cases in this section AND in any of its descendants
+                                  const idsInScope = new Set(collectSectionIds(section));
                                   const sectionTestCases = filteredTestCases.filter(
-                                    tc => tc.test_suite_id === section.id || tc.section === section.name
+                                    (tc) => tc.section_id != null && idsInScope.has(tc.section_id),
                                   );
 
                                   if (sectionTestCases.length === 0) return null;
@@ -1031,7 +1060,7 @@ export function TestSuites() {
           ) : (
             <div className="grid gap-4 p-5 sm:p-6 xl:grid-cols-2">
               {filteredTestSuites.map((suite) => {
-                const suiteCaseCount = suite.test_case_ids?.length || 0;
+                const suiteCaseCount = suite.test_case_count ?? suite.test_case_ids?.length ?? 0;
 
                 return (
                   <Card
@@ -1082,7 +1111,7 @@ export function TestSuites() {
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
-                                onClick={() => handleDeleteSuite(suite)}
+                                onClick={() => setDeleteTarget(suite)}
                                 className="text-red-600 dark:text-red-400"
                               >
                                 <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -1131,6 +1160,42 @@ export function TestSuites() {
             </div>
           )}
         </section>
+
+        <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+          <DialogContent isRTL={isRTL} className="sm:max-w-[460px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                <AlertTriangle className="h-5 w-5" />
+                {t('delete')}
+              </DialogTitle>
+              <DialogDescription className="pt-1">
+                {t('areYouSureToDeleteSuite', { name: deleteTarget?.name || '' })}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('deleting')}
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('delete')}
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
