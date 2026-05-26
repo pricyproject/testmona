@@ -96,6 +96,27 @@ import { BulkEditTestCasesDialog } from '@/components/BulkEditTestCasesDialog';
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 const CUSTOM_FIELD_FILTER_ALL = 'all';
 const CUSTOM_FIELD_FILTER_ANY_VALUE = '__any__';
+const SUITE_SELECTION_PREFIX = 'suite:';
+const UNSECTIONED_SELECTION_SUFFIX = ':unsectioned';
+
+type SuiteSummary = {
+  id: number;
+  name: string;
+  description?: string | null;
+};
+
+const getSuiteSelectionValue = (suiteId: number) => `${SUITE_SELECTION_PREFIX}${suiteId}`;
+const getUnsectionedSelectionValue = (suiteId: number) => `${SUITE_SELECTION_PREFIX}${suiteId}${UNSECTIONED_SELECTION_SUFFIX}`;
+const isSuiteSelectionValue = (value: string) => value.startsWith(SUITE_SELECTION_PREFIX);
+const isUnsectionedSelectionValue = (value: string) => value.endsWith(UNSECTIONED_SELECTION_SUFFIX);
+const getSuiteIdFromSelectionValue = (value: string): number | null => {
+  if (!isSuiteSelectionValue(value)) return null;
+  const rawSuiteId = value
+    .replace(SUITE_SELECTION_PREFIX, '')
+    .replace(UNSECTIONED_SELECTION_SUFFIX, '');
+  const suiteId = Number(rawSuiteId);
+  return Number.isInteger(suiteId) && suiteId > 0 ? suiteId : null;
+};
 
 export function TestCases() {
   const { t, isRTL } = useTranslation();
@@ -210,6 +231,7 @@ export function TestCases() {
 
   // Test suite state
   const [currentTestSuiteId, setCurrentTestSuiteId] = useState<number | null>(null);
+  const [testSuites, setTestSuites] = useState<SuiteSummary[]>([]);
   const [isTestSuiteLoading, setIsTestSuiteLoading] = useState(true);
   const [isSuiteDialogOpen, setIsSuiteDialogOpen] = useState(false);
   const [isCreatingSuite, setIsCreatingSuite] = useState(false);
@@ -806,6 +828,42 @@ export function TestCases() {
     }
   };
 
+  const findSectionById = (sections: Section[], sectionId: string): Section | null => {
+    for (const section of sections) {
+      if (section.id === sectionId) return section;
+      if (section.children?.length) {
+        const found = findSectionById(section.children, sectionId);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+
+  const collectSectionAndDescendantIds = (section: Section): number[] => {
+    const ids = [Number(section.id)].filter((id) => Number.isInteger(id));
+    section.children?.forEach((child) => {
+      ids.push(...collectSectionAndDescendantIds(child));
+    });
+    return ids;
+  };
+
+  const handleScopeSelection = (scope: string) => {
+    setSelectedTestSuite(scope);
+
+    if (scope === 'all') return;
+
+    const suiteId = getSuiteIdFromSelectionValue(scope);
+    if (suiteId) {
+      setCurrentTestSuiteId(suiteId);
+      return;
+    }
+
+    const section = findSectionById(mockSectionsRef.current, scope);
+    if (section?.test_suite_id) {
+      setCurrentTestSuiteId(section.test_suite_id);
+    }
+  };
+
   // Load sections from API
   const loadSections = async () => {
     if (!currentProjectId) return;
@@ -814,6 +872,12 @@ export function TestCases() {
       const hierarchyData = await sectionsAPI.getProjectSectionHierarchy(currentProjectId);
 
       if (hierarchyData && hierarchyData.hierarchy && hierarchyData.hierarchy.length > 0) {
+        setTestSuites(hierarchyData.hierarchy.map((suiteData: any) => ({
+          id: suiteData.test_suite.id,
+          name: suiteData.test_suite.name,
+          description: suiteData.test_suite.description,
+        })));
+
         // Transform API data directly to our Section interface without flattening
         const allSections: Section[] = [];
 
@@ -859,6 +923,7 @@ export function TestCases() {
 
         setMockSections(allSections);
       } else {
+        setTestSuites([]);
         setMockSections([]);
       }
     } catch (error) {
@@ -872,6 +937,7 @@ export function TestCases() {
       // Clear sections when project changes
       setMockSections([]);
       setCurrentTestSuiteId(null);
+      setSelectedTestSuite('all');
 
       await loadTestSuite();
       await loadTestCases();
@@ -886,13 +952,15 @@ export function TestCases() {
       loadSections();
     } else {
       // Clear sections if no project is available
+      setTestSuites([]);
       setMockSections([]);
     }
   }, [currentProjectId]); // Only reload when project changes, not when test cases change
 
   // Load test suite for the current project
-  const loadTestSuite = async () => {
+  const loadTestSuite = async (preferredSuiteId?: number) => {
     if (!currentProjectId) {
+      setTestSuites([]);
       setIsTestSuiteLoading(false);
       return;
     }
@@ -900,17 +968,25 @@ export function TestCases() {
     try {
       setIsTestSuiteLoading(true);
       const testSuites = await testSuitesAPI.getAll(currentProjectId);
+      setTestSuites(testSuites.map((suite: any) => ({
+        id: suite.id,
+        name: suite.name,
+        description: suite.description,
+      })));
 
       if (testSuites && testSuites.length > 0) {
         // Auto-select the first suite as the active context for "Add Test Case" /
         // "Import / Export" actions. The user can still browse all suites' cases via
         // the section panel (clicking sections changes the filter, not this default).
-        setCurrentTestSuiteId(testSuites[0].id);
+        setCurrentTestSuiteId(preferredSuiteId && testSuites.some((suite: any) => suite.id === preferredSuiteId)
+          ? preferredSuiteId
+          : testSuites[0].id);
       } else {
         setCurrentTestSuiteId(null);
       }
     } catch (error) {
       console.error('Failed to load test suite:', error);
+      setTestSuites([]);
       setCurrentTestSuiteId(null);
     } finally {
       setIsTestSuiteLoading(false);
@@ -952,6 +1028,22 @@ export function TestCases() {
     });
 
     return options;
+  };
+
+  const generateDestinationOptions = (): React.ReactElement[] => {
+    if (testSuites.length === 0) {
+      return [];
+    }
+
+    return testSuites.flatMap((suite) => {
+      const suiteSections = mockSections.filter((section) => section.test_suite_id === suite.id);
+      return [
+        <SelectItem key={`unsectioned-${suite.id}`} value={getUnsectionedSelectionValue(suite.id)}>
+          {suite.name} / {t('unsectioned')}
+        </SelectItem>,
+        ...generateSectionOptions(suiteSections),
+      ];
+    });
   };
 
   // Droppable Section Component
@@ -1006,6 +1098,44 @@ export function TestCases() {
     );
   };
 
+  const DroppableUnsectioned = ({
+    suiteId,
+    suiteName,
+    children,
+  }: {
+    suiteId: number;
+    suiteName: string;
+    children: React.ReactNode;
+  }) => {
+    const { setNodeRef, isOver } = useDroppable({
+      id: `unsectioned-${suiteId}`,
+      data: {
+        type: 'unsectioned',
+        suiteId,
+        sectionName: `${suiteName} / ${t('unsectioned')}`,
+      },
+    });
+
+    const isDraggingTestCases = activeDragId !== null;
+    const showDropIndicator = isDraggingTestCases && isOver;
+
+    return (
+      <div
+        ref={setNodeRef}
+        className={`relative transition-all ${
+          showDropIndicator
+            ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-blue-400 ring-offset-1 rounded shadow-lg scale-[1.02]'
+            : isDraggingTestCases
+              ? 'hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded'
+              : ''
+        }`}
+      >
+        {isDraggingTestCases && <div className="absolute inset-0 z-5" style={{ pointerEvents: 'auto' }} />}
+        <div className="relative z-1">{children}</div>
+      </div>
+    );
+  };
+
   // Render section tree function
   const renderSectionTree = (sections: Section[], level: number = 0): React.ReactElement[] => {
     return sections.map((section) => {
@@ -1038,7 +1168,7 @@ export function TestCases() {
                   : 'hover:bg-gray-100 dark:hover:bg-gray-700'
               }`}
               onClick={() => {
-                setSelectedTestSuite(section.id);
+                handleScopeSelection(section.id);
                 if (hasChildren) {
                   toggleSectionExpansion(section.id);
                 }
@@ -1134,7 +1264,7 @@ export function TestCases() {
 
       // Reset selection if the deleted section was selected
       if (selectedTestSuite === sectionId) {
-        setSelectedTestSuite('all');
+        handleScopeSelection('all');
       }
     }
   };
@@ -1270,16 +1400,27 @@ export function TestCases() {
 
       const matchesType = filterType === 'all' || normalizeSearchValue(testCase.test_type) === normalizeSearchValue(filterType);
       const matchesPriority = filterPriority === 'all' || testCase.priority === filterPriority;
-      // `selectedTestSuite` is set by the left-panel section tree, so it's always
-      // a section id (or 'all'). Matching it against `test_suite_id` too — as the
-      // previous version did — silently leaked rows whenever a suite happened to
-      // share its numeric id with an unrelated section.
-      const matchesSuite = selectedTestSuite === 'all' ||
-                           testCase.section_id === parseInt(selectedTestSuite);
+      let matchesSuite = true;
+      if (selectedTestSuite !== 'all') {
+        const selectedSuiteId = getSuiteIdFromSelectionValue(selectedTestSuite);
+
+        if (selectedSuiteId) {
+          matchesSuite = testCase.test_suite_id === selectedSuiteId;
+          if (isUnsectionedSelectionValue(selectedTestSuite)) {
+            matchesSuite = matchesSuite && !testCase.section_id;
+          }
+        } else {
+          const selectedSection = findSectionById(mockSections, selectedTestSuite);
+          const sectionIds = selectedSection
+            ? collectSectionAndDescendantIds(selectedSection)
+            : [Number(selectedTestSuite)];
+          matchesSuite = !!testCase.section_id && sectionIds.includes(testCase.section_id);
+        }
+      }
 
       return matchesSearch && matchesCustomField && matchesType && matchesPriority && matchesSuite;
     });
-  }, [apiTestCases, searchQuery, customFieldFilterId, customFieldFilterValue, filterType, filterPriority, selectedTestSuite, selectedCustomFieldFilter]);
+  }, [apiTestCases, mockSections, searchQuery, customFieldFilterId, customFieldFilterValue, filterType, filterPriority, selectedTestSuite, selectedCustomFieldFilter]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -1684,9 +1825,10 @@ export function TestCases() {
       return;
     }
 
-    // Get the selected section ID
+    // Get the selected section ID. Suite and unsectioned scopes intentionally
+    // create the test case without a section, but still inside currentTestSuiteId.
     let sectionId: number | undefined = undefined;
-    if (selectedTestSuite !== 'all') {
+    if (selectedTestSuite !== 'all' && !isSuiteSelectionValue(selectedTestSuite)) {
       sectionId = parseInt(selectedTestSuite);
     }
 
@@ -1750,7 +1892,7 @@ export function TestCases() {
 
       toast({
         title: t('success'),
-        description: t('testCaseCreatedSuccessfully', {section: sectionId ? getSelectedSectionName() : t('noSection')}),
+        description: t('testCaseCreatedSuccessfully', {section: getSelectedScopeName()}),
       });
 
       // Refresh the test cases list and sections
@@ -1768,22 +1910,22 @@ export function TestCases() {
     }
   };
 
-  // Helper function to get selected section name
-  const getSelectedSectionName = () => {
-    if (selectedTestSuite === 'all') return 'no section';
+  // Helper function to get selected scope name for creation and messages.
+  const getSelectedScopeName = () => {
+    if (selectedTestSuite === 'all') {
+      const activeSuite = testSuites.find((suite) => suite.id === currentTestSuiteId);
+      return activeSuite ? `${activeSuite.name} / ${t('unsectioned')}` : t('noSection');
+    }
 
-    const findSection = (sections: Section[], sectionId: string): string | null => {
-      for (const section of sections) {
-        if (section.id === sectionId) return section.name;
-        if (section.children) {
-          const found = findSection(section.children, sectionId);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
+    const selectedSuiteId = getSuiteIdFromSelectionValue(selectedTestSuite);
+    if (selectedSuiteId) {
+      const suiteName = testSuites.find((suite) => suite.id === selectedSuiteId)?.name || t('suiteName');
+      return isUnsectionedSelectionValue(selectedTestSuite)
+        ? `${suiteName} / ${t('unsectioned')}`
+        : suiteName;
+    }
 
-    return findSection(mockSections, selectedTestSuite) || 'unknown section';
+    return findSectionById(mockSections, selectedTestSuite)?.name || t('noSection');
   };
 
   // Helper function to build breadcrumb path for selected section
@@ -1961,7 +2103,7 @@ export function TestCases() {
     if (urlSectionId) {
       setImportSectionId(urlSectionId);
     } else {
-      setImportSectionId(selectedTestSuite === 'all' ? 'none' : selectedTestSuite);
+      setImportSectionId(selectedTestSuite === 'all' || isSuiteSelectionValue(selectedTestSuite) ? 'none' : selectedTestSuite);
     }
     setIsImportDialogOpen(true);
     void loadCustomFields();
@@ -2249,6 +2391,11 @@ export function TestCases() {
       });
 
       setCurrentTestSuiteId(createdSuite.id);
+      setSelectedTestSuite(getSuiteSelectionValue(createdSuite.id));
+      setTestSuites(prev => [
+        ...prev.filter((suite) => suite.id !== createdSuite.id),
+        { id: createdSuite.id, name: createdSuite.name, description: createdSuite.description },
+      ]);
       setSuiteName('');
       setSuiteDescription('');
       setIsSuiteDialogOpen(false);
@@ -2258,7 +2405,7 @@ export function TestCases() {
         description: t('testSuiteCreatedSuccessfully'),
       });
 
-      await loadTestSuite();
+      await loadTestSuite(createdSuite.id);
       await loadSections();
       await loadTestCases();
     } catch (error) {
@@ -2404,13 +2551,23 @@ export function TestCases() {
     if (!selectedTestCaseToMove || !destinationSection) return;
 
     const testCaseToMove = selectedTestCaseToMove;
-    const sectionName = findSectionNameById(destinationSection, mockSections) || destinationSection;
+    const targetSection = findSectionById(mockSections, destinationSection);
+    const sectionName = targetSection?.name || findSectionNameById(destinationSection, mockSections) || destinationSection;
+
+    if (!targetSection?.test_suite_id) {
+      toast({
+        title: t('error'),
+        description: t('failedToMoveTestCases'),
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
-      // Persist the move: only the section changes, so send just section_id
-      // (sending the whole test case would re-escape every text field server-side).
+      // Persist only the placement fields to avoid re-escaping every text field server-side.
       await testCasesAPI.update(testCaseToMove.id, {
         section_id: parseInt(destinationSection),
+        test_suite_id: targetSection.test_suite_id,
       });
 
       setMoveDialogOpen(false);
@@ -2442,8 +2599,8 @@ export function TestCases() {
 
   const handleDragOver = (event: DragOverEvent) => {
     const { over } = event;
-    if (over && over.data.current?.type === 'section') {
-      setDragOverSectionId(over.data.current.sectionId);
+    if (over && (over.data.current?.type === 'section' || over.data.current?.type === 'unsectioned')) {
+      setDragOverSectionId(String(over.data.current.sectionId || over.data.current.suiteId));
     } else {
       setDragOverSectionId(null);
     }
@@ -2457,10 +2614,66 @@ export function TestCases() {
 
     if (!over) return;
 
+    if (over.data.current?.type === 'unsectioned') {
+      const suiteId = Number(over.data.current.suiteId);
+      const sectionName = over.data.current.sectionName || t('unsectioned');
+
+      if (!Number.isInteger(suiteId) || suiteId <= 0) {
+        toast({
+          title: t('error'),
+          description: t('failedToMoveTestCases'),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const testCasesToMove = selectedTestCases.length > 0 && selectedTestCases.includes(active.id as number)
+        ? selectedTestCases
+        : [active.id as number];
+
+      try {
+        for (const testCaseId of testCasesToMove) {
+          await testCasesAPI.update(testCaseId, {
+            section_id: null,
+            test_suite_id: suiteId,
+          });
+        }
+
+        toast({
+          title: t('success'),
+          description: t('movedTestCasesSuccessfully', {count: testCasesToMove.length, sectionName}),
+        });
+
+        await loadTestCases();
+        await loadSections();
+        setSelectedTestCases([]);
+        setSelectAll(false);
+      } catch (error) {
+        console.error('Failed to move test cases:', error);
+        toast({
+          title: t('error'),
+          description: t('failedToMoveTestCases'),
+          variant: "destructive",
+        });
+      }
+
+      return;
+    }
+
     // Check if dropping on a section
     if (over.data.current?.type === 'section') {
       const sectionId = over.data.current.sectionId;
       const sectionName = over.data.current.sectionName;
+      const targetSection = findSectionById(mockSections, String(sectionId));
+
+      if (!targetSection?.test_suite_id) {
+        toast({
+          title: t('error'),
+          description: t('failedToMoveTestCases'),
+          variant: "destructive",
+        });
+        return;
+      }
 
       // Get test cases to move (either selected ones or just the dragged one)
       const testCasesToMove = selectedTestCases.length > 0 && selectedTestCases.includes(active.id as number)
@@ -2472,10 +2685,10 @@ export function TestCases() {
         for (const testCaseId of testCasesToMove) {
           const testCase = apiTestCases.find(tc => tc.id === testCaseId);
           if (testCase) {
-            // Only the section changes — sending the full test case would
-            // re-escape (and so corrupt) every text field on the server.
+            // Persist only the placement fields to avoid re-escaping every text field server-side.
             await testCasesAPI.update(testCaseId, {
-              section_id: parseInt(sectionId)
+              section_id: parseInt(sectionId),
+              test_suite_id: targetSection.test_suite_id,
             });
           }
         }
@@ -2536,8 +2749,6 @@ export function TestCases() {
         // Update the test cases array
         setApiTestCases(reorderedTestCases);
 
-        // Force re-render by updating state
-        setSelectedTestSuite(prev => prev === 'all' ? 'all' : selectedTestSuite);
       }
     }
   };
@@ -2680,7 +2891,7 @@ export function TestCases() {
                 {selectedTestSuite !== 'all' && (
                   <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-700">
                     <span className="text-sm text-blue-700 dark:text-blue-300">
-                      📁 {t('testCaseWillBeAddedTo')} <strong>{getSelectedSectionName()}</strong>
+                      📁 {t('testCaseWillBeAddedTo')} <strong>{getSelectedScopeName()}</strong>
                     </span>
                   </div>
                 )}
@@ -3358,7 +3569,7 @@ export function TestCases() {
                   <Button
                     variant={selectedTestSuite === 'all' ? 'secondary' : 'ghost'}
                     className="w-full justify-start text-sm font-semibold"
-                    onClick={() => setSelectedTestSuite('all')}
+                    onClick={() => handleScopeSelection('all')}
                   >
                     <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 text-blue-500`} />
                     <span className="flex-1 truncate text-left rtl:text-right">{t('testCasesTitle')}</span>
@@ -3405,8 +3616,20 @@ export function TestCases() {
                     }, []);
                   };
 
-                  // Group sections by test suite
-                  const sectionsBySuite = new Map<number, { name: string; sections: Section[] }>();
+                  const normalizedQuery = sectionSearchQuery.trim().toLowerCase();
+                  const sectionsBySuite = new Map<number, { name: string; sections: Section[]; matchesSuite: boolean }>();
+
+                  testSuites.forEach((suite) => {
+                    const matchesSuite = !normalizedQuery || suite.name.toLowerCase().includes(normalizedQuery);
+                    const matchesUnsectioned = !!normalizedQuery && t('unsectioned').toLowerCase().includes(normalizedQuery);
+                    if (matchesSuite || matchesUnsectioned || !normalizedQuery) {
+                      sectionsBySuite.set(suite.id, {
+                        name: suite.name,
+                        sections: [],
+                        matchesSuite,
+                      });
+                    }
+                  });
 
                   // Apply search filter first
                   const filteredSections = filterSections(mockSections, sectionSearchQuery);
@@ -3416,7 +3639,8 @@ export function TestCases() {
                       if (!sectionsBySuite.has(section.test_suite_id)) {
                         sectionsBySuite.set(section.test_suite_id, {
                           name: section.test_suite_name || 'Unknown Suite',
-                          sections: []
+                          sections: [],
+                          matchesSuite: false,
                         });
                       }
                       sectionsBySuite.get(section.test_suite_id)!.sections.push(section);
@@ -3436,17 +3660,52 @@ export function TestCases() {
 
                   return Array.from(sectionsBySuite.entries()).map(([suiteId, suiteData]) => (
                     <div key={suiteId} className="mb-3">
-                      <div className="flex items-center gap-2 mb-2 px-3 py-1 bg-gray-50 dark:bg-gray-800 rounded">
-                        <Folder className="h-4 w-4 text-blue-600" />
-                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                      <Button
+                        variant={selectedTestSuite === getSuiteSelectionValue(suiteId) ? 'secondary' : 'ghost'}
+                        className="mb-1 h-auto w-full justify-start px-3 py-1.5 text-xs font-semibold"
+                        onClick={() => handleScopeSelection(getSuiteSelectionValue(suiteId))}
+                      >
+                        <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 text-blue-600`} />
+                        <span className="min-w-0 flex-1 truncate text-left rtl:text-right">
                           {suiteData.name}
                         </span>
-                        <span className="text-xs text-gray-500">
-                          ({suiteData.sections.reduce((sum, s) => sum + (s.testCaseCount || 0), 0)} TCs)
+                        <span className="shrink-0 text-xs text-gray-500">
+                          {t('testCasesCountSimple', { count: apiTestCases.filter((tc) => tc.test_suite_id === suiteId).length })}
                         </span>
-                      </div>
+                      </Button>
                       <div className="ml-2">
-                        {renderSectionTree(suiteData.sections)}
+                        {(() => {
+                          const unsectionedValue = getUnsectionedSelectionValue(suiteId);
+                          const unsectionedCount = apiTestCases.filter((tc) => tc.test_suite_id === suiteId && !tc.section_id).length;
+                          const unsectionedMatches = t('unsectioned').toLowerCase().includes(normalizedQuery);
+                          const showUnsectioned = !normalizedQuery || suiteData.matchesSuite || unsectionedMatches || unsectionedCount > 0;
+
+                          return (
+                            <>
+                              {showUnsectioned && (
+                                <DroppableUnsectioned suiteId={suiteId} suiteName={suiteData.name}>
+                                  <Button
+                                    variant={selectedTestSuite === unsectionedValue ? 'secondary' : 'ghost'}
+                                    className="h-auto w-full justify-start px-3 py-1 text-xs font-normal"
+                                    onClick={() => handleScopeSelection(unsectionedValue)}
+                                    title={t('unsectionedTooltip')}
+                                  >
+                                    <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-3.5 w-3.5 text-gray-400`} />
+                                    <span className="min-w-0 flex-1 truncate text-left rtl:text-right">{t('unsectioned')}</span>
+                                    <span className="shrink-0 rounded bg-gray-50 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-gray-800">
+                                      {unsectionedCount}
+                                    </span>
+                                  </Button>
+                                </DroppableUnsectioned>
+                              )}
+                              {suiteData.sections.length > 0 ? (
+                                renderSectionTree(suiteData.sections)
+                              ) : (
+                                <p className="px-3 py-1.5 text-xs text-gray-500">{t('noSectionsYetForSuite')}</p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   ));
@@ -3489,7 +3748,7 @@ export function TestCases() {
 
                           const sectionId = findSectionIdByName(mockSections, section);
                           if (sectionId) {
-                            setSelectedTestSuite(sectionId);
+                            handleScopeSelection(sectionId);
                           }
                         }}
                         className={`hover:text-blue-600 dark:hover:text-blue-400 transition-colors ${

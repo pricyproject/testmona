@@ -737,6 +737,18 @@ def register_test_management_routes(app):
         test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
         if not test_suite:
             raise HTTPException(status_code=404, detail="Test suite not found")
+        if not rbac.has_permission(current_user, "write", test_suite.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to create test cases in this project")
+
+        if test_case.section_id is not None:
+            section = crud.get_test_case_section(db, section_id=test_case.section_id)
+            if not section:
+                raise HTTPException(status_code=404, detail="Section not found")
+            if section.test_suite_id != test_case.test_suite_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Section must belong to the selected test suite",
+                )
         
         # Ensure default environment definitions exist for the project
         crud.ensure_default_environment_definitions(db, test_suite.project_id, current_user.id)
@@ -926,6 +938,8 @@ def register_test_management_routes(app):
             raise HTTPException(status_code=403, detail="Not authorized to update this test case")
 
         original_project_id = test_suite.project_id
+        update_fields = test_case.model_dump(exclude_unset=True)
+        target_test_suite_id = update_fields.get("test_suite_id", original_test_case.test_suite_id)
 
         if test_case.test_suite_id is not None:
             new_test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
@@ -933,6 +947,25 @@ def register_test_management_routes(app):
                 raise HTTPException(status_code=404, detail="Test suite not found")
             if not rbac.has_permission(current_user, "write", new_test_suite.project_id, db):
                 raise HTTPException(status_code=403, detail="Not authorized to move test case to this project")
+
+        if "section_id" in update_fields and update_fields["section_id"] is not None:
+            section = crud.get_test_case_section(db, section_id=update_fields["section_id"])
+            if not section:
+                raise HTTPException(status_code=404, detail="Section not found")
+            if section.test_suite_id != target_test_suite_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Section must belong to the selected test suite",
+                )
+        elif (
+            "test_suite_id" in update_fields
+            and update_fields["test_suite_id"] != original_test_case.test_suite_id
+            and original_test_case.section_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="section_id must be provided or cleared when moving a test case to another suite",
+            )
 
         original_data = {
             'title': original_test_case.title,
@@ -961,7 +994,7 @@ def register_test_management_routes(app):
                 return str(value)
 
             changed_fields = []
-            update_data = test_case.model_dump(exclude_unset=True)
+            update_data = update_fields
 
             for field, new_value in update_data.items():
                 if field not in original_data:
