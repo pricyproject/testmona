@@ -47,9 +47,22 @@ export function IntelligentReferenceField({
     if (input.startsWith('(req)')) {
       return 'requirement';
     }
-    if (input.includes('jira.com') || input.includes('atlassian.net')) {
-      return 'jira';
+
+    try {
+      const hostname = new URL(input).hostname.toLowerCase();
+      const isJiraHost =
+        hostname === 'jira.com' ||
+        hostname.endsWith('.jira.com') ||
+        hostname === 'atlassian.net' ||
+        hostname.endsWith('.atlassian.net');
+
+      if (isJiraHost) {
+        return 'jira';
+      }
+    } catch {
+      // Not a valid absolute URL; treat as plain text.
     }
+
     return 'text';
   }, []);
 
