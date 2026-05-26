@@ -1136,7 +1136,7 @@ def register_test_management_routes(app):
             )
 
         db_test_case = crud.get_test_case(db, test_case_id=test_case_id)
-        if not db_test_case:
+        if not db_test_case or getattr(db_test_case, "is_deleted", False):
             raise HTTPException(status_code=404, detail="Test case not found")
 
         test_suite = crud.get_test_suite(db, test_suite_id=db_test_case.test_suite_id)

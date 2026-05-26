@@ -107,7 +107,10 @@ def register_project_routes(app):
             case_counts = dict(
                 db.query(TestSuite.project_id, func.count(TestCase.id))
                 .join(TestCase, TestCase.test_suite_id == TestSuite.id)
-                .filter(TestSuite.project_id.in_(project_ids))
+                .filter(
+                    TestSuite.project_id.in_(project_ids),
+                    ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+                )
                 .group_by(TestSuite.project_id)
                 .all()
             )

@@ -92,7 +92,10 @@ def get_projects(db: Session, skip: int = 0, limit: int = 100):
     # Add test case counts for each project
     for project in projects:
         # Count test cases through test suites
-        test_case_count = db.query(TestCase).join(TestSuite).filter(TestSuite.project_id == project.id).count()
+        test_case_count = db.query(TestCase).join(TestSuite).filter(
+            TestSuite.project_id == project.id,
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        ).count()
         test_suite_count = db.query(TestSuite).filter(TestSuite.project_id == project.id).count()
         test_run_count = db.query(TestRun).filter(TestRun.project_id == project.id).count()
         

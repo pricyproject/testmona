@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc
+from sqlalchemy import and_, desc
 from datetime import datetime, timedelta
 import json
 import difflib
@@ -20,6 +20,10 @@ class VersioningService:
     
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def _active_test_case_filter() -> Any:
+        return (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))
     
     def create_version(
         self, 
@@ -31,14 +35,19 @@ class VersioningService:
         """Create a new version of a test case"""
         
         # Get test case
-        test_case = self.db.query(TestCase).filter(TestCase.id == test_case_id).first()
+        test_case = self.db.query(TestCase).filter(
+            TestCase.id == test_case_id,
+            self._active_test_case_filter(),
+        ).first()
         if not test_case:
             raise ValueError("Test case not found")
         
         # Determine version numbers
         if parent_version_id:
             parent_version = self.db.query(TestCaseVersion).filter(
-                TestCaseVersion.id == parent_version_id
+                TestCaseVersion.id == parent_version_id,
+                TestCaseVersion.test_case_id == test_case_id,
+                TestCaseVersion.test_case.has(self._active_test_case_filter()),
             ).first()
             if not parent_version:
                 raise ValueError("Parent version not found")
@@ -105,7 +114,8 @@ class VersioningService:
     def get_versions(self, test_case_id: int) -> List[TestCaseVersion]:
         """Get all versions of a test case"""
         return self.db.query(TestCaseVersion).filter(
-            TestCaseVersion.test_case_id == test_case_id
+            TestCaseVersion.test_case_id == test_case_id,
+            TestCaseVersion.test_case.has(self._active_test_case_filter()),
         ).order_by(
             desc(TestCaseVersion.version_major),
             desc(TestCaseVersion.version_minor),
@@ -117,6 +127,7 @@ class VersioningService:
         return self.db.query(TestCaseVersion).filter(
             and_(
                 TestCaseVersion.test_case_id == test_case_id,
+                TestCaseVersion.test_case.has(self._active_test_case_filter()),
                 TestCaseVersion.status == VersionStatus.PUBLISHED
             )
         ).order_by(
@@ -127,7 +138,10 @@ class VersioningService:
     
     def get_version(self, version_id: int) -> Optional[TestCaseVersion]:
         """Get a specific version"""
-        return self.db.query(TestCaseVersion).filter(TestCaseVersion.id == version_id).first()
+        return self.db.query(TestCaseVersion).filter(
+            TestCaseVersion.id == version_id,
+            TestCaseVersion.test_case.has(self._active_test_case_filter()),
+        ).first()
     
     def update_version(
         self, 
@@ -164,7 +178,10 @@ class VersioningService:
         version.published_at = datetime.utcnow()
         
         # Update the actual test case with this version's data
-        test_case = self.db.query(TestCase).filter(TestCase.id == version.test_case_id).first()
+        test_case = self.db.query(TestCase).filter(
+            TestCase.id == version.test_case_id,
+            self._active_test_case_filter(),
+        ).first()
         if test_case:
             test_case.title = version.title
             test_case.test_type = version.test_type
