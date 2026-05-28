@@ -666,8 +666,16 @@ def register_system_settings_routes(app):
         else:
             if not rbac.has_permission(current_user, "write", parameter.project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        db_parameter = crud.create_global_parameter(db=db, parameter=parameter.model_dump())
+
+        # Names are unique per scope. Check explicitly for a clean 400 (and to
+        # cover the global scope, where the (project_id, name) DB constraint
+        # doesn't fire because NULL project_ids compare as distinct).
+        if crud.get_global_parameter_by_name(db, name=parameter.name, project_id=parameter.project_id) is not None:
+            raise HTTPException(status_code=400, detail="A parameter with that name already exists in this scope")
+
+        parameter_data = parameter.model_dump()
+        parameter_data["created_by"] = current_user.id
+        db_parameter = crud.create_global_parameter(db=db, parameter=parameter_data)
         
         # Create audit trail
         try:
@@ -689,7 +697,7 @@ def register_system_settings_routes(app):
         
         return db_parameter
 
-    @app.get("/global-parameters")
+    @app.get("/global-parameters", response_model=List[schemas.GlobalParameter])
     def read_global_parameters(
         project_id: int = None,
         skip: int = 0,
@@ -744,8 +752,16 @@ def register_system_settings_routes(app):
         else:
             if not rbac.has_permission(current_user, "write", db_parameter.project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        db_parameter = crud.update_global_parameter(db, param_id=param_id, parameter=parameter.model_dump(exclude_unset=True))
+
+        # Reject a rename that collides with another parameter in the same scope.
+        changes = parameter.model_dump(exclude_unset=True)
+        new_name = changes.get("name")
+        if new_name is not None and new_name != db_parameter.name:
+            conflict = crud.get_global_parameter_by_name(db, name=new_name, project_id=db_parameter.project_id)
+            if conflict is not None and conflict.id != db_parameter.id:
+                raise HTTPException(status_code=400, detail="A parameter with that name already exists in this scope")
+
+        db_parameter = crud.update_global_parameter(db, param_id=param_id, parameter=changes)
         
         # Create audit trail
         try:

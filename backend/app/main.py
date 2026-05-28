@@ -54,6 +54,9 @@ from .routes.custom_fields import register_custom_fields_routes
 from .routes.shared_steps import register_shared_steps_routes
 from .routes.tokens_webhooks import register_tokens_and_webhooks_routes
 from .routes.saved_filters_and_bulk import register_saved_filters_and_bulk_routes
+from .routes.datasets import register_dataset_routes
+from .routes.ai_manager import register_ai_manager_routes
+from .routes.ai_generation import register_ai_generation_routes
 
 register_common_routes(app)
 register_auth_routes(app)
@@ -71,6 +74,9 @@ register_custom_fields_routes(app)
 register_shared_steps_routes(app)
 register_tokens_and_webhooks_routes(app)
 register_saved_filters_and_bulk_routes(app)
+register_dataset_routes(app)
+register_ai_manager_routes(app)
+register_ai_generation_routes(app)
 
 
 @app.on_event("startup")

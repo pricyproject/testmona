@@ -23,15 +23,46 @@ class Settings(BaseSettings):
     @field_validator('secret_key', mode='before')
     @classmethod
     def generate_secret_key(cls, v):
-        if v is None or v == "":
-            import warnings
+        if v is not None and v != "":
+            return v
+
+        # No SECRET_KEY configured. A fresh random key on every startup would
+        # invalidate all sessions AND make every encrypted value (global
+        # parameters, Jira tokens, ...) permanently unrecoverable on restart.
+        # Persist the auto-generated key to a local file so it stays stable in
+        # development; production should still set SECRET_KEY explicitly.
+        import os
+        import warnings
+        from pathlib import Path
+
+        key_path = Path(os.environ.get("SECRET_KEY_FILE", ".secret_key"))
+        try:
+            if key_path.exists():
+                existing = key_path.read_text().strip()
+                if existing:
+                    return existing
+            generated = secrets.token_urlsafe(32)
+            key_path.write_text(generated)
+            try:
+                os.chmod(key_path, 0o600)
+            except OSError:
+                pass
             warnings.warn(
-                "SECRET_KEY not set in environment variables. Using auto-generated key. "
-                "This is NOT secure for production! Set SECRET_KEY environment variable.",
-                RuntimeWarning
+                "SECRET_KEY not set; generated one and persisted it to "
+                f"'{key_path}'. Set SECRET_KEY explicitly for production.",
+                RuntimeWarning,
+            )
+            return generated
+        except OSError:
+            # Couldn't persist (e.g. read-only filesystem) — fall back to an
+            # ephemeral key, but make the durability risk explicit.
+            warnings.warn(
+                "SECRET_KEY not set and a key file could not be written; using "
+                "an ephemeral key. Sessions and encrypted data will NOT survive "
+                "a restart. Set SECRET_KEY for production.",
+                RuntimeWarning,
             )
             return secrets.token_urlsafe(32)
-        return v
 
 
 settings = Settings()

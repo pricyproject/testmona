@@ -18,6 +18,9 @@ Thumbs.db
 .env.test
 .env.production
 config.local.*
+# Persisted auto-generated dev secret key (see backend/app/config.py)
+.secret_key
+**/.secret_key
 
 # Logs
 logs/
