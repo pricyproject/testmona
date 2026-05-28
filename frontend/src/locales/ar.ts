@@ -934,6 +934,7 @@ export const ar = {
     expires: 'تنتهي',
     noPendingInvitations: 'لا توجد دعوات معلقة',
     pending: 'معلق',
+    expired: 'منتهية',
     createUser: 'إنشاء مستخدم',
     createUserDialogDesc: 'أنشئ حساب مستخدم جديداً يدوياً. سيتمكن المستخدم من تسجيل الدخول فوراً.',
     usernamePlaceholder: 'johndoe',

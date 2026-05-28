@@ -744,6 +744,7 @@ export const en = {
   expires: 'Expires',
   noPendingInvitations: 'No pending invitations',
   pending: 'Pending',
+  expired: 'Expired',
   createUser: 'Create User',
   createUserDialogDesc: 'Create a new user account manually. The user will be able to log in immediately.',
   usernamePlaceholder: 'johndoe',

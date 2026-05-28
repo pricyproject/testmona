@@ -965,6 +965,7 @@ export const fa = {
     expires: 'انقضا',
     noPendingInvitations: 'دعوت‌نامه در انتظاری وجود ندارد',
     pending: 'در انتظار',
+    expired: 'منقضی شده',
     createUser: 'ایجاد کاربر',
     createUserDialogDesc: 'یک حساب کاربری جدید را به‌صورت دستی ایجاد کنید. کاربر می‌تواند بلافاصله وارد شود.',
     usernamePlaceholder: 'johndoe',

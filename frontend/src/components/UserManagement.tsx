@@ -67,6 +67,11 @@ interface Project {
   name: string;
 }
 
+const isInvitationExpired = (expiresAt: string) => {
+  const expirationTime = new Date(expiresAt).getTime();
+  return Number.isFinite(expirationTime) && expirationTime < Date.now();
+};
+
 export function UserManagement() {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
@@ -472,40 +477,49 @@ export function UserManagement() {
                   </TableCell>
                 </TableRow>
               ) : (
-                invitations.filter(i => !i.is_used).map((invitation) => (
-                  <TableRow key={invitation.id}>
-                    <TableCell className="font-medium">{invitation.email}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{getRoleLabel(invitation.role)}</Badge>
-                    </TableCell>
-                    <TableCell>{new Date(invitation.expires_at).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{t('pending')}</Badge>
-                    </TableCell>
-                    <TableCell className="text-end">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyInviteLink(invitation.token)}
-                        >
-                          {copiedToken === invitation.token ? (
-                            <Check className="h-4 w-4 text-green-600" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
+                invitations.filter(i => !i.is_used).map((invitation) => {
+                  const expired = isInvitationExpired(invitation.expires_at);
+
+                  return (
+                    <TableRow key={invitation.id}>
+                      <TableCell className="font-medium">{invitation.email}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{getRoleLabel(invitation.role)}</Badge>
+                      </TableCell>
+                      <TableCell>{new Date(invitation.expires_at).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{t('pending')}</Badge>
+                          {expired && (
+                            <Badge variant="destructive">{t('expired')}</Badge>
                           )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteInvitation(invitation.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-end">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyInviteLink(invitation.token)}
+                          >
+                            {copiedToken === invitation.token ? (
+                              <Check className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteInvitation(invitation.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
