@@ -1,0 +1,203 @@
+{
+  "info": {
+    "name": "AI Manager",
+    "description": "AI provider token management, connection testing, and usage tracking",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "openAiApiKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "liteLlmApiKey",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Login - Setup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username_or_email\": \"demo@testmona.com\",\n  \"password\": \"12345678\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "token"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get AI Manager Settings",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/settings",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "settings"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get AI Manager Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/status",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "status"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update AI Manager Settings",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"active_provider\": \"openai\",\n  \"per_project_monthly_token_limit\": 50000,\n  \"providers\": [\n    {\n      \"provider\": \"openai\",\n      \"enabled\": true,\n      \"api_key\": \"{{openAiApiKey}}\",\n      \"model\": \"gpt-4o-mini\",\n      \"base_url\": \"https://api.openai.com/v1\",\n      \"request_timeout_seconds\": 30,\n      \"monthly_token_limit\": 100000\n    },\n    {\n      \"provider\": \"litellm\",\n      \"enabled\": false,\n      \"api_key\": \"{{liteLlmApiKey}}\",\n      \"model\": \"gpt-4o-mini\",\n      \"base_url\": \"http://localhost:4000/v1\",\n      \"request_timeout_seconds\": 30,\n      \"monthly_token_limit\": null\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/settings",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "settings"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Test AI Provider",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"provider\": \"openai\",\n  \"prompt\": \"Reply with exactly: TestMona AI is ready.\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/test",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "test"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get AI Usage",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/usage",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "usage"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Reset AI Usage Statistics",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/usage",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "usage"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Clear Recent AI Actions",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/ai-manager/recent-actions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ai-manager",
+            "recent-actions"
+          ]
+        }
+      }
+    }
+  ]
+}

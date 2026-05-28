@@ -4992,7 +4992,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GlobalParameter"
+                  },
+                  "title": "Response Read Global Parameters Global Parameters Get"
+                }
               }
             }
           },
@@ -5215,6 +5221,36 @@
               "default": 100,
               "title": "Limit"
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Status"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter projects by status",
+              "title": "Status"
+            },
+            "description": "Filter projects by status"
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived projects when no status filter is provided",
+              "default": true,
+              "title": "Include Archived"
+            },
+            "description": "Include archived projects when no status filter is provided"
           }
         ],
         "responses": {
@@ -8679,7 +8715,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 1000,
               "minimum": 1,
               "default": 100,
               "title": "Limit"
@@ -9660,6 +9696,23 @@
               "default": 100,
               "title": "Limit"
             }
+          },
+          {
+            "name": "milestone_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Milestone Id"
+            }
           }
         ],
         "responses": {
@@ -10552,6 +10605,23 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "name": "milestone_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Milestone Id"
             }
           }
         ],
@@ -16126,7 +16196,7 @@
     "/custom-fields/definitions": {
       "get": {
         "summary": "Get Custom Fields Definitions",
-        "description": "Get custom field definitions - endpoint to match frontend expectations",
+        "description": "List custom field definitions for a project.\n\n``entity_type`` (optional, one of test_case/test_run/defect/\nrequirement) filters to definitions targeting that entity. A\ndefinition with NULL/empty ``entity_types`` is treated as\ntest-case-only to preserve pre-unification behavior.",
         "operationId": "get_custom_fields_definitions_custom_fields_definitions_get",
         "security": [
           {
@@ -16162,6 +16232,24 @@
               "default": 100,
               "title": "Limit"
             }
+          },
+          {
+            "name": "entity_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to definitions that apply to this entity type",
+              "title": "Entity Type"
+            },
+            "description": "Filter to definitions that apply to this entity type"
           }
         ],
         "responses": {
@@ -16398,6 +16486,250 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/custom-fields/entities/{entity_type}/{entity_id}/values": {
+      "get": {
+        "summary": "List Entity Custom Field Values",
+        "description": "List custom field values attached to one entity (case/run/defect/requirement).",
+        "operationId": "list_entity_custom_field_values_custom_fields_entities__entity_type___entity_id__values_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Type"
+            }
+          },
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Entity Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CustomFieldValue"
+                  },
+                  "title": "Response List Entity Custom Field Values Custom Fields Entities  Entity Type   Entity Id  Values Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Entity Custom Field Value",
+        "operationId": "create_entity_custom_field_value_custom_fields_entities__entity_type___entity_id__values_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Type"
+            }
+          },
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Entity Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldValueCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldValue"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/custom-fields/entities/{entity_type}/{entity_id}/values/{value_id}": {
+      "put": {
+        "summary": "Update Entity Custom Field Value",
+        "operationId": "update_entity_custom_field_value_custom_fields_entities__entity_type___entity_id__values__value_id__put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Type"
+            }
+          },
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "value_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Value Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomFieldValueUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomFieldValue"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Entity Custom Field Value",
+        "operationId": "delete_entity_custom_field_value_custom_fields_entities__entity_type___entity_id__values__value_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Type"
+            }
+          },
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "value_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Value Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -18290,10 +18622,820 @@
           }
         ]
       }
+    },
+    "/test-datasets": {
+      "get": {
+        "summary": "List Test Datasets",
+        "operationId": "list_test_datasets_test_datasets_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TestDataset"
+                  },
+                  "title": "Response List Test Datasets Test Datasets Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Test Dataset",
+        "operationId": "create_test_dataset_test_datasets_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDatasetCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestDataset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-datasets/{dataset_id}": {
+      "get": {
+        "summary": "Read Test Dataset",
+        "operationId": "read_test_dataset_test_datasets__dataset_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestDataset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Test Dataset",
+        "operationId": "update_test_dataset_test_datasets__dataset_id__put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDatasetUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestDataset"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Test Dataset",
+        "operationId": "delete_test_dataset_test_datasets__dataset_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai-manager/settings": {
+      "get": {
+        "summary": "Read Ai Manager Settings",
+        "operationId": "read_ai_manager_settings_ai_manager_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Save Ai Manager Settings",
+        "operationId": "save_ai_manager_settings_ai_manager_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIManagerSettingsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/ai-manager/status": {
+      "get": {
+        "summary": "Read Ai Manager Status",
+        "operationId": "read_ai_manager_status_ai_manager_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/ai-manager/usage": {
+      "get": {
+        "summary": "Read Ai Usage",
+        "operationId": "read_ai_usage_ai_manager_usage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Reset Ai Usage Statistics",
+        "operationId": "reset_ai_usage_statistics_ai_manager_usage_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/ai-manager/recent-actions": {
+      "delete": {
+        "summary": "Clear Recent Ai Actions",
+        "operationId": "clear_recent_ai_actions_ai_manager_recent_actions_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/ai-manager/test": {
+      "post": {
+        "summary": "Test Ai Provider",
+        "operationId": "test_ai_provider_ai_manager_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AITestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/requirements/{requirement_id}/ai/test-cases": {
+      "post": {
+        "summary": "Generate Requirement Test Cases",
+        "operationId": "generate_requirement_test_cases_requirements__requirement_id__ai_test_cases_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requirement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementTestCaseGenerationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementTestCaseGenerationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-cases/{test_case_id}/ai/assist": {
+      "post": {
+        "summary": "Assist Test Case",
+        "operationId": "assist_test_case_test_cases__test_case_id__ai_assist_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestCaseAssistantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestCaseAssistantResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-cases/ai/assist": {
+      "post": {
+        "summary": "Assist Test Case Draft",
+        "operationId": "assist_test_case_draft_test_cases_ai_assist_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestCaseDraftAssistantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestCaseAssistantResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "AIDraftStep": {
+        "properties": {
+          "step_number": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Step Number"
+          },
+          "action": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Action"
+          },
+          "expected_result": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Expected Result"
+          },
+          "step_type": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Step Type",
+            "default": "manual"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step_number",
+          "action",
+          "expected_result"
+        ],
+        "title": "AIDraftStep"
+      },
+      "AIDraftTestCase": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description",
+            "default": ""
+          },
+          "preconditions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preconditions",
+            "default": "No preconditions defined"
+          },
+          "steps": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Steps",
+            "default": ""
+          },
+          "expected_result": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Expected Result",
+            "default": ""
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Priority",
+            "default": "medium"
+          },
+          "test_type": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Test Type",
+            "default": "manual"
+          },
+          "tags": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Tags",
+            "default": ""
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "test_steps": {
+            "items": {
+              "$ref": "#/components/schemas/AIDraftStep"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Test Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "AIDraftTestCase"
+      },
+      "AIManagerSettingsPayload": {
+        "properties": {
+          "active_provider": {
+            "type": "string",
+            "title": "Active Provider",
+            "description": "Supported values: openai, openrouter, anthropic, huggingface, litellm"
+          },
+          "per_project_monthly_token_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Project Monthly Token Limit"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/AIProviderConfigPayload"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active_provider"
+        ],
+        "title": "AIManagerSettingsPayload"
+      },
+      "AIProviderConfigPayload": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "Supported values: openai, openrouter, anthropic, huggingface, litellm"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "request_timeout_seconds": {
+            "type": "integer",
+            "maximum": 300.0,
+            "minimum": 5.0,
+            "title": "Request Timeout Seconds",
+            "default": 60
+          },
+          "monthly_token_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Token Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "title": "AIProviderConfigPayload"
+      },
+      "AITestRequest": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "Supported values: openai, openrouter, anthropic, huggingface, litellm"
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Prompt",
+            "default": "Reply with exactly: TestMona AI is ready."
+          }
+        },
+        "type": "object",
+        "title": "AITestRequest"
+      },
       "ActivityCount": {
         "properties": {
           "action": {
@@ -23807,15 +24949,21 @@
             "default": false
           },
           "created_by": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Created By"
           }
         },
         "type": "object",
         "required": [
           "name",
-          "value",
-          "created_by"
+          "value"
         ],
         "title": "GlobalParameterCreate"
       },
@@ -27622,6 +28770,17 @@
             "title": "Is Multistep",
             "default": false
           },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
           "test_suite_id": {
             "type": "integer",
             "title": "Test Suite Id"
@@ -28025,6 +29184,69 @@
           "deprecated"
         ],
         "title": "RequirementStatus"
+      },
+      "RequirementTestCaseGenerationRequest": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "default": 5
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions"
+          }
+        },
+        "type": "object",
+        "title": "RequirementTestCaseGenerationRequest"
+      },
+      "RequirementTestCaseGenerationResponse": {
+        "properties": {
+          "requirement_id": {
+            "type": "integer",
+            "title": "Requirement Id"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "drafts": {
+            "items": {
+              "$ref": "#/components/schemas/AIDraftTestCase"
+            },
+            "type": "array",
+            "title": "Drafts"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requirement_id",
+          "provider",
+          "model",
+          "drafts"
+        ],
+        "title": "RequirementTestCaseGenerationResponse"
       },
       "RequirementTraceabilitySummary": {
         "properties": {
@@ -29452,6 +30674,104 @@
         "type": "object",
         "title": "SystemSettingsUpdate"
       },
+      "TestCaseAssistantRequest": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "suggest_steps",
+              "improve_expected_result",
+              "add_negative_cases",
+              "convert_to_gherkin",
+              "split_broad_case"
+            ],
+            "title": "Action"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "TestCaseAssistantRequest"
+      },
+      "TestCaseAssistantResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "drafts": {
+            "items": {
+              "$ref": "#/components/schemas/AIDraftTestCase"
+            },
+            "type": "array",
+            "title": "Drafts"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/AIDraftStep"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "expected_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Result"
+          },
+          "gherkin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gherkin"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "action"
+        ],
+        "title": "TestCaseAssistantResponse"
+      },
       "TestCaseCreate": {
         "properties": {
           "title": {
@@ -29575,6 +30895,17 @@
             "title": "Is Multistep",
             "default": false
           },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
           "test_suite_id": {
             "type": "integer",
             "title": "Test Suite Id"
@@ -29600,6 +30931,148 @@
           "test_suite_id"
         ],
         "title": "TestCaseCreate"
+      },
+      "TestCaseDraftAssistantRequest": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "suggest_steps",
+              "improve_expected_result",
+              "add_negative_cases",
+              "convert_to_gherkin",
+              "split_broad_case"
+            ],
+            "title": "Action"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "project_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Project Id"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "default": ""
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "default": ""
+          },
+          "preconditions": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preconditions",
+            "default": ""
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps",
+            "default": ""
+          },
+          "expected_result": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Result",
+            "default": ""
+          },
+          "priority": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Priority",
+            "default": "medium"
+          },
+          "test_type": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Test Type",
+            "default": "manual"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "default": ""
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference",
+            "default": ""
+          },
+          "test_steps": {
+            "items": {
+              "$ref": "#/components/schemas/AIDraftStep"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Test Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "project_id"
+        ],
+        "title": "TestCaseDraftAssistantRequest"
       },
       "TestCaseLinkedRequirement": {
         "properties": {
@@ -30261,6 +31734,17 @@
               }
             ],
             "title": "Is Multistep"
+          },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
           }
         },
         "type": "object",
@@ -30472,6 +31956,17 @@
             "title": "Is Multistep",
             "default": false
           },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -30649,6 +32144,17 @@
             "title": "Is Multistep",
             "default": false
           },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -30747,6 +32253,203 @@
           "created_at"
         ],
         "title": "TestCaseWithRelations"
+      },
+      "TestDataset": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 150,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "parameters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "rows": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "project_id": {
+            "type": "integer",
+            "title": "Project Id"
+          },
+          "created_by": {
+            "type": "integer",
+            "title": "Created By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "id",
+          "project_id",
+          "created_by",
+          "created_at"
+        ],
+        "title": "TestDataset"
+      },
+      "TestDatasetCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 150,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "parameters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "rows": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "project_id": {
+            "type": "integer",
+            "title": "Project Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "project_id"
+        ],
+        "title": "TestDatasetCreate"
+      },
+      "TestDatasetUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 150,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "TestDatasetUpdate"
       },
       "TestExecution": {
         "properties": {
@@ -31972,6 +33675,21 @@
             "title": "Retest Needed",
             "description": "Set when a linked defect is resolved or reopened"
           },
+          "iteration_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration Results",
+            "description": "Per-iteration outcomes for data-driven cases: [{row_index, values, status, ...}]"
+          },
           "id": {
             "type": "integer",
             "title": "Id"
@@ -32168,6 +33886,21 @@
             ],
             "title": "Retest Needed",
             "description": "Set when a linked defect is resolved or reopened"
+          },
+          "iteration_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration Results",
+            "description": "Per-iteration outcomes for data-driven cases: [{row_index, values, status, ...}]"
           },
           "test_case_id": {
             "type": "integer",
@@ -32562,6 +34295,21 @@
             ],
             "title": "Retest Needed",
             "description": "Set when a linked defect is resolved or reopened"
+          },
+          "iteration_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration Results",
+            "description": "Per-iteration outcomes for data-driven cases: [{row_index, values, status, ...}]"
           }
         },
         "type": "object",
@@ -32714,6 +34462,21 @@
             ],
             "title": "Retest Needed",
             "description": "Set when a linked defect is resolved or reopened"
+          },
+          "iteration_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iteration Results",
+            "description": "Per-iteration outcomes for data-driven cases: [{row_index, values, status, ...}]"
           },
           "id": {
             "type": "integer",

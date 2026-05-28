@@ -1,0 +1,154 @@
+{
+  "info": {
+    "name": "AI Generation",
+    "description": "Draft-only AI generation for requirement-based test cases and test case assistant actions",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "requirementId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "projectId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "testCaseId",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Login - Setup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username_or_email\": \"demo@testmona.com\",\n  \"password\": \"12345678\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "token"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Generate Requirement Test Case Drafts",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"count\": 5,\n  \"instructions\": \"Include positive, negative, and edge-case coverage.\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/requirements/{{requirementId}}/ai/test-cases",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "requirements",
+            "{{requirementId}}",
+            "ai",
+            "test-cases"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Assist Existing Test Case",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action\": \"suggest_steps\",\n  \"instructions\": \"Prefer concise manual steps.\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/test-cases/{{testCaseId}}/ai/assist",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-cases",
+            "{{testCaseId}}",
+            "ai",
+            "assist"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Assist New Test Case Draft",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"project_id\": {{projectId}},\n  \"action\": \"improve_expected_result\",\n  \"title\": \"User can reset password\",\n  \"description\": \"Validate reset password flow\",\n  \"preconditions\": \"User exists\",\n  \"steps\": \"Open forgot password and submit email\",\n  \"expected_result\": \"Reset email is sent\",\n  \"priority\": \"medium\",\n  \"test_type\": \"manual\",\n  \"tags\": \"auth,password\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/test-cases/ai/assist",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "test-cases",
+            "ai",
+            "assist"
+          ]
+        }
+      }
+    }
+  ]
+}

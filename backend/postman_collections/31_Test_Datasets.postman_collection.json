@@ -1,0 +1,124 @@
+{
+  "info": {
+    "name": "Test Datasets",
+    "description": "Reusable, project-scoped test data sets for case-level parameterization. A case attaches one dataset (TestCase.dataset_id) and iterates over each row during a run.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "projectId", "value": "1", "type": "string" },
+    { "key": "datasetId", "value": "", "type": "string" },
+    { "key": "testCaseId", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{accessToken}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "Login - Setup",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const data = pm.response.json();",
+              "if (data.access_token) { pm.collectionVariables.set('accessToken', data.access_token); }"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username_or_email\": \"demo@testmona.com\",\n  \"password\": \"12345678\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/token", "host": ["{{baseUrl}}"], "path": ["token"] }
+      }
+    },
+    {
+      "name": "Create Dataset",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('created', () => pm.response.code === 201);",
+              "const data = pm.response.json();",
+              "if (data.id) { pm.collectionVariables.set('datasetId', data.id); }"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"project_id\": {{projectId}},\n  \"name\": \"Login credentials\",\n  \"description\": \"Valid and invalid logins\",\n  \"parameters\": [\"username\", \"password\"],\n  \"rows\": [\n    { \"username\": \"alice\", \"password\": \"secret\" },\n    { \"username\": \"bob\", \"password\": \"hunter2\" },\n    { \"username\": \"empty\", \"password\": \"\" }\n  ]\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/test-datasets", "host": ["{{baseUrl}}"], "path": ["test-datasets"] }
+      }
+    },
+    {
+      "name": "List Datasets",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/test-datasets?project_id={{projectId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["test-datasets"],
+          "query": [{ "key": "project_id", "value": "{{projectId}}" }]
+        }
+      }
+    },
+    {
+      "name": "Get Dataset",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/test-datasets/{{datasetId}}", "host": ["{{baseUrl}}"], "path": ["test-datasets", "{{datasetId}}"] }
+      }
+    },
+    {
+      "name": "Update Dataset",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Updated description\",\n  \"parameters\": [\"username\", \"password\", \"expected\"],\n  \"rows\": [\n    { \"username\": \"alice\", \"password\": \"secret\", \"expected\": \"pass\" },\n    { \"username\": \"bob\", \"password\": \"wrong\", \"expected\": \"fail\" }\n  ]\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/test-datasets/{{datasetId}}", "host": ["{{baseUrl}}"], "path": ["test-datasets", "{{datasetId}}"] }
+      }
+    },
+    {
+      "name": "Attach Dataset to Test Case",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"dataset_id\": {{datasetId}}\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/test-cases/{{testCaseId}}", "host": ["{{baseUrl}}"], "path": ["test-cases", "{{testCaseId}}"] }
+      }
+    },
+    {
+      "name": "Delete Dataset",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/test-datasets/{{datasetId}}", "host": ["{{baseUrl}}"], "path": ["test-datasets", "{{datasetId}}"] }
+      }
+    }
+  ]
+}
