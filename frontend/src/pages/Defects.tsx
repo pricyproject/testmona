@@ -544,6 +544,12 @@ export function Defects() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, severityFilter, priorityFilter, sortMode]);
 
+  // Drop any selection carried over from a previous project — those IDs aren't
+  // in the new project and would silently land in skipped_ids on a bulk edit.
+  useEffect(() => {
+    setSelectedDefectIds([]);
+  }, [projectId]);
+
   // Detect a restorable draft so we can offer a "Discard draft" affordance even
   // before the dialog is opened.
   useEffect(() => {

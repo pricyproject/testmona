@@ -43,6 +43,7 @@ const SECTION_LABEL_KEYS: Record<string, TranslationKey> = {
   'custom-fields': 'customFields',
   'shared-steps': 'sharedSteps',
   'global-parameters': 'globalParameters',
+  'test-data': 'testData',
   sections: 'sections',
   environments: 'environments',
   'activity-management': 'activity',

@@ -12,6 +12,7 @@ const lazyPage = (loader: () => Promise<any>, exportName: string) =>
 
 const Login = lazyPage(() => import('@/pages/Login'), 'Login');
 const Signup = lazyPage(() => import('@/pages/Signup'), 'Signup');
+const AcceptInvite = lazyPage(() => import('@/pages/AcceptInvite'), 'AcceptInvite');
 const Dashboard = lazyPage(() => import('@/pages/Dashboard'), 'Dashboard');
 const Projects = lazyPage(() => import('@/pages/Projects'), 'Projects');
 const Requirements = lazyPage(() => import('@/pages/Requirements'), 'Requirements');
@@ -41,6 +42,8 @@ const MilestoneDetail = lazyPage(() => import('@/pages/MilestoneDetail'), 'Miles
 const CustomFields = lazyPage(() => import('@/pages/CustomFields'), 'CustomFields');
 const SharedSteps = lazyPage(() => import('@/pages/SharedSteps'), 'SharedSteps');
 const GlobalParameters = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParameters');
+const GlobalParametersAdmin = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParametersAdmin');
+const TestData = lazyPage(() => import('@/pages/TestData'), 'TestData');
 const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 'ActivityManagement');
 const Settings = lazyPage(() => import('@/pages/Settings'), 'Settings');
 const Profile = lazyPage(() => import('@/pages/Profile'), 'Profile');
@@ -110,13 +113,18 @@ function AppWithRouter() {
     );
   }
   
-  // The shared-report viewer is fully public and should render without the app
-  // chrome (no Layout, no auth gate) in either auth state.
-  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/shared-reports/')) {
+  // These routes are fully public and should render without the app chrome
+  // (no Layout, no auth gate) in either auth state.
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.pathname.startsWith('/shared-reports/') ||
+      window.location.pathname.startsWith('/accept-invite/'))
+  ) {
     return (
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route path="/shared-reports/:token" element={<SharedReportViewer />} />
+          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
         </Routes>
       </Suspense>
     );
@@ -128,6 +136,7 @@ function AppWithRouter() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
@@ -281,6 +290,11 @@ function AppWithRouter() {
             <GlobalParameters />
           </ProjectGuard>
         } />
+        <Route path="/projects/:projectId/test-data" element={
+          <ProjectGuard>
+            <TestData />
+          </ProjectGuard>
+        } />
         <Route path="/projects/:projectId/environments" element={
           <ProjectGuard>
             <Environments />
@@ -315,6 +329,7 @@ function AppWithRouter() {
         } />
         <Route path="/environments" element={<Navigate to="/projects" replace />} />
         <Route path="/activity-management" element={<ActivityManagement />} />
+        <Route path="/global-parameters" element={<GlobalParametersAdmin />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/api-tokens" element={<ApiTokens />} />

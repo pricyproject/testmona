@@ -37,6 +37,13 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Server, Settings, Trash2, Copy, PlayCircle } from 'lucide-react';
 import { environmentsAPI } from '@/lib/api';
 
+const environmentTypeTranslationKeys: Record<string, string> = {
+  development: 'environmentTypeDevelopment',
+  staging: 'environmentTypeStaging',
+  production: 'environmentTypeProduction',
+  custom: 'environmentTypeCustom',
+};
+
 export function Environments() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
@@ -244,7 +251,7 @@ export function Environments() {
 
   const handleCloneEnvironment = (environment: any) => {
     // Pre-fill the form with cloned environment data
-    setEnvName(`${environment.name} (Clone)`);
+    setEnvName(t('environmentCloneName', { name: environment.name }));
     setEnvDescription(environment.description || '');
     setEnvType(environment.environment_type || 'development');
     setEnvUrl(environment.config_data?.url || '');
@@ -282,17 +289,19 @@ export function Environments() {
     return variants[type] || 'bg-gray-100 text-gray-800';
   };
 
+  const getEnvironmentTypeLabel = (type: string) => t(environmentTypeTranslationKeys[type] || 'environmentTypeCustom');
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Execution Environments</h1>
-          <p className="text-gray-600">Manage test environments and configurations</p>
+          <h1 className="text-3xl font-bold">{t('executionEnvironments')}</h1>
+          <p className="text-gray-600 dark:text-gray-400">{t('executionEnvironmentsDescription')}</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
           <DialogTrigger asChild>
             <Button disabled={!currentProjectId}>
-              <Plus className="h-4 w-4 mr-2" />
+              <Plus className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('addEnvironment')}
             </Button>
           </DialogTrigger>
@@ -305,7 +314,7 @@ export function Environments() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="envName" className="text-right">
+                <Label htmlFor="envName" className="text-right rtl:text-left">
                   {t('name')}
                 </Label>
                 <div className="col-span-3 space-y-1">
@@ -318,14 +327,14 @@ export function Environments() {
                     placeholder={t('enterEnvironmentName')}
                     maxLength={100}
                   />
-                  <div className="flex justify-between text-xs text-gray-500">
+                  <div className="flex justify-between gap-3 text-xs text-gray-500">
                     <span>{t('enterEnvironmentName')}</span>
-                    <span>{envName.length}/100</span>
+                    <span dir="ltr">{envName.length}/100</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="envDescription" className="text-right pt-2">
+                <Label htmlFor="envDescription" className="text-right pt-2 rtl:text-left">
                   {t('description')}
                 </Label>
                 <div className="col-span-3 space-y-1">
@@ -337,14 +346,14 @@ export function Environments() {
                     rows={2}
                     maxLength={500}
                   />
-                  <div className="flex justify-between text-xs text-gray-500">
+                  <div className="flex justify-between gap-3 text-xs text-gray-500">
                     <span>{t('describeEnvironment')}</span>
-                    <span>{envDescription.length}/500</span>
+                    <span dir="ltr">{envDescription.length}/500</span>
                   </div>
                 </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="envType" className="text-right">
+                <Label htmlFor="envType" className="text-right rtl:text-left">
                   {t('type')}
                 </Label>
                 <Select value={envType} onValueChange={setEnvType}>
@@ -360,7 +369,7 @@ export function Environments() {
                 </Select>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="envUrl" className="text-right">
+                <Label htmlFor="envUrl" className="text-right rtl:text-left">
                   {t('apiUrlLabel')}
                 </Label>
                 <Input
@@ -372,7 +381,7 @@ export function Environments() {
                 />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="envDbUrl" className="text-right">
+                <Label htmlFor="envDbUrl" className="text-right rtl:text-left">
                   {t('databaseUrl')}
                 </Label>
                 <Input
@@ -385,7 +394,7 @@ export function Environments() {
               </div>
             </div>
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
+              <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto rtl:sm:mr-0 rtl:sm:ml-auto">
                 {t('ctrlEnterToSubmit')}
               </div>
               <Button
@@ -408,39 +417,50 @@ export function Environments() {
       </div>
 
       {/* Environments List */}
+      {loading ? (
+        <div className="rounded-md border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          {t('loadingEnvironments')}
+        </div>
+      ) : environments.length === 0 ? (
+        <div className="rounded-md border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          {currentProjectId ? t('noEnvironmentsYet') : t('selectProjectForEnvironments')}
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {environments.map((environment) => (
+        {environments.map((environment: any) => (
           <Card key={environment.id} className="hover:shadow-lg transition-shadow">
             <CardHeader>
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 rtl:flex-row-reverse">
                   <Server className="h-5 w-5 text-blue-600" />
                   <CardTitle className="text-lg">{environment.name}</CardTitle>
                 </div>
                 <Badge className={getEnvironmentBadge(environment.environment_type)}>
-                  {environment.environment_type}
+                  {getEnvironmentTypeLabel(environment.environment_type)}
                 </Badge>
               </div>
-              <p className="text-sm text-gray-600">{environment.description}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                {environment.description || t('noDescriptionProvided')}
+              </p>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <div className="space-y-2">
                   <div className="text-sm">
-                    <span className="font-medium">API URL:</span>
-                    <div className="text-gray-600 font-mono text-xs bg-gray-50 p-1 rounded">
-                      {environment.config_data?.url || 'N/A'}
+                    <span className="font-medium">{t('apiUrlLabel')}:</span>
+                    <div dir="ltr" className="text-left text-gray-600 dark:text-gray-300 font-mono text-xs bg-gray-50 dark:bg-gray-900 p-1 rounded">
+                      {environment.config_data?.url || t('notAvailableShort')}
                     </div>
                   </div>
                   <div className="text-sm">
-                    <span className="font-medium">Database:</span>
-                    <div className="text-gray-600 font-mono text-xs bg-gray-50 p-1 rounded truncate">
-                      {environment.config_data?.database_url || 'N/A'}
+                    <span className="font-medium">{t('database')}:</span>
+                    <div dir="ltr" className="text-left text-gray-600 dark:text-gray-300 font-mono text-xs bg-gray-50 dark:bg-gray-900 p-1 rounded truncate">
+                      {environment.config_data?.database_url || t('notAvailableShort')}
                     </div>
                   </div>
                   <div className="text-sm">
-                    <span className="font-medium">Version:</span>
-                    <div className="text-gray-600">{environment.build_info?.version || 'N/A'}</div>
+                    <span className="font-medium">{t('version')}:</span>
+                    <div className="text-gray-600 dark:text-gray-300">{environment.build_info?.version || t('notAvailableShort')}</div>
                   </div>
                 </div>
                 
@@ -451,7 +471,7 @@ export function Environments() {
                     onClick={() => handleRunTests(environment.id)}
                     className="flex-1 min-w-[80px]"
                   >
-                    <PlayCircle className="h-4 w-4 mr-1" />
+                    <PlayCircle className="h-4 w-4 mr-1 rtl:mr-0 rtl:ml-1" />
                     <span className="whitespace-nowrap">{t('runTests')}</span>
                   </Button>
                   <Button 
@@ -460,7 +480,7 @@ export function Environments() {
                     onClick={() => handleCloneEnvironment(environment)}
                     className="min-w-[70px]"
                   >
-                    <Copy className="h-4 w-4 mr-1" />
+                    <Copy className="h-4 w-4 mr-1 rtl:mr-0 rtl:ml-1" />
                     <span className="whitespace-nowrap">{t('clone')}</span>
                   </Button>
                   <Button 
@@ -484,6 +504,7 @@ export function Environments() {
           </Card>
         ))}
       </div>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

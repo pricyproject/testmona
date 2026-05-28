@@ -10,8 +10,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
-import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw } from 'lucide-react';
-import { testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI } from '@/lib/api';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Wand2, Loader2 } from 'lucide-react';
+import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset } from '@/lib/api';
 import { CustomFieldDefinition } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
@@ -21,6 +22,7 @@ type TestCasePriority = 'low' | 'medium' | 'high' | 'critical';
 type TestCaseStatus = 'active' | 'inactive' | 'archived';
 type TestCaseType = string;
 type SelectOption = { value: string; label: string };
+type AIAssistantAction = 'suggest_steps' | 'improve_expected_result' | 'add_negative_cases' | 'convert_to_gherkin' | 'split_broad_case';
 
 const parseBooleanFlag = (value: unknown): boolean => {
   if (typeof value === 'boolean') return value;
@@ -50,6 +52,7 @@ export function TestCaseEdit() {
     test_suite_id: null as number | null,
     section_id: null as number | null,
     is_multistep: false,
+    dataset_id: null as number | null,
   });
   
   // Multistep test case steps state
@@ -66,6 +69,14 @@ export function TestCaseEdit() {
   const [customFieldsLoading, setCustomFieldsLoading] = useState(false);
   const [testTypeOptions, setTestTypeOptions] = useState<SelectOption[]>([]);
   const [testTypesLoading, setTestTypesLoading] = useState(false);
+  const [datasets, setDatasets] = useState<TestDataset[]>([]);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [aiAssistantAction, setAiAssistantAction] = useState<AIAssistantAction>('suggest_steps');
+  const [aiInstructions, setAiInstructions] = useState('');
+  const [aiAssistantLoading, setAiAssistantLoading] = useState(false);
+  const [aiAssistantResult, setAiAssistantResult] = useState<any>(null);
+  const [aiStatus, setAiStatus] = useState<AIManagerStatus | null>(null);
+  const [loadingAIStatus, setLoadingAIStatus] = useState(false);
 
   const displayedTestTypeOptions = useMemo(() => {
     if (!formData.test_type || testTypeOptions.some((option) => option.value === formData.test_type)) {
@@ -166,6 +177,7 @@ export function TestCaseEdit() {
           test_suite_id: suiteId,
           section_id: sectionId,
           is_multistep: isMultistep,
+          dataset_id: (testCaseData as any).dataset_id ?? null,
         });
         setCustomFieldValues(existingCustomValues.fieldValues);
         setExistingCustomFieldValueIds(existingCustomValues.valueIds);
@@ -223,6 +235,28 @@ export function TestCaseEdit() {
   }, [id, projectId]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadAIStatus = async () => {
+      setLoadingAIStatus(true);
+      try {
+        const status = await aiManagerAPI.getStatus();
+        if (isMounted) setAiStatus(status);
+      } catch (error) {
+        console.error('Failed to load AI status:', error);
+        if (isMounted) setAiStatus({ active_provider: 'openai', available: false, reason: 'active_provider_not_configured' });
+      } finally {
+        if (isMounted) setLoadingAIStatus(false);
+      }
+    };
+
+    loadAIStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const loadTestTypes = async () => {
       setTestTypesLoading(true);
       try {
@@ -264,7 +298,7 @@ export function TestCaseEdit() {
 
       setCustomFieldsLoading(true);
       try {
-        const fields = await customFieldsAPI.getDefinitions(currentProjectId);
+        const fields = await customFieldsAPI.getDefinitions(currentProjectId, 'test_case');
         setCustomFields(Array.isArray(fields) ? fields : []);
       } catch (error) {
         console.error('Failed to load custom fields:', error);
@@ -347,6 +381,20 @@ export function TestCaseEdit() {
     loadSections();
   }, [currentProjectId, formData.test_suite_id]);
 
+  // Reusable datasets this case can iterate over during a run.
+  useEffect(() => {
+    if (!currentProjectId) {
+      setDatasets([]);
+      return;
+    }
+    let cancelled = false;
+    datasetsAPI
+      .list(currentProjectId)
+      .then((rows) => { if (!cancelled) setDatasets(rows); })
+      .catch(() => { if (!cancelled) setDatasets([]); });
+    return () => { cancelled = true; };
+  }, [currentProjectId]);
+
   const handleInputChange = (field: string, value: string | number | null) => {
     setFormData(prev => {
       const updated = {
@@ -404,6 +452,90 @@ export function TestCaseEdit() {
         ? { ...step, [field]: value }
         : step
     ));
+  };
+
+  const applyAIAssistantResult = (result = aiAssistantResult) => {
+    if (!result) return;
+    if (Array.isArray(result.steps) && result.steps.length > 0) {
+      setTestSteps(result.steps.map((step: any, index: number) => ({
+        step_number: index + 1,
+        action: step.action || '',
+        expected_result: step.expected_result || '',
+        step_type: step.step_type || 'manual',
+      })));
+      setFormData((current) => ({ ...current, is_multistep: true }));
+    }
+    if (result.expected_result) {
+      setFormData((current) => ({ ...current, expected_result: result.expected_result }));
+    }
+    if (result.gherkin) {
+      setFormData((current) => ({ ...current, steps: result.gherkin, is_multistep: false }));
+    }
+    if (Array.isArray(result.drafts) && result.drafts.length > 0) {
+      const draft = result.drafts[0];
+      setFormData((current) => ({
+        ...current,
+        title: draft.title || current.title,
+        description: draft.description || current.description,
+        preconditions: draft.preconditions || current.preconditions,
+        steps: draft.steps || current.steps,
+        expected_result: draft.expected_result || current.expected_result,
+        priority: draft.priority || current.priority,
+        test_type: draft.test_type || current.test_type,
+        tags: draft.tags || current.tags,
+        is_multistep: Array.isArray(draft.test_steps) && draft.test_steps.length > 0 ? true : current.is_multistep,
+      }));
+      if (Array.isArray(draft.test_steps) && draft.test_steps.length > 0) {
+        setTestSteps(draft.test_steps.map((step: any, index: number) => ({
+          step_number: index + 1,
+          action: step.action || '',
+          expected_result: step.expected_result || '',
+          step_type: step.step_type || 'manual',
+        })));
+      }
+    }
+    setAiDialogOpen(false);
+  };
+
+  const runAIAssistant = async (action: AIAssistantAction) => {
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId) || numericId <= 0) return;
+    setAiAssistantAction(action);
+    setAiAssistantLoading(true);
+    setAiAssistantResult(null);
+    try {
+      const result = currentProjectId
+        ? await testCasesAPI.assistDraft({
+            project_id: currentProjectId,
+            action,
+            instructions: aiInstructions.trim() || undefined,
+            title: formData.title,
+            description: formData.description,
+            preconditions: formData.preconditions,
+            steps: formData.steps,
+            expected_result: formData.expected_result,
+            priority: formData.priority,
+            test_type: formData.test_type,
+            tags: formData.tags,
+            reference: formData.reference,
+            test_steps: testSteps,
+          })
+        : await testCasesAPI.assist(numericId, {
+            action,
+            instructions: aiInstructions.trim() || undefined,
+          });
+      setAiAssistantResult(result);
+      setAiDialogOpen(true);
+    } catch (error: any) {
+      console.error('AI test case assistant failed:', error);
+      toast({
+        variant: 'destructive',
+        title: t('error'),
+        description: error.response?.data?.detail || t('aiAssistantFailed'),
+      });
+    } finally {
+      setAiAssistantLoading(false);
+    }
   };
 
   const getCustomFieldOptions = (field: CustomFieldDefinition): string[] => {
@@ -698,6 +830,48 @@ export function TestCaseEdit() {
           )}
         </CardHeader>
         <CardContent className="space-y-6">
+          <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-2">
+                <Label htmlFor="ai-assistant-instructions">{t('aiTestCaseAssistant')}</Label>
+                <Input
+                  id="ai-assistant-instructions"
+                  value={aiInstructions}
+                  onChange={(event) => setAiInstructions(event.target.value)}
+                  placeholder={t('aiAssistantInstructionsPlaceholder')}
+                  maxLength={2000}
+                />
+              </div>
+              {loadingAIStatus ? (
+                <div className="rounded-md border border-slate-200 bg-white/70 p-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300">
+                  <Loader2 className={`inline h-3.5 w-3.5 animate-spin ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                  {t('loading')}
+                </div>
+              ) : aiStatus && !aiStatus.available ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                  <AlertTriangle className={`inline h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                  {t('aiEnabledTokenMissing')}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600 dark:text-slate-300">{t('aiDraftReviewRequired')}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {([
+                  ['suggest_steps', t('suggestSteps')],
+                  ['improve_expected_result', t('improveExpectedResult')],
+                  ['add_negative_cases', t('addNegativeCases')],
+                  ['convert_to_gherkin', t('convertToGherkin')],
+                  ['split_broad_case', t('splitBroadCase')],
+                ] as [AIAssistantAction, string][]).map(([action, label]) => (
+                  <Button key={action} type="button" variant="outline" size="sm" onClick={() => runAIAssistant(action)} disabled={aiAssistantLoading || loadingAIStatus || aiStatus?.available === false}>
+                    {aiAssistantLoading && aiAssistantAction === action ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Wand2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div>
             <Label htmlFor="title">
               {t('title')}<span className="text-red-500 ml-1">*</span>
@@ -842,6 +1016,39 @@ export function TestCaseEdit() {
               )}
             </div>
           )}
+
+          <div>
+            <Label htmlFor="dataset">{t('testDataSet')}</Label>
+            <Select
+              value={formData.dataset_id === null ? 'none' : String(formData.dataset_id)}
+              onValueChange={(value) =>
+                handleInputChange('dataset_id', value === 'none' ? null : parseInt(value, 10))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t('selectDataset')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('noDataset')}</SelectItem>
+                {datasets.map((ds) => (
+                  <SelectItem key={ds.id} value={String(ds.id)}>
+                    {ds.name} ({t('datasetRowCount', { count: String(ds.rows.length) })})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(() => {
+              const selected = datasets.find((d) => d.id === formData.dataset_id);
+              if (!selected) {
+                return <p className="text-xs text-muted-foreground mt-1">{t('datasetAttachHint')}</p>;
+              }
+              return (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t('datasetParametersLabel')}: {selected.parameters.map((p) => `\${${p}}`).join(', ')}
+                </p>
+              );
+            })()}
+          </div>
 
           <div>
             <Label htmlFor="tags">{t('tags')}</Label>
@@ -1137,6 +1344,71 @@ export function TestCaseEdit() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
+        <DialogContent isRTL={isRTL} className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t('aiAssistantResult')}</DialogTitle>
+            <DialogDescription>{t('aiAssistantResultDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto py-2 text-sm">
+            {aiAssistantResult?.warnings?.map((warning: string, index: number) => (
+              <div key={index} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                {warning}
+              </div>
+            ))}
+            {aiAssistantResult?.expected_result && (
+              <PreviewBlock title={t('expectedResult')} value={aiAssistantResult.expected_result} />
+            )}
+            {aiAssistantResult?.gherkin && (
+              <PreviewBlock title={t('gherkinSyntax')} value={aiAssistantResult.gherkin} />
+            )}
+            {Array.isArray(aiAssistantResult?.steps) && aiAssistantResult.steps.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="font-medium">{t('testSteps')}</h3>
+                {aiAssistantResult.steps.map((step: any, index: number) => (
+                  <div key={index} className="rounded-md border p-3 dark:border-slate-800">
+                    <p className="font-medium">{index + 1}. {step.action}</p>
+                    <p className="mt-1 text-muted-foreground">{step.expected_result}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {Array.isArray(aiAssistantResult?.drafts) && aiAssistantResult.drafts.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="font-medium">{t('generatedDrafts')}</h3>
+                {aiAssistantResult.drafts.map((draft: any, index: number) => (
+                  <div key={index} className="rounded-md border p-3 dark:border-slate-800">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{draft.title}</p>
+                      {typeof draft.confidence === 'number' && <Badge variant="outline">{t('aiConfidence', { confidence: Math.round(draft.confidence * 100) })}</Badge>}
+                    </div>
+                    <p className="mt-1 text-muted-foreground">{draft.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!aiAssistantResult?.expected_result && !aiAssistantResult?.gherkin && (!Array.isArray(aiAssistantResult?.steps) || aiAssistantResult.steps.length === 0) && (!Array.isArray(aiAssistantResult?.drafts) || aiAssistantResult.drafts.length === 0) && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                {t('aiNoDraftContent')}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAiDialogOpen(false)}>{t('cancel')}</Button>
+            <Button type="button" onClick={() => applyAIAssistantResult()}>{t('applyDraft')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function PreviewBlock({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="font-medium">{title}</h3>
+      <pre className="whitespace-pre-wrap rounded-md border bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-950">{value}</pre>
     </div>
   );
 }

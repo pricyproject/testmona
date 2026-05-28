@@ -58,7 +58,7 @@ export function TestRunReport() {
         testRunsAPI.getById(parseInt(testRunId!)),
         testResultsAPI.getAll(parseInt(testRunId!)),
         usersAPI.getAll(),
-        parsedProjectId ? customFieldsAPI.getDefinitions(parsedProjectId).catch(() => []) : Promise.resolve([]),
+        parsedProjectId ? customFieldsAPI.getDefinitions(parsedProjectId, 'test_case').catch(() => []) : Promise.resolve([]),
         parsedProjectId ? projectsAPI.getById(parsedProjectId).catch(() => null) : Promise.resolve(null),
       ]);
       setTestRun(runData);

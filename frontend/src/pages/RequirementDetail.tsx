@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, MoreVertical, Pencil, Play, Plus, Settings2, Tag, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, Pencil, Play, Plus, Settings2, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,7 +27,7 @@ import { ContentEditor } from '@/components/ui/content-editor';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
-import { requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
+import { aiManagerAPI, AIManagerStatus, requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
 import { Requirement, RequirementLinkedTestCase, RequirementLinkedTestCaseHistoryItem, RequirementRelationshipSummary, RequirementTraceabilitySummary, TestCaseSection, TestSuite } from '@/types';
 
 const decodeHtmlEntities = (value?: string | null): string => {
@@ -199,6 +199,27 @@ type SourceDoc = {
   intro: string;
 };
 
+type AIDraftStep = {
+  step_number: number;
+  action: string;
+  expected_result: string;
+  step_type: string;
+};
+
+type AIDraftTestCase = {
+  title: string;
+  description: string;
+  preconditions: string;
+  steps: string;
+  expected_result: string;
+  priority: string;
+  test_type: string;
+  tags: string;
+  confidence?: number | null;
+  test_steps: AIDraftStep[];
+  selected?: boolean;
+};
+
 const extractSourceDocument = (rawDescription?: string | null): SourceDoc | null => {
   const decoded = decodeHtmlEntities(rawDescription);
   if (typeof window !== 'undefined' && /data-requirement-source=/i.test(decoded)) {
@@ -265,6 +286,16 @@ export function RequirementDetail() {
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingTestCase, setCreatingTestCase] = useState(false);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [generatingAI, setGeneratingAI] = useState(false);
+  const [savingAIDrafts, setSavingAIDrafts] = useState(false);
+  const [aiDrafts, setAiDrafts] = useState<AIDraftTestCase[]>([]);
+  const [aiWarnings, setAiWarnings] = useState<string[]>([]);
+  const [aiGenerationError, setAiGenerationError] = useState('');
+  const [aiStatus, setAiStatus] = useState<AIManagerStatus | null>(null);
+  const [loadingAIStatus, setLoadingAIStatus] = useState(false);
+  const [aiGenerationForm, setAiGenerationForm] = useState({ count: 5, instructions: '' });
+  const [activeAIDraftIndex, setActiveAIDraftIndex] = useState(0);
   const [newTestCaseForm, setNewTestCaseForm] = useState({
     title: '',
     description: '',
@@ -341,6 +372,28 @@ export function RequirementDetail() {
       isMounted = false;
     };
   }, [projectId, requirementId, t, toast]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAIStatus = async () => {
+      setLoadingAIStatus(true);
+      try {
+        const status = await aiManagerAPI.getStatus();
+        if (isMounted) setAiStatus(status);
+      } catch (error) {
+        console.error('Failed to load AI status:', error);
+        if (isMounted) setAiStatus({ active_provider: 'openai', available: false, reason: 'active_provider_not_configured' });
+      } finally {
+        if (isMounted) setLoadingAIStatus(false);
+      }
+    };
+
+    loadAIStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -534,6 +587,10 @@ export function RequirementDetail() {
     };
   }, [requirement?.id, refreshLinkedKey, showLinkHistory]);
 
+  useEffect(() => {
+    setActiveAIDraftIndex((current) => Math.min(current, Math.max(aiDrafts.length - 1, 0)));
+  }, [aiDrafts.length]);
+
   const descriptionHtml = useMemo(() => decodeEntitiesDeep(requirement?.description), [requirement?.description]);
   const acceptanceHtml = useMemo(() => decodeEntitiesDeep(requirement?.acceptance_criteria), [requirement?.acceptance_criteria]);
   const acceptanceText = useMemo(() => htmlToReadableText(requirement?.acceptance_criteria), [requirement?.acceptance_criteria]);
@@ -554,6 +611,8 @@ export function RequirementDetail() {
     if (!newTestCaseForm.test_suite_id) return [];
     return sections.filter((section) => String(section.test_suite_id) === newTestCaseForm.test_suite_id);
   }, [newTestCaseForm.test_suite_id, sections]);
+  const selectedAIDraftsCount = aiDrafts.filter((draft) => draft.selected !== false && draft.title.trim()).length;
+  const activeAIDraft = aiDrafts[activeAIDraftIndex];
 
   const backPath = projectId ? `/projects/${projectId}/requirements` : '/projects';
   const BackIcon = isRTL ? ArrowRight : ArrowLeft;
@@ -717,6 +776,138 @@ export function RequirementDetail() {
     }
   };
 
+  const updateAIDraft = (index: number, updates: Partial<AIDraftTestCase>) => {
+    setAiDrafts((current) => current.map((draft, draftIndex) => (
+      draftIndex === index ? { ...draft, ...updates } : draft
+    )));
+  };
+
+  const updateAIDraftStep = (draftIndex: number, stepIndex: number, updates: Partial<AIDraftStep>) => {
+    setAiDrafts((current) => current.map((draft, index) => {
+      if (index !== draftIndex) return draft;
+      return {
+        ...draft,
+        test_steps: draft.test_steps.map((step, currentStepIndex) => (
+          currentStepIndex === stepIndex ? { ...step, ...updates } : step
+        )),
+      };
+    }));
+  };
+
+  const addAIDraftStep = (draftIndex: number) => {
+    setAiDrafts((current) => current.map((draft, index) => {
+      if (index !== draftIndex) return draft;
+      return {
+        ...draft,
+        test_steps: [
+          ...(draft.test_steps || []),
+          {
+            step_number: (draft.test_steps || []).length + 1,
+            action: '',
+            expected_result: '',
+            step_type: 'manual',
+          },
+        ],
+      };
+    }));
+  };
+
+  const removeAIDraftStep = (draftIndex: number, stepIndex: number) => {
+    setAiDrafts((current) => current.map((draft, index) => {
+      if (index !== draftIndex) return draft;
+      return {
+        ...draft,
+        test_steps: (draft.test_steps || [])
+          .filter((_, currentStepIndex) => currentStepIndex !== stepIndex)
+          .map((step, currentStepIndex) => ({ ...step, step_number: currentStepIndex + 1 })),
+      };
+    }));
+  };
+
+  const handleGenerateRequirementTestCases = async () => {
+    if (!requirement) return;
+    if (!testSuites.length) {
+      toast({
+        title: t('validationError'),
+        description: t('targetSuiteRequiredForAIGeneration'),
+        variant: 'destructive',
+      });
+      return;
+    }
+    setGeneratingAI(true);
+    setAiWarnings([]);
+    try {
+      const result = await requirementsAPI.generateTestCases(requirement.id, {
+        count: aiGenerationForm.count,
+        instructions: aiGenerationForm.instructions.trim() || undefined,
+      });
+      setAiDrafts((result.drafts || []).map((draft: AIDraftTestCase) => ({ ...draft, selected: true })));
+      setActiveAIDraftIndex(0);
+      setAiWarnings(result.warnings || []);
+      toast({ title: t('success'), description: t('aiDraftsGenerated', { count: result.drafts?.length || 0 }) });
+    } catch (error: any) {
+      console.error('Failed to generate requirement test cases:', error);
+      toast({
+        title: t('error'),
+        description: error.response?.data?.detail || t('failedToGenerateAITestCases'),
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
+
+  const handleCreateSelectedAIDrafts = async () => {
+    if (!requirement) return;
+    const selectedDrafts = aiDrafts.filter((draft) => draft.selected !== false && draft.title.trim());
+    if (!selectedDrafts.length || !testSuites.length) {
+      toast({
+        title: t('validationError'),
+        description: t('selectAtLeastOneDraft'),
+        variant: 'destructive',
+      });
+      return;
+    }
+    setSavingAIDrafts(true);
+    try {
+      for (const draft of selectedDrafts) {
+        await requirementsAPI.createAndLinkTestCase(requirement.id, {
+          title: draft.title.trim(),
+          description: draft.description?.trim() || undefined,
+          test_type: draft.test_type || 'manual',
+          preconditions: draft.preconditions?.trim() || 'No preconditions defined',
+          steps: draft.steps?.trim() || 'No steps defined',
+          expected_result: draft.expected_result?.trim() || 'No expected results defined',
+          priority: draft.priority || 'medium',
+          status: 'active',
+          reference: requirement.requirement_id,
+          tags: draft.tags?.trim() || undefined,
+          test_suite_id: Number(newTestCaseForm.test_suite_id || testSuites[0].id),
+          section_id: newTestCaseForm.section_id === 'none' ? undefined : Number(newTestCaseForm.section_id),
+          test_steps: (draft.test_steps || []).map((step, index) => ({
+            step_number: index + 1,
+            action: step.action,
+            expected_result: step.expected_result,
+            step_type: step.step_type || 'manual',
+          })),
+        });
+      }
+      setAiDialogOpen(false);
+      setAiDrafts([]);
+      refreshRequirementLinks();
+      toast({ title: t('success'), description: t('aiDraftsCreatedAndLinked', { count: selectedDrafts.length }) });
+    } catch (error: any) {
+      console.error('Failed to create AI test case drafts:', error);
+      toast({
+        title: t('error'),
+        description: error.response?.data?.detail || t('failedToCreateAndLinkTestCase'),
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingAIDrafts(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-8">
@@ -780,6 +971,10 @@ export function RequirementDetail() {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setAiDialogOpen(true)}>
+                <Wand2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                {t('generateTestCases')}
+              </Button>
               <Button type="button" size="sm" onClick={openEditDialog}>
                 <Pencil className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                 {t('edit')}
@@ -1034,6 +1229,10 @@ export function RequirementDetail() {
                                   <FileText className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('viewTestCase')}
                                 </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/edit`)}>
+                                  <Pencil className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                                  {t('edit')}
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`)}>
                                   <Play className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('execute')}
@@ -1164,6 +1363,256 @@ export function RequirementDetail() {
           </aside>
           )}
         </div>
+
+        <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
+          <DialogContent isRTL={isRTL} className="max-w-6xl">
+            <DialogHeader>
+              <DialogTitle>{t('generateTestCases')}</DialogTitle>
+              <DialogDescription>{t('aiRequirementGenerationDesc')}</DialogDescription>
+            </DialogHeader>
+            <div className="-mx-1 max-h-[70vh] space-y-5 overflow-y-auto px-1 py-2">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                {t('aiDraftReviewRequired')}
+              </div>
+              {loadingAIStatus ? (
+                <div className="flex items-center gap-2 rounded-md border border-slate-200 p-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t('loading')}
+                </div>
+              ) : aiStatus && !aiStatus.available ? (
+                <div className="flex flex-col gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    {t('aiEnabledTokenMissing')}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setLoadingAIStatus(true);
+                      aiManagerAPI.getStatus()
+                        .then(setAiStatus)
+                        .catch((error) => console.error('Failed to refresh AI status:', error))
+                        .finally(() => setLoadingAIStatus(false));
+                    }}
+                  >
+                    {t('retry')}
+                  </Button>
+                </div>
+              ) : null}
+              <div className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)]">
+                <div className="space-y-2">
+                  <Label>{t('count')}</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={aiGenerationForm.count}
+                    onChange={(event) => setAiGenerationForm((current) => ({
+                      ...current,
+                      count: Math.min(10, Math.max(1, Number(event.target.value) || 5)),
+                    }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('additionalInstructions')}</Label>
+                  <Input
+                    value={aiGenerationForm.instructions}
+                    onChange={(event) => setAiGenerationForm((current) => ({ ...current, instructions: event.target.value }))}
+                    placeholder={t('aiInstructionsPlaceholder')}
+                    maxLength={2000}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>{t('targetSuite')}</Label>
+                  <Select
+                    value={newTestCaseForm.test_suite_id}
+                    onValueChange={(value) => setNewTestCaseForm((current) => ({ ...current, test_suite_id: value, section_id: 'none' }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('selectTestSuite')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {testSuites.map((suite) => <SelectItem key={suite.id} value={String(suite.id)}>{suite.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('targetSection')}</Label>
+                  <Select
+                    value={newTestCaseForm.section_id}
+                    onValueChange={(value) => setNewTestCaseForm((current) => ({ ...current, section_id: value }))}
+                    disabled={!newTestCaseForm.test_suite_id}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('section')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t('noSection')}</SelectItem>
+                      {newTestCaseSections.map((section) => <SelectItem key={section.id} value={String(section.id)}>{section.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={handleGenerateRequirementTestCases} disabled={generatingAI || !testSuites.length || loadingAIStatus || aiStatus?.available === false}>
+                  {generatingAI ? <Loader2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 animate-spin`} /> : <Wand2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />}
+                  {generatingAI ? t('generating') : t('generateDrafts')}
+                </Button>
+                {aiDrafts.length > 0 && (
+                  <>
+                    <Button type="button" variant="outline" onClick={() => setAiDrafts((current) => current.map((draft) => ({ ...draft, selected: true })))}>
+                      {t('selectAll')}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setAiDrafts((current) => current.map((draft) => ({ ...draft, selected: false })))}>
+                      {t('clearSelection')}
+                    </Button>
+                    <Badge variant="secondary" className="self-center">
+                      {t('selectedDraftsCount', { count: selectedAIDraftsCount })}
+                    </Badge>
+                  </>
+                )}
+              </div>
+              {aiWarnings.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                  {aiWarnings.map((warning, index) => <p key={`${warning}-${index}`}>{warning}</p>)}
+                </div>
+              )}
+              {aiDrafts.length > 0 && activeAIDraft && (
+                <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+                  <div className="rounded-md border border-slate-200 dark:border-slate-800">
+                    <div className="border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{t('generatedDrafts')}</p>
+                      <p className="text-xs text-slate-500">{t('selectDraftToPreview')}</p>
+                    </div>
+                    <div className="max-h-[480px] overflow-y-auto">
+                      {aiDrafts.map((draft, draftIndex) => (
+                        <div
+                          key={draftIndex}
+                          className={`flex gap-2 border-b border-slate-100 p-3 last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-950 ${activeAIDraftIndex === draftIndex ? 'bg-blue-50 dark:bg-blue-950/30' : ''}`}
+                        >
+                          <Checkbox
+                            checked={draft.selected !== false}
+                            onCheckedChange={(checked) => updateAIDraft(draftIndex, { selected: checked === true })}
+                          />
+                          <button
+                            type="button"
+                            className={`min-w-0 flex-1 ${isRTL ? 'text-right' : 'text-left'}`}
+                            onClick={() => setActiveAIDraftIndex(draftIndex)}
+                          >
+                            <span className="block truncate text-sm font-medium text-slate-900 dark:text-white">{draft.title || t('untitled')}</span>
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              <Badge variant="outline" className="capitalize">{draft.priority || t('priority')}</Badge>
+                              {typeof draft.confidence === 'number' && (
+                                <Badge variant="secondary">{t('aiConfidence', { confidence: Math.round(draft.confidence * 100) })}</Badge>
+                              )}
+                            </span>
+                            <span className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">
+                              {draft.description || draft.expected_result || t('noDescriptionProvided')}
+                            </span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 space-y-4 rounded-md border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('draftPreview')}</p>
+                        <h3 className="mt-1 wrap-break-word text-lg font-semibold text-slate-950 dark:text-white">
+                          {activeAIDraft.title || t('untitled')}
+                        </h3>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={activeAIDraft.selected !== false ? 'default' : 'outline'}>
+                          {activeAIDraft.selected !== false ? t('selected') : t('notSelected')}
+                        </Badge>
+                        {typeof activeAIDraft.confidence === 'number' && (
+                          <Badge variant="outline">{t('aiConfidence', { confidence: Math.round(activeAIDraft.confidence * 100) })}</Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="space-y-2 sm:col-span-3">
+                        <Label>{t('title')}</Label>
+                        <Input value={activeAIDraft.title} onChange={(event) => updateAIDraft(activeAIDraftIndex, { title: event.target.value })} maxLength={255} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('priority')}</Label>
+                        <Select value={activeAIDraft.priority} onValueChange={(value) => updateAIDraft(activeAIDraftIndex, { priority: value })}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>{TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{t(priority as any)}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('testType')}</Label>
+                        <Input value={activeAIDraft.test_type} onChange={(event) => updateAIDraft(activeAIDraftIndex, { test_type: event.target.value })} maxLength={40} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('tags')}</Label>
+                        <Input value={activeAIDraft.tags || ''} onChange={(event) => updateAIDraft(activeAIDraftIndex, { tags: event.target.value })} maxLength={500} />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>{t('description')}</Label>
+                        <Textarea value={activeAIDraft.description || ''} onChange={(event) => updateAIDraft(activeAIDraftIndex, { description: event.target.value })} rows={4} maxLength={4000} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('expectedResult')}</Label>
+                        <Textarea value={activeAIDraft.expected_result || ''} onChange={(event) => updateAIDraft(activeAIDraftIndex, { expected_result: event.target.value })} rows={4} maxLength={4000} />
+                      </div>
+                      <div className="space-y-2 lg:col-span-2">
+                        <Label>{t('preconditions')}</Label>
+                        <Textarea value={activeAIDraft.preconditions || ''} onChange={(event) => updateAIDraft(activeAIDraftIndex, { preconditions: event.target.value })} rows={2} maxLength={4000} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label>{t('testSteps')}</Label>
+                        <Button type="button" variant="outline" size="sm" onClick={() => addAIDraftStep(activeAIDraftIndex)}>
+                          <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
+                          {t('addStep')}
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        {(activeAIDraft.test_steps || []).length === 0 ? (
+                          <EmptyState label={t('noTestSteps')} />
+                        ) : (
+                          (activeAIDraft.test_steps || []).map((step, stepIndex) => (
+                            <div key={stepIndex} className="grid gap-2 rounded-md bg-slate-50 p-3 dark:bg-slate-900 lg:grid-cols-[32px_minmax(0,1fr)_minmax(0,1fr)_40px]">
+                              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-white text-xs font-semibold text-slate-600 dark:bg-slate-950 dark:text-slate-300">
+                                {stepIndex + 1}
+                              </span>
+                              <Textarea value={step.action} onChange={(event) => updateAIDraftStep(activeAIDraftIndex, stepIndex, { action: event.target.value })} rows={2} placeholder={t('action')} maxLength={2000} />
+                              <Textarea value={step.expected_result} onChange={(event) => updateAIDraftStep(activeAIDraftIndex, stepIndex, { expected_result: event.target.value })} rows={2} placeholder={t('expectedResult')} maxLength={2000} />
+                              <Button type="button" variant="ghost" size="icon" onClick={() => removeAIDraftStep(activeAIDraftIndex, stepIndex)} aria-label={t('remove')}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setAiDialogOpen(false)}>{t('cancel')}</Button>
+              <Button type="button" onClick={handleCreateSelectedAIDrafts} disabled={savingAIDrafts || selectedAIDraftsCount === 0 || !testSuites.length}>
+                {savingAIDrafts ? t('saving') : t('createSelectedDraftsCount', { count: selectedAIDraftsCount })}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
           <DialogContent isRTL={isRTL} className="max-w-2xl">

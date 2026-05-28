@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
-import { defectsAPI, executionSettingsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI } from '@/lib/api';
+import { datasetsAPI, defectsAPI, executionSettingsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI, type TestDataset } from '@/lib/api';
 import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -136,6 +136,10 @@ export function TestCaseExecution() {
     step_type: string;
   }>>([]);
   const [testStepsLoadError, setTestStepsLoadError] = useState(false);
+  // Case-level parameterization: dataset the case iterates over, plus per-row outcomes.
+  const [dataset, setDataset] = useState<TestDataset | null>(null);
+  const [activeIteration, setActiveIteration] = useState(0);
+  const [iterationStatuses, setIterationStatuses] = useState<Record<number, string>>({});
   const [testRun, setTestRun] = useState<any>(null);
   const [executionHistory, setExecutionHistory] = useState<any[]>([]);
   const [historyLoadError, setHistoryLoadError] = useState(false);
@@ -548,6 +552,75 @@ export function TestCaseExecution() {
     loadResultDefectLinks(testResultId);
   }, [testResultId]);
 
+  // --- Case-level parameterization (data-driven iterations) ---
+  const datasetId = testCase?.dataset_id ?? null;
+  useEffect(() => {
+    if (!datasetId) {
+      setDataset(null);
+      setActiveIteration(0);
+      return;
+    }
+    let cancelled = false;
+    datasetsAPI
+      .get(datasetId)
+      .then((ds) => { if (!cancelled) { setDataset(ds); setActiveIteration(0); } })
+      .catch(() => { if (!cancelled) setDataset(null); });
+    return () => { cancelled = true; };
+  }, [datasetId]);
+
+  const hasIterations = !!dataset && Array.isArray(dataset.rows) && dataset.rows.length > 0;
+  const activeRow = hasIterations ? (dataset!.rows[activeIteration] || {}) : null;
+
+  // Replace ${param} placeholders with the active iteration's values; unknown
+  // placeholders are left as-is so the tester can still see the template.
+  const substitute = (text: string | null | undefined): string => {
+    if (!text) return text || '';
+    if (!activeRow) return text;
+    return text.replace(/\$\{([^}]+)\}/g, (match, key) => {
+      const k = String(key).trim();
+      return Object.prototype.hasOwnProperty.call(activeRow, k) ? (activeRow[k] ?? '') : match;
+    });
+  };
+
+  // Overall status derived from per-iteration outcomes: fail wins, then block,
+  // then any unset row keeps it pending, otherwise pass.
+  const derivedIterationStatus = useMemo(() => {
+    if (!hasIterations) return null;
+    const statuses = dataset!.rows.map((_, i) => iterationStatuses[i] || 'pending');
+    if (statuses.includes('failed')) return 'failed';
+    if (statuses.includes('blocked')) return 'blocked';
+    if (statuses.some((s) => s === 'pending')) return 'pending';
+    return 'passed';
+  }, [hasIterations, dataset, iterationStatuses]);
+
+  // Keep the single overall result status in sync with the iteration outcomes.
+  useEffect(() => {
+    if (hasIterations && derivedIterationStatus) {
+      setExecutionStatus(derivedIterationStatus);
+    }
+  }, [hasIterations, derivedIterationStatus]);
+
+  // Load prior per-iteration outcomes when re-opening an executed result.
+  useEffect(() => {
+    if (!testResultId || !hasIterations) return;
+    let cancelled = false;
+    const reverse: Record<string, string> = { pass: 'passed', fail: 'failed', block: 'blocked', skip: 'pending' };
+    (async () => {
+      try {
+        const result = await testResultsAPI.getById(testResultId);
+        if (cancelled || !result?.iteration_results) return;
+        const next: Record<number, string> = {};
+        for (const it of result.iteration_results) {
+          if (typeof it?.row_index === 'number') next[it.row_index] = reverse[it.status] || 'pending';
+        }
+        setIterationStatuses(next);
+      } catch {
+        /* prior iteration outcomes are best-effort */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [testResultId, hasIterations]);
+
   // Load project execution settings (defect-on-failure policy)
   useEffect(() => {
     const loadExecutionSettings = async () => {
@@ -750,11 +823,21 @@ export function TestCaseExecution() {
       // Use current elapsed seconds from state, not recalculate
       const executionTimeSeconds = Math.max(0, elapsedSeconds);
 
+      // For data-driven cases, persist each row's outcome alongside the result.
+      const iterationResultsPayload = hasIterations
+        ? dataset!.rows.map((row, i) => ({
+            row_index: i,
+            values: row,
+            status: statusMap[iterationStatuses[i] || 'pending'] || 'skip',
+          }))
+        : null;
+
       const executionData = {
         test_case_id: parseInt(testCaseId || '0'),
         test_run_id: parseInt(testRunId || '0'),
         status: statusMap[executionStatus] || 'skip',
         actual_result: executionNotes,
+        iteration_results: iterationResultsPayload,
         comments: executionNotes,
         execution_started_at: startedAt,
         execution_time: executionTimeSeconds,
@@ -1774,6 +1857,123 @@ export function TestCaseExecution() {
             </CardContent>
           </Card>
 
+          {/* Data-driven iterations */}
+          {hasIterations && (
+            <Card className="border-emerald-200 dark:border-emerald-900/40">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+                  <FileText className="h-4 w-4" />
+                  {t('dataDrivenIterations')}
+                  <Badge variant="outline" className="text-xs">{dataset!.name}</Badge>
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">
+                    {t('iterationsPassedSummary', {
+                      passed: String(dataset!.rows.filter((_, i) => iterationStatuses[i] === 'passed').length),
+                      total: String(dataset!.rows.length),
+                    })}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap gap-1">
+                  {dataset!.rows.map((_, i) => {
+                    const st = iterationStatuses[i] || 'pending';
+                    const color =
+                      st === 'passed' ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/30 dark:text-green-300'
+                      : st === 'failed' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-300'
+                      : st === 'blocked' ? 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300'
+                      : 'bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300';
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setActiveIteration(i)}
+                        className={`rounded border px-2 py-1 text-xs ${color} ${activeIteration === i ? 'ring-2 ring-cyan-400 ring-offset-1' : ''}`}
+                      >
+                        {t('iterationLabel', { n: String(i + 1) })}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="overflow-x-auto rounded border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/50">
+                        {dataset!.parameters.map((p) => (
+                          <th key={p} className="px-2 py-1 text-left font-mono">{p}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {dataset!.parameters.map((p) => (
+                          <td key={p} className="px-2 py-1">{activeRow?.[p] ?? ''}</td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">{t('iterationPreviewHint')}</p>
+
+                {testCase?.preconditions && (
+                  <div>
+                    <Label className="text-xs font-medium text-gray-700">{t('preconditions')}</Label>
+                    <p className="mt-1 whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs text-gray-600 dark:bg-gray-900/50">
+                      {substitute(testCase.preconditions)}
+                    </p>
+                  </div>
+                )}
+
+                {testSteps.length > 0 ? (
+                  <div className="space-y-2">
+                    {testSteps.map((step) => (
+                      <div key={step.step_number} className="rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/50">
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                            {step.step_number}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600"><span className="font-medium">{t('action')}:</span> {substitute(step.action)}</p>
+                        <p className="text-xs text-gray-600"><span className="font-medium">{t('expectedResult')}:</span> {substitute(step.expected_result)}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : testCase?.steps ? (
+                  <pre className="mt-1 whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs text-gray-600 dark:bg-gray-900/50">{substitute(testCase.steps)}</pre>
+                ) : null}
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs text-muted-foreground">{t('iterationOutcome')}:</span>
+                  <Button
+                    size="sm"
+                    variant={iterationStatuses[activeIteration] === 'passed' ? 'default' : 'outline'}
+                    className={iterationStatuses[activeIteration] === 'passed' ? 'bg-green-600 hover:bg-green-700' : ''}
+                    onClick={() => setIterationStatuses((prev) => ({ ...prev, [activeIteration]: 'passed' }))}
+                  >
+                    <CheckCircle className="mr-1 h-3 w-3" /> {t('passed')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={iterationStatuses[activeIteration] === 'failed' ? 'default' : 'outline'}
+                    className={iterationStatuses[activeIteration] === 'failed' ? 'bg-red-600 hover:bg-red-700' : ''}
+                    onClick={() => setIterationStatuses((prev) => ({ ...prev, [activeIteration]: 'failed' }))}
+                  >
+                    <XCircle className="mr-1 h-3 w-3" /> {t('failed')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={iterationStatuses[activeIteration] === 'blocked' ? 'default' : 'outline'}
+                    className={iterationStatuses[activeIteration] === 'blocked' ? 'bg-amber-600 hover:bg-amber-700' : ''}
+                    onClick={() => setIterationStatuses((prev) => ({ ...prev, [activeIteration]: 'blocked' }))}
+                  >
+                    {t('blocked')}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Execution Form */}
           <Card className="overflow-hidden border-slate-200/80 shadow-xs dark:border-slate-800">
             <CardHeader className="border-b border-slate-100 bg-linear-to-r from-slate-50 via-cyan-50/60 to-white pb-4 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
@@ -1798,7 +1998,7 @@ export function TestCaseExecution() {
                   <Label htmlFor="status" className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {t('executionStatusLabel')}
                   </Label>
-                  <Select value={executionStatus} onValueChange={setExecutionStatus}>
+                  <Select value={executionStatus} onValueChange={setExecutionStatus} disabled={hasIterations}>
                     <SelectTrigger className="mt-2 h-10 text-sm">
                       <SelectValue placeholder={t('selectStatus')} />
                     </SelectTrigger>
@@ -1813,6 +2013,9 @@ export function TestCaseExecution() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {hasIterations && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">{t('statusDerivedFromIterations')}</p>
+                  )}
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white/80 p-3 shadow-xs dark:border-slate-800 dark:bg-slate-950/60">
                   <Label htmlFor="assignee" className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -2242,22 +2445,30 @@ export function TestCaseExecution() {
               <CardTitle className="text-base">Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button 
-                variant="outline" 
-                className="w-full justify-start h-8 text-xs"
-                onClick={() => setExecutionStatus('passed')}
-              >
-                <CheckCircle className="h-3 w-3 mr-2 text-green-600" />
-                Mark as Passed
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start h-8 text-xs"
-                onClick={() => setExecutionStatus('failed')}
-              >
-                <XCircle className="h-3 w-3 mr-2 text-red-600" />
-                Mark as Failed
-              </Button>
+              {hasIterations ? (
+                <p className="rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+                  {t('statusDerivedFromIterations')}
+                </p>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => setExecutionStatus('passed')}
+                  >
+                    <CheckCircle className="h-3 w-3 mr-2 text-green-600" />
+                    Mark as Passed
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start h-8 text-xs"
+                    onClick={() => setExecutionStatus('failed')}
+                  >
+                    <XCircle className="h-3 w-3 mr-2 text-red-600" />
+                    Mark as Failed
+                  </Button>
+                </>
+              )}
               <Button
                 variant="outline"
                 className="w-full justify-start h-8 text-xs"
@@ -2266,14 +2477,16 @@ export function TestCaseExecution() {
                 <Bug className="h-3 w-3 mr-2 text-orange-600" />
                 Report Defect
               </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start h-8 text-xs"
-                onClick={() => setExecutionStatus('blocked')}
-              >
-                <AlertTriangle className="h-3 w-3 mr-2 text-orange-600" />
-                Mark as Blocked
-              </Button>
+              {!hasIterations && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start h-8 text-xs"
+                  onClick={() => setExecutionStatus('blocked')}
+                >
+                  <AlertTriangle className="h-3 w-3 mr-2 text-orange-600" />
+                  Mark as Blocked
+                </Button>
+              )}
             </CardContent>
           </Card>
 

@@ -6,6 +6,7 @@ import {
   ArrowRight,
   AlertTriangle,
   CheckCircle,
+  Database,
   Edit,
   Eye,
   FileText,
@@ -22,7 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
-import { api, customFieldsAPI, sectionsAPI, testCasesAPI, testSuitesAPI } from '@/lib/api';
+import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset } from '@/lib/api';
 import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSuite } from '@/types';
 
 type SectionCrumb = { id: number; name: string };
@@ -68,6 +69,7 @@ export function TestCaseDetail() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   const navigate = useNavigate();
   const [testCase, setTestCase] = useState<TestCase | null>(null);
+  const [dataset, setDataset] = useState<TestDataset | null>(null);
   const [testSuite, setTestSuite] = useState<TestSuite | null>(null);
   const [section, setSection] = useState<{ name: string; path: SectionCrumb[] } | null>(null);
   const [testSteps, setTestSteps] = useState<Array<{
@@ -178,7 +180,7 @@ export function TestCaseDetail() {
         const projectForCustomFields = Number(projectId || testSuiteData?.project_id || testCaseData.test_suite?.project_id || (testCaseData as any).project_id);
         if (projectForCustomFields && !Number.isNaN(projectForCustomFields)) {
           setCustomFieldsLoading(true);
-          customFieldsAPI.getDefinitions(projectForCustomFields)
+          customFieldsAPI.getDefinitions(projectForCustomFields, 'test_case')
             .then((fields) => {
               if (isMounted) setCustomFields(Array.isArray(fields) ? fields : []);
             })
@@ -316,6 +318,21 @@ export function TestCaseDetail() {
     // resetDetailState only closes over setters (stable), so it doesn't belong in deps.
 
   }, [id, projectId]);
+
+  // Load the attached dataset (if any) for read-only display.
+  const attachedDatasetId = (testCase as any)?.dataset_id ?? null;
+  useEffect(() => {
+    if (!attachedDatasetId) {
+      setDataset(null);
+      return;
+    }
+    let cancelled = false;
+    datasetsAPI
+      .get(attachedDatasetId)
+      .then((ds) => { if (!cancelled) setDataset(ds); })
+      .catch(() => { if (!cancelled) setDataset(null); });
+    return () => { cancelled = true; };
+  }, [attachedDatasetId]);
 
   const displaySteps = useMemo(() => {
     const parseLegacyText = (text: string | undefined | null) =>
@@ -602,6 +619,49 @@ export function TestCaseDetail() {
                 </div>
               </CardContent>
             </Card>
+
+            {dataset && (
+              <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                    <span className="rounded-lg bg-emerald-100 p-1.5 dark:bg-emerald-900/30">
+                      <Database className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                    </span>
+                    {t('testDataSet')}: {dataset.name}
+                    <Badge className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      {t('datasetRowCount', { count: String(dataset.rows.length) })}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0 space-y-2">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {t('datasetUsageHint', { params: dataset.parameters.map((p) => `\${${p}}`).join(', ') })}
+                  </p>
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-slate-950/60">
+                          <th className="px-3 py-2 text-left font-medium text-slate-500">#</th>
+                          {dataset.parameters.map((p) => (
+                            <th key={p} className="px-3 py-2 text-left font-mono text-xs text-slate-700 dark:text-slate-300">{p}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataset.rows.map((row, i) => (
+                          <tr key={i} className="border-t border-slate-200 dark:border-slate-800">
+                            <td className="px-3 py-2 text-slate-400">{i + 1}</td>
+                            {dataset.parameters.map((p) => (
+                              <td key={p} className="px-3 py-2 text-slate-700 dark:text-slate-300">{row[p] ?? ''}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
               <CardHeader className="pb-3">

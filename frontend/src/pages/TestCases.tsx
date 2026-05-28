@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
+import { aiManagerAPI, AIManagerStatus, api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -81,6 +81,8 @@ import {
   Layers,
   TrendingUp,
   AlertTriangle,
+  Wand2,
+  Loader2,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ContentEditor } from '@/components/ui/content-editor';
@@ -117,6 +119,8 @@ const getSuiteIdFromSelectionValue = (value: string): number | null => {
   const suiteId = Number(rawSuiteId);
   return Number.isInteger(suiteId) && suiteId > 0 ? suiteId : null;
 };
+
+type AIAssistantAction = 'suggest_steps' | 'improve_expected_result' | 'add_negative_cases' | 'convert_to_gherkin' | 'split_broad_case';
 
 export function TestCases() {
   const { t, isRTL } = useTranslation();
@@ -179,6 +183,12 @@ export function TestCases() {
     expected_result: string;
     step_type: string;
   }>>([]);
+  const [aiAssistantLoading, setAiAssistantLoading] = useState(false);
+  const [aiAssistantAction, setAiAssistantAction] = useState<AIAssistantAction>('suggest_steps');
+  const [aiAssistantResult, setAiAssistantResult] = useState<any>(null);
+  const [aiAssistantDialogOpen, setAiAssistantDialogOpen] = useState(false);
+  const [aiStatus, setAiStatus] = useState<AIManagerStatus | null>(null);
+  const [loadingAIStatus, setLoadingAIStatus] = useState(false);
 
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
@@ -354,6 +364,28 @@ export function TestCases() {
   const [apiTestCases, setApiTestCases] = useState<TestCase[]>([]);
   const mockSectionsRef = useRef<Section[]>([]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAIStatus = async () => {
+      setLoadingAIStatus(true);
+      try {
+        const status = await aiManagerAPI.getStatus();
+        if (isMounted) setAiStatus(status);
+      } catch (error) {
+        console.error('Failed to load AI status:', error);
+        if (isMounted) setAiStatus({ active_provider: 'openai', available: false, reason: 'active_provider_not_configured' });
+      } finally {
+        if (isMounted) setLoadingAIStatus(false);
+      }
+    };
+
+    loadAIStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Performance optimization: Preload custom fields on component mount
   useEffect(() => {
     const startTime = performance.now();
@@ -367,7 +399,7 @@ export function TestCases() {
       }
 
       try {
-        const fields = await customFieldsAPI.getDefinitions(currentProjectId);
+        const fields = await customFieldsAPI.getDefinitions(currentProjectId, 'test_case');
         setCustomFields(fields);
       } catch (error) {
         console.error('Failed to load custom field definitions:', error);
@@ -938,6 +970,10 @@ export function TestCases() {
       setMockSections([]);
       setCurrentTestSuiteId(null);
       setSelectedTestSuite('all');
+      // Drop any selection carried over from the previous project — those IDs
+      // aren't in the new project and would silently land in skipped_ids.
+      setSelectedTestCases([]);
+      setSelectAll(false);
 
       await loadTestSuite();
       await loadTestCases();
@@ -1001,7 +1037,7 @@ export function TestCases() {
     }
 
     try {
-      const fields = await customFieldsAPI.getDefinitions(currentProjectId);
+      const fields = await customFieldsAPI.getDefinitions(currentProjectId, 'test_case');
       setCustomFields(fields);
     } catch (error) {
       console.error('Failed to load custom fields:', error);
@@ -1631,6 +1667,84 @@ export function TestCases() {
     ));
   };
 
+  const applyAIAssistantResult = () => {
+    const result = aiAssistantResult;
+    if (!result) return;
+    if (Array.isArray(result.steps) && result.steps.length > 0) {
+      setTestSteps(result.steps.map((step: any, index: number) => ({
+        step_number: index + 1,
+        action: step.action || '',
+        expected_result: step.expected_result || '',
+        step_type: step.step_type || 'manual',
+      })));
+      setTestCaseForm((prev) => ({ ...prev, is_multistep: true }));
+    }
+    if (result.expected_result) {
+      setTestCaseForm((prev) => ({ ...prev, expected_result: result.expected_result }));
+    }
+    if (result.gherkin) {
+      setTestCaseForm((prev) => ({ ...prev, steps: result.gherkin, is_multistep: false }));
+    }
+    if (Array.isArray(result.drafts) && result.drafts.length > 0) {
+      const draft = result.drafts[0];
+      setTestCaseForm((prev) => ({
+        ...prev,
+        title: draft.title || prev.title,
+        description: draft.description || prev.description,
+        preconditions: draft.preconditions || prev.preconditions,
+        steps: draft.steps || prev.steps,
+        expected_result: draft.expected_result || prev.expected_result,
+        priority: draft.priority || prev.priority,
+        test_type: draft.test_type || prev.test_type,
+        tags: draft.tags || prev.tags,
+        is_multistep: Array.isArray(draft.test_steps) && draft.test_steps.length > 0 ? true : prev.is_multistep,
+      }));
+      if (Array.isArray(draft.test_steps) && draft.test_steps.length > 0) {
+        setTestSteps(draft.test_steps.map((step: any, index: number) => ({
+          step_number: index + 1,
+          action: step.action || '',
+          expected_result: step.expected_result || '',
+          step_type: step.step_type || 'manual',
+        })));
+      }
+    }
+    setAiAssistantDialogOpen(false);
+  };
+
+  const runAIDraftAssistant = async (action: AIAssistantAction) => {
+    if (!currentProjectId) return;
+    setAiAssistantAction(action);
+    setAiAssistantLoading(true);
+    setAiAssistantResult(null);
+    try {
+      const result = await testCasesAPI.assistDraft({
+        project_id: currentProjectId,
+        action,
+        title: testCaseForm.title,
+        description: testCaseForm.description,
+        preconditions: testCaseForm.preconditions,
+        steps: testCaseForm.steps,
+        expected_result: testCaseForm.expected_result,
+        priority: testCaseForm.priority || 'medium',
+        test_type: testCaseForm.test_type || 'manual',
+        tags: testCaseForm.tags,
+        reference: testCaseForm.reference,
+        test_steps: testSteps,
+      });
+      setAiAssistantResult(result);
+      setAiAssistantDialogOpen(true);
+    } catch (error: any) {
+      console.error('AI test case draft assistant failed:', error);
+      toast({
+        title: t('error'),
+        description: error.response?.data?.detail || t('aiAssistantFailed'),
+        variant: 'destructive',
+      });
+    } finally {
+      setAiAssistantLoading(false);
+    }
+  };
+
   // Requirements linking functions
   const loadAvailableRequirements = async () => {
     try {
@@ -1974,7 +2088,7 @@ export function TestCases() {
       const exportCustomFields = customFields.length > 0
         ? customFields
         : currentProjectId
-          ? await customFieldsAPI.getDefinitions(currentProjectId).catch(() => [])
+          ? await customFieldsAPI.getDefinitions(currentProjectId, 'test_case').catch(() => [])
           : [];
 
       const csvEscape = (value: unknown) => {
@@ -3212,6 +3326,39 @@ export function TestCases() {
                 {/* Test Details */}
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">{t('testDetails')}</h3>
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 dark:border-indigo-900 dark:bg-indigo-950/30">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                      <Wand2 className="h-4 w-4 text-indigo-600" />
+                      {t('aiTestCaseAssistant')}
+                    </div>
+                    {loadingAIStatus ? (
+                      <div className="mb-2 rounded-md border border-slate-200 bg-white/70 p-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300">
+                        <Loader2 className={`inline h-3.5 w-3.5 animate-spin ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                        {t('loading')}
+                      </div>
+                    ) : aiStatus && !aiStatus.available ? (
+                      <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                        <AlertTriangle className={`inline h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                        {t('aiEnabledTokenMissing')}
+                      </div>
+                    ) : (
+                      <p className="mb-2 text-xs text-slate-600 dark:text-slate-300">{t('aiDraftReviewRequired')}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        ['suggest_steps', t('suggestSteps')],
+                        ['improve_expected_result', t('improveExpectedResult')],
+                        ['add_negative_cases', t('addNegativeCases')],
+                        ['convert_to_gherkin', t('convertToGherkin')],
+                        ['split_broad_case', t('splitBroadCase')],
+                      ] as [AIAssistantAction, string][]).map(([action, label]) => (
+                        <Button key={action} type="button" variant="outline" size="sm" onClick={() => runAIDraftAssistant(action)} disabled={aiAssistantLoading || !currentProjectId || loadingAIStatus || aiStatus?.available === false}>
+                          {aiAssistantLoading && aiAssistantAction === action ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Wand2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="description">{t('testCaseDescription')}</Label>
                     <ContentEditor
@@ -3474,6 +3621,58 @@ export function TestCases() {
             </DialogContent>
           </Dialog>
           )}
+
+          <Dialog open={aiAssistantDialogOpen} onOpenChange={setAiAssistantDialogOpen}>
+            <DialogContent isRTL={isRTL} className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>{t('aiAssistantResult')}</DialogTitle>
+                <DialogDescription>{t('aiAssistantResultDesc')}</DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[60vh] space-y-4 overflow-y-auto py-2 text-sm">
+                {aiAssistantResult?.warnings?.map((warning: string, index: number) => (
+                  <div key={index} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    {warning}
+                  </div>
+                ))}
+                {aiAssistantResult?.expected_result && <AIPreviewBlock title={t('expectedResult')} value={aiAssistantResult.expected_result} />}
+                {aiAssistantResult?.gherkin && <AIPreviewBlock title={t('gherkinSyntax')} value={aiAssistantResult.gherkin} />}
+                {Array.isArray(aiAssistantResult?.steps) && aiAssistantResult.steps.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="font-medium">{t('testSteps')}</h3>
+                    {aiAssistantResult.steps.map((step: any, index: number) => (
+                      <div key={index} className="rounded-md border p-3 dark:border-slate-800">
+                        <p className="font-medium">{index + 1}. {step.action}</p>
+                        <p className="mt-1 text-muted-foreground">{step.expected_result}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(aiAssistantResult?.drafts) && aiAssistantResult.drafts.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="font-medium">{t('generatedDrafts')}</h3>
+                    {aiAssistantResult.drafts.map((draft: any, index: number) => (
+                      <div key={index} className="rounded-md border p-3 dark:border-slate-800">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{draft.title}</p>
+                          {typeof draft.confidence === 'number' && <Badge variant="outline">{t('aiConfidence', { confidence: Math.round(draft.confidence * 100) })}</Badge>}
+                        </div>
+                        <p className="mt-1 text-muted-foreground">{draft.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!aiAssistantResult?.expected_result && !aiAssistantResult?.gherkin && (!Array.isArray(aiAssistantResult?.steps) || aiAssistantResult.steps.length === 0) && (!Array.isArray(aiAssistantResult?.drafts) || aiAssistantResult.drafts.length === 0) && (
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                    {t('aiNoDraftContent')}
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setAiAssistantDialogOpen(false)}>{t('cancel')}</Button>
+                <Button type="button" onClick={applyAIAssistantResult}>{t('applyDraft')}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Unsaved Changes Confirmation Dialog */}
           <Dialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>
@@ -3927,7 +4126,13 @@ export function TestCases() {
                       <TableRow className="bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                         <TableHead className="w-12">
                           <Checkbox
-                            checked={paginatedTestCases.length > 0 && paginatedTestCases.every(tc => selectedTestCases.includes(tc.id))}
+                            checked={
+                              paginatedTestCases.length > 0 && paginatedTestCases.every(tc => selectedTestCases.includes(tc.id))
+                                ? true
+                                : paginatedTestCases.some(tc => selectedTestCases.includes(tc.id))
+                                  ? 'indeterminate'
+                                  : false
+                            }
                             onCheckedChange={handleSelectAll}
                             className="rtl:mr-0"
                           />
@@ -4519,6 +4724,15 @@ export function TestCases() {
           setSelectedTestCases([]);
         }}
       />
+    </div>
+  );
+}
+
+function AIPreviewBlock({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="font-medium">{title}</h3>
+      <pre className="whitespace-pre-wrap rounded-md border bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-950">{value}</pre>
     </div>
   );
 }

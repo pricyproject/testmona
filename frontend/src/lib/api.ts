@@ -42,6 +42,102 @@ export const systemSettingsAPI = {
   },
 };
 
+export type AIProviderName = "openai" | "openrouter" | "anthropic" | "huggingface" | "litellm";
+
+export interface AIProviderConfig {
+  provider: AIProviderName;
+  enabled: boolean;
+  api_key?: string;
+  model: string;
+  base_url: string;
+  request_timeout_seconds: number;
+  monthly_token_limit?: number | null;
+  token_configured?: boolean;
+  api_key_masked?: string | null;
+  api_key_required?: boolean;
+}
+
+export interface AIManagerSettings {
+  active_provider: AIProviderName;
+  per_project_monthly_token_limit?: number | null;
+  providers: AIProviderConfig[];
+}
+
+export interface AIManagerStatus {
+  active_provider: AIProviderName;
+  available: boolean;
+  reason?: "active_provider_not_configured" | "active_provider_disabled" | "token_missing" | null;
+  provider?: AIProviderConfig | null;
+}
+
+export interface AIUsageLimitEntry {
+  used_tokens: number;
+  limit: number | null;
+  remaining_tokens: number | null;
+  percent_used: number;
+  status: "unlimited" | "ok" | "warning" | "exceeded";
+  requests?: number;
+  failures?: number;
+}
+
+export interface AIUsageSummary {
+  current_month?: string;
+  totals?: Record<string, number>;
+  providers?: Record<AIProviderName, Record<string, number>>;
+  monthly?: Record<string, unknown>;
+  recent_events?: Array<Record<string, unknown>>;
+  limits?: {
+    current_month: string;
+    active_provider: AIProviderName;
+    providers: Record<AIProviderName, AIUsageLimitEntry>;
+    active_provider_limit?: AIUsageLimitEntry | null;
+    project_monthly_limit: {
+      limit: number | null;
+      total_projects: number;
+      projects_over_limit: number;
+      projects_near_limit: number;
+      top_projects: Array<AIUsageLimitEntry & { project_id: string }>;
+    };
+  };
+}
+
+export const aiManagerAPI = {
+  getSettings: async (): Promise<AIManagerSettings> => {
+    const response = await api.get("/ai-manager/settings");
+    return response.data;
+  },
+
+  getStatus: async (): Promise<AIManagerStatus> => {
+    const response = await api.get("/ai-manager/status");
+    return response.data;
+  },
+
+  updateSettings: async (settings: AIManagerSettings): Promise<AIManagerSettings> => {
+    const response = await api.put("/ai-manager/settings", settings);
+    return response.data;
+  },
+
+  getUsage: async (): Promise<AIUsageSummary> => {
+    const response = await api.get("/ai-manager/usage");
+    return response.data;
+  },
+
+  resetUsage: async (): Promise<AIUsageSummary> => {
+    const response = await api.delete("/ai-manager/usage");
+    return response.data;
+  },
+
+  clearRecentActions: async (): Promise<AIUsageSummary> => {
+    const response = await api.delete("/ai-manager/recent-actions");
+    return response.data;
+  },
+
+  testProvider: async (provider?: AIProviderName, prompt?: string) => {
+    const response = await api.post("/ai-manager/test", { provider, prompt });
+    return response.data;
+  },
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const api = axios.create({
@@ -233,6 +329,31 @@ export const authAPI = {
   },
 };
 
+export interface InvitationDetails {
+  email: string;
+  role: string;
+  expires_at: string;
+}
+
+export interface InvitationAcceptPayload {
+  token: string;
+  username: string;
+  password: string;
+  full_name?: string;
+}
+
+export const invitationsAPI = {
+  getByToken: async (token: string): Promise<InvitationDetails> => {
+    const response = await api.get(`/invitations/${encodeURIComponent(token)}`);
+    return response.data;
+  },
+
+  accept: async (token: string, payload: InvitationAcceptPayload): Promise<{ message: string; user_id: number }> => {
+    const response = await api.post(`/invitations/${encodeURIComponent(token)}/accept`, payload);
+    return response.data;
+  },
+};
+
 
 // Projects API
 type ProjectStatusFilter = 'active' | 'inactive' | 'archived';
@@ -411,6 +532,10 @@ export const requirementsAPI = {
     const response = await api.post(`/requirements/${id}/test-cases`, payload);
     return response.data;
   },
+  generateTestCases: async (id: number, payload: { count?: number; instructions?: string }) => {
+    const response = await api.post(`/requirements/${id}/ai/test-cases`, payload);
+    return response.data;
+  },
   getTestCaseHistory: async (id: number, offset = 0, limit = 20) => {
     const response = await api.get(`/requirements/${id}/test-cases/history?offset=${offset}&limit=${limit}`);
     return response.data;
@@ -501,6 +626,20 @@ export const testCasesAPI = {
       test_case_id: testCaseId
     }));
     const response = await api.post(`/test-cases/${testCaseId}/steps`, stepsWithTestCaseId);
+    return response.data;
+  },
+  assist: async (
+    testCaseId: number,
+    payload: {
+      action: 'suggest_steps' | 'improve_expected_result' | 'add_negative_cases' | 'convert_to_gherkin' | 'split_broad_case';
+      instructions?: string;
+    }
+  ) => {
+    const response = await api.post(`/test-cases/${testCaseId}/ai/assist`, payload);
+    return response.data;
+  },
+  assistDraft: async (payload: any) => {
+    const response = await api.post('/test-cases/ai/assist', payload);
     return response.data;
   },
 };
@@ -712,6 +851,75 @@ export const savedFiltersAPI = {
   },
   remove: async (id: number): Promise<void> => {
     await api.delete(`/saved-filters/${id}`);
+  },
+};
+
+// Test datasets (case-level parameterization)
+export interface TestDataset {
+  id: number;
+  project_id: number;
+  name: string;
+  description?: string | null;
+  parameters: string[];
+  rows: Record<string, string>[];
+  is_active: boolean;
+  created_by: number;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export const datasetsAPI = {
+  list: async (projectId: number): Promise<TestDataset[]> => {
+    const response = await api.get('/test-datasets', { params: { project_id: projectId } });
+    return response.data;
+  },
+  get: async (id: number): Promise<TestDataset> => {
+    const response = await api.get(`/test-datasets/${id}`);
+    return response.data;
+  },
+  create: async (payload: { project_id: number; name: string; description?: string; parameters: string[]; rows: Record<string, string>[] }): Promise<TestDataset> => {
+    const response = await api.post('/test-datasets', payload);
+    return response.data;
+  },
+  update: async (id: number, payload: { name?: string; description?: string; parameters?: string[]; rows?: Record<string, string>[]; is_active?: boolean }): Promise<TestDataset> => {
+    const response = await api.put(`/test-datasets/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/test-datasets/${id}`);
+  },
+};
+
+// Global parameters (single key->value, project-scoped or global)
+export interface GlobalParameter {
+  id: number;
+  name: string;
+  value: string;
+  description?: string | null;
+  parameter_type: string;
+  project_id?: number | null;
+  is_active: boolean;
+  is_encrypted: boolean;
+  created_by: number;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export const globalParametersAPI = {
+  list: async (projectId?: number): Promise<GlobalParameter[]> => {
+    const response = await api.get('/global-parameters', { params: projectId != null ? { project_id: projectId } : {} });
+    return response.data;
+  },
+  create: async (payload: { name: string; value: string; description?: string; parameter_type: string; project_id?: number | null; is_encrypted?: boolean }): Promise<GlobalParameter> => {
+    const response = await api.post('/global-parameters/', payload);
+    return response.data;
+  },
+  update: async (id: number, payload: { name?: string; value?: string; description?: string; parameter_type?: string; is_encrypted?: boolean }): Promise<GlobalParameter> => {
+    const response = await api.put(`/global-parameters/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/global-parameters/${id}`);
   },
 };
 

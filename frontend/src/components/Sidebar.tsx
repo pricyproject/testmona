@@ -19,6 +19,7 @@ import {
   Database,
   Layers,
   Wrench,
+  Table2,
   ClipboardList,
   Network,
   Users,
@@ -65,7 +66,7 @@ export function Sidebar({
   onClose
 }: SidebarProps) {
   const location = useLocation();
-  const { logout } = useAuthStore();
+  const { logout, user } = useAuthStore();
   const { selectedProject, projects } = useProjectStore();
   const { t, isRTL } = useTranslation();
   const { appName, appLogoUrl } = useAppName(false);
@@ -103,6 +104,7 @@ export function Sidebar({
             { name: t('projects'), href: '/projects', icon: FolderOpen },
             { name: t('environments'), href: '/environments', icon: Settings },
             { name: t('activity'), href: '/activity-management', icon: BarChart3 },
+            ...(user?.is_superuser ? [{ name: t('globalParametersAdmin'), href: '/global-parameters', icon: Wrench }] : []),
           ]
         },
         {
@@ -155,6 +157,7 @@ export function Sidebar({
           { name: t('customFields'), href: `/projects/${projectId}/custom-fields`, icon: Database },
           { name: t('sharedSteps'), href: `/projects/${projectId}/shared-steps`, icon: Layers },
           { name: t('globalParameters'), href: `/projects/${projectId}/global-parameters`, icon: Wrench },
+          { name: t('testData'), href: `/projects/${projectId}/test-data`, icon: Table2 },
           { name: t('webhooks'), href: `/projects/${projectId}/webhooks`, icon: Webhook },
         ]
       },
@@ -162,6 +165,7 @@ export function Sidebar({
         name: t('global'),
         items: [
           { name: t('environments'), href: `/projects/${projectId}/environments`, icon: Settings },
+          ...(user?.is_superuser ? [{ name: t('globalParametersAdmin'), href: '/global-parameters', icon: Wrench }] : []),
         ]
       },
       {

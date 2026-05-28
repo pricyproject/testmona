@@ -44,14 +44,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2 } from 'lucide-react';
+import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2, BrainCircuit, KeyRound, PlayCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 import { Switch } from '@/components/ui/switch';
-import { api, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI } from '@/lib/api';
+import { api, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary } from '@/lib/api';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
 import { useAuthStore } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -192,6 +192,28 @@ interface AutomationSettings {
   created_at?: string;
   updated_at?: string;
 }
+
+const defaultAIProviders: AIProviderConfig[] = [
+  { provider: 'openai', enabled: false, model: 'gpt-4o-mini', base_url: 'https://api.openai.com/v1', request_timeout_seconds: 60, monthly_token_limit: null },
+  { provider: 'openrouter', enabled: false, model: 'openai/gpt-4o-mini', base_url: 'https://openrouter.ai/api/v1', request_timeout_seconds: 60, monthly_token_limit: null },
+  { provider: 'anthropic', enabled: false, model: 'claude-3-5-haiku-latest', base_url: 'https://api.anthropic.com/v1', request_timeout_seconds: 60, monthly_token_limit: null },
+  { provider: 'huggingface', enabled: false, model: 'openai/gpt-oss-20b', base_url: 'https://router.huggingface.co/v1', request_timeout_seconds: 60, monthly_token_limit: null },
+  { provider: 'litellm', enabled: false, model: 'gpt-4o-mini', base_url: 'http://localhost:4000/v1', request_timeout_seconds: 60, monthly_token_limit: null },
+];
+
+const defaultAIManagerSettings: AIManagerSettings = {
+  active_provider: 'openai',
+  per_project_monthly_token_limit: null,
+  providers: defaultAIProviders,
+};
+
+const aiProviderLabels: Record<AIProviderName, string> = {
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  anthropic: 'Claude',
+  huggingface: 'Hugging Face',
+  litellm: 'LiteLLM',
+};
 
 export function Settings() {
   const { language, setLanguage, compactMode, setCompactMode } = useAuthStore();
@@ -518,6 +540,20 @@ export function Settings() {
     duplicate_detection: true,
     performance_optimization: true
   });
+  const [aiManagerSettings, setAIManagerSettings] = useState<AIManagerSettings>(defaultAIManagerSettings);
+  const [aiUsage, setAIUsage] = useState<AIUsageSummary | null>(null);
+  const [loadingAIManager, setLoadingAIManager] = useState(false);
+  const [savingAIManager, setSavingAIManager] = useState(false);
+  const [resettingAIUsage, setResettingAIUsage] = useState(false);
+  const [clearingAIRecentActions, setClearingAIRecentActions] = useState(false);
+  const [testingAIProvider, setTestingAIProvider] = useState<AIProviderName | null>(null);
+  const [aiTestPrompt, setAITestPrompt] = useState('Reply with exactly: TestMona AI is ready.');
+  const [aiTestResult, setAITestResult] = useState<any>(null);
+  const [aiActionStatusFilter, setAIActionStatusFilter] = useState('all');
+  const [aiActionProviderFilter, setAIActionProviderFilter] = useState('all');
+  const [aiActionPage, setAIActionPage] = useState(1);
+  const [resetAIUsageConfirmOpen, setResetAIUsageConfirmOpen] = useState(false);
+  const [clearAIRecentActionsConfirmOpen, setClearAIRecentActionsConfirmOpen] = useState(false);
   
   // Dialog states for different forms
   const [testTypeDialogOpen, setTestTypeDialogOpen] = useState(false);
@@ -727,12 +763,43 @@ export function Settings() {
     }
   };
 
+  const loadAIManager = async () => {
+    if (!isAdminUser(user)) return;
+    setLoadingAIManager(true);
+    try {
+      const [settings, usage] = await Promise.all([
+        aiManagerAPI.getSettings(),
+        aiManagerAPI.getUsage(),
+      ]);
+      setAIManagerSettings({
+        active_provider: settings.active_provider,
+        per_project_monthly_token_limit: settings.per_project_monthly_token_limit ?? null,
+        providers: defaultAIProviders.map((defaults) => ({
+          ...defaults,
+          ...(settings.providers.find((provider) => provider.provider === defaults.provider) || {}),
+          api_key: '',
+        })),
+      });
+      setAIUsage(usage);
+    } catch (error) {
+      console.error('Failed to load AI manager:', error);
+      showErrorToast(getErrorDetail(error, t('failedToLoadAIManager')));
+    } finally {
+      setLoadingAIManager(false);
+    }
+  };
+
   useEffect(() => {
     loadProjects();
     loadTestManagementSettings();
     loadSystemSettings();
     loadAuditTrailConfig();
+    loadAIManager();
   }, []);
+
+  useEffect(() => {
+    setAIActionPage(1);
+  }, [aiActionStatusFilter, aiActionProviderFilter]);
 
   useEffect(() => {
     if (selectedProjectId) {
@@ -1110,6 +1177,95 @@ export function Settings() {
       description,
       variant: 'destructive',
     });
+  };
+
+  const updateAIProvider = (providerName: AIProviderName, updates: Partial<AIProviderConfig>) => {
+    setAIManagerSettings((current) => ({
+      ...current,
+      providers: current.providers.map((provider) =>
+        provider.provider === providerName ? { ...provider, ...updates } : provider
+      ),
+    }));
+  };
+
+  const handleSaveAIManager = async () => {
+    setSavingAIManager(true);
+    try {
+      const payload: AIManagerSettings = {
+        active_provider: aiManagerSettings.active_provider,
+        per_project_monthly_token_limit: aiManagerSettings.per_project_monthly_token_limit || null,
+        providers: aiManagerSettings.providers.map((provider) => ({
+          ...provider,
+          api_key: provider.api_key?.trim() || undefined,
+          monthly_token_limit: provider.monthly_token_limit || null,
+        })),
+      };
+      const savedSettings = await aiManagerAPI.updateSettings(payload);
+      setAIManagerSettings({
+        active_provider: savedSettings.active_provider,
+        per_project_monthly_token_limit: savedSettings.per_project_monthly_token_limit ?? null,
+        providers: defaultAIProviders.map((defaults) => ({
+          ...defaults,
+          ...(savedSettings.providers.find((provider) => provider.provider === defaults.provider) || {}),
+          api_key: '',
+        })),
+      });
+      showSuccessToast(t('aiManagerSaved'));
+    } catch (error) {
+      console.error('Failed to save AI manager:', error);
+      showErrorToast(getErrorDetail(error, t('failedToSaveAIManager')));
+    } finally {
+      setSavingAIManager(false);
+    }
+  };
+
+  const handleTestAIProvider = async (provider: AIProviderName) => {
+    setTestingAIProvider(provider);
+    setAITestResult(null);
+    try {
+      const result = await aiManagerAPI.testProvider(provider, aiTestPrompt.trim() || undefined);
+      setAITestResult(result);
+      const usage = await aiManagerAPI.getUsage();
+      setAIUsage(usage);
+      showSuccessToast(t('aiConnectionTestPassed', { provider: aiProviderLabels[provider] }));
+    } catch (error) {
+      console.error('AI connection test failed:', error);
+      showErrorToast(getErrorDetail(error, t('aiConnectionTestFailed')));
+    } finally {
+      setTestingAIProvider(null);
+    }
+  };
+
+  const handleResetAIUsage = async () => {
+    setResettingAIUsage(true);
+    try {
+      const usage = await aiManagerAPI.resetUsage();
+      setAIUsage(usage);
+      setAIActionPage(1);
+      showSuccessToast(t('aiUsageResetSuccess'));
+    } catch (error) {
+      console.error('Failed to reset AI usage:', error);
+      showErrorToast(getErrorDetail(error, t('aiUsageResetFailed')));
+    } finally {
+      setResettingAIUsage(false);
+      setResetAIUsageConfirmOpen(false);
+    }
+  };
+
+  const handleClearAIRecentActions = async () => {
+    setClearingAIRecentActions(true);
+    try {
+      const usage = await aiManagerAPI.clearRecentActions();
+      setAIUsage(usage);
+      setAIActionPage(1);
+      showSuccessToast(t('aiRecentActionsCleared'));
+    } catch (error) {
+      console.error('Failed to clear AI recent actions:', error);
+      showErrorToast(getErrorDetail(error, t('aiRecentActionsClearFailed')));
+    } finally {
+      setClearingAIRecentActions(false);
+      setClearAIRecentActionsConfirmOpen(false);
+    }
   };
 
   const resetSharedStepTemplateForm = () => {
@@ -1882,6 +2038,43 @@ export function Settings() {
     t('compactAppliesForms'),
     t('compactAppliesDialogs'),
   ];
+  const aiRecentEvents = Array.isArray(aiUsage?.recent_events) ? aiUsage.recent_events : [];
+  const filteredAIRecentEvents = aiRecentEvents.filter((event: any) => {
+    const statusMatches = aiActionStatusFilter === 'all'
+      || (aiActionStatusFilter === 'succeeded' && event.success)
+      || (aiActionStatusFilter === 'failed' && !event.success);
+    const providerMatches = aiActionProviderFilter === 'all' || event.provider === aiActionProviderFilter;
+    return statusMatches && providerMatches;
+  });
+  const aiActionPageSize = 8;
+  const aiActionTotalPages = Math.max(1, Math.ceil(filteredAIRecentEvents.length / aiActionPageSize));
+  const normalizedAIActionPage = Math.min(aiActionPage, aiActionTotalPages);
+  const visibleAIRecentEvents = filteredAIRecentEvents.slice(
+    (normalizedAIActionPage - 1) * aiActionPageSize,
+    normalizedAIActionPage * aiActionPageSize,
+  );
+  const activeAIProvider = aiManagerSettings.providers.find((provider) => provider.provider === aiManagerSettings.active_provider);
+  const aiUsageLimits = aiUsage?.limits;
+  const activeProviderLimit = aiUsageLimits?.active_provider_limit || null;
+  const projectMonthlyLimit = aiUsageLimits?.project_monthly_limit;
+  const formatAIUsageNumber = (value?: number | null) => Number(value || 0).toLocaleString();
+  const getAIUsagePercent = (limit?: AIUsageLimitEntry | null) => Math.min(100, Math.max(0, Math.round(limit?.percent_used || 0)));
+  const getAIUsageProgressClass = (status?: AIUsageLimitEntry['status']) => {
+    if (status === 'exceeded') return 'bg-red-600';
+    if (status === 'warning') return 'bg-amber-500';
+    if (status === 'ok') return 'bg-emerald-600';
+    return 'bg-slate-400';
+  };
+  const getAIUsageBadgeVariant = (status?: AIUsageLimitEntry['status']) => status === 'exceeded' ? 'destructive' : 'outline';
+  const getAIUsageStatusLabel = (status?: AIUsageLimitEntry['status']) => {
+    if (status === 'exceeded') return t('aiUsageLimitExceeded');
+    if (status === 'warning') return t('aiUsageLimitNear');
+    if (status === 'ok') return t('aiUsageLimitHealthy');
+    return t('aiUsageLimitUnlimited');
+  };
+  const getAIUsageLimitLabel = (limit?: AIUsageLimitEntry | null) => limit?.limit
+    ? t('aiUsageVsLimit', { used: formatAIUsageNumber(limit.used_tokens), limit: formatAIUsageNumber(limit.limit) })
+    : t('aiUsageUnlimitedUsed', { used: formatAIUsageNumber(limit?.used_tokens || 0) });
 
   return (
     <div className="space-y-6">
@@ -1902,6 +2095,12 @@ export function Settings() {
             <FileText className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('testManagement')}
           </TabsTrigger>
+          {isAdminUser(user) && (
+            <TabsTrigger value="ai-manager" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
+              <BrainCircuit className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
+              {t('aiManager')}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="integrations" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <Link className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('integrations')}
@@ -3134,6 +3333,410 @@ export function Settings() {
             </Button>
           </div>
         </TabsContent>
+
+        {isAdminUser(user) && (
+          <TabsContent value="ai-manager" className="space-y-6">
+            <Card>
+              <CardHeader className="border-b border-gray-100 dark:border-gray-800">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                    <BrainCircuit className="h-5 w-5 text-indigo-600" />
+                    <div>
+                      <CardTitle>{t('aiManager')}</CardTitle>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{t('aiManagerDesc')}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={loadAIManager} disabled={loadingAIManager}>
+                      <RefreshCw className={`h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 ${loadingAIManager ? 'animate-spin' : ''}`} />
+                      {t('refresh')}
+                    </Button>
+                    <Button variant="outline" onClick={() => setResetAIUsageConfirmOpen(true)} disabled={resettingAIUsage || loadingAIManager}>
+                      {resettingAIUsage ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
+                      {t('resetAIUsage')}
+                    </Button>
+                    <Button onClick={handleSaveAIManager} disabled={savingAIManager}>
+                      {savingAIManager ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <KeyRound className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
+                      {savingAIManager ? t('saving') : t('saveAIManager')}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6 pt-6">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                  <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('aiTotalRequests')}</p>
+                    <p className="mt-1 text-2xl font-semibold">{aiUsage?.totals?.requests ?? 0}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('aiTotalTokens')}</p>
+                    <p className="mt-1 text-2xl font-semibold">{aiUsage?.totals?.total_tokens ?? 0}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('aiPromptTokens')}</p>
+                    <p className="mt-1 text-2xl font-semibold">{aiUsage?.totals?.prompt_tokens ?? 0}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('aiFailures')}</p>
+                    <p className="mt-1 text-2xl font-semibold">{aiUsage?.totals?.failures ?? 0}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-slate-50 p-4 dark:border-gray-700 dark:bg-slate-950">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{t('activeAIProviderStatus')}</p>
+                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                        {activeAIProvider
+                          ? `${aiProviderLabels[activeAIProvider.provider]} · ${activeAIProvider.model || t('model')}`
+                          : t('aiTokenMissing')}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant={activeAIProvider?.enabled ? 'outline' : 'destructive'}>
+                        {activeAIProvider?.enabled ? t('enabled') : t('disabled')}
+                      </Badge>
+                      <Badge variant={activeAIProvider?.token_configured || activeAIProvider?.api_key_required === false ? 'outline' : 'destructive'}>
+                        {activeAIProvider?.token_configured
+                          ? t('aiTokenConfiguredShort')
+                          : activeAIProvider?.api_key_required === false
+                            ? t('aiTokenOptional')
+                            : t('aiTokenMissing')}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-emerald-600" />
+                        <h3 className="font-semibold">{t('monthlyUsageLimitIndicator')}</h3>
+                        <Badge variant={getAIUsageBadgeVariant(activeProviderLimit?.status)}>
+                          {getAIUsageStatusLabel(activeProviderLimit?.status)}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                        {t('monthlyUsageLimitSummary', {
+                          provider: activeAIProvider ? aiProviderLabels[activeAIProvider.provider] : t('unknown'),
+                          month: aiUsageLimits?.current_month || t('currentMonth'),
+                        })}
+                      </p>
+                      <div className="mt-3">
+                        <div className="mb-1 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+                          <span>{getAIUsageLimitLabel(activeProviderLimit)}</span>
+                          <span>{activeProviderLimit?.limit ? t('aiUsagePercentUsed', { percent: getAIUsagePercent(activeProviderLimit) }) : t('unlimited')}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                          <div
+                            className={`h-full rounded-full ${getAIUsageProgressClass(activeProviderLimit?.status)}`}
+                            style={{ width: `${activeProviderLimit?.limit ? getAIUsagePercent(activeProviderLimit) : 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-gray-200 px-3 py-2 text-sm dark:border-gray-700 lg:w-72">
+                      <p className="font-medium">{t('projectMonthlyTokenLimit')}</p>
+                      <p className="mt-1 text-gray-600 dark:text-gray-400">
+                        {projectMonthlyLimit?.limit
+                          ? t('projectUsageLimitSummary', {
+                              limit: formatAIUsageNumber(projectMonthlyLimit.limit),
+                              projects: projectMonthlyLimit.total_projects,
+                            })
+                          : t('projectUsageLimitDisabled')}
+                      </p>
+                      {(projectMonthlyLimit?.projects_over_limit || projectMonthlyLimit?.projects_near_limit) ? (
+                        <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                          {t('projectUsageLimitAlerts', {
+                            near: projectMonthlyLimit.projects_near_limit,
+                            over: projectMonthlyLimit.projects_over_limit,
+                          })}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>{t('activeAIProvider')}</Label>
+                    <Select value={aiManagerSettings.active_provider} onValueChange={(value) => setAIManagerSettings((current) => ({ ...current, active_provider: value as AIProviderName }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {aiManagerSettings.providers.map((provider) => (
+                          <SelectItem key={provider.provider} value={provider.provider}>
+                            {aiProviderLabels[provider.provider]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t('projectMonthlyTokenLimit')}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={aiManagerSettings.per_project_monthly_token_limit ?? ''}
+                      onChange={(event) => setAIManagerSettings((current) => ({
+                        ...current,
+                        per_project_monthly_token_limit: event.target.value ? Number(event.target.value) : null,
+                      }))}
+                      placeholder={t('unlimited')}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t('aiTestPrompt')}</Label>
+                    <Input value={aiTestPrompt} onChange={(event) => setAITestPrompt(event.target.value)} maxLength={1000} />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {aiManagerSettings.providers.map((provider) => {
+                    const providerUsage: Record<string, number> = aiUsage?.providers?.[provider.provider] || {};
+                    const providerLimit = aiUsageLimits?.providers?.[provider.provider] || null;
+                    return (
+                      <div key={provider.provider} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div className="flex items-center gap-3">
+                            <Switch
+                              checked={provider.enabled}
+                              onCheckedChange={(checked) => updateAIProvider(provider.provider, { enabled: checked })}
+                            />
+                            <div>
+                              <h3 className="font-semibold">{aiProviderLabels[provider.provider]}</h3>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {provider.token_configured
+                                  ? t('aiTokenConfigured', { token: provider.api_key_masked || '' })
+                                  : provider.api_key_required === false
+                                    ? t('aiTokenOptional')
+                                    : t('aiTokenMissing')}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline">{t('aiProviderTokens', { count: providerUsage.total_tokens ?? 0 })}</Badge>
+                            <Badge variant={getAIUsageBadgeVariant(providerLimit?.status)}>
+                              {getAIUsageStatusLabel(providerLimit?.status)}
+                            </Badge>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleTestAIProvider(provider.provider)}
+                              disabled={testingAIProvider === provider.provider || !provider.enabled}
+                            >
+                              {testingAIProvider === provider.provider ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <PlayCircle className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
+                              {t('testAIProvider')}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 rounded-md bg-slate-50 p-3 dark:bg-slate-950">
+                          <div className="mb-1 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+                            <span>{t('monthlyUsage')}</span>
+                            <span>{getAIUsageLimitLabel(providerLimit)}</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                            <div
+                              className={`h-full rounded-full ${getAIUsageProgressClass(providerLimit?.status)}`}
+                              style={{ width: `${providerLimit?.limit ? getAIUsagePercent(providerLimit) : 100}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                          <div className="space-y-2 xl:col-span-2">
+                            <Label>{t('apiToken')}</Label>
+                            <Input
+                              type="password"
+                              value={provider.api_key || ''}
+                              onChange={(event) => updateAIProvider(provider.provider, { api_key: event.target.value })}
+                              placeholder={provider.token_configured ? t('leaveBlankToKeepToken') : provider.api_key_required === false ? t('optionalApiToken') : t('enterApiToken')}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('model')}</Label>
+                            <Input value={provider.model} onChange={(event) => updateAIProvider(provider.provider, { model: event.target.value })} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('requestTimeoutSeconds')}</Label>
+                            <Input
+                              type="number"
+                              min={5}
+                              max={300}
+                              value={provider.request_timeout_seconds}
+                              onChange={(event) => updateAIProvider(provider.provider, { request_timeout_seconds: Number(event.target.value) || 60 })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{t('monthlyTokenLimit')}</Label>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={provider.monthly_token_limit ?? ''}
+                              onChange={(event) => updateAIProvider(provider.provider, { monthly_token_limit: event.target.value ? Number(event.target.value) : null })}
+                              placeholder={t('unlimited')}
+                            />
+                          </div>
+                          <div className="space-y-2 md:col-span-2 xl:col-span-5">
+                            <Label>{t('baseUrl')}</Label>
+                            <Input value={provider.base_url} onChange={(event) => updateAIProvider(provider.provider, { base_url: event.target.value })} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {aiTestResult && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
+                    <p className="font-medium">{t('latestAITestResult')}</p>
+                    <p className="mt-1">{aiTestResult.message}</p>
+                    <p className="mt-2 text-xs">
+                      {aiProviderLabels[aiTestResult.provider as AIProviderName] || aiTestResult.provider} · {aiTestResult.model} · {t('aiProviderTokens', { count: aiTestResult.usage?.total_tokens ?? 0 })}
+                    </p>
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+                  <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h3 className="font-semibold">{t('recentAIActions')}</h3>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {t('recentAIActionsRetention', { count: aiRecentEvents.length })}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <div className="grid gap-2 sm:grid-cols-2 lg:w-[360px]">
+                        <Select value={aiActionStatusFilter} onValueChange={setAIActionStatusFilter}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('status')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">{t('allStatuses')}</SelectItem>
+                            <SelectItem value="succeeded">{t('aiActionSucceeded')}</SelectItem>
+                            <SelectItem value="failed">{t('aiActionFailed')}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={aiActionProviderFilter} onValueChange={setAIActionProviderFilter}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('provider')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">{t('allProviders')}</SelectItem>
+                            {aiManagerSettings.providers.map((provider) => (
+                              <SelectItem key={provider.provider} value={provider.provider}>
+                                {aiProviderLabels[provider.provider]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setClearAIRecentActionsConfirmOpen(true)}
+                        disabled={clearingAIRecentActions || aiRecentEvents.length === 0}
+                      >
+                        {clearingAIRecentActions ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
+                        {t('clearRecentAIActions')}
+                      </Button>
+                    </div>
+                  </div>
+                  {visibleAIRecentEvents.length > 0 ? (
+                    <>
+                      <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
+                        <div className="hidden grid-cols-[1fr_140px_120px_170px] gap-3 border-b border-gray-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-gray-500 dark:border-gray-700 dark:bg-slate-950 md:grid">
+                          <span>{t('action')}</span>
+                          <span>{t('provider')}</span>
+                          <span>{t('tokens')}</span>
+                          <span>{t('created')}</span>
+                        </div>
+                        {visibleAIRecentEvents.map((event: any, index: number) => (
+                          <div key={`${event.created_at || index}-${event.operation || 'ai'}`} className="grid gap-2 border-b border-gray-100 px-3 py-3 text-sm last:border-b-0 dark:border-gray-800 md:grid-cols-[1fr_140px_120px_170px] md:items-center">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant={event.success ? 'outline' : 'destructive'}>
+                                  {event.success ? t('aiActionSucceeded') : t('aiActionFailed')}
+                                </Badge>
+                                <span className="font-medium capitalize">{String(event.operation || 'completion').replace(/_/g, ' ')}</span>
+                              </div>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                {event.project_id ? `${t('projectIdLabel')}: ${event.project_id}` : t('global')}
+                                {event.user_id ? ` · ${t('userIdLabel')}: ${event.user_id}` : ''}
+                              </p>
+                              {!event.success && event.error && (
+                                <p className="mt-1 truncate text-xs text-red-600 dark:text-red-400" title={event.error}>{event.error}</p>
+                              )}
+                            </div>
+                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                              {aiProviderLabels[event.provider as AIProviderName] || event.provider || t('unknown')}
+                            </span>
+                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                              {t('aiProviderTokens', { count: event.total_tokens ?? 0 })}
+                            </span>
+                            <time className="text-xs text-gray-500 dark:text-gray-400">
+                              {event.created_at ? new Date(event.created_at).toLocaleString() : t('unknown')}
+                            </time>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 flex flex-col gap-2 text-xs text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+                        <span>{t('showingRecentAIActions', { shown: visibleAIRecentEvents.length, total: filteredAIRecentEvents.length })}</span>
+                        <div className="flex items-center gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={() => setAIActionPage((current) => Math.max(1, current - 1))} disabled={normalizedAIActionPage <= 1}>
+                            {t('previous')}
+                          </Button>
+                          <span>{t('paginationPage', { page: normalizedAIActionPage, total: aiActionTotalPages })}</span>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setAIActionPage((current) => Math.min(aiActionTotalPages, current + 1))} disabled={normalizedAIActionPage >= aiActionTotalPages}>
+                            {t('next')}
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-gray-200 p-4 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                      {t('noRecentAIActions')}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+            <AlertDialog open={resetAIUsageConfirmOpen} onOpenChange={setResetAIUsageConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t('resetAIUsageConfirmTitle')}</AlertDialogTitle>
+                  <AlertDialogDescription>{t('resetAIUsageConfirmDesc')}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={resettingAIUsage}>{t('cancel')}</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleResetAIUsage} disabled={resettingAIUsage}>
+                    {resettingAIUsage ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : null}
+                    {t('resetAIUsage')}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            <AlertDialog open={clearAIRecentActionsConfirmOpen} onOpenChange={setClearAIRecentActionsConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t('clearRecentAIActionsConfirmTitle')}</AlertDialogTitle>
+                  <AlertDialogDescription>{t('clearRecentAIActionsConfirmDesc')}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={clearingAIRecentActions}>{t('cancel')}</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleClearAIRecentActions} disabled={clearingAIRecentActions || aiRecentEvents.length === 0}>
+                    {clearingAIRecentActions ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : null}
+                    {t('clearRecentAIActions')}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </TabsContent>
+        )}
 
         <TabsContent value="integrations" className="space-y-6">
           <Card>
