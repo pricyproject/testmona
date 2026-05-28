@@ -1,4 +1,4 @@
-# TestMona
+# TestMona | AI Test Management System
 
 TestMona is a full-stack test management system for organizing QA work across projects. It includes project workspaces, requirements, test cases, suites, runs, defects, reports, reusable test assets, audit trails, and a React frontend backed by a FastAPI API.
 
