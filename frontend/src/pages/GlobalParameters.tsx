@@ -88,7 +88,7 @@ function ParametersManager({ projectId: projectIdNum, isGlobal }: ManagerProps) 
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [projectIdNum, isGlobal]);
 
   useEffect(() => {
