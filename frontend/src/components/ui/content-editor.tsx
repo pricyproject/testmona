@@ -133,7 +133,7 @@ turndown.addRule('fencedCodeBlockWithLang', {
 
 marked.setOptions({ gfm: true, breaks: false });
 
-function markdownToHtml(md: string): string {
+export function markdownToHtml(md: string): string {
   if (!md) return '';
   try {
     return marked.parse(md, { async: false }) as string;
@@ -142,7 +142,7 @@ function markdownToHtml(md: string): string {
   }
 }
 
-function htmlToMarkdown(html: string): string {
+export function htmlToMarkdown(html: string): string {
   if (!html) return '';
   try {
     return turndown.turndown(html);

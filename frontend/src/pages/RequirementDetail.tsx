@@ -23,7 +23,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { isGherkinText } from '@/components/requirements/gherkin';
-import { ContentEditor } from '@/components/ui/content-editor';
+import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
@@ -182,6 +182,17 @@ const GHERKIN_TEMPLATE = [
   '    Given ',
   '    When ',
   '    Then ',
+].join('\n');
+const GHERKIN_BACKGROUND_TEMPLATE = ['  Background:', '    Given '].join('\n');
+const GHERKIN_SCENARIO_OUTLINE_TEMPLATE = [
+  '  Scenario Outline: ',
+  '    Given ',
+  '    When ',
+  '    Then ',
+  '',
+  '    Examples:',
+  '      | input | result |',
+  '      | value | expected |',
 ].join('\n');
 
 const emptyTraceabilitySummary: RequirementTraceabilitySummary = {
@@ -625,10 +636,18 @@ export function RequirementDetail() {
 
   const openEditDialog = () => {
     if (!requirement) return;
+    const decodedDescription = decodeEntitiesDeep(requirement.description);
+    const decodedAcceptanceHtml = decodeEntitiesDeep(requirement.acceptance_criteria);
+    const readableAcceptance = htmlToReadableText(requirement.acceptance_criteria);
+    const shouldEditAsGherkin = isGherkinText(readableAcceptance);
     setEditForm({
       title: requirement.title,
-      description: requirement.description || '',
-      acceptance_criteria: requirement.acceptance_criteria || '',
+      description: isHtmlMarkup(decodedDescription) ? htmlToMarkdown(decodedDescription) : decodedDescription,
+      acceptance_criteria: shouldEditAsGherkin
+        ? readableAcceptance
+        : isHtmlMarkup(decodedAcceptanceHtml)
+          ? htmlToMarkdown(decodedAcceptanceHtml)
+          : decodedAcceptanceHtml,
       status: requirement.status,
       priority: requirement.priority,
       tags: requirement.tags || '',
@@ -636,8 +655,17 @@ export function RequirementDetail() {
         ? String(requirement.estimated_effort)
         : '',
     });
-    setEditGherkin(isGherkinText(requirement.acceptance_criteria));
+    setEditGherkin(shouldEditAsGherkin);
     setEditDialogOpen(true);
+  };
+
+  const insertEditGherkinSnippet = (snippet: string) => {
+    setEditForm((current) => ({
+      ...current,
+      acceptance_criteria: current.acceptance_criteria.trim()
+        ? `${current.acceptance_criteria.trim()}\n\n${snippet}`
+        : snippet,
+    }));
   };
 
   const handleUpdateRequirement = async () => {
@@ -655,8 +683,8 @@ export function RequirementDetail() {
     try {
       const updated = await requirementsAPI.update(requirement.id, {
         title: editForm.title.trim(),
-        description: editForm.description,
-        acceptance_criteria: editForm.acceptance_criteria,
+        description: markdownToHtml(editForm.description),
+        acceptance_criteria: editGherkin ? editForm.acceptance_criteria : markdownToHtml(editForm.acceptance_criteria),
         status: editForm.status,
         priority: editForm.priority,
         tags: editForm.tags.trim(),
@@ -1829,7 +1857,7 @@ export function RequirementDetail() {
                   value={editForm.description}
                   onChange={(value) => setEditForm((current) => ({ ...current, description: value }))}
                   placeholder={t('enterRequirementDescription')}
-                  format="html"
+                  format="markdown"
                   dir={isRTL ? 'rtl' : 'ltr'}
                   minHeight="200px"
                 />
@@ -1863,6 +1891,32 @@ export function RequirementDetail() {
                       dir={isRTL ? 'rtl' : 'ltr'}
                       className="min-h-[180px] font-mono text-sm leading-6"
                     />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => insertEditGherkinSnippet(GHERKIN_TEMPLATE)}
+                      >
+                        {t('insertGherkinTemplate')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => insertEditGherkinSnippet(GHERKIN_BACKGROUND_TEMPLATE)}
+                      >
+                        {t('insertGherkinBackground')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => insertEditGherkinSnippet(GHERKIN_SCENARIO_OUTLINE_TEMPLATE)}
+                      >
+                        {t('insertScenarioOutline')}
+                      </Button>
+                    </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
                       <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('gherkinPreview')}</p>
                       <GherkinViewer value={editForm.acceptance_criteria} emptyLabel={t('noAcceptanceCriteriaProvided')} />
@@ -1873,12 +1927,14 @@ export function RequirementDetail() {
                     value={editForm.acceptance_criteria}
                     onChange={(value) => setEditForm((current) => ({ ...current, acceptance_criteria: value }))}
                     placeholder={t('enterAcceptanceCriteria')}
-                    format="html"
+                    format="markdown"
                     dir={isRTL ? 'rtl' : 'ltr'}
                     minHeight="160px"
                   />
                 )}
-                <p className="text-xs text-slate-500">{t('acceptanceCriteriaHelper')}</p>
+                <p className="text-xs text-slate-500">
+                  {editGherkin ? t('gherkinAcceptanceHelper') : t('acceptanceCriteriaHelper')}
+                </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
