@@ -324,8 +324,12 @@ class GlobalParameter(Base):
     __tablename__ = "global_parameters"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True, index=True)
-    value = Column(Text, nullable=False)
+    # Unique per scope (project_id, name) — not globally — so different projects
+    # can reuse the same parameter name. Enforced via __table_args__ below.
+    name = Column(String(100), nullable=False, index=True)
+    # Stored encrypted-at-rest when ``is_encrypted`` is set. The DB column stays
+    # ``value``; access goes through the ``value`` property below.
+    _value = Column("value", Text, nullable=False)
     description = Column(Text)
     parameter_type = Column(String(50), default="string")  # string, number, boolean, json
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=True)  # null for global, project_id for project-specific
@@ -338,6 +342,70 @@ class GlobalParameter(Base):
     # Relationships
     project = relationship("Project")
     creator = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_global_parameter_project_name"),
+    )
+
+    @property
+    def value(self):
+        """Decrypt on read when the parameter is marked encrypted.
+
+        Falls back to the raw stored value if decryption fails — this keeps
+        rows written before encryption was enabled (plaintext) readable.
+        """
+        if self.is_encrypted and self._value:
+            from .crypto import decrypt_data
+            try:
+                return decrypt_data(self._value)
+            except Exception:
+                return self._value
+        return self._value
+
+    @value.setter
+    def value(self, plaintext):
+        """Encrypt on write when ``is_encrypted`` is set.
+
+        Callers must set ``is_encrypted`` before assigning ``value`` so the
+        flag is current at encryption time (see ``crud.create_global_parameter``
+        / ``crud.update_global_parameter``).
+        """
+        if self.is_encrypted and plaintext is not None:
+            from .crypto import encrypt_data
+            self._value = encrypt_data(plaintext)
+        else:
+            self._value = plaintext
+
+
+class TestDataset(Base):
+    """A reusable, named table of test data scoped to a project.
+
+    Unlike :class:`GlobalParameter` (a single key→value), a dataset is a small
+    table: ``parameters`` is the ordered list of column names and ``rows`` is a
+    list of ``{param: value}`` dicts — one row per iteration. A test case can
+    attach one dataset (``TestCase.dataset_id``); during a run the execution
+    screen iterates over each row, substituting ``${param}`` placeholders in the
+    step text. Datasets are reusable across many cases.
+    """
+    __tablename__ = "test_datasets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String(150), nullable=False)
+    description = Column(Text)
+    parameters = Column(JSON, nullable=False, default=list)  # ordered list of column names
+    rows = Column(JSON, nullable=False, default=list)        # list of {param: value} dicts
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_test_dataset_project_name"),
+    )
 
 
 class TestTypeDefinition(Base):
@@ -568,6 +636,10 @@ class TestCase(Base):
     order_index = Column(Integer, default=0)
     is_deleted = Column(Boolean, default=False)
     is_multistep = Column(Boolean, default=False)  # Flag to indicate multistep format
+    # Optional reusable data set this case iterates over during a run. When set,
+    # the execution screen walks the tester through each dataset row, substituting
+    # ${param} placeholders in step text. SET NULL so deleting a dataset detaches.
+    dataset_id = Column(Integer, ForeignKey("test_datasets.id", ondelete="SET NULL"), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -579,6 +651,7 @@ class TestCase(Base):
     revisions = relationship("TestCaseRevision", back_populates="test_case")
     shared_steps = relationship("SharedStep", secondary=shared_step_usage, back_populates="test_cases")
     test_steps = relationship("TestCaseStep", back_populates="test_case", cascade="all, delete-orphan")
+    dataset = relationship("TestDataset", foreign_keys=[dataset_id])
     creator = relationship("User", foreign_keys=[created_by])
 
     @property
@@ -713,6 +786,12 @@ class TestResult(Base):
     defect_link = Column(String(500))  # URL to a defect in an external tracker
     custom_link = Column(String(500))  # Free-form reference URL (logs, build, etc.)
     retest_needed = Column(Boolean, default=False)  # Set when a linked defect is resolved/reopened
+
+    # Per-iteration outcomes for data-driven cases. Null for non-parameterized
+    # cases. Shape: [{"row_index": int, "values": {...}, "status": str,
+    # "actual_result": str?, "comments": str?}]. The row-level `status` field
+    # remains the derived overall outcome.
+    iteration_results = Column(JSON, nullable=True)
 
     # Relationships
     test_case = relationship("TestCase", back_populates="test_results")

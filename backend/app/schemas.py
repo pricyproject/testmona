@@ -171,6 +171,7 @@ class TestCaseBase(BaseModel):
     section_id: Optional[int] = None
     order_index: Optional[int] = 0
     is_multistep: Optional[bool] = False  # Flag to indicate multistep format
+    dataset_id: Optional[int] = None  # Reusable data set this case iterates over during a run
 
     @model_validator(mode='before')
     @classmethod
@@ -216,6 +217,7 @@ class TestCaseUpdate(BaseModel):
     test_suite_id: Optional[int] = None
     order_index: Optional[int] = None
     is_multistep: Optional[bool] = None  # Flag to indicate multistep format
+    dataset_id: Optional[int] = None  # Reusable data set this case iterates over (null detaches)
 
     @model_validator(mode='before')
     @classmethod
@@ -422,6 +424,9 @@ class TestResultBase(BaseModel):
     defect_link: Optional[str] = Field(None, max_length=500, description="URL to a defect in an external tracker")
     custom_link: Optional[str] = Field(None, max_length=500, description="Free-form reference URL")
     retest_needed: Optional[bool] = Field(None, description="Set when a linked defect is resolved or reopened")
+    iteration_results: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Per-iteration outcomes for data-driven cases: [{row_index, values, status, ...}]"
+    )
 
 
 class TestResultCreate(TestResultBase):
@@ -445,6 +450,9 @@ class TestResultUpdate(BaseModel):
     defect_link: Optional[str] = Field(None, max_length=500, description="URL to a defect in an external tracker")
     custom_link: Optional[str] = Field(None, max_length=500, description="Free-form reference URL")
     retest_needed: Optional[bool] = Field(None, description="Set when a linked defect is resolved or reopened")
+    iteration_results: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Per-iteration outcomes for data-driven cases: [{row_index, values, status, ...}]"
+    )
 
 
 class TestResult(TestResultBase):
@@ -3260,7 +3268,8 @@ class GlobalParameterBase(BaseModel):
 
 
 class GlobalParameterCreate(GlobalParameterBase):
-    created_by: int
+    # Set server-side from the authenticated user; never trusted from the client.
+    created_by: Optional[int] = None
 
 
 class GlobalParameterUpdate(BaseModel):
@@ -3275,6 +3284,87 @@ class GlobalParameterUpdate(BaseModel):
 
 class GlobalParameter(GlobalParameterBase):
     id: int
+    created_by: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Test Dataset (case-level parameterization) Schemas
+def _normalize_dataset(parameters, rows):
+    """Validate a dataset's columns + rows.
+
+    ``parameters`` must be a non-empty list of unique, trimmed column names.
+    Every row key must be one of those columns; missing keys default to "".
+    Returns the cleaned ``(parameters, rows)`` tuple.
+    """
+    if not isinstance(parameters, list) or not parameters:
+        raise ValueError("parameters must be a non-empty list of column names")
+    cleaned_params: List[str] = []
+    for raw in parameters:
+        name = str(raw).strip()
+        if not name:
+            raise ValueError("parameter names cannot be empty")
+        if name in cleaned_params:
+            raise ValueError(f"duplicate parameter name: {name}")
+        cleaned_params.append(name)
+    param_set = set(cleaned_params)
+
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ValueError("rows must be a list of objects")
+    cleaned_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("each row must be an object mapping parameter -> value")
+        unknown = set(row.keys()) - param_set
+        if unknown:
+            raise ValueError(f"row has unknown parameters: {sorted(unknown)}")
+        cleaned_rows.append({p: ("" if row.get(p) is None else str(row.get(p))) for p in cleaned_params})
+    return cleaned_params, cleaned_rows
+
+
+class TestDatasetBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=150)
+    description: Optional[str] = None
+    parameters: List[str] = Field(default_factory=list)
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class TestDatasetCreate(TestDatasetBase):
+    project_id: int
+
+    @model_validator(mode="after")
+    def _validate(self):
+        self.parameters, self.rows = _normalize_dataset(self.parameters, self.rows)
+        return self
+
+
+class TestDatasetUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=150)
+    description: Optional[str] = None
+    parameters: Optional[List[str]] = None
+    rows: Optional[List[Dict[str, Any]]] = None
+    is_active: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _validate(self):
+        # Only validate when either side of the table is being changed; the
+        # caller may PATCH just the name/description.
+        if self.parameters is not None or self.rows is not None:
+            if self.parameters is None:
+                raise ValueError("parameters is required when rows are provided")
+            self.parameters, self.rows = _normalize_dataset(self.parameters, self.rows or [])
+        return self
+
+
+class TestDataset(TestDatasetBase):
+    id: int
+    project_id: int
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None

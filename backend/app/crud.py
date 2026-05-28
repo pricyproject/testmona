@@ -18,7 +18,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -2659,7 +2659,12 @@ def increment_shared_step_usage(db: Session, step_id: int):
 
 # Global Parameter CRUD functions
 def create_global_parameter(db: Session, parameter: dict):
-    db_param = GlobalParameter(**parameter)
+    # Pop value and assign it last so ``is_encrypted`` is already set on the
+    # instance when the value setter decides whether to encrypt.
+    data = dict(parameter)
+    raw_value = data.pop("value", None)
+    db_param = GlobalParameter(**data)
+    db_param.value = raw_value
     db.add(db_param)
     safe_commit(db)
     db.refresh(db_param)
@@ -2693,8 +2698,28 @@ def get_global_parameter_by_name(db: Session, name: str, project_id: int = None)
 def update_global_parameter(db: Session, param_id: int, parameter: dict):
     db_param = db.query(GlobalParameter).filter(GlobalParameter.id == param_id).first()
     if db_param:
-        for key, value in parameter.items():
-            setattr(db_param, key, value)
+        old_encrypted = bool(db_param.is_encrypted)
+        # Snapshot current plaintext (getter decrypts using the OLD flag) before
+        # any mutation, in case the encryption mode is being toggled.
+        current_plain = db_param.value
+        value_provided = "value" in parameter
+        new_value = parameter.get("value")
+
+        # Apply every field except value first, so ``is_encrypted`` is current
+        # before the value setter runs.
+        for key, val in parameter.items():
+            if key == "value":
+                continue
+            setattr(db_param, key, val)
+
+        new_encrypted = bool(db_param.is_encrypted)
+        if value_provided:
+            db_param.value = new_value
+        elif new_encrypted != old_encrypted:
+            # Encryption toggled without a new value — re-store the existing
+            # plaintext under the new mode (encrypt it, or decrypt back to plain).
+            db_param.value = current_plain
+
         safe_commit(db)
         db.refresh(db_param)
     return db_param
@@ -2703,10 +2728,76 @@ def update_global_parameter(db: Session, param_id: int, parameter: dict):
 def delete_global_parameter(db: Session, param_id: int):
     db_param = db.query(GlobalParameter).filter(GlobalParameter.id == param_id).first()
     if db_param:
-        db_param.is_active = False
+        # Hard delete so the (project_id, name) slot frees up for reuse. Nothing
+        # references a parameter by FK, so this is safe.
+        db.delete(db_param)
         safe_commit(db)
-        db.refresh(db_param)
     return db_param
+
+
+# Test Dataset (case-level parameterization) CRUD functions
+def create_test_dataset(db: Session, dataset: dict):
+    db_dataset = TestDataset(**dataset)
+    db.add(db_dataset)
+    safe_commit(db)
+    db.refresh(db_dataset)
+    return db_dataset
+
+
+def get_test_datasets(db: Session, project_id: int, skip: int = 0, limit: int = 500):
+    return (
+        db.query(TestDataset)
+        .filter(TestDataset.project_id == project_id, TestDataset.is_active == True)
+        .order_by(TestDataset.name)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_test_dataset(db: Session, dataset_id: int):
+    return (
+        db.query(TestDataset)
+        .filter(TestDataset.id == dataset_id, TestDataset.is_active == True)
+        .first()
+    )
+
+
+def get_test_dataset_by_name(db: Session, name: str, project_id: int):
+    return (
+        db.query(TestDataset)
+        .filter(
+            TestDataset.name == name,
+            TestDataset.project_id == project_id,
+            TestDataset.is_active == True,
+        )
+        .first()
+    )
+
+
+def update_test_dataset(db: Session, dataset_id: int, dataset: dict):
+    db_dataset = db.query(TestDataset).filter(TestDataset.id == dataset_id).first()
+    if db_dataset:
+        for key, value in dataset.items():
+            setattr(db_dataset, key, value)
+        safe_commit(db)
+        db.refresh(db_dataset)
+    return db_dataset
+
+
+def delete_test_dataset(db: Session, dataset_id: int):
+    db_dataset = db.query(TestDataset).filter(TestDataset.id == dataset_id).first()
+    if db_dataset:
+        # Detach from any cases pointing at it, then hard-delete. A hard delete
+        # is safe because nothing else references a dataset (results snapshot
+        # row values inline), and it frees the (project_id, name) unique slot so
+        # the same name can be reused.
+        db.query(TestCase).filter(TestCase.dataset_id == dataset_id).update(
+            {TestCase.dataset_id: None}
+        )
+        db.delete(db_dataset)
+        safe_commit(db)
+    return db_dataset
 
 
 # Test Mindmap CRUD functions

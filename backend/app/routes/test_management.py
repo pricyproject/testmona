@@ -970,6 +970,20 @@ def register_test_management_routes(app):
                 detail="section_id must be provided or cleared when moving a test case to another suite",
             )
 
+        # A case can only iterate over a dataset from its own project.
+        if "dataset_id" in update_fields and update_fields["dataset_id"] is not None:
+            target_project_id = original_project_id
+            if test_case.test_suite_id is not None:
+                target_project_id = new_test_suite.project_id
+            dataset = crud.get_test_dataset(db, dataset_id=update_fields["dataset_id"])
+            if dataset is None:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+            if dataset.project_id != target_project_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Dataset must belong to the same project as the test case",
+                )
+
         original_data = {
             'title': original_test_case.title,
             'description': original_test_case.description,
@@ -1930,7 +1944,7 @@ def register_test_management_routes(app):
         parent_section_id: Optional[int] = Query(None, ge=1),
         project_id: Optional[int] = Query(None, ge=1),
         skip: int = Query(0, ge=0),
-        limit: int = Query(100, ge=1, le=500),
+        limit: int = Query(100, ge=1, le=1000),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
