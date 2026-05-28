@@ -3346,16 +3346,16 @@ export function Settings() {
                       <p className="text-sm text-gray-500 dark:text-gray-400">{t('aiManagerDesc')}</p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={loadAIManager} disabled={loadingAIManager}>
+                  <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 md:w-auto md:justify-end">
+                    <Button className="w-full" variant="outline" onClick={loadAIManager} disabled={loadingAIManager}>
                       <RefreshCw className={`h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 ${loadingAIManager ? 'animate-spin' : ''}`} />
                       {t('refresh')}
                     </Button>
-                    <Button variant="outline" onClick={() => setResetAIUsageConfirmOpen(true)} disabled={resettingAIUsage || loadingAIManager}>
+                    <Button className="w-full" variant="outline" onClick={() => setResetAIUsageConfirmOpen(true)} disabled={resettingAIUsage || loadingAIManager}>
                       {resettingAIUsage ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
                       {t('resetAIUsage')}
                     </Button>
-                    <Button onClick={handleSaveAIManager} disabled={savingAIManager}>
+                    <Button className="w-full" onClick={handleSaveAIManager} disabled={savingAIManager}>
                       {savingAIManager ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <KeyRound className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
                       {savingAIManager ? t('saving') : t('saveAIManager')}
                     </Button>
@@ -3499,7 +3499,7 @@ export function Settings() {
                     const providerLimit = aiUsageLimits?.providers?.[provider.provider] || null;
                     return (
                       <div key={provider.provider} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                           <div className="flex items-center gap-3">
                             <Switch
                               checked={provider.enabled}
@@ -3516,7 +3516,7 @@ export function Settings() {
                               </p>
                             </div>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end md:w-auto">
                             <Badge variant="outline">{t('aiProviderTokens', { count: providerUsage.total_tokens ?? 0 })}</Badge>
                             <Badge variant={getAIUsageBadgeVariant(providerLimit?.status)}>
                               {getAIUsageStatusLabel(providerLimit?.status)}
@@ -3524,6 +3524,7 @@ export function Settings() {
                             <Button
                               variant="outline"
                               size="sm"
+                              className="w-full sm:w-auto sm:min-w-36"
                               onClick={() => handleTestAIProvider(provider.provider)}
                               disabled={testingAIProvider === provider.provider || !provider.enabled}
                             >
@@ -3608,7 +3609,7 @@ export function Settings() {
                         {t('recentAIActionsRetention', { count: aiRecentEvents.length })}
                       </p>
                     </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-center lg:justify-end">
                       <div className="grid gap-2 sm:grid-cols-2 lg:w-[360px]">
                         <Select value={aiActionStatusFilter} onValueChange={setAIActionStatusFilter}>
                           <SelectTrigger>
@@ -3638,6 +3639,7 @@ export function Settings() {
                         type="button"
                         variant="outline"
                         size="sm"
+                        className="w-full lg:w-auto lg:min-w-48"
                         onClick={() => setClearAIRecentActionsConfirmOpen(true)}
                         disabled={clearingAIRecentActions || aiRecentEvents.length === 0}
                       >
