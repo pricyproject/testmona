@@ -6,6 +6,8 @@ import path from 'path'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:8000'
+  const hmrHost = env.VITE_HMR_HOST || '127.0.0.1'
+  const hmrPort = Number(env.VITE_HMR_PORT || 3000)
   
   return {
     plugins: [react()],
@@ -19,6 +21,11 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 3000,
+      hmr: {
+        host: hmrHost,
+        clientPort: hmrPort,
+        protocol: 'ws',
+      },
       proxy: {
         '/api': {
           target: apiProxyTarget,
