@@ -68,6 +68,43 @@ def validate_file_path(file_path: str, allowed_base_dir: str) -> bool:
     except (OSError, RuntimeError):
         return False
 
+
+def _get_project_defect_or_404(db: Session, project_id: int, defect_id: int):
+    """Fetch a defect, ensuring it belongs to the given project.
+
+    Prevents broken object-level authorization (IDOR): a user with access to
+    one project must not be able to read or mutate defect sub-resources
+    (comments, attachments, history, sync) belonging to another project just
+    by guessing a defect_id.
+    """
+    defect = crud_defect_management.get_defect_management_detail(db, defect_id=defect_id)
+    if not defect or defect.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Defect not found")
+    return defect
+
+
+def _get_project_integration_or_404(db: Session, project_id: int, integration_id: int):
+    """Fetch an issue-tracker integration, ensuring it belongs to the project.
+
+    Integrations store API credentials, so a user managing one project must not
+    be able to read, mutate, test, or delete another project's integration by
+    guessing an integration_id.
+    """
+    integration = crud_defect_management.get_issue_tracker_integration(db, integration_id=integration_id)
+    if not integration or integration.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    return integration
+
+
+def _get_project_template_or_404(db: Session, project_id: int, template_id: int):
+    """Fetch a defect template, ensuring it belongs to the given project."""
+    template = db.query(models.DefectTemplate).filter(
+        models.DefectTemplate.id == template_id
+    ).first()
+    if not template or template.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return template
+
 # Defect Management Endpoints
 
 @router.get("/projects/{project_id}/defects-management", response_model=List[schemas.DefectManagement])
@@ -207,7 +244,10 @@ def get_defect_comments(
     # Check project access
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     return crud_defect_management.get_defect_comments(db, defect_id=defect_id, skip=skip, limit=limit)
 
 @router.post("/projects/{project_id}/defects-management/{defect_id}/comments", response_model=schemas.DefectComment)
@@ -225,7 +265,10 @@ def create_defect_comment(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
         raise HTTPException(status_code=403, detail="Write permission required")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     return crud_defect_management.create_defect_comment(
         db=db,
         comment=comment,
@@ -249,7 +292,10 @@ def update_defect_comment(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
         raise HTTPException(status_code=403, detail="Write permission required")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     return crud_defect_management.update_defect_comment(
         db=db,
         comment_id=comment_id,
@@ -272,7 +318,10 @@ def delete_defect_comment(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
         raise HTTPException(status_code=403, detail="Delete permission required")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     success = crud_defect_management.delete_defect_comment(db, comment_id=comment_id, user_id=current_user.id)
     if not success:
         raise HTTPException(status_code=404, detail="Comment not found or access denied")
@@ -292,7 +341,10 @@ def get_defect_attachments(
     # Check project access
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     return crud_defect_management.get_defect_attachments(db, defect_id=defect_id)
 
 @router.post("/projects/{project_id}/defects-management/{defect_id}/attachments", response_model=schemas.DefectAttachment)
@@ -310,7 +362,10 @@ async def upload_defect_attachment(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
         raise HTTPException(status_code=403, detail="Write permission required")
-    
+
+    # Ensure the defect exists and belongs to this project before writing any file
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     # Validate file size (10MB limit)
     content = await validate_file_size(file, MAX_ATTACHMENT_SIZE, "Attachment")
     file_size = len(content)
@@ -372,7 +427,10 @@ def delete_defect_attachment(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
         raise HTTPException(status_code=403, detail="Delete permission required")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     # Get attachment info for file deletion
     attachment = crud_defect_management.get_defect_attachment(db, attachment_id=attachment_id)
     if not attachment:
@@ -416,7 +474,10 @@ def get_defect_history(
     # Check project access
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
         raise HTTPException(status_code=403, detail="Access denied")
-    
+
+    # Ensure the defect belongs to this project
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     return crud_defect_management.get_defect_history(db, defect_id=defect_id, skip=skip, limit=limit)
 
 # Issue Tracker Integrations Endpoints
@@ -471,7 +532,10 @@ def update_issue_tracker_integration(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
-    
+
+    # Ensure the integration belongs to this project
+    _get_project_integration_or_404(db, project_id, integration_id)
+
     return crud_defect_management.update_issue_tracker_integration(
         db=db,
         integration_id=integration_id,
@@ -492,7 +556,10 @@ def delete_issue_tracker_integration(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
-    
+
+    # Ensure the integration belongs to this project
+    _get_project_integration_or_404(db, project_id, integration_id)
+
     success = crud_defect_management.delete_issue_tracker_integration(db, integration_id=integration_id)
     if not success:
         raise HTTPException(status_code=404, detail="Integration not found")
@@ -513,12 +580,10 @@ def test_issue_tracker_connection(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
-    
-    # Get integration
-    integration = crud_defect_management.get_issue_tracker_integration(db, integration_id=integration_id)
-    if not integration:
-        raise HTTPException(status_code=404, detail="Integration not found")
-    
+
+    # Get integration, ensuring it belongs to this project
+    integration = _get_project_integration_or_404(db, project_id, integration_id)
+
     # Use sync service to test connection
     from app.sync_service import SyncService
     
@@ -548,16 +613,14 @@ def sync_defect_with_external(
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
         raise HTTPException(status_code=403, detail="Write permission required")
     
-    # Get defect
-    defect = crud_defect_management.get_defect_management_detail(db, defect_id=defect_id)
-    if not defect:
-        raise HTTPException(status_code=404, detail="Defect not found")
-    
-    # Get integration
+    # Get defect, ensuring it belongs to this project
+    defect = _get_project_defect_or_404(db, project_id, defect_id)
+
+    # Get integration, ensuring it belongs to this project (it holds API credentials)
     integration = crud_defect_management.get_issue_tracker_integration(db, integration_id=sync_data.integration_id)
-    if not integration:
+    if not integration or integration.project_id != project_id:
         raise HTTPException(status_code=404, detail="Integration not found")
-    
+
     # Check if integration is active
     if not integration.is_active:
         raise HTTPException(status_code=400, detail="Integration is inactive. Please activate it first.")
@@ -716,7 +779,10 @@ def update_defect_template(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
         raise HTTPException(status_code=403, detail="Write permission required")
-    
+
+    # Ensure the template belongs to this project
+    _get_project_template_or_404(db, project_id, template_id)
+
     return crud_defect_management.update_defect_template(
         db=db,
         template_id=template_id,
@@ -737,7 +803,10 @@ def delete_defect_template(
     
     if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
         raise HTTPException(status_code=403, detail="Delete permission required")
-    
+
+    # Ensure the template belongs to this project
+    _get_project_template_or_404(db, project_id, template_id)
+
     success = crud_defect_management.delete_defect_template(db, template_id=template_id)
     if not success:
         raise HTTPException(status_code=404, detail="Template not found")
