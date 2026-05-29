@@ -316,8 +316,13 @@ async def upload_defect_attachment(
     file_size = len(content)
     
     # Create upload directory if it doesn't exist
-    upload_dir = f"uploads/defects/{defect_id}"
-    os.makedirs(upload_dir, exist_ok=True)
+    base_upload_dir = pathlib.Path("uploads/defects").resolve()
+    upload_dir_path = (base_upload_dir / str(defect_id)).resolve()
+    try:
+        upload_dir_path.relative_to(base_upload_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid defect upload path")
+    os.makedirs(upload_dir_path, exist_ok=True)
     
     # Sanitize the original filename to prevent path traversal
     try:
@@ -328,7 +333,7 @@ async def upload_defect_attachment(
     # Generate unique filename using sanitized extension
     file_extension = os.path.splitext(sanitized_filename)[1]
     unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(upload_dir, unique_filename)
+    file_path = str(upload_dir_path / unique_filename)
     
     # Save file
     with open(file_path, "wb") as buffer:
