@@ -17,6 +17,7 @@ from ..database import get_db
 from ..auth import get_current_active_user
 from ..services.milestone_service import enrich_milestone, enrich_milestones, get_project_milestone_stats
 from ..services.atlassian_document_service import fetch_requirement_source
+from ..services.tracker_import_service import fetch_requirement_from_tracker
 from ..crud import (
     create_requirement, get_requirements, get_requirement, update_requirement, delete_requirement,
     create_defect, get_defects, get_defect, update_defect, delete_defect,
@@ -504,6 +505,39 @@ def register_requirements_defects_plans_routes(app):
         except Exception as e:
             logger.exception("Unexpected error fetching requirement source for project %s", request.project_id)
             raise HTTPException(status_code=502, detail="Unable to fetch the external document.")
+
+    @app.post("/requirements/import-from-tracker", response_model=schemas.RequirementExternalDocumentResponse)
+    def import_requirement_from_tracker(
+        request: schemas.RequirementTrackerImportRequest,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        if not rbac.has_permission(current_user, "read", request.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        try:
+            return fetch_requirement_from_tracker(
+                db=db,
+                project_id=request.project_id,
+                source=request.source,
+                url=request.url,
+            )
+        except PermissionError as e:
+            logger.warning("Tracker import permission error for project %s: %s", request.project_id, e)
+            raise HTTPException(status_code=403, detail=str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except TimeoutError as e:
+            logger.warning("Tracker import timed out for project %s: %s", request.project_id, e)
+            raise HTTPException(status_code=504, detail=str(e))
+        except ConnectionError as e:
+            logger.warning("Tracker import connection error for project %s: %s", request.project_id, e)
+            raise HTTPException(status_code=502, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception:
+            logger.exception("Unexpected error importing tracker item for project %s", request.project_id)
+            raise HTTPException(status_code=502, detail="Unable to import from the external tracker.")
 
     @app.get("/requirements/{requirement_id}/test-cases", response_model=schemas.RequirementLinkedTestCaseList)
     def search_requirement_test_cases(
@@ -1094,7 +1128,7 @@ def register_requirements_defects_plans_routes(app):
                 raise HTTPException(status_code=400, detail="Assigned user not found")
 
         try:
-            db_requirement = update_requirement(db, requirement_id=requirement_id, requirement=requirement)
+            db_requirement = update_requirement(db, requirement_id=requirement_id, requirement=requirement, actor_id=current_user.id)
             
             # Create audit trail
             try:

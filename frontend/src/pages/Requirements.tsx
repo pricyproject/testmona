@@ -33,11 +33,20 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2 } from 'lucide-react';
+import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2, ArrowUpDown, ArrowUp, ArrowDown, Bookmark, BookmarkPlus, Star, X, ListChecks, ShieldCheck, ShieldAlert, ShieldX, Loader2, Tag } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { requirementsAPI } from '@/lib/api';
-import { Requirement, RequirementCreate, RequirementUpdate } from '@/types';
+import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter } from '@/lib/api';
+import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus } from '@/types';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { isGherkinText } from '@/components/requirements/gherkin';
@@ -73,7 +82,27 @@ export function Requirements() {
   const [selectedRequirement, setSelectedRequirement] = useState<Requirement | null>(null);
   const [requirementToDelete, setRequirementToDelete] = useState<Requirement | null>(null);
   const [deleteConfirmationName, setDeleteConfirmationName] = useState('');
-  const itemsPerPage = 10;
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Coverage badges
+  const [coverageMap, setCoverageMap] = useState<Record<number, RequirementCoverageItem>>({});
+  // Sorting
+  const [sortBy, setSortBy] = useState<'requirement_id' | 'title' | 'status' | 'priority' | 'created_at' | 'coverage'>('requirement_id');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  // Bulk selection + actions
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  const [bulkTagInput, setBulkTagInput] = useState('');
+  const [showBulkTagInput, setShowBulkTagInput] = useState(false);
+  // Saved views
+  const [savedViews, setSavedViews] = useState<SavedFilter[]>([]);
+  const [activeViewId, setActiveViewId] = useState<number | null>(null);
+  const [isSaveViewOpen, setIsSaveViewOpen] = useState(false);
+  const [viewName, setViewName] = useState('');
+  const [viewShared, setViewShared] = useState(false);
+  const [viewDefault, setViewDefault] = useState(false);
+  const [savingView, setSavingView] = useState(false);
 
   // Form states
   const [reqTitle, setReqTitle] = useState('');
@@ -86,6 +115,7 @@ export function Requirements() {
   const [reqEstimatedEffort, setReqEstimatedEffort] = useState('');
   const [useGherkinSyntax, setUseGherkinSyntax] = useState(false);
   const [externalDocumentUrl, setExternalDocumentUrl] = useState('');
+  const [importSource, setImportSource] = useState<'atlassian' | 'asana' | 'linear' | 'monday'>('atlassian');
   const [isFetchingDocument, setIsFetchingDocument] = useState(false);
   const [showExternalImport, setShowExternalImport] = useState(false);
   const [showAdvancedRequirementTools, setShowAdvancedRequirementTools] = useState(false);
@@ -175,14 +205,26 @@ export function Requirements() {
     '      | value | expected |',
   ].join('\n');
 
-  const isValidExternalDocumentUrl = (value: string): boolean => {
+  // Host allow-list per import source. Matching on host only — matching the
+  // path let through URLs like https://evil.com/jira. The backend remains the
+  // authoritative gate.
+  const isValidImportUrl = (value: string, source: typeof importSource): boolean => {
     try {
       const parsed = new URL(value);
       if (!['http:', 'https:'].includes(parsed.protocol)) return false;
-      // Match on the host only — matching the path let through URLs like
-      // https://evil.com/jira. The backend remains the authoritative gate.
       const host = parsed.hostname.toLowerCase();
-      return host.endsWith('.atlassian.net') || /(^|\.)(jira|confluence)(\.|$)/.test(host);
+      switch (source) {
+        case 'atlassian':
+          return host.endsWith('.atlassian.net') || /(^|\.)(jira|confluence)(\.|$)/.test(host);
+        case 'asana':
+          return host === 'asana.com' || host.endsWith('.asana.com');
+        case 'linear':
+          return host === 'linear.app' || host.endsWith('.linear.app');
+        case 'monday':
+          return host === 'monday.com' || host.endsWith('.monday.com');
+        default:
+          return false;
+      }
     } catch {
       return false;
     }
@@ -198,7 +240,14 @@ export function Requirements() {
 
   const buildExternalDocumentText = (documentData: any, currentDescription: string): string => {
     const sourceType = String(documentData.source_type || 'external').toLowerCase();
-    const heading = sourceType === 'confluence' ? t('confluenceDocument') : t('jiraDocument');
+    const sourceHeadings: Record<string, string> = {
+      confluence: t('confluenceDocument'),
+      jira: t('jiraDocument'),
+      asana: t('asanaTask'),
+      linear: t('linearIssue'),
+      monday: t('mondayItem'),
+    };
+    const heading = sourceHeadings[sourceType] || t('jiraDocument');
     const sourceUrl = String(documentData.url || '');
     const documentText = [
       `<section data-requirement-source="true" data-requirement-source-url="${escapeHtml(sourceUrl)}">`,
@@ -251,10 +300,18 @@ export function Requirements() {
     try {
       setLoading(true);
       // Fetch a high limit so projects with >100 requirements are not silently truncated.
-      const data = await requirementsAPI.getAll(parseInt(projectId), 0, 1000, {
-        milestoneId: linkedMilestoneId,
-      });
+      // Coverage is fetched in parallel and is best-effort — a failure there must
+      // not block the list from rendering.
+      const [data, coverage] = await Promise.all([
+        requirementsAPI.getAll(parseInt(projectId), 0, 1000, {
+          milestoneId: linkedMilestoneId,
+        }),
+        requirementsAPI.coverage(parseInt(projectId)).catch(() => ({ items: [] })),
+      ]);
       setRequirements(data);
+      const map: Record<number, RequirementCoverageItem> = {};
+      for (const item of coverage.items) map[item.requirement_id] = item;
+      setCoverageMap(map);
     } catch (error) {
       console.error('Error loading requirements:', error);
       toast({
@@ -286,16 +343,207 @@ export function Requirements() {
     return matchesSearch && matchesStatus && matchesPriority;
   });
 
-  const totalPages = Math.max(1, Math.ceil(filteredRequirements.length / itemsPerPage));
+  // Workflow / severity orderings so status & priority sort meaningfully
+  // rather than alphabetically.
+  const statusRank: Record<string, number> = { draft: 1, reviewed: 2, approved: 3, implemented: 4, verified: 5, deprecated: 6 };
+  const priorityRank: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+
+  const sortedRequirements = useMemo(() => {
+    const arr = [...filteredRequirements];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'title':
+          cmp = (a.title || '').localeCompare(b.title || '');
+          break;
+        case 'status':
+          cmp = (statusRank[a.status] || 0) - (statusRank[b.status] || 0);
+          break;
+        case 'priority':
+          cmp = (priorityRank[a.priority] || 0) - (priorityRank[b.priority] || 0);
+          break;
+        case 'created_at':
+          cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          break;
+        case 'coverage':
+          cmp = (coverageMap[a.id]?.linked_count || 0) - (coverageMap[b.id]?.linked_count || 0);
+          break;
+        case 'requirement_id':
+        default:
+          cmp = (a.requirement_id || '').localeCompare(b.requirement_id || '', undefined, { numeric: true });
+      }
+      return cmp * dir;
+    });
+    return arr;
+  }, [filteredRequirements, sortBy, sortDir, coverageMap]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRequirements.length / itemsPerPage));
   // Clamp so a stale page index (e.g. after filtering) never yields an empty slice.
   const safePage = Math.min(Math.max(1, currentPage), totalPages);
   const startIndex = (safePage - 1) * itemsPerPage;
-  const paginatedRequirements = filteredRequirements.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedRequirements = sortedRequirements.slice(startIndex, startIndex + itemsPerPage);
 
-  // Reset to the first page whenever the active filters change.
+  // ---- Bulk selection helpers -------------------------------------------
+  const pageIds = paginatedRequirements.map((req) => req.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAllPage = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // Reset to the first page whenever the active filters or sort change.
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter]);
+  }, [searchQuery, statusFilter, priorityFilter, sortBy, sortDir, itemsPerPage]);
+
+  // Drop selections that are no longer present (e.g. after delete/filter).
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const present = new Set(requirements.map((req) => req.id));
+      const next = new Set(Array.from(prev).filter((id) => present.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [requirements]);
+
+  // ---- Bulk actions ------------------------------------------------------
+  const runBulkUpdate = async (payload: { status?: string; priority?: string; add_tags?: string }) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      setBulkBusy(true);
+      const result = await bulkAPI.requirements({ ids, ...payload });
+      toast({ title: t('success'), description: t('bulkUpdated', { count: result.updated }) });
+      clearSelection();
+      loadRequirements();
+    } catch (error: any) {
+      toast({ title: t('error'), description: error.response?.data?.detail || t('bulkUpdateFailed'), variant: 'destructive' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkAddTag = () => {
+    const tag = bulkTagInput.trim();
+    setShowBulkTagInput(false);
+    setBulkTagInput('');
+    if (tag) runBulkUpdate({ add_tags: tag });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      setBulkBusy(true);
+      const result = await bulkAPI.deleteRequirements({ ids });
+      toast({ title: t('success'), description: t('bulkDeleted', { count: result.updated }) });
+      clearSelection();
+      setIsBulkDeleteOpen(false);
+      loadRequirements();
+    } catch (error: any) {
+      toast({ title: t('error'), description: error.response?.data?.detail || t('bulkDeleteFailed'), variant: 'destructive' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // ---- Saved views -------------------------------------------------------
+  const loadSavedViews = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const views = await savedFiltersAPI.list(parseInt(projectId), 'requirements');
+      setSavedViews(views);
+      // Auto-apply the user's default view on first load only.
+      const def = views.find((v) => v.is_default);
+      if (def) {
+        setActiveViewId((current) => {
+          if (current !== null) return current;
+          const d = def.definition || {};
+          setSearchQuery(d.search || '');
+          setStatusFilter(d.status || 'all');
+          setPriorityFilter(d.priority || 'all');
+          if (d.sortBy) setSortBy(d.sortBy);
+          if (d.sortDir) setSortDir(d.sortDir);
+          return def.id;
+        });
+      }
+    } catch {
+      // Saved views are non-critical; ignore load failures silently.
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadSavedViews();
+  }, [loadSavedViews]);
+
+  const currentViewDefinition = () => ({
+    search: searchQuery,
+    status: statusFilter,
+    priority: priorityFilter,
+    sortBy,
+    sortDir,
+  });
+
+  const applyView = (view: SavedFilter) => {
+    const d = view.definition || {};
+    setSearchQuery(d.search || '');
+    setStatusFilter(d.status || 'all');
+    setPriorityFilter(d.priority || 'all');
+    setSortBy(d.sortBy || 'requirement_id');
+    setSortDir(d.sortDir || 'asc');
+    setActiveViewId(view.id);
+  };
+
+  const handleSaveView = async () => {
+    if (!projectId || !viewName.trim()) return;
+    try {
+      setSavingView(true);
+      const created = await savedFiltersAPI.create({
+        project_id: parseInt(projectId),
+        scope: 'requirements',
+        name: viewName.trim(),
+        definition: currentViewDefinition(),
+        is_shared: viewShared,
+        is_default: viewDefault,
+      });
+      toast({ title: t('success'), description: t('viewSaved', { name: created.name }) });
+      setIsSaveViewOpen(false);
+      setViewName('');
+      setViewShared(false);
+      setViewDefault(false);
+      setActiveViewId(created.id);
+      loadSavedViews();
+    } catch (error: any) {
+      toast({ title: t('error'), description: error.response?.data?.detail || t('viewSaveFailed'), variant: 'destructive' });
+    } finally {
+      setSavingView(false);
+    }
+  };
+
+  const handleDeleteView = async (view: SavedFilter) => {
+    try {
+      await savedFiltersAPI.remove(view.id);
+      if (activeViewId === view.id) setActiveViewId(null);
+      loadSavedViews();
+    } catch (error: any) {
+      toast({ title: t('error'), description: error.response?.data?.detail || t('viewDeleteFailed'), variant: 'destructive' });
+    }
+  };
 
   // API functions
   const handleCreateRequirement = async () => {
@@ -510,10 +758,12 @@ export function Requirements() {
   const handleFetchExternalDocument = async () => {
     if (!projectId) return;
     const url = externalDocumentUrl.trim();
-    if (!isValidExternalDocumentUrl(url)) {
+    if (!isValidImportUrl(url, importSource)) {
       toast({
         title: t('validationError'),
-        description: t('externalDocInvalidUrl'),
+        description: importSource === 'atlassian'
+          ? t('externalDocInvalidUrl')
+          : t('trackerImportInvalidUrl', { source: t(`importSource_${importSource}` as any) }),
         variant: 'destructive',
       });
       return;
@@ -521,10 +771,16 @@ export function Requirements() {
 
     try {
       setIsFetchingDocument(true);
-      const documentData = await requirementsAPI.fetchExternalDocument({
-        project_id: Number(projectId),
-        url,
-      });
+      const documentData = importSource === 'atlassian'
+        ? await requirementsAPI.fetchExternalDocument({
+            project_id: Number(projectId),
+            url,
+          })
+        : await requirementsAPI.importFromTracker({
+            project_id: Number(projectId),
+            source: importSource,
+            url,
+          });
       setReqTitle(documentData.title || reqTitle);
       setReqDescription(buildExternalDocumentText(documentData, reqDescription));
       setReqAcceptanceCriteria(documentData.acceptance_criteria || reqAcceptanceCriteria);
@@ -556,6 +812,7 @@ export function Requirements() {
     setReqEstimatedEffort('');
     setUseGherkinSyntax(false);
     setExternalDocumentUrl('');
+    setImportSource('atlassian');
     setShowExternalImport(false);
     setShowAdvancedRequirementTools(false);
     setHasUnsavedChanges(false);
@@ -708,6 +965,42 @@ export function Requirements() {
     }
   };
 
+  const coverageMeta: Record<RequirementCoverageStatus, { label: string; cls: string; Icon: typeof ShieldCheck }> = {
+    covered: { label: t('covCovered'), cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', Icon: ShieldCheck },
+    partial: { label: t('covPartial'), cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300', Icon: ShieldCheck },
+    failing: { label: t('covFailing'), cls: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300', Icon: ShieldX },
+    blocked: { label: t('covBlocked'), cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300', Icon: ShieldAlert },
+    uncovered: { label: t('covUncovered'), cls: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400', Icon: ShieldX },
+  };
+
+  const renderCoverageBadge = (requirement: Requirement) => {
+    const cov = coverageMap[requirement.id];
+    const status: RequirementCoverageStatus = cov?.status || 'uncovered';
+    const meta = coverageMeta[status];
+    const Icon = meta.Icon;
+    const detail =
+      status === 'failing' && cov?.failed_related_runs
+        ? ` · ${cov.failed_related_runs} ${t('failed')}`
+        : cov?.linked_count
+          ? ` · ${cov.linked_count}`
+          : '';
+    return (
+      <Badge className={`${meta.cls} border-0`} title={t('coverageBadgeTooltip')}>
+        <Icon className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+        {meta.label}{detail}
+      </Badge>
+    );
+  };
+
+  const sortOptions: Array<{ value: typeof sortBy; label: string }> = [
+    { value: 'requirement_id', label: t('reqId') },
+    { value: 'title', label: t('title') },
+    { value: 'status', label: t('status') },
+    { value: 'priority', label: t('priority') },
+    { value: 'created_at', label: t('created') },
+    { value: 'coverage', label: t('coverage') },
+  ];
+
   // Generate next requirement ID
   const generateRequirementId = () => {
     if (requirements.length === 0) {
@@ -848,20 +1141,44 @@ export function Requirements() {
 
   }, [isCreateDialogOpen, isEditDialogOpen, showUnsavedDialog, reqId, reqTitle, reqDescription, reqPriority, reqStatus, reqAcceptanceCriteria, reqTags, reqEstimatedEffort, selectedRequirement]);
 
+  const importSourceOptions: Array<{ value: typeof importSource; label: string }> = [
+    { value: 'atlassian', label: t('importSource_atlassian') },
+    { value: 'asana', label: t('importSource_asana') },
+    { value: 'linear', label: t('importSource_linear') },
+    { value: 'monday', label: t('importSource_monday') },
+  ];
+
+  const importUrlPlaceholders: Record<typeof importSource, string> = {
+    atlassian: t('externalDocUrlPlaceholder'),
+    asana: 'https://app.asana.com/0/1234567890/1234567890',
+    linear: 'https://linear.app/acme/issue/ENG-123/title',
+    monday: 'https://acme.monday.com/boards/123456/pulses/7890123',
+  };
+
   const renderExternalDocumentImport = (inputId: string) => (
     <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900/60 dark:bg-blue-950/20">
       <div className="flex items-center gap-2">
         <ExternalLink className="h-4 w-4 text-blue-600 dark:text-blue-300" />
         <Label htmlFor={inputId} className="text-sm font-semibold">
-          {t('importFromAtlassian')}
+          {t('importFromExternalTool')}
         </Label>
       </div>
+      <Select value={importSource} onValueChange={(value) => setImportSource(value as typeof importSource)}>
+        <SelectTrigger className="text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {importSourceOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input
           id={inputId}
           value={externalDocumentUrl}
           onChange={(e) => setExternalDocumentUrl(e.target.value)}
-          placeholder={t('externalDocUrlPlaceholder')}
+          placeholder={importUrlPlaceholders[importSource]}
           className="min-w-0 flex-1"
           dir="ltr"
         />
@@ -885,7 +1202,9 @@ export function Requirements() {
           )}
         </Button>
       </div>
-      <p className="text-xs text-blue-700 dark:text-blue-300">{t('externalDocImportHelp')}</p>
+      <p className="text-xs text-blue-700 dark:text-blue-300">
+        {importSource === 'atlassian' ? t('externalDocImportHelp') : t('trackerImportHelp')}
+      </p>
     </div>
   );
 
@@ -893,7 +1212,7 @@ export function Requirements() {
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
         <Label htmlFor={`${idPrefix}-external-import`} className="text-sm font-medium">
-          {t('importFromAtlassian')}
+          {t('importFromExternalTool')}
         </Label>
         <Switch
           id={`${idPrefix}-external-import`}
@@ -1314,6 +1633,78 @@ export function Requirements() {
                 <SelectItem value="critical">{t('critical')}</SelectItem>
               </SelectContent>
             </Select>
+            {/* Sort */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <ArrowUpDown className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                  {sortOptions.find((o) => o.value === sortBy)?.label}
+                  {sortDir === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuLabel>{t('sortBy')}</DropdownMenuLabel>
+                {sortOptions.map((option) => (
+                  <DropdownMenuItem key={option.value} onClick={() => setSortBy(option.value)} className="flex items-center justify-between">
+                    {option.label}
+                    {sortBy === option.value && <CheckCircle className="h-3.5 w-3.5 text-blue-600" />}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))} className="flex items-center justify-between">
+                  {sortDir === 'asc' ? t('ascending') : t('descending')}
+                  {sortDir === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Saved views */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant={activeViewId ? 'default' : 'outline'} size="sm">
+                  <Bookmark className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                  {activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name || t('views') : t('views')}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>{t('savedViews')}</DropdownMenuLabel>
+                {savedViews.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noSavedViews')}</div>
+                ) : (
+                  savedViews.map((view) => (
+                    <DropdownMenuItem key={view.id} onClick={() => applyView(view)} className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 truncate">
+                        {view.is_default && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+                        {view.is_shared && <Users className="h-3 w-3 text-muted-foreground" />}
+                        <span className="truncate">{view.name}</span>
+                      </span>
+                      {view.owned_by_current_user && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteView(view); }}
+                          className="text-muted-foreground hover:text-rose-600"
+                          aria-label={t('delete')}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </DropdownMenuItem>
+                  ))
+                )}
+                <DropdownMenuSeparator />
+                {activeViewId && (
+                  <DropdownMenuItem onClick={() => { setActiveViewId(null); setSearchQuery(''); setStatusFilter('all'); setPriorityFilter('all'); }}>
+                    <X className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('clearActiveView')}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => setIsSaveViewOpen(true)}>
+                  <BookmarkPlus className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('saveCurrentView')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <Button variant="outline" size="sm" onClick={handleExportRequirements}>
               <Download className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
               {t('export')}
@@ -1322,15 +1713,104 @@ export function Requirements() {
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/90 p-3 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/60">
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <ListChecks className="h-4 w-4 text-blue-600 dark:text-blue-300" />
+            {t('selectedCount', { count: selectedIds.size })}
+          </span>
+          <span className="mx-1 h-5 w-px bg-blue-200 dark:bg-blue-800" />
+
+          {/* Set status */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={bulkBusy}>{t('setStatus')}</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {['draft', 'reviewed', 'approved', 'implemented', 'verified', 'deprecated'].map((status) => (
+                <DropdownMenuItem key={status} onClick={() => runBulkUpdate({ status })}>{t(status as any)}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Set priority */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={bulkBusy}>{t('setPriority')}</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {['low', 'medium', 'high', 'critical'].map((priority) => (
+                <DropdownMenuItem key={priority} onClick={() => runBulkUpdate({ priority })}>{t(priority as any)}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Add tag */}
+          {showBulkTagInput ? (
+            <div className="flex items-center gap-1">
+              <Input
+                value={bulkTagInput}
+                onChange={(e) => setBulkTagInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleBulkAddTag(); }}
+                placeholder={t('tagName')}
+                className="h-8 w-32"
+                autoFocus
+              />
+              <Button size="sm" onClick={handleBulkAddTag} disabled={bulkBusy || !bulkTagInput.trim()}>{t('add')}</Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowBulkTagInput(false); setBulkTagInput(''); }}>{t('cancel')}</Button>
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => setShowBulkTagInput(true)}>
+              <Tag className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+              {t('addTag')}
+            </Button>
+          )}
+
+          <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={bulkBusy} onClick={() => setIsBulkDeleteOpen(true)}>
+            <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+            {t('delete')}
+          </Button>
+
+          <span className="flex-1" />
+          {bulkBusy && <Loader2 className="h-4 w-4 animate-spin text-blue-600" />}
+          <Button variant="ghost" size="sm" onClick={clearSelection}>
+            <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+            {t('clearSelection')}
+          </Button>
+        </div>
+      )}
+
+      {/* Select-all-on-page row */}
+      {paginatedRequirements.length > 0 && (
+        <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+          <Checkbox
+            checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
+            onCheckedChange={toggleSelectAllPage}
+            aria-label={t('selectAllOnPage')}
+          />
+          <span>{t('selectAllOnPage')}</span>
+        </div>
+      )}
+
       {/* Requirements List */}
       <div className="space-y-4">
         {paginatedRequirements.length > 0 ? (
           paginatedRequirements.map((requirement) => (
-            <Card key={requirement.id} className="hover:shadow-md transition-shadow">
+            <Card
+              key={requirement.id}
+              className={`transition-shadow hover:shadow-md ${selectedIds.has(requirement.id) ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-gray-900' : ''}`}
+            >
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-3">
+                  <Checkbox
+                    className="mt-1.5"
+                    checked={selectedIds.has(requirement.id)}
+                    onCheckedChange={() => toggleSelect(requirement.id)}
+                    aria-label={t('selectRequirement', { id: requirement.requirement_id })}
+                  />
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
                       <span className="font-mono text-sm text-gray-500 dark:text-gray-400">{requirement.requirement_id}</span>
                       <Badge className={getStatusBadge(requirement.status)}>
                         <div className="flex items-center gap-1">
@@ -1341,6 +1821,7 @@ export function Requirements() {
                       <Badge className={getPriorityBadge(requirement.priority)}>
                         {requirement.priority}
                       </Badge>
+                      {renderCoverageBadge(requirement)}
                     </div>
                     <CardTitle className="text-lg mb-1">{requirement.title}</CardTitle>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
@@ -1521,6 +2002,67 @@ export function Requirements() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Bulk delete confirmation */}
+      <AlertDialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              {t('bulkDeleteTitle', { count: selectedIds.size })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t('bulkDeleteDesc')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkBusy}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleBulkDelete(); }}
+              disabled={bulkBusy}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {bulkBusy ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('deleteSelected')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Save current view */}
+      <Dialog open={isSaveViewOpen} onOpenChange={setIsSaveViewOpen}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{t('saveCurrentView')}</DialogTitle>
+            <DialogDescription>{t('saveViewDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="view-name">{t('viewName')}</Label>
+              <Input
+                id="view-name"
+                value={viewName}
+                onChange={(e) => setViewName(e.target.value)}
+                placeholder={t('viewNamePlaceholder')}
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2 dark:border-gray-700">
+              <Label htmlFor="view-default" className="text-sm">{t('viewMakeDefault')}</Label>
+              <Switch id="view-default" checked={viewDefault} onCheckedChange={setViewDefault} />
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2 dark:border-gray-700">
+              <Label htmlFor="view-shared" className="text-sm">{t('viewShareWithTeam')}</Label>
+              <Switch id="view-shared" checked={viewShared} onCheckedChange={setViewShared} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsSaveViewOpen(false)}>{t('cancel')}</Button>
+            <Button onClick={handleSaveView} disabled={savingView || !viewName.trim()}>
+              {savingView ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Bookmark className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Pagination */}
       {totalPages > 1 && filteredRequirements.length > 0 && (
         <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mt-4">
@@ -1528,6 +2070,16 @@ export function Requirements() {
             {t('showingRequirements', { start: startIndex + 1, end: Math.min(startIndex + itemsPerPage, filteredRequirements.length), total: filteredRequirements.length })}
           </div>
           <div className="flex items-center gap-2">
+            <Select value={String(itemsPerPage)} onValueChange={(value) => setItemsPerPage(Number(value))}>
+              <SelectTrigger className="h-8 w-[110px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[10, 25, 50, 100].map((size) => (
+                  <SelectItem key={size} value={String(size)}>{t('perPage', { count: size })}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               variant="outline"
               size="sm"

@@ -9,7 +9,7 @@ from fastapi import Depends, HTTPException, Path, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
-from .. import models, rbac, schemas
+from .. import crud, models, rbac, schemas
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
@@ -17,7 +17,7 @@ from ..database import get_db
 logger = logging.getLogger(__name__)
 
 
-_ALLOWED_SCOPES = {"test_cases", "defects"}
+_ALLOWED_SCOPES = {"test_cases", "defects", "requirements"}
 _ALLOWED_TEST_CASE_STATUSES = {"active", "inactive", "archived", "draft"}
 _ALLOWED_TEST_CASE_TYPES = {"manual", "automated"}
 
@@ -407,3 +407,115 @@ def register_saved_filters_and_bulk_routes(app) -> None:
         if updated:
             safe_commit(db)
         return schemas.BulkUpdateResult(updated=updated, skipped_ids=skipped)
+
+    # --------------------------- Bulk: requirements ---------------------------
+
+    @app.patch("/requirements/bulk", response_model=schemas.BulkUpdateResult)
+    def bulk_update_requirements(
+        payload: schemas.BulkRequirementUpdate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        if payload.clear_assignee and payload.assigned_to is not None:
+            raise HTTPException(status_code=400, detail="Use either assigned_to or clear_assignee, not both")
+
+        ids = list(dict.fromkeys(payload.ids))
+        if not ids:
+            return schemas.BulkUpdateResult(updated=0)
+
+        requirements = db.query(models.Requirement).filter(models.Requirement.id.in_(ids)).all()
+        requirement_by_id = {requirement.id: requirement for requirement in requirements}
+
+        if payload.assigned_to is not None:
+            assignee_user = db.query(models.User).filter(models.User.id == payload.assigned_to).first()
+            if assignee_user is None or not assignee_user.is_active:
+                raise HTTPException(status_code=400, detail="Assignee not found or inactive")
+        else:
+            assignee_user = None
+
+        add_tags = _normalize_tags(payload.add_tags)
+        remove_tags = _normalize_tags(payload.remove_tags)
+
+        updated = 0
+        skipped: List[int] = []
+        write_cache: dict[int, bool] = {}
+        assignee_project_cache: dict[int, bool] = {}
+
+        for requirement_id in ids:
+            requirement = requirement_by_id.get(requirement_id)
+            if requirement is None:
+                skipped.append(requirement_id)
+                continue
+            project_id = requirement.project_id
+            allowed = write_cache.get(project_id)
+            if allowed is None:
+                allowed = rbac.has_permission(current_user, "write", project_id, db)
+                write_cache[project_id] = allowed
+            if not allowed:
+                skipped.append(requirement_id)
+                continue
+
+            if assignee_user is not None:
+                ok = assignee_project_cache.get(project_id)
+                if ok is None:
+                    ok = rbac.has_permission(assignee_user, "read", project_id, db)
+                    assignee_project_cache[project_id] = ok
+                if not ok:
+                    skipped.append(requirement_id)
+                    continue
+                requirement.assigned_to = assignee_user.id
+            elif payload.clear_assignee:
+                requirement.assigned_to = None
+
+            # status/priority are Enum columns — assign the enum instance so
+            # SQLAlchemy serializes by NAME, matching how they're read back.
+            if payload.status is not None:
+                requirement.status = payload.status
+            if payload.priority is not None:
+                requirement.priority = payload.priority
+            new_tags = _merge_tags(requirement.tags, add_tags, remove_tags, payload.tags)
+            if new_tags is not None:
+                requirement.tags = new_tags
+            updated += 1
+
+        if updated:
+            safe_commit(db)
+        return schemas.BulkUpdateResult(updated=updated, skipped_ids=skipped)
+
+    # POST (not DELETE) on a 2-segment path so this isn't shadowed by the
+    # earlier-registered DELETE /requirements/{requirement_id}.
+    @app.post("/requirements/bulk/delete", response_model=schemas.BulkUpdateResult)
+    def bulk_delete_requirements(
+        payload: schemas.BulkRequirementDelete,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        ids = list(dict.fromkeys(payload.ids))
+        if not ids:
+            return schemas.BulkUpdateResult(updated=0)
+
+        requirements = db.query(models.Requirement).filter(models.Requirement.id.in_(ids)).all()
+        requirement_by_id = {requirement.id: requirement for requirement in requirements}
+
+        deleted = 0
+        skipped: List[int] = []
+        write_cache: dict[int, bool] = {}
+
+        for requirement_id in ids:
+            requirement = requirement_by_id.get(requirement_id)
+            if requirement is None:
+                skipped.append(requirement_id)
+                continue
+            allowed = write_cache.get(requirement.project_id)
+            if allowed is None:
+                allowed = rbac.has_permission(current_user, "write", requirement.project_id, db)
+                write_cache[requirement.project_id] = allowed
+            if not allowed:
+                skipped.append(requirement_id)
+                continue
+            # Reuse the single-delete CRUD so association/traceability rows are
+            # cleaned up consistently.
+            crud.delete_requirement(db, requirement_id=requirement_id)
+            deleted += 1
+
+        return schemas.BulkUpdateResult(updated=deleted, skipped_ids=skipped)
