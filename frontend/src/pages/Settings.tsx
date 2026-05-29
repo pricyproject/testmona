@@ -51,7 +51,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 import { Switch } from '@/components/ui/switch';
-import { api, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary } from '@/lib/api';
+import { api, auditAPI, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary } from '@/lib/api';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
 import { useAuthStore } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -265,6 +265,12 @@ export function Settings() {
   const [loadingAuditConfig, setLoadingAuditConfig] = useState(false);
   const [savingAuditConfig, setSavingAuditConfig] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Per-project audit trail deletion. Only projects with >= 10 audit records
+  // are eligible, so we keep a map of project_id -> count to drive the list.
+  const [selectedAuditProjectId, setSelectedAuditProjectId] = useState<string>('');
+  const [projectAuditCounts, setProjectAuditCounts] = useState<Record<string, number>>({});
+  const [deletingProjectAudit, setDeletingProjectAudit] = useState(false);
+  const [showProjectDeleteConfirm, setShowProjectDeleteConfirm] = useState(false);
 
   useEffect(() => {
     setAppNameInput(appName);
@@ -383,6 +389,16 @@ export function Settings() {
         setAuditTrailEnabled(response.data.enabled ?? true);
         setAuditEntitySettings(response.data.entity_settings || {});
       }
+
+      // Fetch per-project audit counts so the per-project delete selector can
+      // exclude any project with fewer than 10 records.
+      try {
+        const counts = await auditAPI.getProjectAuditCounts();
+        setProjectAuditCounts(counts);
+      } catch (countError) {
+        console.error('Failed to load project audit counts:', countError);
+        setProjectAuditCounts({});
+      }
     } catch (error) {
       console.error('Failed to load audit trail config:', error);
       // Set defaults on error
@@ -498,6 +514,9 @@ export function Settings() {
       }
 
       const data = await response.json();
+      // All audit logs are gone, so no project is eligible for per-project delete.
+      setProjectAuditCounts({});
+      setSelectedAuditProjectId('');
       toast({
         title: t('success'),
         description: data.message || t('deleteAllAuditTrailsSuccess'),
@@ -513,7 +532,36 @@ export function Settings() {
       setSavingAuditConfig(false);
     }
   };
-  
+
+  const confirmDeleteProjectAuditTrails = async () => {
+    setShowProjectDeleteConfirm(false);
+    if (!selectedAuditProjectId) return;
+    setDeletingProjectAudit(true);
+    try {
+      const data = await auditAPI.deleteProjectAuditTrails(Number(selectedAuditProjectId));
+      // Drop the project from the eligible list and clear the selection.
+      setProjectAuditCounts((prev) => {
+        const next = { ...prev };
+        delete next[selectedAuditProjectId];
+        return next;
+      });
+      setSelectedAuditProjectId('');
+      toast({
+        title: t('success'),
+        description: data.message || t('deleteAllAuditTrailsSuccess'),
+      });
+    } catch (error) {
+      console.error('Error deleting project audit trails:', error);
+      toast({
+        title: t('error'),
+        description: t('deleteAllAuditTrailsError'),
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingProjectAudit(false);
+    }
+  };
+
   // Test Management Settings State - Remove mock data, will load from API
   const [testTypes, setTestTypes] = useState<TestType[]>([]);
   const [priorities, setPriorities] = useState<Priority[]>([]);
@@ -4202,6 +4250,11 @@ export function Settings() {
                     </div>
                   )}
 
+                  {/* Both delete actions are only shown when at least one project
+                      has enough (>= 10) audit logs to be worth purging. */}
+                  {projects.some((project) => (projectAuditCounts[String(project.id)] ?? 0) >= 10) && (
+                  <>
+                  {/* Delete the entire audit log (all projects). */}
                   <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
                     <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                     <div className="flex-1 space-y-2">
@@ -4245,6 +4298,86 @@ export function Settings() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
+
+                  {/* Per-project audit log deletion. Only projects with >= 10
+                      audit records are eligible and appear in the list. */}
+                  <div className="flex items-start gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <p className="text-sm font-medium text-red-800 dark:text-red-200">
+                          {t('deleteProjectAuditTrails')}
+                        </p>
+                        <p className="text-sm text-red-700 dark:text-red-300">
+                          {t('deleteProjectAuditTrailsDesc')}
+                        </p>
+                      </div>
+                      {(() => {
+                        const eligibleProjects = projects.filter(
+                          (project) => (projectAuditCounts[String(project.id)] ?? 0) >= 10
+                        );
+                        return (
+                          <>
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                              <Select value={selectedAuditProjectId} onValueChange={setSelectedAuditProjectId}>
+                                <SelectTrigger className="w-full sm:w-72 bg-white dark:bg-gray-800">
+                                  <SelectValue placeholder={t('selectProject')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {eligibleProjects.map((project) => (
+                                    <SelectItem key={project.id} value={String(project.id)}>
+                                      {project.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+
+                              {selectedAuditProjectId && (
+                                <span className="text-sm text-red-700 dark:text-red-300">
+                                  {t('projectAuditTrailsCount', { count: projectAuditCounts[selectedAuditProjectId] ?? 0 })}
+                                </span>
+                              )}
+                            </div>
+
+                            {selectedAuditProjectId && (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => setShowProjectDeleteConfirm(true)}
+                                disabled={deletingProjectAudit}
+                              >
+                                {deletingProjectAudit ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
+                                )}
+                                {t('deleteProjectAuditTrailsButton')}
+                              </Button>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <AlertDialog open={showProjectDeleteConfirm} onOpenChange={setShowProjectDeleteConfirm}>
+                    <AlertDialogContent isRTL={isRTL}>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t('confirmDelete')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t('confirmDeleteProjectAuditTrails')}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteProjectAuditTrails} className="bg-red-600 hover:bg-red-700">
+                          {t('delete')}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  </>
+                  )}
                 </>
               )}
             </CardContent>

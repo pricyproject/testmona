@@ -344,10 +344,33 @@ class AuditService:
         audit_trail = self.get_audit_trail_by_id(audit_id)
         if not audit_trail:
             return False
-        
+
         self.db.delete(audit_trail)
         self.db.commit()
         return True
+
+    def count_project_audit_trails(self, project_id: int) -> int:
+        """Count audit trail records belonging to a project."""
+        return self.db.query(AuditTrail).filter(
+            AuditTrail.project_id == project_id
+        ).count()
+
+    def get_project_audit_counts(self) -> List[tuple]:
+        """Return (project_id, count) pairs for every project that has audit trails."""
+        return (
+            self.db.query(AuditTrail.project_id, func.count(AuditTrail.id))
+            .filter(AuditTrail.project_id.isnot(None))
+            .group_by(AuditTrail.project_id)
+            .all()
+        )
+
+    def delete_project_audit_trails(self, project_id: int) -> int:
+        """Delete all audit trail records for a project. Returns count deleted."""
+        deleted = self.db.query(AuditTrail).filter(
+            AuditTrail.project_id == project_id
+        ).delete(synchronize_session=False)
+        self.db.commit()
+        return deleted
 
     def log_action(
         self,

@@ -116,6 +116,28 @@ async def get_recent_activities(
 
     return [AuditTrailResponse.from_orm(activity) for activity in activities]
 
+@router.get("/project-counts")
+async def get_project_audit_counts(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service)
+):
+    """
+    Return audit-log counts per project, limited to projects the user may
+    purge (manage permission, or superuser). Used to decide which projects
+    are eligible for per-project deletion.
+    """
+    counts = audit_service.get_project_audit_counts()
+    result = {}
+    for project_id, count in counts:
+        if project_id is None:
+            continue
+        if current_user.is_superuser or crud_rbac.has_project_permission(
+            db, current_user.id, project_id, "manage_projects"
+        ):
+            result[project_id] = count
+    return result
+
 @router.get("/{audit_id}", response_model=AuditTrailResponse)
 async def get_audit_trail(
     audit_id: int,
@@ -279,6 +301,45 @@ async def delete_audit_trail(
 
     return {"message": "Audit trail deleted successfully"}
 
+@router.delete("/project/{project_id}")
+async def delete_project_audit_trails(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service)
+):
+    """
+    Delete all audit trails for a specific project.
+    Requires project-level manage permission (or superuser).
+    """
+    from ..models import Project
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not current_user.is_superuser and not crud_rbac.has_project_permission(
+        db, current_user.id, project_id, "manage_projects"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Not enough permissions to delete audit trails for this project",
+        )
+
+    deleted = audit_service.delete_project_audit_trails(project_id)
+
+    # Record the purge itself so the action is not silently lost
+    await log_audit_event(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.DELETE.value,
+        entity_type=EntityType.PROJECT.value,
+        entity_id=project_id,
+        project_id=project_id,
+        description=f"Deleted {deleted} audit trail records for project {project_id}",
+    )
+
+    return {"message": f"Successfully deleted {deleted} audit trail records", "deleted": deleted}
+
 # Endpoint to create audit trails (used by other services)
 @router.post("", response_model=AuditTrailResponse)
 async def create_audit_trail(
@@ -306,7 +367,16 @@ async def create_audit_trail(
         audit_create = AuditTrailCreate(**audit_data)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    
+
+    # Prevent forging audit entries for projects the user cannot access
+    if (audit_create.project_id
+            and not current_user.is_superuser
+            and not crud_rbac.has_project_permission(db, current_user.id, audit_create.project_id, "view")):
+        raise HTTPException(
+            status_code=403,
+            detail="Not enough permissions to create audit trails for this project",
+        )
+
     audit_trail = audit_service.create_audit_trail(audit_create)
     if audit_trail is None:
         raise HTTPException(status_code=409, detail="Audit trail logging is disabled for this entity type")

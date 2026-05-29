@@ -1301,6 +1301,14 @@ export const auditAPI = {
     const response = await api.get(`/audit-trails/project/${projectId}/summary?days=${days}`);
     return response.data;
   },
+  getProjectAuditCounts: async (): Promise<Record<string, number>> => {
+    const response = await api.get('/audit-trails/project-counts');
+    return response.data ?? {};
+  },
+  deleteProjectAuditTrails: async (projectId: number): Promise<{ message: string; deleted: number }> => {
+    const response = await api.delete(`/audit-trails/project/${projectId}`);
+    return response.data;
+  },
 };
 
 // Custom Fields API
