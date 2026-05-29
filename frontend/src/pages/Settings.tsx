@@ -247,6 +247,20 @@ export function Settings() {
   
   // Audit trail configuration state
   const [auditTrailEnabled, setAuditTrailEnabled] = useState(true);
+
+  const sanitizeLogoUrl = (url: string): string => {
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) return '';
+    try {
+      const parsedUrl = new URL(trimmedUrl);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        return parsedUrl.toString();
+      }
+    } catch {
+      // Invalid URL
+    }
+    return '';
+  };
   const [auditEntitySettings, setAuditEntitySettings] = useState<Record<string, boolean>>({});
   const [loadingAuditConfig, setLoadingAuditConfig] = useState(false);
   const [savingAuditConfig, setSavingAuditConfig] = useState(false);
@@ -2249,8 +2263,8 @@ export function Settings() {
                     </p>
                   </div>
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-sm font-bold text-white">
-                    {appLogoUrlInput ? (
-                      <img src={appLogoUrlInput} alt={appNameInput || appName} className="h-full w-full rounded-2xl object-cover" />
+                    {sanitizeLogoUrl(appLogoUrlInput) ? (
+                      <img src={sanitizeLogoUrl(appLogoUrlInput)} alt={appNameInput || appName} className="h-full w-full rounded-2xl object-cover" />
                     ) : (
                       (appNameInput || appName).slice(0, 2).toUpperCase()
                     )}
