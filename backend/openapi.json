@@ -7500,6 +7500,25 @@
               "title": "Milestone Id"
             },
             "description": "Filter by linked milestone ID"
+          },
+          {
+            "name": "environment_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by execution environment ID",
+              "title": "Environment Id"
+            },
+            "description": "Filter by execution environment ID"
           }
         ],
         "responses": {

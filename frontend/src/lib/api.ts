@@ -673,6 +673,7 @@ export interface TestRunFilters {
   assigned_to?: number;
   test_plan_id?: number;
   milestone_id?: number;
+  environment_id?: number;
 }
 
 export const testRunsAPI = {
@@ -685,6 +686,7 @@ export const testRunsAPI = {
     if (filters.assigned_to) params.append('assigned_to', filters.assigned_to.toString());
     if (filters.test_plan_id) params.append('test_plan_id', filters.test_plan_id.toString());
     if (filters.milestone_id) params.append('milestone_id', filters.milestone_id.toString());
+    if (filters.environment_id) params.append('environment_id', filters.environment_id.toString());
     const response = await api.get(`/test-runs?${params}`);
     return response.data;
   },

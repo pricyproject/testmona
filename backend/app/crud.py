@@ -461,6 +461,7 @@ def get_test_runs(
     assigned_to: Optional[int] = None,
     test_plan_id: Optional[int] = None,
     milestone_id: Optional[int] = None,
+    environment_id: Optional[int] = None,
 ):
     query = db.query(TestRun).options(joinedload(TestRun.assignee))
     if project_id:
@@ -485,6 +486,8 @@ def get_test_runs(
         query = query.outerjoin(TestPlan, TestRun.test_plan_id == TestPlan.id).filter(
             or_(TestRun.milestone_id == milestone_id, TestPlan.milestone_id == milestone_id)
         )
+    if environment_id is not None:
+        query = query.filter(TestRun.environment_id == environment_id)
     query = query.order_by(TestRun.created_at.desc(), TestRun.id.desc())
     return query.offset(skip).limit(limit).all()
 

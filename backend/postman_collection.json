@@ -818,7 +818,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/test-runs?project_id=1&search=Test&status=pending&priority=medium&assigned_to=1",
+              "raw": "{{baseUrl}}/test-runs?project_id=1&search=Test&status=pending&priority=medium&assigned_to=1&environment_id=1",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -849,6 +849,11 @@
                   "key": "assigned_to",
                   "value": "1",
                   "description": "Optional: assigned user ID"
+                },
+                {
+                  "key": "environment_id",
+                  "value": "1",
+                  "description": "Optional: execution environment ID"
                 }
               ]
             }

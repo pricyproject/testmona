@@ -31,6 +31,11 @@
       "type": "string"
     },
     {
+      "key": "testEnvironmentId",
+      "value": "1",
+      "type": "string"
+    },
+    {
       "key": "assigneeId",
       "value": "1",
       "type": "string"
@@ -157,7 +162,7 @@
       "request": {
         "method": "GET",
         "url": {
-          "raw": "{{baseUrl}}/test-runs?project_id={{testProjectId}}&search={{testRunSearch}}&status={{testRunStatus}}&priority={{testRunPriority}}&assigned_to={{assigneeId}}",
+          "raw": "{{baseUrl}}/test-runs?project_id={{testProjectId}}&search={{testRunSearch}}&status={{testRunStatus}}&priority={{testRunPriority}}&assigned_to={{assigneeId}}&environment_id={{testEnvironmentId}}",
           "host": [
             "{{baseUrl}}"
           ],
@@ -188,10 +193,15 @@
               "key": "assigned_to",
               "value": "{{assigneeId}}",
               "description": "Optional: assigned user ID"
+            },
+            {
+              "key": "environment_id",
+              "value": "{{testEnvironmentId}}",
+              "description": "Optional: execution environment ID"
             }
           ]
         },
-        "description": "Get test runs for a project with optional search, status, priority, and assignee filters"
+        "description": "Get test runs for a project with optional search, status, priority, assignee, and environment filters"
       },
       "event": [
         {

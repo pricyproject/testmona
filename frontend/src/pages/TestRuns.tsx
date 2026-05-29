@@ -125,13 +125,17 @@ export function TestRuns() {
   const currentProjectId = projectId ? parseInt(projectId) : null;
   const linkedTestPlanId = parsePositiveQueryNumber(searchParams.get('test_plan_id'));
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
+  const linkedEnvironmentId = parsePositiveQueryNumber(
+    searchParams.get('environment_id') || searchParams.get('environment')
+  );
 
   const totalPages = Math.max(1, Math.ceil(testRuns.length / itemsPerPage));
   const hasActiveTestRunFilters =
     testRunSearchQuery.trim() !== '' ||
     statusFilter !== 'all' ||
     priorityFilter !== 'all' ||
-    assigneeFilter !== 'all';
+    assigneeFilter !== 'all' ||
+    Boolean(linkedEnvironmentId);
   const paginatedTestRuns = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     return testRuns.slice(startIndex, startIndex + itemsPerPage);
@@ -262,6 +266,9 @@ export function TestRuns() {
     setPriorityFilter('all');
     setAssigneeFilter('all');
     setCurrentPage(1);
+    if (linkedEnvironmentId && currentProjectId) {
+      navigate(`/projects/${currentProjectId}/test-runs`, { replace: true });
+    }
   };
 
   useEffect(() => {
@@ -349,7 +356,7 @@ export function TestRuns() {
     }, 250);
 
     return () => window.clearTimeout(timeoutId);
-  }, [projectId, testRunSearchQuery, statusFilter, priorityFilter, assigneeFilter, linkedTestPlanId, linkedMilestoneId]);
+  }, [projectId, testRunSearchQuery, statusFilter, priorityFilter, assigneeFilter, linkedTestPlanId, linkedMilestoneId, linkedEnvironmentId]);
 
   const loadData = async () => {
     if (!currentProjectId || isNaN(currentProjectId) || currentProjectId <= 0) return;
@@ -366,6 +373,7 @@ export function TestRuns() {
           assigned_to: Number.isInteger(selectedAssigneeId) ? selectedAssigneeId : undefined,
           test_plan_id: linkedTestPlanId,
           milestone_id: linkedMilestoneId,
+          environment_id: linkedEnvironmentId,
         }).catch(err => {
           if (err.response?.status === 404) {
             setError('Project not found');

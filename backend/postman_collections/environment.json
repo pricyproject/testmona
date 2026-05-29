@@ -48,6 +48,11 @@
       "enabled": true
     },
     {
+      "key": "testEnvironmentId",
+      "value": "1",
+      "enabled": true
+    },
+    {
       "key": "testResultId",
       "value": "1",
       "enabled": true
