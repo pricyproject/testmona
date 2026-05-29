@@ -35,7 +35,6 @@ const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunRe
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
 const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetail');
 const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
-const TraceabilityMatrix = lazyPage(() => import('@/pages/TraceabilityMatrix'), 'TraceabilityMatrix');
 const SharedReportViewer = lazyPage(() => import('@/pages/SharedReportViewer'), 'SharedReportViewer');
 const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
 const MilestoneDetail = lazyPage(() => import('@/pages/MilestoneDetail'), 'MilestoneDetail');
@@ -252,11 +251,6 @@ function AppWithRouter() {
         <Route path="/projects/:projectId/reports" element={
           <ProjectGuard>
             <Reports />
-          </ProjectGuard>
-        } />
-        <Route path="/projects/:projectId/traceability" element={
-          <ProjectGuard>
-            <TraceabilityMatrix />
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/milestones" element={

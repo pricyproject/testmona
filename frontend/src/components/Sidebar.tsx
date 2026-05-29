@@ -21,7 +21,6 @@ import {
   Wrench,
   Table2,
   ClipboardList,
-  Network,
   Users,
   Webhook,
   KeyRound,
@@ -145,7 +144,6 @@ export function Sidebar({
         name: t('management'),
         items: [
           { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug },
-          { name: t('traceability'), href: `/projects/${projectId}/traceability`, icon: Network },
           { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3 },
         ]
       },
