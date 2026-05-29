@@ -1276,6 +1276,165 @@
               }
             }
           ]
+        },
+        {
+          "name": "List Requirement Comments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "comments"
+              ]
+            },
+            "description": "List threaded comments and review replies for a requirement."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200, 403, or 404\", function () {",
+                  "    pm.expect([200, 403, 404]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Requirement Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Review note for this requirement\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "comments"
+              ]
+            },
+            "description": "Create a top-level requirement review comment. Body is trimmed and must contain 1-10000 characters."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201, 403, 404, or 422\", function () {",
+                  "    pm.expect([201, 403, 404, 422]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property(\"id\");",
+                  "    pm.environment.set(\"requirementCommentId\", jsonData.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Requirement Reply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Replying to the review note\",\n  \"parent_id\": {{requirementCommentId}}\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/requirements/{{requirementId}}/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "{{requirementId}}",
+                "comments"
+              ]
+            },
+            "description": "Create a reply. If a nested reply id is supplied, the API stores the reply under the root thread."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201, 400, 403, 404, or 422\", function () {",
+                  "    pm.expect([201, 400, 403, 404, 422]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resolve Requirement Comment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_resolved\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/requirements/comments/{{requirementCommentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "requirements",
+                "comments",
+                "{{requirementCommentId}}"
+              ]
+            },
+            "description": "Mark a requirement review thread as resolved."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200, 403, 404, or 422\", function () {",
+                  "    pm.expect([200, 403, 404, 422]).to.include(pm.response.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
         }
       ]
     },

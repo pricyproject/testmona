@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Float, JSON, Table, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
 from typing import Optional
 from .database import Base
@@ -1003,6 +1003,76 @@ class Requirement(Base):
     child_requirements = relationship("Requirement", back_populates="parent_requirement")
     test_cases = relationship("TestCase", secondary="requirement_test_case_links")
     test_plans = relationship("TestPlan", secondary="requirement_test_plan_links", back_populates="requirements")
+    versions = relationship(
+        "RequirementVersion",
+        back_populates="requirement",
+        cascade="all, delete-orphan",
+        order_by="RequirementVersion.version_number.desc()",
+    )
+    comments = relationship(
+        "RequirementComment",
+        back_populates="requirement",
+        cascade="all, delete-orphan",
+    )
+
+
+class RequirementVersion(Base):
+    """Immutable snapshot of a requirement's content at a point in time.
+
+    A row is written on create, on every save, and on restore, so the full
+    edit history is reconstructable and any prior state can be restored.
+    """
+    __tablename__ = "requirement_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    action = Column(String(20), nullable=False, default="updated")  # created, updated, restored
+    # Snapshot of the editable content at this version.
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    acceptance_criteria = Column(Text)
+    status = Column(String(50))
+    priority = Column(String(50))
+    tags = Column(String(500))
+    estimated_effort = Column(Float)
+    # Free-text note (e.g. "restored from v3").
+    change_note = Column(String(500))
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    requirement = relationship("Requirement", back_populates="versions")
+    author = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        UniqueConstraint("requirement_id", "version_number", name="uq_requirement_version_number"),
+    )
+
+
+class RequirementComment(Base):
+    """Threaded comment / review note on a requirement.
+
+    A ``parent_id`` of ``None`` is a top-level thread; replies point at their
+    root comment. ``is_resolved`` lets a thread be marked done during review.
+    """
+    __tablename__ = "requirement_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("requirement_comments.id", ondelete="CASCADE"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    body = Column(Text, nullable=False)
+    is_resolved = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    requirement = relationship("Requirement", back_populates="comments")
+    author = relationship("User", foreign_keys=[user_id])
+    replies = relationship(
+        "RequirementComment",
+        cascade="all, delete-orphan",
+        backref=backref("parent", remote_side=[id]),
+    )
 
 
 class Defect(Base):

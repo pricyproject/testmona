@@ -18,7 +18,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -1316,6 +1316,98 @@ def get_requirement(db: Session, requirement_id: int):
     return db.query(Requirement).filter(Requirement.id == requirement_id).first()
 
 
+def _enum_value(value):
+    """Return the stored string for an enum-or-string column value."""
+    return getattr(value, "value", value)
+
+
+def record_requirement_version(
+    db: Session,
+    requirement: Requirement,
+    action: str = "updated",
+    actor_id: Optional[int] = None,
+    change_note: Optional[str] = None,
+    commit: bool = True,
+) -> RequirementVersion:
+    """Snapshot the requirement's current content as a new version row.
+
+    Version numbers are dense and 1-based per requirement. Failures here must
+    never break the underlying create/update, so callers wrap accordingly.
+    """
+    latest = (
+        db.query(RequirementVersion)
+        .filter(RequirementVersion.requirement_id == requirement.id)
+        .order_by(RequirementVersion.version_number.desc())
+        .first()
+    )
+
+    # For routine saves, skip recording when none of the snapshotted content
+    # actually changed (e.g. an update that only touched assignee/parent).
+    # 'created' and 'restored' always record so the timeline stays meaningful.
+    if action == "updated" and latest is not None:
+        unchanged = (
+            latest.title == requirement.title
+            and latest.description == requirement.description
+            and latest.acceptance_criteria == requirement.acceptance_criteria
+            and latest.status == _enum_value(requirement.status)
+            and latest.priority == _enum_value(requirement.priority)
+            and latest.tags == requirement.tags
+            and latest.estimated_effort == requirement.estimated_effort
+        )
+        if unchanged:
+            return latest
+
+    last_number = latest.version_number if latest is not None else 0
+    version = RequirementVersion(
+        requirement_id=requirement.id,
+        version_number=last_number + 1,
+        action=action,
+        title=requirement.title,
+        description=requirement.description,
+        acceptance_criteria=requirement.acceptance_criteria,
+        status=_enum_value(requirement.status),
+        priority=_enum_value(requirement.priority),
+        tags=requirement.tags,
+        estimated_effort=requirement.estimated_effort,
+        change_note=change_note,
+        created_by=actor_id,
+    )
+    db.add(version)
+    if commit:
+        safe_commit(db)
+        db.refresh(version)
+    return version
+
+
+def restore_requirement_version(
+    db: Session,
+    requirement: Requirement,
+    version: RequirementVersion,
+    actor_id: Optional[int] = None,
+    change_note: Optional[str] = None,
+) -> Requirement:
+    """Apply a prior version's content to the requirement and log a new version."""
+    requirement.title = version.title
+    requirement.description = version.description
+    requirement.acceptance_criteria = version.acceptance_criteria
+    if version.status:
+        requirement.status = RequirementStatus(version.status)
+    if version.priority:
+        requirement.priority = Priority(version.priority)
+    requirement.tags = version.tags
+    requirement.estimated_effort = version.estimated_effort
+    safe_commit(db)
+    db.refresh(requirement)
+    record_requirement_version(
+        db,
+        requirement,
+        action="restored",
+        actor_id=actor_id,
+        change_note=change_note or f"Restored from v{version.version_number}",
+    )
+    return requirement
+
+
 def get_requirements(
     db: Session,
     project_id: int = None,
@@ -1372,29 +1464,52 @@ def create_requirement(db: Session, requirement: RequirementCreate):
     db.add(db_requirement)
     safe_commit(db)
     db.refresh(db_requirement)
+
+    # Seed the version history with the initial state. Never let a history
+    # failure roll back the requirement that was just created.
+    try:
+        record_requirement_version(
+            db, db_requirement, action="created", actor_id=db_requirement.created_by
+        )
+    except Exception:
+        db.rollback()
+
     return db_requirement
 
 
-def update_requirement(db: Session, requirement_id: int, requirement: RequirementUpdate):
+def update_requirement(
+    db: Session,
+    requirement_id: int,
+    requirement: RequirementUpdate,
+    actor_id: Optional[int] = None,
+):
     db_requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if db_requirement:
         update_data = requirement.model_dump(exclude_unset=True)
-        
+
         # Handle enum conversions
         if 'status' in update_data and update_data['status'] is not None:
             update_data['status'] = RequirementStatus(update_data['status'])
         if 'priority' in update_data and update_data['priority'] is not None:
             update_data['priority'] = Priority(update_data['priority'])
-        
+
         # Validate estimated_effort
         if 'estimated_effort' in update_data and update_data['estimated_effort'] is not None:
             if update_data['estimated_effort'] < 0:
                 raise ValueError("Estimated effort must be a positive number")
-        
+
         for key, value in update_data.items():
             setattr(db_requirement, key, value)
         safe_commit(db)
         db.refresh(db_requirement)
+
+        # Snapshot the new state for version history.
+        try:
+            record_requirement_version(
+                db, db_requirement, action="updated", actor_id=actor_id
+            )
+        except Exception:
+            db.rollback()
     return db_requirement
 
 

@@ -1025,6 +1025,31 @@
         }
       }
     },
+    "/audit-trails/project-counts": {
+      "get": {
+        "tags": [
+          "Audit Trails"
+        ],
+        "summary": "Get Project Audit Counts",
+        "description": "Return audit-log counts per project, limited to projects the user may\npurge (manage permission, or superuser). Used to decide which projects\nare eligible for per-project deletion.",
+        "operationId": "get_project_audit_counts_audit_trails_project_counts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
     "/audit-trails/{audit_id}": {
       "get": {
         "tags": [
@@ -1337,6 +1362,52 @@
                 "schema": {
                   "$ref": "#/components/schemas/ActivitySummary"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit-trails/project/{project_id}": {
+      "delete": {
+        "tags": [
+          "Audit Trails"
+        ],
+        "summary": "Delete Project Audit Trails",
+        "description": "Delete all audit trails for a specific project.\nRequires project-level manage permission (or superuser).",
+        "operationId": "delete_project_audit_trails_audit_trails_project__project_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -9636,6 +9707,358 @@
         ]
       }
     },
+    "/requirements/{requirement_id}/versions": {
+      "get": {
+        "summary": "List Requirement Versions",
+        "operationId": "list_requirement_versions_requirements__requirement_id__versions_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requirement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequirementVersionView"
+                  },
+                  "title": "Response List Requirement Versions Requirements  Requirement Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requirements/{requirement_id}/versions/{version_id}/restore": {
+      "post": {
+        "summary": "Restore Requirement Version",
+        "operationId": "restore_requirement_version_requirements__requirement_id__versions__version_id__restore_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requirement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Requirement Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementVersionRestore"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Requirement"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requirements/{requirement_id}/comments": {
+      "get": {
+        "summary": "List Requirement Comments",
+        "operationId": "list_requirement_comments_requirements__requirement_id__comments_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requirement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequirementCommentView"
+                  },
+                  "title": "Response List Requirement Comments Requirements  Requirement Id  Comments Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Requirement Comment",
+        "operationId": "create_requirement_comment_requirements__requirement_id__comments_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requirement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementCommentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementCommentView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requirements/comments/{comment_id}": {
+      "patch": {
+        "summary": "Update Requirement Comment",
+        "operationId": "update_requirement_comment_requirements_comments__comment_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Comment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementCommentUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementCommentView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Requirement Comment",
+        "operationId": "delete_requirement_comment_requirements_comments__comment_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Comment Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requirements/coverage": {
+      "get": {
+        "summary": "Requirement Coverage",
+        "operationId": "requirement_coverage_requirements_coverage_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementCoverageList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/requirements": {
       "post": {
         "summary": "Create Requirement Endpoint",
@@ -9771,6 +10194,49 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RequirementExternalDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementExternalDocumentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/requirements/import-from-tracker": {
+      "post": {
+        "summary": "Import Requirement From Tracker",
+        "operationId": "import_requirement_from_tracker_requirements_import_from_tracker_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementTrackerImportRequest"
               }
             }
           },
@@ -11931,6 +12397,144 @@
         }
       }
     },
+    "/analytics/traceability-matrix": {
+      "get": {
+        "summary": "Get Traceability Matrix Get",
+        "description": "Detailed traceability matrix with server-side filters and pagination.\nHeadline coverage numbers (total/covered/uncovered/coverage_percentage)\nare always reported for the FULL project so filters don't distort them.",
+        "operationId": "get_traceability_matrix_get_analytics_traceability_matrix_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by requirement priority (low/medium/high/critical)",
+              "title": "Priority"
+            },
+            "description": "Filter by requirement priority (low/medium/high/critical)"
+          },
+          {
+            "name": "coverage_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'covered' or 'uncovered'",
+              "title": "Coverage Status"
+            },
+            "description": "'covered' or 'uncovered'"
+          },
+          {
+            "name": "test_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Show requirements that have a TC with this status",
+              "title": "Test Status"
+            },
+            "description": "Show requirements that have a TC with this status"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Substring match on requirement title or key",
+              "title": "Search"
+            },
+            "description": "Substring match on requirement title or key"
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/traceability-matrix/": {
       "post": {
         "summary": "Create Traceability Entry",
@@ -13061,6 +13665,398 @@
         ]
       }
     },
+    "/analytics/dashboard/analytics": {
+      "get": {
+        "summary": "Get Dashboard Analytics Get",
+        "description": "Get dashboard analytics for a project with time range filtering",
+        "operationId": "get_dashboard_analytics_get_analytics_dashboard_analytics_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "time_range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "7d",
+              "title": "Time Range"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/time-series": {
+      "get": {
+        "summary": "Get Analytics Time Series",
+        "description": "Daily project quality trend for reports overview charts.",
+        "operationId": "get_analytics_time_series_analytics_time_series_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "time_range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "30d",
+              "title": "Time Range"
+            }
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "day",
+              "title": "Granularity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/granular-insights": {
+      "get": {
+        "summary": "Get Granular Insights Get",
+        "description": "Get granular quality insights with real period-over-period trends.",
+        "operationId": "get_granular_insights_get_analytics_granular_insights_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "filter_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "all",
+              "title": "Filter Type"
+            }
+          },
+          {
+            "name": "time_range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "7d",
+              "title": "Time Range"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Get Granular Insights",
+        "operationId": "get_granular_insights_analytics_granular_insights_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GranularInsightsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GranularInsightsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/coverage-reports": {
+      "get": {
+        "summary": "Get Coverage Reports Get",
+        "description": "Get the current dynamically generated coverage report for a project.",
+        "operationId": "get_coverage_reports_get_analytics_coverage_reports_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/coverage-reports/generate": {
+      "post": {
+        "summary": "Generate Coverage Report Post",
+        "description": "Generate a fresh coverage report payload for the reports page.",
+        "operationId": "generate_coverage_report_post_analytics_coverage_reports_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/analytics/test-execution-status": {
+      "get": {
+        "summary": "Get Test Execution Status Get",
+        "description": "Get test execution status for a project.",
+        "operationId": "get_test_execution_status_get_analytics_test_execution_status_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/root-cause-analyses": {
+      "get": {
+        "summary": "Get Root Cause Analyses Get",
+        "description": "Get root cause analyses for a project",
+        "operationId": "get_root_cause_analyses_get_analytics_root_cause_analyses_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/analytics/dashboard": {
       "post": {
         "summary": "Get Dashboard Analytics",
@@ -13319,110 +14315,6 @@
                   },
                   "title": "Response Get Kpi Data Endpoint Analytics Kpi Data  Project Id  Get"
                 }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics/granular-insights": {
-      "post": {
-        "summary": "Get Granular Insights",
-        "operationId": "get_granular_insights_analytics_granular_insights_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GranularInsightsRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GranularInsightsResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "summary": "Get Granular Insights Get",
-        "description": "Get granular quality insights with real period-over-period trends.",
-        "operationId": "get_granular_insights_get_analytics_granular_insights_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          },
-          {
-            "name": "filter_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "all",
-              "title": "Filter Type"
-            }
-          },
-          {
-            "name": "time_range",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "7d",
-              "title": "Time Range"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
               }
             }
           },
@@ -14718,369 +15610,6 @@
             "schema": {
               "type": "integer",
               "title": "Environment Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics/dashboard/analytics": {
-      "get": {
-        "summary": "Get Dashboard Analytics Get",
-        "description": "Get dashboard analytics for a project with time range filtering",
-        "operationId": "get_dashboard_analytics_get_analytics_dashboard_analytics_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          },
-          {
-            "name": "time_range",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "7d",
-              "title": "Time Range"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics/traceability-matrix": {
-      "get": {
-        "summary": "Get Traceability Matrix Get",
-        "description": "Detailed traceability matrix with server-side filters and pagination.\nHeadline coverage numbers (total/covered/uncovered/coverage_percentage)\nare always reported for the FULL project so filters don't distort them.",
-        "operationId": "get_traceability_matrix_get_analytics_traceability_matrix_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          },
-          {
-            "name": "priority",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter by requirement priority (low/medium/high/critical)",
-              "title": "Priority"
-            },
-            "description": "Filter by requirement priority (low/medium/high/critical)"
-          },
-          {
-            "name": "coverage_status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "'covered' or 'uncovered'",
-              "title": "Coverage Status"
-            },
-            "description": "'covered' or 'uncovered'"
-          },
-          {
-            "name": "test_status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Show requirements that have a TC with this status",
-              "title": "Test Status"
-            },
-            "description": "Show requirements that have a TC with this status"
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Substring match on requirement title or key",
-              "title": "Search"
-            },
-            "description": "Substring match on requirement title or key"
-          },
-          {
-            "name": "skip",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Skip"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics/coverage-reports": {
-      "get": {
-        "summary": "Get Coverage Reports Get",
-        "description": "Get the current dynamically generated coverage report for a project.",
-        "operationId": "get_coverage_reports_get_analytics_coverage_reports_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics/coverage-reports/generate": {
-      "post": {
-        "summary": "Generate Coverage Report Post",
-        "description": "Generate a fresh coverage report payload for the reports page.",
-        "operationId": "generate_coverage_report_post_analytics_coverage_reports_generate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "title": "Request"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/analytics/test-execution-status": {
-      "get": {
-        "summary": "Get Test Execution Status Get",
-        "description": "Get test execution status for a project.",
-        "operationId": "get_test_execution_status_get_analytics_test_execution_status_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics/root-cause-analyses": {
-      "get": {
-        "summary": "Get Root Cause Analyses Get",
-        "description": "Get root cause analyses for a project",
-        "operationId": "get_root_cause_analyses_get_analytics_root_cause_analyses_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Project Id"
             }
           }
         ],
@@ -18642,6 +19171,92 @@
         ]
       }
     },
+    "/requirements/bulk": {
+      "patch": {
+        "summary": "Bulk Update Requirements",
+        "operationId": "bulk_update_requirements_requirements_bulk_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRequirementUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkUpdateResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/requirements/bulk/delete": {
+      "post": {
+        "summary": "Bulk Delete Requirements",
+        "operationId": "bulk_delete_requirements_requirements_bulk_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRequirementDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkUpdateResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
     "/test-datasets": {
       "get": {
         "summary": "List Test Datasets",
@@ -19086,6 +19701,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RequirementTestCaseGenerationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requirements/{requirement_id}/ai/test-cases/duplicate-check": {
+      "post": {
+        "summary": "Check Requirement Test Case Duplicates",
+        "description": "Flag drafts that duplicate an existing case or another draft in the batch.\n\nCompares each candidate draft against existing test cases in the target\nsuite/section and against earlier drafts, returning the strongest matches\nand an overall status (unique / similar / duplicate) per draft. This runs\nentirely on stored data \u2014 it does not call the AI provider.",
+        "operationId": "check_requirement_test_case_duplicates_requirements__requirement_id__ai_test_cases_duplicate_check_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requirement_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DuplicateCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DuplicateCheckResponse"
                 }
               }
             }
@@ -20543,6 +21213,114 @@
           "notification_ids"
         ],
         "title": "BulkNotificationUpdate"
+      },
+      "BulkRequirementDelete": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "BulkRequirementDelete"
+      },
+      "BulkRequirementUpdate": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Ids"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequirementStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Priority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To"
+          },
+          "clear_assignee": {
+            "type": "boolean",
+            "title": "Clear Assignee",
+            "default": false
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "add_tags": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Add Tags"
+          },
+          "remove_tags": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remove Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "BulkRequirementUpdate"
       },
       "BulkTestCaseUpdate": {
         "properties": {
@@ -24450,6 +25228,195 @@
         ],
         "title": "DefectUserSummary"
       },
+      "DuplicateCheckDraft": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Index"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description",
+            "default": ""
+          },
+          "preconditions": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Preconditions",
+            "default": ""
+          },
+          "steps": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Steps",
+            "default": ""
+          },
+          "expected_result": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Expected Result",
+            "default": ""
+          },
+          "test_steps": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateCheckDraftStep"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Test Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index"
+        ],
+        "title": "DuplicateCheckDraft"
+      },
+      "DuplicateCheckDraftStep": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Action",
+            "default": ""
+          },
+          "expected_result": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Expected Result",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "DuplicateCheckDraftStep"
+      },
+      "DuplicateCheckFinding": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateMatch"
+            },
+            "type": "array",
+            "title": "Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "status",
+          "score"
+        ],
+        "title": "DuplicateCheckFinding"
+      },
+      "DuplicateCheckRequest": {
+        "properties": {
+          "test_suite_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Test Suite Id"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "section",
+              "suite"
+            ],
+            "title": "Scope",
+            "default": "suite"
+          },
+          "drafts": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateCheckDraft"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Drafts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "test_suite_id"
+        ],
+        "title": "DuplicateCheckRequest"
+      },
+      "DuplicateCheckResponse": {
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/DuplicateCheckFinding"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "duplicate_count": {
+            "type": "integer",
+            "title": "Duplicate Count",
+            "default": 0
+          },
+          "similar_count": {
+            "type": "integer",
+            "title": "Similar Count",
+            "default": 0
+          },
+          "existing_compared": {
+            "type": "integer",
+            "title": "Existing Compared",
+            "default": 0
+          },
+          "existing_truncated": {
+            "type": "boolean",
+            "title": "Existing Truncated",
+            "default": false
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": "suite"
+          },
+          "thresholds": {
+            "type": "object",
+            "title": "Thresholds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "findings"
+        ],
+        "title": "DuplicateCheckResponse"
+      },
       "DuplicateDetectionSummary": {
         "properties": {
           "duplicates_by_title": {
@@ -24470,6 +25437,97 @@
         },
         "type": "object",
         "title": "DuplicateDetectionSummary"
+      },
+      "DuplicateMatch": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "existing",
+              "draft"
+            ],
+            "title": "Kind"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "title_score": {
+            "type": "number",
+            "title": "Title Score"
+          },
+          "body_score": {
+            "type": "number",
+            "title": "Body Score"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "test_case_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Case Id"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "section_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Name"
+          },
+          "in_target_section": {
+            "type": "boolean",
+            "title": "In Target Section",
+            "default": false
+          },
+          "draft_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "score",
+          "title_score",
+          "body_score",
+          "status",
+          "title"
+        ],
+        "title": "DuplicateMatch"
       },
       "EntityCount": {
         "properties": {
@@ -28284,6 +29342,188 @@
         ],
         "title": "Requirement"
       },
+      "RequirementCommentCreate": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Body"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "RequirementCommentCreate"
+      },
+      "RequirementCommentUpdate": {
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "is_resolved": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Resolved"
+          }
+        },
+        "type": "object",
+        "title": "RequirementCommentUpdate"
+      },
+      "RequirementCommentView": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "requirement_id": {
+            "type": "integer",
+            "title": "Requirement Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "is_resolved": {
+            "type": "boolean",
+            "title": "Is Resolved"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequirementVersionAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementCommentView"
+            },
+            "type": "array",
+            "title": "Replies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "requirement_id",
+          "body",
+          "is_resolved",
+          "created_at"
+        ],
+        "title": "RequirementCommentView"
+      },
+      "RequirementCoverageItem": {
+        "properties": {
+          "requirement_id": {
+            "type": "integer",
+            "title": "Requirement Id"
+          },
+          "linked_count": {
+            "type": "integer",
+            "title": "Linked Count",
+            "default": 0
+          },
+          "active_count": {
+            "type": "integer",
+            "title": "Active Count",
+            "default": 0
+          },
+          "failed_related_runs": {
+            "type": "integer",
+            "title": "Failed Related Runs",
+            "default": 0
+          },
+          "blocked_related_runs": {
+            "type": "integer",
+            "title": "Blocked Related Runs",
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "uncovered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requirement_id"
+        ],
+        "title": "RequirementCoverageItem"
+      },
+      "RequirementCoverageList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementCoverageItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "title": "RequirementCoverageList"
+      },
       "RequirementCreate": {
         "properties": {
           "title": {
@@ -29298,6 +30538,32 @@
         "type": "object",
         "title": "RequirementTraceabilitySummary"
       },
+      "RequirementTrackerImportRequest": {
+        "properties": {
+          "project_id": {
+            "type": "integer",
+            "title": "Project Id"
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^(asana|linear|monday)$",
+            "title": "Source"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 8,
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_id",
+          "source",
+          "url"
+        ],
+        "title": "RequirementTrackerImportRequest"
+      },
       "RequirementUpdate": {
         "properties": {
           "title": {
@@ -29400,6 +30666,179 @@
         },
         "type": "object",
         "title": "RequirementUpdate"
+      },
+      "RequirementVersionAuthor": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "RequirementVersionAuthor"
+      },
+      "RequirementVersionRestore": {
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          }
+        },
+        "type": "object",
+        "title": "RequirementVersionRestore"
+      },
+      "RequirementVersionView": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "requirement_id": {
+            "type": "integer",
+            "title": "Requirement Id"
+          },
+          "version_number": {
+            "type": "integer",
+            "title": "Version Number"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "acceptance_criteria": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptance Criteria"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "estimated_effort": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Effort"
+          },
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequirementVersionAuthor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "requirement_id",
+          "version_number",
+          "action",
+          "title",
+          "created_at"
+        ],
+        "title": "RequirementVersionView"
       },
       "Role": {
         "type": "string",

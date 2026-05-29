@@ -2004,8 +2004,133 @@ class Requirement(RequirementBase):
         from_attributes = True
 
 
+# --- Requirement version history -------------------------------------------
+
+class RequirementVersionAuthor(BaseModel):
+    id: int
+    username: str
+    full_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RequirementVersionView(BaseModel):
+    id: int
+    requirement_id: int
+    version_number: int
+    action: str
+    title: str
+    description: Optional[str] = None
+    acceptance_criteria: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    tags: Optional[str] = None
+    estimated_effort: Optional[float] = None
+    change_note: Optional[str] = None
+    created_at: datetime
+    author: Optional[RequirementVersionAuthor] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RequirementVersionRestore(BaseModel):
+    change_note: Optional[str] = Field(default=None, max_length=500)
+
+
+# --- Requirement comments / review threads ---------------------------------
+
+REQUIREMENT_COMMENT_BODY_MAX_LENGTH = 10000
+
+
+def _normalize_requirement_comment_body(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    body = value.strip()
+    if not body:
+        raise ValueError("Comment body cannot be empty")
+    if len(body) > REQUIREMENT_COMMENT_BODY_MAX_LENGTH:
+        raise ValueError(f"Comment body cannot exceed {REQUIREMENT_COMMENT_BODY_MAX_LENGTH} characters")
+    return body
+
+
+class RequirementCommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=REQUIREMENT_COMMENT_BODY_MAX_LENGTH)
+    parent_id: Optional[int] = Field(default=None, ge=1)
+
+    @field_validator("body")
+    @classmethod
+    def validate_body(cls, value: str) -> str:
+        return _normalize_requirement_comment_body(value) or ""
+
+
+class RequirementCommentUpdate(BaseModel):
+    body: Optional[str] = Field(default=None, min_length=1, max_length=REQUIREMENT_COMMENT_BODY_MAX_LENGTH)
+    is_resolved: Optional[bool] = None
+
+    @field_validator("body")
+    @classmethod
+    def validate_body(cls, value: Optional[str]) -> Optional[str]:
+        return _normalize_requirement_comment_body(value)
+
+
+class RequirementCommentView(BaseModel):
+    id: int
+    requirement_id: int
+    parent_id: Optional[int] = None
+    body: str
+    is_resolved: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    author: Optional[RequirementVersionAuthor] = None
+    replies: List["RequirementCommentView"] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+# --- Coverage badges (batched per project) ---------------------------------
+
+class RequirementCoverageItem(BaseModel):
+    requirement_id: int
+    linked_count: int = 0
+    active_count: int = 0
+    failed_related_runs: int = 0
+    blocked_related_runs: int = 0
+    # Derived rollup: covered | partial | failing | blocked | uncovered
+    status: str = "uncovered"
+
+
+class RequirementCoverageList(BaseModel):
+    items: List[RequirementCoverageItem] = Field(default_factory=list)
+
+
+# --- Bulk requirement actions ----------------------------------------------
+
+class BulkRequirementUpdate(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=2000)
+    status: Optional[RequirementStatus] = None
+    priority: Optional[Priority] = None
+    assigned_to: Optional[int] = None
+    clear_assignee: bool = False
+    tags: Optional[str] = Field(default=None, max_length=500)
+    add_tags: Optional[str] = Field(default=None, max_length=500)
+    remove_tags: Optional[str] = Field(default=None, max_length=500)
+
+
+class BulkRequirementDelete(BaseModel):
+    ids: List[int] = Field(min_length=1, max_length=2000)
+
+
 class RequirementExternalDocumentRequest(BaseModel):
     project_id: int
+    url: str = Field(..., min_length=8, max_length=2000)
+
+
+class RequirementTrackerImportRequest(BaseModel):
+    project_id: int
+    source: str = Field(..., pattern="^(asana|linear|monday)$")
     url: str = Field(..., min_length=8, max_length=2000)
 
 
@@ -3788,6 +3913,11 @@ __all__ = [
     "TestCaseExport", "TestSuiteWithSections", "TestCaseSectionWithCases",
     "RequirementBase", "RequirementCreate", "RequirementUpdate", "Requirement",
     "RequirementExternalDocumentRequest", "RequirementExternalDocumentResponse",
+    "RequirementTrackerImportRequest",
+    "RequirementVersionView", "RequirementVersionAuthor", "RequirementVersionRestore",
+    "RequirementCommentCreate", "RequirementCommentUpdate", "RequirementCommentView",
+    "RequirementCoverageItem", "RequirementCoverageList",
+    "BulkRequirementUpdate", "BulkRequirementDelete",
     "RequirementTraceabilitySummary", "RequirementLinkedTestCase", "RequirementLinkedTestCaseList",
     "RequirementLinkedTestCaseBulkRequest", "RequirementLinkedTestCaseBulkResponse",
     "RequirementLinkedTestCaseCreate", "RequirementLinkedTestCaseHistoryItem", "RequirementLinkedTestCaseHistory",

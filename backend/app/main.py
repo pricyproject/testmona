@@ -45,6 +45,7 @@ from .routes.system_settings import register_system_settings_routes
 from .routes.projects import register_project_routes
 from .routes.test_management import register_test_management_routes
 from .routes.requirements_defects_plans import register_requirements_defects_plans_routes
+from .routes.requirement_history import register_requirement_history_routes
 from .routes.traceability_coverage import register_traceability_coverage_routes
 from .routes.analytics_dashboard import register_analytics_dashboard_routes
 from .routes.remaining_routes import register_remaining_routes
@@ -64,6 +65,9 @@ register_user_routes(app)
 register_system_settings_routes(app)
 register_project_routes(app)
 register_test_management_routes(app)
+# Register before requirements_defects_plans so the static /requirements/coverage
+# and /requirements/comments/* paths are matched ahead of /requirements/{requirement_id}.
+register_requirement_history_routes(app)
 register_requirements_defects_plans_routes(app)
 register_traceability_coverage_routes(app)
 register_analytics_dashboard_routes(app)
