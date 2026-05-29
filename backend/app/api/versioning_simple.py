@@ -105,20 +105,23 @@ def compare_versions(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Compare two versions"""
-    from_version_id = compare_data.get("from_version_id")
-    to_version_id = compare_data.get("to_version_id")
-    
-    # Get versions to check permissions
-    from_version = versioning_service.get_version(from_version_id)
-    to_version = versioning_service.get_version(to_version_id)
-    
-    if not from_version or not to_version:
-        raise HTTPException(status_code=404, detail="One or both versions not found")
-    
-    # Check permissions for both versions
+    # Check permissions
     if not has_permission(current_user, "read"):
         raise HTTPException(status_code=403, detail="No permission to read versions")
-    
+
+    from_version_id = compare_data.get("from_version_id")
+    to_version_id = compare_data.get("to_version_id")
+
+    if from_version_id is None or to_version_id is None:
+        raise HTTPException(status_code=422, detail="from_version_id and to_version_id are required")
+
+    # Get versions to confirm they exist
+    from_version = versioning_service.get_version(from_version_id)
+    to_version = versioning_service.get_version(to_version_id)
+
+    if not from_version or not to_version:
+        raise HTTPException(status_code=404, detail="One or both versions not found")
+
     try:
         comparison = versioning_service.compare_versions(
             from_version_id=from_version_id,
@@ -148,18 +151,23 @@ def create_branch(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Create a branch from a specific version"""
-    parent_version_id = branch_data.get("parent_version_id")
-    branch_name = branch_data.get("branch_name")
-    reason = branch_data.get("reason", "")
-    
-    parent_version = versioning_service.get_version(parent_version_id)
-    if not parent_version:
-        raise HTTPException(status_code=404, detail="Parent version not found")
-    
     # Check permissions
     if not has_permission(current_user, "write"):
         raise HTTPException(status_code=403, detail="No permission to create branch")
-    
+
+    parent_version_id = branch_data.get("parent_version_id")
+    branch_name = (branch_data.get("branch_name") or "").strip()
+    reason = branch_data.get("reason", "")
+
+    if parent_version_id is None:
+        raise HTTPException(status_code=422, detail="parent_version_id is required")
+    if not branch_name:
+        raise HTTPException(status_code=422, detail="branch_name is required")
+
+    parent_version = versioning_service.get_version(parent_version_id)
+    if not parent_version:
+        raise HTTPException(status_code=404, detail="Parent version not found")
+
     try:
         branch = versioning_service.create_branch(
             parent_version_id=parent_version_id,
@@ -188,13 +196,16 @@ def rollback_to_version(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Rollback a test case to a specific version"""
-    target_version_id = rollback_data.get("target_version_id")
-    reason = rollback_data.get("reason", "Rollback")
-    
     # Check permissions
     if not has_permission(current_user, "write"):
         raise HTTPException(status_code=403, detail="No permission to rollback test case")
-    
+
+    target_version_id = rollback_data.get("target_version_id")
+    reason = rollback_data.get("reason", "Rollback")
+
+    if target_version_id is None:
+        raise HTTPException(status_code=422, detail="target_version_id is required")
+
     try:
         rollback_version = versioning_service.rollback_to_version(
             test_case_id=test_case_id,
@@ -241,7 +252,9 @@ def get_version_stats(
         else 0
     )
     
-    last_updated = versions[0].created_at if versions else None
+    # versions are ordered by version number, not creation time, so take the
+    # most recent created_at explicitly
+    last_updated = max((v.created_at for v in versions), default=None)
     
     return {
         "test_case_id": test_case_id,

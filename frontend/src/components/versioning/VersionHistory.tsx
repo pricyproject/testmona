@@ -120,13 +120,19 @@ export const VersionHistory: React.FC<VersionHistoryProps> = ({
   };
 
   const handleCreateBranch = async (version: TestCaseVersion) => {
-    const branchName = prompt(`Enter branch name for ${version.version_string}:`);
-    if (!branchName) return;
+    const input = prompt(`Enter branch name for ${version.version_string}:`);
+    if (input === null) return; // user cancelled
+
+    const branchName = input.trim();
+    if (!branchName) {
+      alert('Branch name cannot be empty.');
+      return;
+    }
 
     try {
       await versioningApi.createBranch(
-        version.id, 
-        branchName, 
+        version.id,
+        branchName,
         `Created branch from version ${version.version_string}`
       );
       await fetchVersions(); // Refresh the version list
