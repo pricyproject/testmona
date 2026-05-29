@@ -54,6 +54,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
       test_run: 'test run',
       test_case: 'test case',
       defect: 'defect',
+      requirement: 'requirement',
     };
 
     return entityType ? labels[entityType] || entityType.replace(/_/g, ' ') : '';
@@ -70,6 +71,9 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
         navigate(`/defects/${notification.related_entity_id}`);
       } else if (notification.related_entity_type === 'test_case') {
         navigate(`/test-cases/${notification.related_entity_id}`);
+      } else if (notification.related_entity_type === 'requirement') {
+        const response = await api.get(`/requirements/${notification.related_entity_id}`);
+        navigate(`/projects/${response.data.project_id}/requirements/${notification.related_entity_id}`);
       }
       setIsOpen(false);
     } catch (error) {

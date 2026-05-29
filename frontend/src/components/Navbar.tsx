@@ -128,8 +128,12 @@ export function Navbar({
     };
 
     fetchUnreadCount();
+    window.addEventListener('notifications:refresh', fetchUnreadCount);
     const interval = setInterval(fetchUnreadCount, 60000);
-    return () => clearInterval(interval);
+    return () => {
+      window.removeEventListener('notifications:refresh', fetchUnreadCount);
+      clearInterval(interval);
+    };
   }, [user]);
 
   const SidebarToggleIcon = isSidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
