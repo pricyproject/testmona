@@ -659,9 +659,11 @@ def register_system_settings_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        # For global parameters (project_id is None), require admin permission
+        # Cross-project global parameters (project_id is None) are admin-or-higher
+        # only. ``manage_users`` is held globally only by superusers and the ADMIN
+        # role, so it cleanly expresses "admin or higher".
         if parameter.project_id is None:
-            if not current_user.is_superuser:
+            if not rbac.has_global_permission(current_user, "manage_users"):
                 raise HTTPException(status_code=403, detail="Only admins can create global parameters")
         else:
             if not rbac.has_permission(current_user, "write", parameter.project_id, db):
@@ -705,9 +707,15 @@ def register_system_settings_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        # Cross-project globals are visible to admins-or-higher only; a project's
+        # own parameters require read access to that specific project.
+        if project_id is None:
+            if not rbac.has_global_permission(current_user, "manage_users"):
+                raise HTTPException(status_code=403, detail="Only admins can view global parameters")
+        else:
+            if not rbac.has_permission(current_user, "read", project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+
         try:
             return crud.get_global_parameters(db, project_id=project_id, skip=skip, limit=limit)
         except Exception as e:
@@ -724,14 +732,14 @@ def register_system_settings_routes(app):
         if parameter is None:
             raise HTTPException(status_code=404, detail="Global parameter not found")
         
-        # For global parameters (project_id is None), require admin permission
+        # Cross-project global parameters are admin-or-higher only.
         if parameter.project_id is None:
-            if not current_user.is_superuser:
+            if not rbac.has_global_permission(current_user, "manage_users"):
                 raise HTTPException(status_code=403, detail="Only admins can access global parameters")
         else:
             if not rbac.has_permission(current_user, "read", parameter.project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
         return parameter
 
     @app.put("/global-parameters/{param_id}", response_model=schemas.GlobalParameter)
@@ -745,9 +753,9 @@ def register_system_settings_routes(app):
         if db_parameter is None:
             raise HTTPException(status_code=404, detail="Global parameter not found")
         
-        # For global parameters (project_id is None), require admin permission
+        # Cross-project global parameters are admin-or-higher only.
         if db_parameter.project_id is None:
-            if not current_user.is_superuser:
+            if not rbac.has_global_permission(current_user, "manage_users"):
                 raise HTTPException(status_code=403, detail="Only admins can modify global parameters")
         else:
             if not rbac.has_permission(current_user, "write", db_parameter.project_id, db):
@@ -793,9 +801,9 @@ def register_system_settings_routes(app):
         if db_parameter is None:
             raise HTTPException(status_code=404, detail="Global parameter not found")
         
-        # For global parameters (project_id is None), require admin permission
+        # Cross-project global parameters are admin-or-higher only.
         if db_parameter.project_id is None:
-            if not current_user.is_superuser:
+            if not rbac.has_global_permission(current_user, "manage_users"):
                 raise HTTPException(status_code=403, detail="Only admins can delete global parameters")
         else:
             if not rbac.has_permission(current_user, "delete", db_parameter.project_id, db):

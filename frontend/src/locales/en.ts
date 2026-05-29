@@ -2972,6 +2972,18 @@ export const en = {
 
   // Global parameters
   globalParametersDescription: 'Reusable single-value parameters for this project (constants, endpoints, secrets).',
+  mergedParametersDescription: 'Parameters available to this project, including inherited cross-project globals.',
+  projectParametersSection: 'This project',
+  crossProjectParameters: 'Global · cross-project',
+  crossProjectParametersDescription: 'Available to every project. Managed by administrators.',
+  overridesGlobalBadge: 'Overrides global',
+  overriddenByProjectBadge: 'Overridden by project',
+  parameterScope: 'Scope',
+  scopeThisProject: 'This project',
+  scopeGlobal: 'Global (all projects)',
+  noProjectParametersYet: 'No project parameters yet.',
+  noGlobalParametersYet: 'No global parameters yet.',
+  onlyAdminsManageGlobalParameters: 'Only administrators can manage global parameters.',
   createParameter: 'Create Parameter',
   createNewParameter: 'Create New Parameter',
   editParameter: 'Edit Parameter',

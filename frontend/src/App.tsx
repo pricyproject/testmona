@@ -42,7 +42,6 @@ const MilestoneDetail = lazyPage(() => import('@/pages/MilestoneDetail'), 'Miles
 const CustomFields = lazyPage(() => import('@/pages/CustomFields'), 'CustomFields');
 const SharedSteps = lazyPage(() => import('@/pages/SharedSteps'), 'SharedSteps');
 const GlobalParameters = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParameters');
-const GlobalParametersAdmin = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParametersAdmin');
 const TestData = lazyPage(() => import('@/pages/TestData'), 'TestData');
 const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 'ActivityManagement');
 const Settings = lazyPage(() => import('@/pages/Settings'), 'Settings');
@@ -329,7 +328,9 @@ function AppWithRouter() {
         } />
         <Route path="/environments" element={<Navigate to="/projects" replace />} />
         <Route path="/activity-management" element={<ActivityManagement />} />
-        <Route path="/global-parameters" element={<GlobalParametersAdmin />} />
+        {/* Cross-project globals were merged into the per-project page; keep the
+            old URL working by redirecting it. */}
+        <Route path="/global-parameters" element={<Navigate to="/projects" replace />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/api-tokens" element={<ApiTokens />} />

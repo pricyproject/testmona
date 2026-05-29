@@ -2874,6 +2874,18 @@ export const ar = {
 
   // المعاملات العامة
   globalParametersDescription: 'معاملات أحادية القيمة قابلة لإعادة الاستخدام لهذا المشروع (ثوابت، عناوين، أسرار).',
+  mergedParametersDescription: 'المعاملات المتاحة لهذا المشروع، بما في ذلك المعاملات العامة المشتركة بين المشاريع الموروثة.',
+  projectParametersSection: 'هذا المشروع',
+  crossProjectParameters: 'عام · مشترك بين المشاريع',
+  crossProjectParametersDescription: 'متاح لكل المشاريع. تتم إدارته بواسطة المسؤولين.',
+  overridesGlobalBadge: 'يتجاوز المعامل العام',
+  overriddenByProjectBadge: 'متجاوَز بواسطة المشروع',
+  parameterScope: 'النطاق',
+  scopeThisProject: 'هذا المشروع',
+  scopeGlobal: 'عام (كل المشاريع)',
+  noProjectParametersYet: 'لا توجد معاملات للمشروع بعد.',
+  noGlobalParametersYet: 'لا توجد معاملات عامة بعد.',
+  onlyAdminsManageGlobalParameters: 'يمكن للمسؤولين فقط إدارة المعاملات العامة.',
   createParameter: 'إنشاء معامل',
   createNewParameter: 'إنشاء معامل جديد',
   editParameter: 'تعديل المعامل',

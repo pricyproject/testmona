@@ -66,7 +66,7 @@ export function Sidebar({
   onClose
 }: SidebarProps) {
   const location = useLocation();
-  const { logout, user } = useAuthStore();
+  const { logout } = useAuthStore();
   const { selectedProject, projects } = useProjectStore();
   const { t, isRTL } = useTranslation();
   const { appName, appLogoUrl } = useAppName(false);
@@ -104,7 +104,6 @@ export function Sidebar({
             { name: t('projects'), href: '/projects', icon: FolderOpen },
             { name: t('environments'), href: '/environments', icon: Settings },
             { name: t('activity'), href: '/activity-management', icon: BarChart3 },
-            ...(user?.is_superuser ? [{ name: t('globalParametersAdmin'), href: '/global-parameters', icon: Wrench }] : []),
           ]
         },
         {
@@ -165,7 +164,6 @@ export function Sidebar({
         name: t('global'),
         items: [
           { name: t('environments'), href: `/projects/${projectId}/environments`, icon: Settings },
-          ...(user?.is_superuser ? [{ name: t('globalParametersAdmin'), href: '/global-parameters', icon: Wrench }] : []),
         ]
       },
       {

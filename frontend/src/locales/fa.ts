@@ -2844,6 +2844,18 @@ export const fa = {
 
   // پارامترهای سراسری
   globalParametersDescription: 'پارامترهای تک‌مقداری قابل استفاده مجدد برای این پروژه (ثابت‌ها، آدرس‌ها، اسرار).',
+  mergedParametersDescription: 'پارامترهای در دسترس این پروژه، شامل پارامترهای سراسری بین‌پروژه‌ای به‌ارث‌رسیده.',
+  projectParametersSection: 'این پروژه',
+  crossProjectParameters: 'سراسری · بین‌پروژه‌ای',
+  crossProjectParametersDescription: 'در دسترس همه پروژه‌ها. توسط مدیران مدیریت می‌شود.',
+  overridesGlobalBadge: 'بازنویسی پارامتر سراسری',
+  overriddenByProjectBadge: 'بازنویسی‌شده توسط پروژه',
+  parameterScope: 'دامنه',
+  scopeThisProject: 'این پروژه',
+  scopeGlobal: 'سراسری (همه پروژه‌ها)',
+  noProjectParametersYet: 'هنوز پارامتری برای پروژه وجود ندارد.',
+  noGlobalParametersYet: 'هنوز پارامتر سراسری وجود ندارد.',
+  onlyAdminsManageGlobalParameters: 'فقط مدیران می‌توانند پارامترهای سراسری را مدیریت کنند.',
   createParameter: 'ایجاد پارامتر',
   createNewParameter: 'ایجاد پارامتر جدید',
   editParameter: 'ویرایش پارامتر',
