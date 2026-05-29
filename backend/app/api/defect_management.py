@@ -315,9 +315,14 @@ async def upload_defect_attachment(
     content = await validate_file_size(file, MAX_ATTACHMENT_SIZE, "Attachment")
     file_size = len(content)
     
+    # Validate defect ID before using it in a filesystem path
+    if defect_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid defect ID")
+    safe_defect_id = str(defect_id)
+
     # Create upload directory if it doesn't exist
     base_upload_dir = pathlib.Path("uploads/defects").resolve()
-    upload_dir_path = (base_upload_dir / str(defect_id)).resolve()
+    upload_dir_path = (base_upload_dir / safe_defect_id).resolve()
     try:
         upload_dir_path.relative_to(base_upload_dir)
     except ValueError:
