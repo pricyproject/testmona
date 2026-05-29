@@ -431,6 +431,56 @@ export interface RequirementTraceabilitySummary {
   blocked_related_runs: number;
 }
 
+export type RequirementCoverageStatus = 'covered' | 'partial' | 'failing' | 'blocked' | 'uncovered';
+
+export interface RequirementCoverageItem {
+  requirement_id: number;
+  linked_count: number;
+  active_count: number;
+  failed_related_runs: number;
+  blocked_related_runs: number;
+  status: RequirementCoverageStatus;
+}
+
+export interface RequirementCoverageList {
+  items: RequirementCoverageItem[];
+}
+
+export interface RequirementVersionAuthor {
+  id: number;
+  username: string;
+  full_name?: string | null;
+}
+
+export interface RequirementVersion {
+  id: number;
+  requirement_id: number;
+  version_number: number;
+  action: 'created' | 'updated' | 'restored' | string;
+  title: string;
+  description?: string | null;
+  acceptance_criteria?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  tags?: string | null;
+  estimated_effort?: number | null;
+  change_note?: string | null;
+  created_at: string;
+  author?: RequirementVersionAuthor | null;
+}
+
+export interface RequirementComment {
+  id: number;
+  requirement_id: number;
+  parent_id?: number | null;
+  body: string;
+  is_resolved: boolean;
+  created_at: string;
+  updated_at?: string | null;
+  author?: RequirementVersionAuthor | null;
+  replies: RequirementComment[];
+}
+
 export interface RequirementLinkedTestCase extends TestCase {
   suite_name?: string;
   section_name?: string;

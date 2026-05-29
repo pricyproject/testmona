@@ -26,6 +26,8 @@ import { isGherkinText } from '@/components/requirements/gherkin';
 import { decodeHtmlEntities, decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup } from '@/components/requirements/richText';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
+import { RequirementVersionHistory } from '@/components/requirements/RequirementVersionHistory';
+import { RequirementComments } from '@/components/requirements/RequirementComments';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { aiManagerAPI, AIManagerStatus, requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
@@ -270,6 +272,7 @@ export function RequirementDetail() {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const [requirement, setRequirement] = useState<Requirement | null>(null);
+  const [requirementRefreshKey, setRequirementRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [testSuites, setTestSuites] = useState<TestSuite[]>([]);
   const [sections, setSections] = useState<TestCaseSection[]>([]);
@@ -388,7 +391,7 @@ export function RequirementDetail() {
     return () => {
       isMounted = false;
     };
-  }, [projectId, requirementId, t, toast]);
+  }, [projectId, requirementId, requirementRefreshKey, t, toast]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1502,6 +1505,18 @@ export function RequirementDetail() {
                 </div>
               </section>
             )}
+
+            {requirement && (
+              <RequirementVersionHistory
+                requirementId={requirement.id}
+                canEdit
+                onRestored={() => setRequirementRefreshKey((key) => key + 1)}
+              />
+            )}
+
+            {requirement && (
+              <RequirementComments requirementId={requirement.id} projectId={requirement.project_id} canComment />
+            )}
           </main>
 
           {showMetadata && (
@@ -2234,13 +2249,13 @@ export function RequirementDetail() {
           </DialogContent>
         </Dialog>
         {requirement?.project_id && requirement?.id && (
-          <div className="mt-6">
-            <CustomFieldsPanel
-              projectId={Number(requirement.project_id)}
-              entityType="requirement"
-              entityId={Number(requirement.id)}
-            />
-          </div>
+          <CustomFieldsPanel
+            projectId={Number(requirement.project_id)}
+            entityType="requirement"
+            entityId={Number(requirement.id)}
+            hideWhenEmpty
+            className="mt-6"
+          />
         )}
       </div>
     </div>

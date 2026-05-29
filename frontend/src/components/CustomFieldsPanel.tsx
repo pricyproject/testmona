@@ -33,6 +33,7 @@ interface Props {
   entityId: number;
   /** Disables every input + save when the parent says read-only. */
   readOnly?: boolean;
+  hideWhenEmpty?: boolean;
   className?: string;
 }
 
@@ -55,7 +56,7 @@ const splitMultiselect = (value: string | null | undefined): string[] => {
     .filter(Boolean);
 };
 
-export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = false, className }: Props) {
+export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = false, hideWhenEmpty = false, className }: Props) {
   const { t } = useTranslation();
   const { toast } = useToast();
 
@@ -247,6 +248,10 @@ export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = 
       />
     );
   };
+
+  if (!isLoading && !error && hideWhenEmpty && definitions.length === 0) {
+    return null;
+  }
 
   return (
     <Card className={className}>

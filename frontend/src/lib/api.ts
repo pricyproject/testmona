@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -499,6 +499,39 @@ export const requirementsAPI = {
     const response = await api.post('/requirements/fetch-external-document', payload);
     return response.data;
   },
+  importFromTracker: async (payload: { project_id: number; source: 'asana' | 'linear' | 'monday'; url: string }) => {
+    const response = await api.post('/requirements/import-from-tracker', payload);
+    return response.data;
+  },
+  coverage: async (projectId: number): Promise<RequirementCoverageList> => {
+    const response = await api.get('/requirements/coverage', { params: { project_id: projectId } });
+    return response.data;
+  },
+  // Version history
+  listVersions: async (id: number): Promise<RequirementVersion[]> => {
+    const response = await api.get(`/requirements/${id}/versions`);
+    return response.data;
+  },
+  restoreVersion: async (id: number, versionId: number, changeNote?: string): Promise<Requirement> => {
+    const response = await api.post(`/requirements/${id}/versions/${versionId}/restore`, { change_note: changeNote ?? null });
+    return response.data;
+  },
+  // Comments / review threads
+  listComments: async (id: number): Promise<RequirementComment[]> => {
+    const response = await api.get(`/requirements/${id}/comments`);
+    return response.data;
+  },
+  addComment: async (id: number, payload: { body: string; parent_id?: number | null }): Promise<RequirementComment> => {
+    const response = await api.post(`/requirements/${id}/comments`, payload);
+    return response.data;
+  },
+  updateComment: async (commentId: number, payload: { body?: string; is_resolved?: boolean }): Promise<RequirementComment> => {
+    const response = await api.patch(`/requirements/comments/${commentId}`, payload);
+    return response.data;
+  },
+  deleteComment: async (commentId: number): Promise<void> => {
+    await api.delete(`/requirements/comments/${commentId}`);
+  },
   searchTestCases: async (
     id: number,
     filters: {
@@ -842,7 +875,7 @@ export const usersAPI = {
 };
 
 // Saved filters
-export type SavedFilterScope = 'test_cases' | 'defects';
+export type SavedFilterScope = 'test_cases' | 'defects' | 'requirements';
 
 export interface SavedFilter {
   id: number;
@@ -953,6 +986,14 @@ export const bulkAPI = {
   },
   defects: async (payload: { ids: number[]; status?: string; severity?: string; priority?: string; assigned_to?: number; clear_assignee?: boolean }) => {
     const response = await api.patch('/defects/bulk', payload);
+    return response.data as { updated: number; skipped_ids: number[]; reason?: string | null };
+  },
+  requirements: async (payload: { ids: number[]; status?: string; priority?: string; assigned_to?: number; clear_assignee?: boolean; tags?: string; add_tags?: string; remove_tags?: string }) => {
+    const response = await api.patch('/requirements/bulk', payload);
+    return response.data as { updated: number; skipped_ids: number[]; reason?: string | null };
+  },
+  deleteRequirements: async (payload: { ids: number[] }) => {
+    const response = await api.post('/requirements/bulk/delete', payload);
     return response.data as { updated: number; skipped_ids: number[]; reason?: string | null };
   },
 };
