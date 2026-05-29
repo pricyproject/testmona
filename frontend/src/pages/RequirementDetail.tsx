@@ -23,43 +23,13 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
 import { isGherkinText } from '@/components/requirements/gherkin';
+import { decodeHtmlEntities, decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup } from '@/components/requirements/richText';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { aiManagerAPI, AIManagerStatus, requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
 import { Requirement, RequirementLinkedTestCase, RequirementLinkedTestCaseHistoryItem, RequirementRelationshipSummary, RequirementTraceabilitySummary, TestCaseSection, TestSuite } from '@/types';
-
-const decodeHtmlEntities = (value?: string | null): string => {
-  if (!value) return '';
-  if (typeof window === 'undefined') return value;
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = value;
-  return textarea.value;
-};
-
-// Requirement rich text is stored HTML-escaped (and some legacy rows are
-// double-escaped). Decode up to twice so real markup is recovered.
-const decodeEntitiesDeep = (value?: string | null): string => {
-  if (!value) return '';
-  let decoded = decodeHtmlEntities(value);
-  if (/&(lt|gt|amp|quot|#\d+);/i.test(decoded)) {
-    decoded = decodeHtmlEntities(decoded);
-  }
-  return decoded;
-};
-
-const htmlToReadableText = (value?: string | null): string => {
-  const decoded = decodeEntitiesDeep(value);
-  if (!decoded.trim()) return '';
-  if (typeof window === 'undefined' || !/<[a-z][\s\S]*>/i.test(decoded)) {
-    return decoded;
-  }
-
-  const parser = new DOMParser();
-  const documentValue = parser.parseFromString(decoded, 'text/html');
-  return documentValue.body.textContent?.replace(/\n{3,}/g, '\n\n').trim() || decoded;
-};
 
 const ALLOWED_HTML_TAGS = new Set([
   'a', 'b', 'blockquote', 'br', 'code', 'col', 'colgroup', 'div', 'em', 'figure', 'figcaption',
@@ -114,8 +84,6 @@ const sanitizeRichHtml = (rawHtml: string): string => {
   visit(documentValue.body);
   return documentValue.body.innerHTML;
 };
-
-const isHtmlMarkup = (value: string): boolean => /<[a-z][\s\S]*>/i.test(value);
 
 const hasRenderableContent = (decodedHtml: string): boolean => {
   if (!decodedHtml.trim()) return false;

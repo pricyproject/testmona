@@ -38,8 +38,10 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI } from '@/lib/api';
 import { Requirement, RequirementCreate, RequirementUpdate } from '@/types';
-import { ContentEditor } from '@/components/ui/content-editor';
+import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
+import { isGherkinText } from '@/components/requirements/gherkin';
+import { decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup, richTextToMarkdownForEdit } from '@/components/requirements/richText';
 import { diffWords } from 'diff';
 
 const parsePositiveQueryNumber = (value: string | null): number | undefined => {
@@ -172,9 +174,6 @@ export function Requirements() {
     '      | input | result |',
     '      | value | expected |',
   ].join('\n');
-
-  const looksLikeGherkin = (value: string): boolean =>
-    /^\s*(Feature|Scenario|Scenario Outline|Background|Given|When|Then|And|But):?\b/im.test(value);
 
   const isValidExternalDocumentUrl = (value: string): boolean => {
     try {
@@ -341,11 +340,11 @@ export function Requirements() {
       
       const newRequirement: RequirementCreate = {
         title: reqTitle,
-        description: reqDescription,
+        description: markdownToHtml(reqDescription),
         requirement_id: reqId,
         priority: reqPriority as any,
         status: reqStatus as any,
-        acceptance_criteria: reqAcceptanceCriteria,
+        acceptance_criteria: useGherkinSyntax ? reqAcceptanceCriteria : markdownToHtml(reqAcceptanceCriteria),
         tags: reqTags,
         estimated_effort: estimatedEffort,
         project_id: parseInt(projectId),
@@ -375,28 +374,38 @@ export function Requirements() {
   };
 
   const handleEditRequirement = (requirement: Requirement) => {
+    const decodedAcceptance = decodeEntitiesDeep(requirement.acceptance_criteria);
+    const readableAcceptance = htmlToReadableText(requirement.acceptance_criteria);
+    const shouldUseGherkinSyntax = isGherkinText(readableAcceptance);
+    const descriptionForEdit = richTextToMarkdownForEdit(requirement.description);
+    const acceptanceForEdit = shouldUseGherkinSyntax
+      ? readableAcceptance
+      : isHtmlMarkup(decodedAcceptance)
+        ? htmlToMarkdown(decodedAcceptance)
+        : decodedAcceptance;
+
     setSelectedRequirement(requirement);
     setReqTitle(requirement.title);
-    setReqDescription(requirement.description || '');
+    setReqDescription(descriptionForEdit);
     setReqId(requirement.requirement_id);
     setReqPriority(requirement.priority);
     setReqStatus(requirement.status);
-    setReqAcceptanceCriteria(requirement.acceptance_criteria || '');
+    setReqAcceptanceCriteria(acceptanceForEdit);
     setReqTags(requirement.tags || '');
     setReqEstimatedEffort(requirement.estimated_effort?.toString() || '');
-    setUseGherkinSyntax(looksLikeGherkin(requirement.acceptance_criteria || ''));
+    setUseGherkinSyntax(shouldUseGherkinSyntax);
     setExternalDocumentUrl('');
     setShowExternalImport(false);
     setShowAdvancedRequirementTools(false);
     setInitialFormState({
       title: requirement.title,
-      description: requirement.description || '',
+      description: descriptionForEdit,
       priority: requirement.priority,
       status: requirement.status,
-      acceptanceCriteria: requirement.acceptance_criteria || '',
+      acceptanceCriteria: acceptanceForEdit,
       tags: requirement.tags || '',
       estimatedEffort: requirement.estimated_effort?.toString() || '',
-      useGherkinSyntax: looksLikeGherkin(requirement.acceptance_criteria || ''),
+      useGherkinSyntax: shouldUseGherkinSyntax,
     });
     setContentVersions([]);
     setCompareFromId('');
@@ -431,10 +440,10 @@ export function Requirements() {
       
       const updateData: RequirementUpdate = {
         title: reqTitle,
-        description: reqDescription,
+        description: markdownToHtml(reqDescription),
         priority: reqPriority as any,
         status: reqStatus as any,
-        acceptance_criteria: reqAcceptanceCriteria,
+        acceptance_criteria: useGherkinSyntax ? reqAcceptanceCriteria : markdownToHtml(reqAcceptanceCriteria),
         tags: reqTags,
         estimated_effort: estimatedEffort,
       };
@@ -519,7 +528,7 @@ export function Requirements() {
       setReqTitle(documentData.title || reqTitle);
       setReqDescription(buildExternalDocumentText(documentData, reqDescription));
       setReqAcceptanceCriteria(documentData.acceptance_criteria || reqAcceptanceCriteria);
-      setUseGherkinSyntax(looksLikeGherkin(documentData.acceptance_criteria || reqAcceptanceCriteria));
+      setUseGherkinSyntax(isGherkinText(documentData.acceptance_criteria || reqAcceptanceCriteria));
       toast({
         title: t('success'),
         description: t('externalDocImported', { title: documentData.title || url }),
@@ -723,27 +732,29 @@ export function Requirements() {
       if (rawDraft) {
         try {
           const draft = JSON.parse(rawDraft);
+          const draftAcceptance = draft.reqAcceptanceCriteria || '';
+          const draftUsesGherkin = Boolean(draft.useGherkinSyntax || isGherkinText(draftAcceptance));
           setReqTitle(draft.reqTitle || '');
-          setReqDescription(draft.reqDescription || '');
+          setReqDescription(richTextToMarkdownForEdit(draft.reqDescription || ''));
           setReqId(draft.reqId || generateRequirementId());
           setReqPriority(draft.reqPriority || 'medium');
           setReqStatus(draft.reqStatus || 'draft');
-          setReqAcceptanceCriteria(draft.reqAcceptanceCriteria || '');
+          setReqAcceptanceCriteria(draftUsesGherkin ? htmlToReadableText(draftAcceptance) : richTextToMarkdownForEdit(draftAcceptance));
           setReqTags(draft.reqTags || '');
           setReqEstimatedEffort(draft.reqEstimatedEffort || '');
-          setUseGherkinSyntax(Boolean(draft.useGherkinSyntax || looksLikeGherkin(draft.reqAcceptanceCriteria || '')));
+          setUseGherkinSyntax(draftUsesGherkin);
           setExternalDocumentUrl('');
           setShowExternalImport(false);
           setShowAdvancedRequirementTools(false);
           setInitialFormState({
             title: draft.reqTitle || '',
-            description: draft.reqDescription || '',
+            description: richTextToMarkdownForEdit(draft.reqDescription || ''),
             priority: draft.reqPriority || 'medium',
             status: draft.reqStatus || 'draft',
-            acceptanceCriteria: draft.reqAcceptanceCriteria || '',
+            acceptanceCriteria: draftUsesGherkin ? htmlToReadableText(draftAcceptance) : richTextToMarkdownForEdit(draftAcceptance),
             tags: draft.reqTags || '',
             estimatedEffort: draft.reqEstimatedEffort || '',
-            useGherkinSyntax: Boolean(draft.useGherkinSyntax || looksLikeGherkin(draft.reqAcceptanceCriteria || '')),
+            useGherkinSyntax: draftUsesGherkin,
           });
           setContentVersions([]);
           setCompareFromId('');
@@ -964,7 +975,7 @@ export function Requirements() {
           value={reqAcceptanceCriteria}
           onChange={setReqAcceptanceCriteria}
           placeholder={t('enterAcceptanceCriteria')}
-          format="html"
+          format="markdown"
           dir={isRTL ? 'rtl' : 'ltr'}
           minHeight="170px"
         />
@@ -1075,7 +1086,7 @@ export function Requirements() {
         value={reqDescription}
         onChange={setReqDescription}
         placeholder={t('enterRequirementDescription')}
-        format="html"
+        format="markdown"
         dir={isRTL ? 'rtl' : 'ltr'}
         minHeight="220px"
       />
