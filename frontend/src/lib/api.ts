@@ -1165,6 +1165,12 @@ export const analyticsAPI = {
     const response = await api.get(`/analytics/dashboard/analytics${params}`);
     return response.data;
   },
+  getAnalyticsTimeSeries: async (projectId: number, timeRange: string, granularity = "day") => {
+    const response = await api.get("/analytics/time-series", {
+      params: { project_id: projectId, time_range: timeRange, granularity },
+    });
+    return response.data;
+  },
   getGranularInsights: async (params: { project_id: number; filter_type: string; time_range?: string }) => {
     const response = await api.get(`/analytics/granular-insights`, { params });
     return response.data;
