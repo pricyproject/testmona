@@ -21,6 +21,7 @@ from ..crud import (
     update_dashboard_widget, delete_dashboard_widget,
     generate_dashboard_analytics
 )
+from ._analytics_shared import normalize_result_status, build_coverage_report
 
 
 def _build_shareable_report_content(db, project_id, report_type, title, generated_by):
@@ -90,6 +91,317 @@ def _build_shareable_report_content(db, project_id, report_type, title, generate
 
 def register_analytics_dashboard_routes(app):
     """Register analytics and dashboard routes with the FastAPI app."""
+
+    @app.get("/analytics/dashboard/analytics")
+    def get_dashboard_analytics_get(
+        project_id: int,
+        time_range: str = "7d",
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Get dashboard analytics for a project with time range filtering"""
+        if time_range not in {"24h", "7d", "30d", "90d"}:
+            raise HTTPException(status_code=400, detail="time_range must be one of 24h, 7d, 30d, or 90d")
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        try:
+            return generate_dashboard_analytics(db, project_id, time_range)
+        except Exception as e:
+            print(f"Error in get_dashboard_analytics_get: {e}")
+            raise HTTPException(status_code=500, detail="Failed to generate analytics")
+
+    @app.get("/analytics/time-series")
+    def get_analytics_time_series(
+        project_id: int,
+        time_range: str = "30d",
+        granularity: str = "day",
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Daily project quality trend for reports overview charts."""
+        if time_range not in {"24h", "7d", "30d", "90d"}:
+            raise HTTPException(status_code=400, detail="time_range must be one of 24h, 7d, 30d, or 90d")
+        if granularity != "day":
+            raise HTTPException(status_code=400, detail="Only day granularity is currently supported")
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        from sqlalchemy import func
+        from ..models import Defect, TestCase, TestResult, TestRun, TestSuite
+
+        days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}[time_range]
+        end_dt = datetime.utcnow()
+        start_dt = end_dt - timedelta(days=days)
+        test_suite_ids = [row.id for row in db.query(TestSuite.id).filter(TestSuite.project_id == project_id).all()]
+        total_test_cases = (
+            db.query(TestCase)
+            .filter(TestCase.test_suite_id.in_(test_suite_ids), TestCase.is_deleted == False)
+            .count()
+            if test_suite_ids else 0
+        )
+
+        result_rows = db.query(
+            func.date(TestResult.executed_at).label("date"),
+            TestResult.status.label("status"),
+            func.count(TestResult.id).label("count"),
+        ).join(TestRun).filter(
+            TestRun.project_id == project_id,
+            TestResult.executed_at >= start_dt,
+            TestResult.executed_at <= end_dt,
+            TestResult.executed_at.isnot(None),
+        ).group_by(func.date(TestResult.executed_at), TestResult.status).all()
+
+        added_rows = db.query(
+            func.date(TestCase.created_at).label("date"),
+            func.count(TestCase.id).label("count"),
+        ).join(TestSuite).filter(
+            TestSuite.project_id == project_id,
+            TestCase.created_at >= start_dt,
+            TestCase.created_at <= end_dt,
+            TestCase.is_deleted == False,
+        ).group_by(func.date(TestCase.created_at)).all()
+
+        defect_rows = db.query(
+            func.date(Defect.created_at).label("date"),
+            func.count(Defect.id).label("count"),
+        ).filter(
+            Defect.project_id == project_id,
+            Defect.created_at >= start_dt,
+            Defect.created_at <= end_dt,
+        ).group_by(func.date(Defect.created_at)).all()
+
+        by_date: dict[str, dict[str, int]] = {}
+        for row in result_rows:
+            date_key = str(row.date)
+            status = normalize_result_status(row.status)
+            by_date.setdefault(date_key, {"passed": 0, "failed": 0, "blocked": 0, "skipped": 0})
+            if status in by_date[date_key]:
+                by_date[date_key][status] += int(row.count or 0)
+
+        added_by_date = {str(row.date): int(row.count or 0) for row in added_rows}
+        defects_by_date = {str(row.date): int(row.count or 0) for row in defect_rows}
+        current_coverage = build_coverage_report(db, project_id).get("coverage_percentage", 0)
+
+        points = []
+        current_day = start_dt.date()
+        while current_day <= end_dt.date():
+            date_key = current_day.isoformat()
+            statuses = by_date.get(date_key, {"passed": 0, "failed": 0, "blocked": 0, "skipped": 0})
+            executed = sum(statuses.values())
+            passed = statuses["passed"]
+            failed = statuses["failed"]
+            points.append({
+                "date": date_key,
+                "executed": executed,
+                "passed": passed,
+                "failed": failed,
+                "blocked": statuses["blocked"],
+                "skipped": statuses["skipped"],
+                "pass_rate": round((passed / executed) * 100, 1) if executed else 0,
+                "failure_rate": round((failed / executed) * 100, 1) if executed else 0,
+                "test_cases_added": added_by_date.get(date_key, 0),
+                "defects_found": defects_by_date.get(date_key, 0),
+            })
+            current_day += timedelta(days=1)
+
+        return {
+            "project_id": project_id,
+            "time_range": time_range,
+            "granularity": granularity,
+            "start_date": start_dt.isoformat(),
+            "end_date": end_dt.isoformat(),
+            "total_test_cases": total_test_cases,
+            "points": points,
+            "summary": {
+                "total_executed": sum(point["executed"] for point in points),
+                "total_passed": sum(point["passed"] for point in points),
+                "total_failed": sum(point["failed"] for point in points),
+                "total_defects": sum(point["defects_found"] for point in points),
+                "current_requirement_coverage": current_coverage,
+            },
+        }
+
+    @app.get("/analytics/granular-insights")
+    def get_granular_insights_get(
+        project_id: int,
+        filter_type: str = "all",
+        time_range: str = "7d",
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Get granular quality insights with real period-over-period trends."""
+        if time_range not in {"24h", "7d", "30d", "90d"}:
+            raise HTTPException(status_code=400, detail="time_range must be one of 24h, 7d, 30d, or 90d")
+        if filter_type not in {"all", "failed", "slow"}:
+            raise HTTPException(status_code=400, detail="filter_type must be one of all, failed, or slow")
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # generate_dashboard_analytics already computes each metric together with a
+        # real trend (up/down/stable + change) by comparing the selected period to
+        # the one before it, so the insights carry genuine trends instead of "stable".
+        analytics = generate_dashboard_analytics(db, project_id, time_range)
+        kpi = analytics["kpi_data"]
+
+        def insight(category, metric, metric_key, suffix, detail_unit):
+            data = kpi.get(metric_key) or {"current": 0, "trend": "stable", "change": 0}
+            change = data.get("change", 0)
+            return {
+                "category": category,
+                "metric": metric,
+                "value": f"{data.get('current', 0)}{suffix}",
+                "trend": data.get("trend", "stable"),
+                "change": change,
+                "details": f"{change}{detail_unit} vs the previous period",
+            }
+
+        insights = [
+            # kpi_data["coverage"] is execution coverage (test cases executed / total),
+            # NOT requirement coverage — keep the label honest and distinct.
+            insight("Test Execution", "Execution Coverage", "coverage", "%", "%"),
+            insight("Test Execution", "Pass Rate", "passRate", "%", "%"),
+            insight("Test Execution", "Failure Rate", "failureTrends", "%", "%"),
+            insight("Test Stability", "Flakiness", "flakiness", "%", "%"),
+            insight("Test Execution", "Cycle Time", "cycleTime", "h", "h"),
+            insight("Defect Analysis", "Defect Density", "defectDensity", "", ""),
+        ]
+
+        # filter_type narrows the insights to the metrics relevant to that view.
+        if filter_type == "failed":
+            insights = [i for i in insights if i["metric"] in {"Failure Rate", "Flakiness"}]
+        elif filter_type == "slow":
+            insights = [i for i in insights if i["metric"] == "Cycle Time"]
+
+        return {
+            "project_id": project_id,
+            "filter_type": filter_type,
+            "time_range": time_range,
+            "insights": insights,
+        }
+
+    @app.get("/analytics/coverage-reports")
+    def get_coverage_reports_get(
+        project_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Get the current dynamically generated coverage report for a project."""
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return [build_coverage_report(db, project_id)]
+
+    @app.post("/analytics/coverage-reports/generate")
+    def generate_coverage_report_post(
+        request: dict,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Generate a fresh coverage report payload for the reports page."""
+        project_id = request.get("project_id")
+        if not isinstance(project_id, int) or project_id <= 0:
+            raise HTTPException(status_code=400, detail="project_id must be a positive integer")
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return build_coverage_report(db, project_id, generated=True)
+
+    @app.get("/analytics/test-execution-status")
+    def get_test_execution_status_get(
+        project_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Get test execution status for a project."""
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        from ..models import TestCase, TestResult, TestSuite
+
+        test_cases = db.query(TestCase).join(TestSuite).filter(
+            TestSuite.project_id == project_id,
+            TestCase.is_deleted == False,
+        ).all()
+        latest_statuses = []
+        for test_case in test_cases:
+            latest_result = db.query(TestResult).filter(
+                TestResult.test_case_id == test_case.id
+            ).order_by(TestResult.executed_at.desc()).first()
+            latest_statuses.append(normalize_result_status(latest_result.status) if latest_result else "not_tested")
+
+        total_tests = len(test_cases)
+        passed = latest_statuses.count("passed")
+        failed = latest_statuses.count("failed")
+        blocked = latest_statuses.count("blocked")
+        skipped = latest_statuses.count("skipped")
+        not_tested = latest_statuses.count("not_tested")
+        executed = passed + failed + blocked + skipped
+
+        return {
+            "project_id": project_id,
+            "summary": {
+                "total_test_cases": total_tests,
+                "executed_test_cases": executed,
+                "not_tested_test_cases": not_tested,
+                "passed_test_cases": passed,
+                "failed_test_cases": failed,
+                "blocked_test_cases": blocked,
+                "skipped_test_cases": skipped,
+            },
+            "status": {
+                "total_tests": total_tests,
+                "executed": executed,
+                "passed": passed,
+                "failed": failed,
+                "blocked": blocked,
+                "skipped": skipped,
+                "not_tested": not_tested,
+            },
+            "execution_rate": round((executed / total_tests) * 100, 1) if total_tests else 0,
+            "success_rate": round((passed / executed) * 100, 1) if executed else 0,
+            "status_percentages": {
+                "passed": round((passed / executed) * 100, 1) if executed else 0,
+                "failed": round((failed / executed) * 100, 1) if executed else 0,
+                "blocked": round((blocked / executed) * 100, 1) if executed else 0,
+                "skipped": round((skipped / executed) * 100, 1) if executed else 0,
+            },
+            "overall_percentages": {
+                "passed": round((passed / total_tests) * 100, 1) if total_tests else 0,
+                "failed": round((failed / total_tests) * 100, 1) if total_tests else 0,
+                "blocked": round((blocked / total_tests) * 100, 1) if total_tests else 0,
+                "skipped": round((skipped / total_tests) * 100, 1) if total_tests else 0,
+                "not_tested": round((not_tested / total_tests) * 100, 1) if total_tests else 0,
+            },
+            "last_execution": datetime.now().isoformat(),
+        }
+
+    @app.get("/analytics/root-cause-analyses")
+    def get_root_cause_analyses_get(
+        project_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Get root cause analyses for a project"""
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        analyses = get_root_cause_analyses(db, project_id=project_id)
+        return [
+            {
+                "id": analysis.id,
+                "analysis_title": analysis.analysis_title,
+                "root_cause": analysis.root_cause,
+                "impact_assessment": analysis.impact_assessment,
+                "resolution_time_hours": analysis.resolution_time_hours,
+                "fix_commit_hash": analysis.fix_commit_hash,
+                "status": analysis.status,
+                "severity": analysis.severity,
+                "defect_id": analysis.defect_id,
+                "requirement_id": analysis.requirement_id,
+                "test_case_id": analysis.test_case_id,
+                "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+            }
+            for analysis in analyses
+        ]
 
     # Dashboard Analytics
     @app.post("/analytics/dashboard")

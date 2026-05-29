@@ -2,11 +2,11 @@
 Traceability matrix, coverage reports, and Jira integration routes.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
-from .. import crud, schemas, auth, rbac
+from .. import crud, schemas, auth, rbac, models
 from ..database import get_db
 from ..auth import get_current_active_user
 from ..crud import (
@@ -14,11 +14,185 @@ from ..crud import (
     update_traceability_matrix_entry, delete_traceability_matrix_entry,
     create_coverage_report, get_coverage_reports, get_coverage_report, update_coverage_report, delete_coverage_report
 )
+from ._analytics_shared import (
+    normalize_result_status,
+    enum_value,
+    get_linked_requirement_test_case_ids,
+    add_legacy_reference_links,
+)
 
 
 def register_traceability_coverage_routes(app):
     """Register traceability, coverage, and Jira integration routes with the FastAPI app."""
-    
+
+    @app.get("/analytics/traceability-matrix")
+    def get_traceability_matrix_get(
+        project_id: int,
+        priority: Optional[str] = Query(None, description="Filter by requirement priority (low/medium/high/critical)"),
+        coverage_status: Optional[str] = Query(None, description="'covered' or 'uncovered'"),
+        test_status: Optional[str] = Query(None, description="Show requirements that have a TC with this status"),
+        search: Optional[str] = Query(None, description="Substring match on requirement title or key"),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=200),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Detailed traceability matrix with server-side filters and pagination.
+        Headline coverage numbers (total/covered/uncovered/coverage_percentage)
+        are always reported for the FULL project so filters don't distort them."""
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        from ..models import Defect, DefectStatus, Requirement, TestCase, TestResult, TestSuite, TraceabilityMatrix
+
+        requirements = db.query(Requirement).filter(Requirement.project_id == project_id).all()
+        requirement_ids = [requirement.id for requirement in requirements]
+        test_suite_ids = [row.id for row in db.query(TestSuite.id).filter(TestSuite.project_id == project_id).all()]
+        project_test_case_ids = [
+            row.id for row in db.query(TestCase.id).filter(
+                TestCase.test_suite_id.in_(test_suite_ids),
+                TestCase.is_deleted == False,
+            ).all()
+        ] if test_suite_ids else []
+
+        traceability_entries = []
+        if requirement_ids and project_test_case_ids:
+            traceability_entries = db.query(TraceabilityMatrix).filter(
+                TraceabilityMatrix.requirement_id.in_(requirement_ids),
+                TraceabilityMatrix.test_case_id.in_(project_test_case_ids),
+            ).all()
+
+        entries_by_requirement = {}
+        for entry in traceability_entries:
+            entries_by_requirement.setdefault(entry.requirement_id, {})[entry.test_case_id] = entry
+
+        linked_test_case_ids = get_linked_requirement_test_case_ids(db, requirement_ids, project_test_case_ids)
+        project_test_cases_by_id = {}
+        if project_test_case_ids:
+            project_test_cases_by_id = {
+                test_case.id: test_case
+                for test_case in db.query(TestCase).filter(TestCase.id.in_(project_test_case_ids)).all()
+            }
+        add_legacy_reference_links(linked_test_case_ids, requirements, list(project_test_cases_by_id.values()))
+
+        # Open defects grouped by test_case_id — one batch query so the matrix
+        # stays O(reqs × tcs) instead of O(reqs × tcs × defect_lookups).
+        open_defect_statuses = (DefectStatus.OPEN, DefectStatus.IN_PROGRESS, DefectStatus.REOPENED)
+        open_defects_by_tc: dict[int, list] = {}
+        if project_test_case_ids:
+            open_defect_rows = db.query(Defect).filter(
+                Defect.project_id == project_id,
+                Defect.test_case_id.in_(project_test_case_ids),
+                Defect.status.in_(open_defect_statuses),
+            ).all()
+            for defect in open_defect_rows:
+                open_defects_by_tc.setdefault(defect.test_case_id, []).append(defect)
+
+        detailed_requirements = []
+        covered_requirements = 0
+        for requirement in requirements:
+            entries = entries_by_requirement.get(requirement.id, {})
+            linked_ids = linked_test_case_ids.get(requirement.id, set())
+            if linked_ids:
+                covered_requirements += 1
+
+            test_cases = []
+            for test_case_id in sorted(linked_ids):
+                test_case = project_test_cases_by_id.get(test_case_id)
+                if not test_case:
+                    continue
+                entry = entries.get(test_case_id)
+                latest_result = db.query(TestResult).filter(
+                    TestResult.test_case_id == test_case.id
+                ).order_by(TestResult.executed_at.desc()).first()
+                status = normalize_result_status(latest_result.status) if latest_result else "not_tested"
+                tc_open_defects = open_defects_by_tc.get(test_case.id, [])
+                test_cases.append({
+                    "id": test_case.id,
+                    "title": test_case.title,
+                    "status": status,
+                    "test_run_id": latest_result.test_run_id if latest_result else None,
+                    "coverage_type": entry.coverage_type if entry and entry.coverage_type else "functional",
+                    "coverage_percentage": entry.coverage_percentage if entry and entry.coverage_percentage is not None else 100,
+                    "last_executed": latest_result.executed_at.isoformat() if latest_result and latest_result.executed_at else None,
+                    "open_defects_count": len(tc_open_defects),
+                    "open_defects": [
+                        {
+                            "id": defect.id,
+                            "defect_id": defect.defect_id,
+                            "title": defect.title,
+                            "severity": enum_value(defect.severity),
+                            "status": enum_value(defect.status),
+                        }
+                        for defect in tc_open_defects[:5]
+                    ],
+                })
+
+            requirement_open_defects = sum(test_case["open_defects_count"] for test_case in test_cases)
+            detailed_requirements.append({
+                "requirement_id": requirement.id,
+                "requirement_key": requirement.requirement_id,
+                "requirement_title": requirement.title,
+                "requirement_status": enum_value(requirement.status),
+                "requirement_priority": enum_value(requirement.priority),
+                "total_test_cases": len(test_cases),
+                "passed_count": len([test_case for test_case in test_cases if test_case["status"] == "passed"]),
+                "failed_count": len([test_case for test_case in test_cases if test_case["status"] == "failed"]),
+                "blocked_count": len([test_case for test_case in test_cases if test_case["status"] == "blocked"]),
+                "skipped_count": len([test_case for test_case in test_cases if test_case["status"] == "skipped"]),
+                "not_tested_count": len([test_case for test_case in test_cases if test_case["status"] == "not_tested"]),
+                "open_defects_count": requirement_open_defects,
+                "test_cases": test_cases,
+            })
+
+        total_requirements = len(requirements)
+
+        # Apply filters (server-side so the UI stays fast on big projects).
+        filtered = detailed_requirements
+        if priority:
+            normalized_priority = priority.strip().lower()
+            filtered = [
+                r for r in filtered
+                if str(r["requirement_priority"] or "").strip().lower() == normalized_priority
+            ]
+        if coverage_status:
+            cs = coverage_status.strip().lower()
+            if cs == "covered":
+                filtered = [r for r in filtered if r["total_test_cases"] > 0]
+            elif cs == "uncovered":
+                filtered = [r for r in filtered if r["total_test_cases"] == 0]
+        if test_status:
+            ts = test_status.strip().lower()
+            filtered = [
+                r for r in filtered
+                if any(tc["status"] == ts for tc in r["test_cases"])
+            ]
+        if search:
+            q = search.strip().lower()
+            if q:
+                filtered = [
+                    r for r in filtered
+                    if q in str(r["requirement_title"] or "").lower()
+                    or q in str(r["requirement_key"] or "").lower()
+                ]
+
+        matched_requirements = len(filtered)
+        page = filtered[skip:skip + limit]
+
+        return {
+            "project_id": project_id,
+            "total_requirements": total_requirements,
+            "covered_requirements": covered_requirements,
+            "uncovered_requirements": max(total_requirements - covered_requirements, 0),
+            "coverage_percentage": round((covered_requirements / total_requirements * 100) if total_requirements else 0, 2),
+            "matched_requirements": matched_requirements,
+            "skip": skip,
+            "limit": limit,
+            "requirements": page,
+        }
+
+    # Traceability Matrix Endpoints
+    @app.post("/traceability-matrix/", response_model=schemas.TraceabilityMatrix)
     # Traceability Matrix Endpoints
     @app.post("/traceability-matrix/", response_model=schemas.TraceabilityMatrix)
     def create_traceability_entry(
