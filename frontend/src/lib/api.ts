@@ -536,6 +536,26 @@ export const requirementsAPI = {
     const response = await api.post(`/requirements/${id}/ai/test-cases`, payload);
     return response.data;
   },
+  checkTestCaseDuplicates: async (
+    id: number,
+    payload: {
+      test_suite_id: number;
+      section_id?: number;
+      scope?: 'section' | 'suite';
+      drafts: Array<{
+        index: number;
+        title?: string;
+        description?: string;
+        preconditions?: string;
+        steps?: string;
+        expected_result?: string;
+        test_steps?: Array<{ action?: string; expected_result?: string }>;
+      }>;
+    }
+  ) => {
+    const response = await api.post(`/requirements/${id}/ai/test-cases/duplicate-check`, payload);
+    return response.data;
+  },
   getTestCaseHistory: async (id: number, offset = 0, limit = 20) => {
     const response = await api.get(`/requirements/${id}/test-cases/history?offset=${offset}&limit=${limit}`);
     return response.data;

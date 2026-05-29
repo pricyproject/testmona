@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, Pencil, Play, Plus, Settings2, Tag, Wand2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -199,6 +199,39 @@ type AIDraftTestCase = {
   selected?: boolean;
 };
 
+type DuplicateStatus = 'unique' | 'similar' | 'duplicate';
+
+type DuplicateMatch = {
+  kind: 'existing' | 'draft';
+  score: number;
+  title_score: number;
+  body_score: number;
+  status: DuplicateStatus;
+  title: string;
+  test_case_id?: number | null;
+  reference?: string | null;
+  section_name?: string | null;
+  in_target_section?: boolean;
+  draft_index?: number | null;
+};
+
+type DuplicateFinding = {
+  index: number;
+  status: DuplicateStatus;
+  score: number;
+  matches: DuplicateMatch[];
+};
+
+type DuplicateCheckResult = {
+  findings: DuplicateFinding[];
+  duplicate_count: number;
+  similar_count: number;
+  existing_compared: number;
+  existing_truncated: boolean;
+  scope: string;
+  thresholds: { duplicate: number; similar: number };
+};
+
 const extractSourceDocument = (rawDescription?: string | null): SourceDoc | null => {
   const decoded = decodeHtmlEntities(rawDescription);
   if (typeof window !== 'undefined' && /data-requirement-source=/i.test(decoded)) {
@@ -275,6 +308,11 @@ export function RequirementDetail() {
   const [loadingAIStatus, setLoadingAIStatus] = useState(false);
   const [aiGenerationForm, setAiGenerationForm] = useState({ count: 5, instructions: '' });
   const [activeAIDraftIndex, setActiveAIDraftIndex] = useState(0);
+  const [dupFindings, setDupFindings] = useState<Record<number, DuplicateFinding>>({});
+  const [dupSummary, setDupSummary] = useState<Pick<DuplicateCheckResult, 'duplicate_count' | 'similar_count' | 'existing_compared' | 'existing_truncated'> | null>(null);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [dupScope, setDupScope] = useState<'suite' | 'section'>('suite');
+  const [allowDuplicates, setAllowDuplicates] = useState(false);
   const [newTestCaseForm, setNewTestCaseForm] = useState({
     title: '',
     description: '',
@@ -592,6 +630,25 @@ export function RequirementDetail() {
   }, [newTestCaseForm.test_suite_id, sections]);
   const selectedAIDraftsCount = aiDrafts.filter((draft) => draft.selected !== false && draft.title.trim()).length;
   const activeAIDraft = aiDrafts[activeAIDraftIndex];
+  const activeDuplicateFinding = dupFindings[activeAIDraftIndex];
+  const duplicateCounts = useMemo(() => {
+    let duplicate = 0;
+    let similar = 0;
+    Object.values(dupFindings).forEach((finding) => {
+      if (finding.status === 'duplicate') duplicate += 1;
+      else if (finding.status === 'similar') similar += 1;
+    });
+    return { duplicate, similar };
+  }, [dupFindings]);
+  // Number of selected drafts that would be blocked as duplicates on save.
+  const selectedDuplicateCount = useMemo(() => (
+    aiDrafts.reduce((count, draft, index) => (
+      draft.selected !== false && draft.title.trim() && dupFindings[index]?.status === 'duplicate'
+        ? count + 1
+        : count
+    ), 0)
+  ), [aiDrafts, dupFindings]);
+  const creatableSelectedCount = allowDuplicates ? selectedAIDraftsCount : selectedAIDraftsCount - selectedDuplicateCount;
 
   const backPath = projectId ? `/projects/${projectId}/requirements` : '/projects';
   const BackIcon = isRTL ? ArrowRight : ArrowLeft;
@@ -772,10 +829,24 @@ export function RequirementDetail() {
     }
   };
 
+  // A draft's similarity verdict is stale once its content changes; drop it so
+  // the badge clears until the next (authoritative) re-check before saving.
+  const clearDuplicateFinding = (index: number) => {
+    setDupFindings((current) => {
+      if (!(index in current)) return current;
+      const next = { ...current };
+      delete next[index];
+      return next;
+    });
+  };
+
   const updateAIDraft = (index: number, updates: Partial<AIDraftTestCase>) => {
+    // Toggling selection does not change content, so keep the finding in that case.
+    const contentChanged = Object.keys(updates).some((key) => key !== 'selected');
     setAiDrafts((current) => current.map((draft, draftIndex) => (
       draftIndex === index ? { ...draft, ...updates } : draft
     )));
+    if (contentChanged) clearDuplicateFinding(index);
   };
 
   const updateAIDraftStep = (draftIndex: number, stepIndex: number, updates: Partial<AIDraftStep>) => {
@@ -788,6 +859,7 @@ export function RequirementDetail() {
         )),
       };
     }));
+    clearDuplicateFinding(draftIndex);
   };
 
   const addAIDraftStep = (draftIndex: number) => {
@@ -806,6 +878,7 @@ export function RequirementDetail() {
         ],
       };
     }));
+    clearDuplicateFinding(draftIndex);
   };
 
   const removeAIDraftStep = (draftIndex: number, stepIndex: number) => {
@@ -818,6 +891,76 @@ export function RequirementDetail() {
           .map((step, currentStepIndex) => ({ ...step, step_number: currentStepIndex + 1 })),
       };
     }));
+    clearDuplicateFinding(draftIndex);
+  };
+
+  // Target suite / section / scope changes invalidate every verdict because the
+  // comparison set differs; clear so the user knows a re-check is needed.
+  const invalidateDuplicateFindings = () => {
+    setDupFindings({});
+    setDupSummary(null);
+    setAllowDuplicates(false);
+  };
+
+  const buildDuplicatePayloadDrafts = (draftsToCheck: AIDraftTestCase[]) =>
+    draftsToCheck
+      .map((draft, index) => ({ draft, index }))
+      .filter(({ draft }) => draft.title?.trim())
+      .map(({ draft, index }) => ({
+        index,
+        title: draft.title?.trim() || '',
+        description: draft.description?.trim() || '',
+        preconditions: draft.preconditions?.trim() || '',
+        steps: draft.steps?.trim() || '',
+        expected_result: draft.expected_result?.trim() || '',
+        test_steps: (draft.test_steps || [])
+          .filter((step) => step.action?.trim() || step.expected_result?.trim())
+          .map((step) => ({ action: step.action || '', expected_result: step.expected_result || '' })),
+      }));
+
+  const runDuplicateCheck = async (
+    draftsToCheck: AIDraftTestCase[],
+    options: { silent?: boolean } = {},
+  ): Promise<{ map: Record<number, DuplicateFinding>; result: DuplicateCheckResult | null }> => {
+    if (!requirement) return { map: {}, result: null };
+    const suiteId = Number(newTestCaseForm.test_suite_id || testSuites[0]?.id);
+    const payloadDrafts = buildDuplicatePayloadDrafts(draftsToCheck);
+    if (!suiteId || !payloadDrafts.length) {
+      setDupFindings({});
+      setDupSummary(null);
+      return { map: {}, result: null };
+    }
+    setCheckingDuplicates(true);
+    try {
+      const result: DuplicateCheckResult = await requirementsAPI.checkTestCaseDuplicates(requirement.id, {
+        test_suite_id: suiteId,
+        section_id: newTestCaseForm.section_id === 'none' ? undefined : Number(newTestCaseForm.section_id),
+        scope: dupScope,
+        drafts: payloadDrafts,
+      });
+      const map: Record<number, DuplicateFinding> = {};
+      (result.findings || []).forEach((finding) => { map[finding.index] = finding; });
+      setDupFindings(map);
+      setDupSummary({
+        duplicate_count: result.duplicate_count,
+        similar_count: result.similar_count,
+        existing_compared: result.existing_compared,
+        existing_truncated: result.existing_truncated,
+      });
+      return { map, result };
+    } catch (error: any) {
+      console.error('Failed to check for duplicate test cases:', error);
+      if (!options.silent) {
+        toast({
+          title: t('error'),
+          description: error.response?.data?.detail || t('failedToCheckDuplicates'),
+          variant: 'destructive',
+        });
+      }
+      return { map: dupFindings, result: null };
+    } finally {
+      setCheckingDuplicates(false);
+    }
   };
 
   const handleGenerateRequirementTestCases = async () => {
@@ -832,15 +975,31 @@ export function RequirementDetail() {
     }
     setGeneratingAI(true);
     setAiWarnings([]);
+    invalidateDuplicateFindings();
     try {
       const result = await requirementsAPI.generateTestCases(requirement.id, {
         count: aiGenerationForm.count,
         instructions: aiGenerationForm.instructions.trim() || undefined,
       });
-      setAiDrafts((result.drafts || []).map((draft: AIDraftTestCase) => ({ ...draft, selected: true })));
+      const generatedDrafts: AIDraftTestCase[] = (result.drafts || []).map((draft: AIDraftTestCase) => ({ ...draft, selected: true }));
+      setAiDrafts(generatedDrafts);
       setActiveAIDraftIndex(0);
       setAiWarnings(result.warnings || []);
       toast({ title: t('success'), description: t('aiDraftsGenerated', { count: result.drafts?.length || 0 }) });
+
+      // Immediately screen the fresh drafts and auto-deselect outright duplicates
+      // so the user does not inject them by simply clicking "Create Selected".
+      const { map, result: checkResult } = await runDuplicateCheck(generatedDrafts, { silent: true });
+      if (checkResult && checkResult.duplicate_count > 0) {
+        setAiDrafts((current) => current.map((draft, index) => (
+          map[index]?.status === 'duplicate' ? { ...draft, selected: false } : draft
+        )));
+        toast({
+          title: t('duplicatesDetectedTitle'),
+          description: t('duplicatesAutoDeselected', { count: checkResult.duplicate_count }),
+          variant: 'destructive',
+        });
+      }
     } catch (error: any) {
       console.error('Failed to generate requirement test cases:', error);
       toast({
@@ -855,8 +1014,10 @@ export function RequirementDetail() {
 
   const handleCreateSelectedAIDrafts = async () => {
     if (!requirement) return;
-    const selectedDrafts = aiDrafts.filter((draft) => draft.selected !== false && draft.title.trim());
-    if (!selectedDrafts.length || !testSuites.length) {
+    const selectedEntries = aiDrafts
+      .map((draft, index) => ({ draft, index }))
+      .filter(({ draft }) => draft.selected !== false && draft.title.trim());
+    if (!selectedEntries.length || !testSuites.length) {
       toast({
         title: t('validationError'),
         description: t('selectAtLeastOneDraft'),
@@ -866,7 +1027,25 @@ export function RequirementDetail() {
     }
     setSavingAIDrafts(true);
     try {
-      for (const draft of selectedDrafts) {
+      // Authoritative re-check against the *current* target suite/section right
+      // before persisting, so edits or section changes since the last check are
+      // honored and we never silently inject a duplicate.
+      const { map: findingMap } = await runDuplicateCheck(aiDrafts, { silent: true });
+      let entriesToCreate = selectedEntries;
+      let skippedDuplicates = 0;
+      if (!allowDuplicates) {
+        entriesToCreate = selectedEntries.filter(({ index }) => findingMap[index]?.status !== 'duplicate');
+        skippedDuplicates = selectedEntries.length - entriesToCreate.length;
+      }
+      if (!entriesToCreate.length) {
+        toast({
+          title: t('duplicatesDetectedTitle'),
+          description: t('allSelectedDraftsAreDuplicates'),
+          variant: 'destructive',
+        });
+        return;
+      }
+      for (const { draft } of entriesToCreate) {
         await requirementsAPI.createAndLinkTestCase(requirement.id, {
           title: draft.title.trim(),
           description: draft.description?.trim() || undefined,
@@ -890,8 +1069,16 @@ export function RequirementDetail() {
       }
       setAiDialogOpen(false);
       setAiDrafts([]);
+      invalidateDuplicateFindings();
       refreshRequirementLinks();
-      toast({ title: t('success'), description: t('aiDraftsCreatedAndLinked', { count: selectedDrafts.length }) });
+      if (skippedDuplicates > 0) {
+        toast({
+          title: t('success'),
+          description: t('aiDraftsCreatedSkippedDuplicates', { created: entriesToCreate.length, skipped: skippedDuplicates }),
+        });
+      } else {
+        toast({ title: t('success'), description: t('aiDraftsCreatedAndLinked', { count: entriesToCreate.length }) });
+      }
     } catch (error: any) {
       console.error('Failed to create AI test case drafts:', error);
       toast({
@@ -1426,7 +1613,10 @@ export function RequirementDetail() {
                   <Label>{t('targetSuite')}</Label>
                   <Select
                     value={newTestCaseForm.test_suite_id}
-                    onValueChange={(value) => setNewTestCaseForm((current) => ({ ...current, test_suite_id: value, section_id: 'none' }))}
+                    onValueChange={(value) => {
+                      setNewTestCaseForm((current) => ({ ...current, test_suite_id: value, section_id: 'none' }));
+                      invalidateDuplicateFindings();
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder={t('selectTestSuite')} />
@@ -1440,7 +1630,10 @@ export function RequirementDetail() {
                   <Label>{t('targetSection')}</Label>
                   <Select
                     value={newTestCaseForm.section_id}
-                    onValueChange={(value) => setNewTestCaseForm((current) => ({ ...current, section_id: value }))}
+                    onValueChange={(value) => {
+                      setNewTestCaseForm((current) => ({ ...current, section_id: value }));
+                      invalidateDuplicateFindings();
+                    }}
                     disabled={!newTestCaseForm.test_suite_id}
                   >
                     <SelectTrigger>
@@ -1453,7 +1646,7 @@ export function RequirementDetail() {
                   </Select>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button type="button" onClick={handleGenerateRequirementTestCases} disabled={generatingAI || !testSuites.length || loadingAIStatus || aiStatus?.available === false}>
                   {generatingAI ? <Loader2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 animate-spin`} /> : <Wand2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />}
                   {generatingAI ? t('generating') : t('generateDrafts')}
@@ -1466,12 +1659,56 @@ export function RequirementDetail() {
                     <Button type="button" variant="outline" onClick={() => setAiDrafts((current) => current.map((draft) => ({ ...draft, selected: false })))}>
                       {t('clearSelection')}
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => runDuplicateCheck(aiDrafts)}
+                      disabled={checkingDuplicates}
+                    >
+                      {checkingDuplicates
+                        ? <Loader2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 animate-spin`} />
+                        : <ShieldAlert className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />}
+                      {checkingDuplicates ? t('checkingDuplicates') : t('recheckDuplicates')}
+                    </Button>
                     <Badge variant="secondary" className="self-center">
                       {t('selectedDraftsCount', { count: selectedAIDraftsCount })}
                     </Badge>
                   </>
                 )}
               </div>
+              {aiDrafts.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                  <div className="flex flex-wrap items-center gap-2 text-slate-600 dark:text-slate-300">
+                    <span className="font-medium">{t('duplicateScope')}:</span>
+                    <Select
+                      value={dupScope}
+                      onValueChange={(value) => { setDupScope(value as 'suite' | 'section'); invalidateDuplicateFindings(); }}
+                    >
+                      <SelectTrigger className="h-8 w-[200px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="suite">{t('duplicateScopeSuite')}</SelectItem>
+                        <SelectItem value="section">{t('duplicateScopeSection')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {dupSummary && (
+                      <span className="text-xs text-slate-500">
+                        {t('duplicateCheckSummary', {
+                          duplicates: duplicateCounts.duplicate,
+                          similar: duplicateCounts.similar,
+                          compared: dupSummary.existing_compared,
+                        })}
+                        {dupSummary.existing_truncated ? ` ${t('duplicateScanTruncated')}` : ''}
+                      </span>
+                    )}
+                  </div>
+                  {selectedDuplicateCount > 0 && (
+                    <label className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
+                      <Checkbox checked={allowDuplicates} onCheckedChange={(checked) => setAllowDuplicates(checked === true)} />
+                      {t('allowDuplicateCreation')}
+                    </label>
+                  )}
+                </div>
+              )}
               {aiWarnings.length > 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                   {aiWarnings.map((warning, index) => <p key={`${warning}-${index}`}>{warning}</p>)}
@@ -1505,6 +1742,12 @@ export function RequirementDetail() {
                               {typeof draft.confidence === 'number' && (
                                 <Badge variant="secondary">{t('aiConfidence', { confidence: Math.round(draft.confidence * 100) })}</Badge>
                               )}
+                              {dupFindings[draftIndex]?.status === 'duplicate' && (
+                                <Badge variant="destructive">{t('duplicateBadge')}</Badge>
+                              )}
+                              {dupFindings[draftIndex]?.status === 'similar' && (
+                                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200">{t('similarBadge')}</Badge>
+                              )}
                             </span>
                             <span className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">
                               {draft.description || draft.expected_result || t('noDescriptionProvided')}
@@ -1530,8 +1773,46 @@ export function RequirementDetail() {
                         {typeof activeAIDraft.confidence === 'number' && (
                           <Badge variant="outline">{t('aiConfidence', { confidence: Math.round(activeAIDraft.confidence * 100) })}</Badge>
                         )}
+                        {activeDuplicateFinding?.status === 'duplicate' && (
+                          <Badge variant="destructive">{t('duplicateBadge')}</Badge>
+                        )}
+                        {activeDuplicateFinding?.status === 'similar' && (
+                          <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200">{t('similarBadge')}</Badge>
+                        )}
                       </div>
                     </div>
+
+                    {activeDuplicateFinding && activeDuplicateFinding.matches.length > 0 && (
+                      <div className={`rounded-md border p-3 text-sm ${
+                        activeDuplicateFinding.status === 'duplicate'
+                          ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
+                          : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'
+                      }`}>
+                        <p className="flex items-center gap-2 font-medium">
+                          {activeDuplicateFinding.status === 'duplicate'
+                            ? <CopyCheck className="h-4 w-4" />
+                            : <ShieldAlert className="h-4 w-4" />}
+                          {activeDuplicateFinding.status === 'duplicate' ? t('duplicateFindingTitle') : t('similarFindingTitle')}
+                        </p>
+                        <ul className="mt-2 space-y-1">
+                          {activeDuplicateFinding.matches.map((match, matchIndex) => (
+                            <li key={`${match.kind}-${match.test_case_id ?? match.draft_index}-${matchIndex}`} className="flex flex-wrap items-center gap-1.5">
+                              <Badge variant="outline" className="text-[10px]">{Math.round(match.score * 100)}%</Badge>
+                              {match.kind === 'existing' ? (
+                                <span className="wrap-anywhere">
+                                  {match.reference ? `${match.reference} · ` : ''}{match.title || t('untitled')}
+                                  {match.section_name ? ` — ${match.section_name}` : ` — ${t('noSection')}`}
+                                </span>
+                              ) : (
+                                <span className="wrap-anywhere">
+                                  {t('matchesDraftNumber', { number: (match.draft_index ?? 0) + 1 })}: {match.title || t('untitled')}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     <div className="grid gap-3 sm:grid-cols-3">
                       <div className="space-y-2 sm:col-span-3">
@@ -1601,10 +1882,19 @@ export function RequirementDetail() {
                 </div>
               )}
             </div>
-            <DialogFooter>
+            <DialogFooter className="sm:items-center">
+              {selectedDuplicateCount > 0 && !allowDuplicates && (
+                <span className="text-xs text-amber-700 dark:text-amber-300">
+                  {t('duplicatesWillBeSkipped', { count: selectedDuplicateCount })}
+                </span>
+              )}
               <Button type="button" variant="outline" onClick={() => setAiDialogOpen(false)}>{t('cancel')}</Button>
-              <Button type="button" onClick={handleCreateSelectedAIDrafts} disabled={savingAIDrafts || selectedAIDraftsCount === 0 || !testSuites.length}>
-                {savingAIDrafts ? t('saving') : t('createSelectedDraftsCount', { count: selectedAIDraftsCount })}
+              <Button
+                type="button"
+                onClick={handleCreateSelectedAIDrafts}
+                disabled={savingAIDrafts || checkingDuplicates || creatableSelectedCount === 0 || !testSuites.length}
+              >
+                {savingAIDrafts ? t('saving') : t('createSelectedDraftsCount', { count: creatableSelectedCount })}
               </Button>
             </DialogFooter>
           </DialogContent>

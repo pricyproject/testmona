@@ -21,6 +21,16 @@ from ..services.ai_prompt_service import (
     clean_ai_text,
     extract_json_object,
 )
+from ..services.similarity_service import (
+    MAX_EXISTING_SCAN,
+    MAX_MATCHES_PER_DRAFT,
+    DUPLICATE_THRESHOLD,
+    SIMILAR_THRESHOLD,
+    TestCaseSignature,
+    build_signature,
+    score_signatures,
+    status_for_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +137,68 @@ class TestCaseAssistantResponse(BaseModel):
     expected_result: Optional[str] = None
     gherkin: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
+
+
+class DuplicateCheckDraftStep(BaseModel):
+    action: str = Field(default="", max_length=2000)
+    expected_result: str = Field(default="", max_length=2000)
+
+    @field_validator("action", "expected_result", mode="before")
+    @classmethod
+    def normalize_step_text(cls, value: Any) -> str:
+        return _clean_text(value, max_length=2000)
+
+
+class DuplicateCheckDraft(BaseModel):
+    index: int = Field(..., ge=0, le=1000)
+    title: str = Field(default="", max_length=255)
+    description: str = Field(default="", max_length=4000)
+    preconditions: str = Field(default="", max_length=4000)
+    steps: str = Field(default="", max_length=8000)
+    expected_result: str = Field(default="", max_length=4000)
+    test_steps: List[DuplicateCheckDraftStep] = Field(default_factory=list, max_length=30)
+
+
+class DuplicateCheckRequest(BaseModel):
+    test_suite_id: int = Field(..., gt=0)
+    section_id: Optional[int] = Field(default=None, gt=0)
+    # "section" restricts the comparison to the target section; "suite" scans the
+    # whole suite so a draft that already exists anywhere in the suite is caught.
+    scope: Literal["section", "suite"] = "suite"
+    drafts: List[DuplicateCheckDraft] = Field(default_factory=list, max_length=10)
+
+
+class DuplicateMatch(BaseModel):
+    # "existing" => an already-persisted test case; "draft" => another draft in
+    # the same batch (internal duplicate).
+    kind: Literal["existing", "draft"]
+    score: float
+    title_score: float
+    body_score: float
+    status: str
+    title: str
+    test_case_id: Optional[int] = None
+    reference: Optional[str] = None
+    section_name: Optional[str] = None
+    in_target_section: bool = False
+    draft_index: Optional[int] = None
+
+
+class DuplicateCheckFinding(BaseModel):
+    index: int
+    status: str
+    score: float
+    matches: List[DuplicateMatch] = Field(default_factory=list)
+
+
+class DuplicateCheckResponse(BaseModel):
+    findings: List[DuplicateCheckFinding]
+    duplicate_count: int = 0
+    similar_count: int = 0
+    existing_compared: int = 0
+    existing_truncated: bool = False
+    scope: str = "suite"
+    thresholds: dict = Field(default_factory=dict)
 
 
 def _clean_text(value: Any, max_length: int = 4000) -> str:
@@ -248,6 +320,98 @@ def _audit_ai_generation(
         logger.exception("Failed to audit AI generation event: %s", exc)
 
 
+class _ExistingCase:
+    """Lightweight holder for an existing test case used in similarity checks."""
+
+    __slots__ = ("id", "title", "section_id", "section_name", "signature")
+
+    def __init__(self, id: int, title: str, section_id: Optional[int], section_name: Optional[str], signature: TestCaseSignature):
+        self.id = id
+        self.title = title
+        self.section_id = section_id
+        self.section_name = section_name
+        self.signature = signature
+
+
+def _load_existing_cases(
+    db: Session,
+    test_suite_id: int,
+    target_section_id: Optional[int],
+    scope: str,
+) -> tuple[List[_ExistingCase], bool]:
+    """Load existing (non-deleted) test cases to compare against.
+
+    Returns ``(cases, truncated)`` where ``truncated`` is True when the suite has
+    more cases than the scan cap. Steps are bulk-loaded in a single query so the
+    body signature reflects multi-step cases whose legacy ``steps`` text is empty.
+    """
+    from ..models import TestCase, TestCaseSection, TestCaseStep
+
+    query = (
+        db.query(TestCase)
+        .filter(
+            TestCase.test_suite_id == test_suite_id,
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        )
+    )
+    if scope == "section":
+        # Compare only within the target section (None matches the "no section" bucket).
+        query = query.filter(TestCase.section_id.is_(target_section_id) if target_section_id is None
+                             else TestCase.section_id == target_section_id)
+
+    rows = query.order_by(TestCase.id.desc()).limit(MAX_EXISTING_SCAN + 1).all()
+    truncated = len(rows) > MAX_EXISTING_SCAN
+    rows = rows[:MAX_EXISTING_SCAN]
+    if not rows:
+        return [], truncated
+
+    case_ids = [row.id for row in rows]
+    steps_by_case: dict[int, List[str]] = {}
+    step_rows = (
+        db.query(TestCaseStep.test_case_id, TestCaseStep.action, TestCaseStep.expected_result)
+        .filter(TestCaseStep.test_case_id.in_(case_ids))
+        .order_by(TestCaseStep.test_case_id, TestCaseStep.step_number)
+        .all()
+    )
+    for case_id, action, expected in step_rows:
+        bucket = steps_by_case.setdefault(case_id, [])
+        if action:
+            bucket.append(action)
+        if expected:
+            bucket.append(expected)
+
+    section_names: dict[int, str] = {}
+    section_ids = {row.section_id for row in rows if row.section_id is not None}
+    if section_ids:
+        for section_id, name in (
+            db.query(TestCaseSection.id, TestCaseSection.name)
+            .filter(TestCaseSection.id.in_(section_ids))
+            .all()
+        ):
+            section_names[section_id] = name
+
+    cases: List[_ExistingCase] = []
+    for row in rows:
+        signature = build_signature(
+            title=row.title,
+            description=row.description,
+            preconditions=row.preconditions,
+            steps=row.steps,
+            expected_result=row.expected_result,
+            step_lines=steps_by_case.get(row.id),
+        )
+        if signature.is_empty:
+            continue
+        cases.append(_ExistingCase(
+            id=row.id,
+            title=row.title or "",
+            section_id=row.section_id,
+            section_name=section_names.get(row.section_id) if row.section_id else None,
+            signature=signature,
+        ))
+    return cases, truncated
+
+
 def register_ai_generation_routes(app):
     """Register AI generation routes with the FastAPI app."""
 
@@ -305,6 +469,127 @@ def register_ai_generation_routes(app):
             model=result.model,
             drafts=drafts,
             warnings=warnings,
+        )
+
+    @app.post(
+        "/requirements/{requirement_id}/ai/test-cases/duplicate-check",
+        response_model=DuplicateCheckResponse,
+    )
+    def check_requirement_test_case_duplicates(
+        requirement_id: int,
+        payload: DuplicateCheckRequest,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Flag drafts that duplicate an existing case or another draft in the batch.
+
+        Compares each candidate draft against existing test cases in the target
+        suite/section and against earlier drafts, returning the strongest matches
+        and an overall status (unique / similar / duplicate) per draft. This runs
+        entirely on stored data — it does not call the AI provider.
+        """
+        requirement = crud.get_requirement(db, requirement_id)
+        if not requirement:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        if not rbac.has_permission(current_user, "write", requirement.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        test_suite = crud.get_test_suite(db, test_suite_id=payload.test_suite_id)
+        if not test_suite or test_suite.project_id != requirement.project_id:
+            raise HTTPException(status_code=400, detail="Test suite must belong to this requirement project")
+
+        if payload.section_id is not None:
+            section = crud.get_test_case_section(db, payload.section_id)
+            if not section or section.test_suite_id != test_suite.id:
+                raise HTTPException(status_code=400, detail="Section must belong to the selected test suite")
+
+        existing_cases, truncated = _load_existing_cases(
+            db, test_suite.id, payload.section_id, payload.scope
+        )
+
+        findings: List[DuplicateCheckFinding] = []
+        # Signatures of drafts already processed, so later drafts can be compared
+        # against earlier ones in the same batch (internal duplicates).
+        prior_drafts: List[tuple[int, str, TestCaseSignature]] = []
+        duplicate_count = 0
+        similar_count = 0
+
+        for draft in payload.drafts:
+            candidate = build_signature(
+                title=draft.title,
+                description=draft.description,
+                preconditions=draft.preconditions,
+                steps=draft.steps,
+                expected_result=draft.expected_result,
+                step_lines=[
+                    f"{step.action} {step.expected_result}".strip()
+                    for step in draft.test_steps
+                    if step.action or step.expected_result
+                ],
+            )
+            matches: List[DuplicateMatch] = []
+
+            if not candidate.is_empty:
+                for existing in existing_cases:
+                    overall, title_score, body_score = score_signatures(candidate, existing.signature)
+                    if overall < SIMILAR_THRESHOLD:
+                        continue
+                    matches.append(DuplicateMatch(
+                        kind="existing",
+                        score=overall,
+                        title_score=title_score,
+                        body_score=body_score,
+                        status=status_for_score(overall),
+                        title=existing.title,
+                        test_case_id=existing.id,
+                        reference=f"TC-{existing.id:03d}",
+                        section_name=existing.section_name,
+                        in_target_section=existing.section_id == payload.section_id,
+                    ))
+
+                for prior_index, prior_title, prior_signature in prior_drafts:
+                    overall, title_score, body_score = score_signatures(candidate, prior_signature)
+                    if overall < SIMILAR_THRESHOLD:
+                        continue
+                    matches.append(DuplicateMatch(
+                        kind="draft",
+                        score=overall,
+                        title_score=title_score,
+                        body_score=body_score,
+                        status=status_for_score(overall),
+                        title=prior_title,
+                        draft_index=prior_index,
+                    ))
+
+            matches.sort(key=lambda match: match.score, reverse=True)
+            best_score = matches[0].score if matches else 0.0
+            status = status_for_score(best_score)
+            if status == "duplicate":
+                duplicate_count += 1
+            elif status == "similar":
+                similar_count += 1
+
+            findings.append(DuplicateCheckFinding(
+                index=draft.index,
+                status=status,
+                score=best_score,
+                matches=matches[:MAX_MATCHES_PER_DRAFT],
+            ))
+
+            if not candidate.is_empty:
+                prior_drafts.append((draft.index, draft.title or "", candidate))
+
+        return DuplicateCheckResponse(
+            findings=findings,
+            duplicate_count=duplicate_count,
+            similar_count=similar_count,
+            existing_compared=len(existing_cases),
+            existing_truncated=truncated,
+            scope=payload.scope,
+            thresholds={
+                "duplicate": DUPLICATE_THRESHOLD,
+                "similar": SIMILAR_THRESHOLD,
+            },
         )
 
     @app.post("/test-cases/{test_case_id}/ai/assist", response_model=TestCaseAssistantResponse)
