@@ -193,8 +193,6 @@ def register_traceability_coverage_routes(app):
 
     # Traceability Matrix Endpoints
     @app.post("/traceability-matrix/", response_model=schemas.TraceabilityMatrix)
-    # Traceability Matrix Endpoints
-    @app.post("/traceability-matrix/", response_model=schemas.TraceabilityMatrix)
     def create_traceability_entry(
         entry: schemas.TraceabilityMatrixCreate,
         db: Session = Depends(get_db),

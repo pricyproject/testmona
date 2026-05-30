@@ -2341,11 +2341,9 @@ def register_test_management_routes(app):
     ):
         if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        from ..models import ResultStatus
-        
+
         test_results = crud.get_test_results(db, test_run_id=test_run_id)
-        
+
         total_tests = len(test_results)
         passed = len([r for r in test_results if r.status == ResultStatus.PASS])
         failed = len([r for r in test_results if r.status == ResultStatus.FAIL])
@@ -2702,35 +2700,9 @@ def register_test_management_routes(app):
         
         return result
 
-    @app.get("/test-runs/{test_run_id}/statistics", response_model=schemas.TestRunStatistics)
-    def get_test_run_statistics(
-        test_run_id: int, 
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        if not rbac.has_permission(current_user, "read"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        test_results = crud.get_test_results(db, test_run_id=test_run_id)
-        
-        total_tests = len(test_results)
-        passed = len([r for r in test_results if r.status == ResultStatus.PASS])
-        failed = len([r for r in test_results if r.status == ResultStatus.FAIL])
-        skipped = len([r for r in test_results if r.status == ResultStatus.SKIP])
-        blocked = len([r for r in test_results if r.status == ResultStatus.BLOCK])
-        
-        pass_rate = (passed / total_tests * 100) if total_tests > 0 else 0
-        execution_time = sum([r.execution_time or 0 for r in test_results])
-        
-        return schemas.TestRunStatistics(
-            total_tests=total_tests,
-            passed=passed,
-            failed=failed,
-            skipped=skipped,
-            blocked=blocked,
-            pass_rate=pass_rate,
-            execution_time=execution_time
-        )
+    # NOTE: GET /test-runs/{test_run_id}/statistics is defined earlier in this
+    # module. A duplicate handler used to live here; it was unreachable (the
+    # first registration wins) and has been removed.
 
     # User Preferences
     @app.get("/user/preferences/items-per-page")
