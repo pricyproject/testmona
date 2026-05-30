@@ -680,16 +680,10 @@ class UserProfileUpdate(BaseModel):
         return v.strip()
 
 
-class User(UserBase):
-    id: int
-    is_superuser: bool
-    force_password_change: bool = False
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-        use_enum_values = True
+# NOTE: The public ``User`` response schema is defined later in this module
+# (the standalone version with a ``role`` normalizer). An earlier duplicate
+# ``User(UserBase)`` used to live here and was silently shadowed by it; it has
+# been removed so ``schemas.User`` no longer depends on definition order.
 
 
 # User Invitation Schemas
@@ -795,38 +789,10 @@ class ProjectMember(BaseModel):
         use_enum_values = True
 
 
-class TestScheduleBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-    test_suite_id: int
-    execution_time: datetime
-    is_recurring: bool = False
-    recurrence_pattern: Optional[str] = None
-    status: Status = Status.ACTIVE
-
-
-class TestScheduleCreate(TestScheduleBase):
-    scheduled_by: int
-
-
-class TestScheduleUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    execution_time: Optional[datetime] = None
-    is_recurring: Optional[bool] = None
-    recurrence_pattern: Optional[str] = None
-    status: Optional[Status] = None
-
-
-class TestSchedule(TestScheduleBase):
-    id: int
-    scheduled_by: int
-    scheduled_at: datetime
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
+# NOTE: The TestSchedule* schemas are defined later in this module (the set
+# matching the TestSchedule DB model: schedule_type/schedule_config/project_id).
+# An earlier, model-mismatched duplicate set used to live here and was silently
+# shadowed by the later one; it has been removed to avoid definition-order bugs.
 
 
 class TestExecutionBase(BaseModel):

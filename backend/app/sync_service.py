@@ -74,7 +74,7 @@ class SyncService:
             Dict with GitHub issue data
         """
         # Sanitize all text fields
-        title = SyncService.sanitize_text(defect.get('title', ''))
+        title = SyncService.sanitize_text(defect.get('title', '')) or 'Untitled Defect'
         description_parts = []
         
         if defect.get('description'):
@@ -131,7 +131,7 @@ class SyncService:
             assignee = None
         
         return {
-            'title': defect.get('title', 'Untitled Defect'),
+            'title': title,
             'body': body,
             'labels': labels,
             'assignee': assignee
