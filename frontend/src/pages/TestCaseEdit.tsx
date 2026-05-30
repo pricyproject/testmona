@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Wand2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Sparkles, ListChecks, Target, FileCode2, Split, ShieldAlert, Check, CopyPlus, ExternalLink, type LucideIcon } from 'lucide-react';
+import { ToastAction } from '@/components/ui/toast';
 import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset } from '@/lib/api';
 import { CustomFieldDefinition } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
@@ -23,6 +24,25 @@ type TestCaseStatus = 'active' | 'inactive' | 'archived';
 type TestCaseType = string;
 type SelectOption = { value: string; label: string };
 type AIAssistantAction = 'suggest_steps' | 'improve_expected_result' | 'add_negative_cases' | 'convert_to_gherkin' | 'split_broad_case';
+
+// Each action maps to the kind of output the assistant returns, which drives how
+// the result is applied: 'steps'/'expected_result'/'gherkin' patch the current
+// case, while 'drafts' are separate cases the user creates without overwriting.
+type AIAssistantOutput = 'steps' | 'expected_result' | 'gherkin' | 'drafts';
+
+const AI_ASSISTANT_ACTIONS: {
+  action: AIAssistantAction;
+  labelKey: string;
+  descKey: string;
+  icon: LucideIcon;
+  output: AIAssistantOutput;
+}[] = [
+  { action: 'suggest_steps', labelKey: 'suggestSteps', descKey: 'aiSuggestStepsDesc', icon: ListChecks, output: 'steps' },
+  { action: 'improve_expected_result', labelKey: 'improveExpectedResult', descKey: 'aiImproveExpectedResultDesc', icon: Target, output: 'expected_result' },
+  { action: 'add_negative_cases', labelKey: 'addNegativeCases', descKey: 'aiAddNegativeCasesDesc', icon: ShieldAlert, output: 'drafts' },
+  { action: 'convert_to_gherkin', labelKey: 'convertToGherkin', descKey: 'aiConvertToGherkinDesc', icon: FileCode2, output: 'gherkin' },
+  { action: 'split_broad_case', labelKey: 'splitBroadCase', descKey: 'aiSplitBroadCaseDesc', icon: Split, output: 'drafts' },
+];
 
 const parseBooleanFlag = (value: unknown): boolean => {
   if (typeof value === 'boolean') return value;
@@ -77,6 +97,13 @@ export function TestCaseEdit() {
   const [aiAssistantResult, setAiAssistantResult] = useState<any>(null);
   const [aiStatus, setAiStatus] = useState<AIManagerStatus | null>(null);
   const [loadingAIStatus, setLoadingAIStatus] = useState(false);
+  const [creatingDraftIndex, setCreatingDraftIndex] = useState<number | null>(null);
+  const [creatingAllDrafts, setCreatingAllDrafts] = useState(false);
+  const [createdDraftInfo, setCreatedDraftInfo] = useState<Record<number, { id: number; title: string }>>({});
+  const [draftTitleOverrides, setDraftTitleOverrides] = useState<Record<number, string>>({});
+  // Suggest Steps: how to apply (replace vs append) and which steps are selected.
+  const [aiStepMode, setAiStepMode] = useState<'replace' | 'append'>('replace');
+  const [aiSelectedSteps, setAiSelectedSteps] = useState<Set<number>>(new Set());
 
   const displayedTestTypeOptions = useMemo(() => {
     if (!formData.test_type || testTypeOptions.some((option) => option.value === formData.test_type)) {
@@ -454,47 +481,213 @@ export function TestCaseEdit() {
     ));
   };
 
-  const applyAIAssistantResult = (result = aiAssistantResult) => {
-    if (!result) return;
-    if (Array.isArray(result.steps) && result.steps.length > 0) {
-      setTestSteps(result.steps.map((step: any, index: number) => ({
-        step_number: index + 1,
-        action: step.action || '',
-        expected_result: step.expected_result || '',
-        step_type: step.step_type || 'manual',
-      })));
-      setFormData((current) => ({ ...current, is_multistep: true }));
+  const normalizeAISteps = (steps: any[]) =>
+    steps.map((step: any, index: number) => ({
+      step_number: index + 1,
+      action: step.action || '',
+      expected_result: step.expected_result || '',
+      step_type: step.step_type || 'manual',
+    }));
+
+  // Every apply mutates form state, so pair it with an Undo so the user can
+  // back out a suggestion they didn't want.
+  const toastWithUndo = (description: string, undo: () => void) => {
+    toast({
+      title: t('applied'),
+      description,
+      action: (
+        <ToastAction altText={t('undo')} onClick={undo}>
+          {t('undo')}
+        </ToastAction>
+      ),
+    });
+  };
+
+  const toggleSelectedStep = (index: number) => {
+    setAiSelectedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index); else next.add(index);
+      return next;
+    });
+  };
+
+  // Suggest Steps: apply only the selected steps, either replacing the list or
+  // appending to the existing steps; never a blind overwrite.
+  const applyAISteps = () => {
+    const steps = aiAssistantResult?.steps;
+    if (!Array.isArray(steps) || steps.length === 0) return;
+    const chosen = steps.filter((_: any, index: number) => aiSelectedSteps.has(index));
+    if (chosen.length === 0) {
+      toast({ variant: 'destructive', title: t('validationError'), description: t('aiSelectAtLeastOneStep') });
+      return;
     }
-    if (result.expected_result) {
-      setFormData((current) => ({ ...current, expected_result: result.expected_result }));
-    }
-    if (result.gherkin) {
-      setFormData((current) => ({ ...current, steps: result.gherkin, is_multistep: false }));
-    }
-    if (Array.isArray(result.drafts) && result.drafts.length > 0) {
-      const draft = result.drafts[0];
-      setFormData((current) => ({
-        ...current,
-        title: draft.title || current.title,
-        description: draft.description || current.description,
-        preconditions: draft.preconditions || current.preconditions,
-        steps: draft.steps || current.steps,
-        expected_result: draft.expected_result || current.expected_result,
-        priority: draft.priority || current.priority,
-        test_type: draft.test_type || current.test_type,
-        tags: draft.tags || current.tags,
-        is_multistep: Array.isArray(draft.test_steps) && draft.test_steps.length > 0 ? true : current.is_multistep,
-      }));
-      if (Array.isArray(draft.test_steps) && draft.test_steps.length > 0) {
-        setTestSteps(draft.test_steps.map((step: any, index: number) => ({
-          step_number: index + 1,
-          action: step.action || '',
-          expected_result: step.expected_result || '',
-          step_type: step.step_type || 'manual',
-        })));
-      }
-    }
+    const previousSteps = testSteps;
+    const previousMultistep = formData.is_multistep;
+    const nextSteps = aiStepMode === 'append'
+      ? normalizeAISteps([...testSteps, ...chosen])
+      : normalizeAISteps(chosen);
+    setTestSteps(nextSteps);
+    setFormData((current) => ({ ...current, is_multistep: true }));
     setAiDialogOpen(false);
+    toastWithUndo(
+      aiStepMode === 'append' ? t('aiStepsAppended', { count: chosen.length }) : t('aiStepsApplied'),
+      () => {
+        setTestSteps(previousSteps);
+        setFormData((current) => ({ ...current, is_multistep: previousMultistep }));
+      },
+    );
+  };
+
+  const applyAIExpectedResult = () => {
+    const perStep = aiAssistantResult?.step_expected_results;
+    // Multistep-aware: when the model returns per-step expected results and the
+    // case is multistep, improve each step's expected result in place rather
+    // than the legacy single field the user isn't even looking at.
+    if (formData.is_multistep && Array.isArray(perStep) && perStep.length > 0 && testSteps.length > 0) {
+      const byNumber = new Map<number, string>();
+      perStep.forEach((item: any) => {
+        if (item && typeof item.step_number === 'number' && item.expected_result) {
+          byNumber.set(item.step_number, item.expected_result);
+        }
+      });
+      if (byNumber.size === 0) return;
+      const previousSteps = testSteps;
+      const nextSteps = testSteps.map((step, index) => {
+        const improved = byNumber.get(step.step_number ?? index + 1);
+        return improved ? { ...step, expected_result: improved } : step;
+      });
+      setTestSteps(nextSteps);
+      setAiDialogOpen(false);
+      toastWithUndo(t('aiExpectedResultApplied'), () => setTestSteps(previousSteps));
+      return;
+    }
+    if (!aiAssistantResult?.expected_result) return;
+    const previous = formData.expected_result;
+    setFormData((current) => ({ ...current, expected_result: aiAssistantResult.expected_result }));
+    setAiDialogOpen(false);
+    toastWithUndo(t('aiExpectedResultApplied'), () => setFormData((current) => ({ ...current, expected_result: previous })));
+  };
+
+  // Keep Gherkin verbatim. The steps field is a Markdown editor that collapses
+  // single newlines, so wrap it in a fenced code block; that round-trips
+  // losslessly and renders as monospace, which suits BDD text.
+  const applyAIGherkin = () => {
+    if (!aiAssistantResult?.gherkin) return;
+    const gherkin = String(aiAssistantResult.gherkin).trim();
+    const fenced = `\`\`\`gherkin\n${gherkin}\n\`\`\``;
+    const previousSteps = formData.steps;
+    const previousMultistep = formData.is_multistep;
+    setFormData((current) => ({ ...current, steps: fenced, is_multistep: false }));
+    setAiDialogOpen(false);
+    toastWithUndo(t('aiGherkinApplied'), () => setFormData((current) => ({ ...current, steps: previousSteps, is_multistep: previousMultistep })));
+  };
+
+  // Turn a Gherkin scenario into structured multistep rows: Given/When/And/But
+  // become step actions; a Then (and its trailing And/But) becomes the expected
+  // result of the step it follows. Feature/Scenario/Background lines are skipped.
+  const parseGherkinToSteps = (gherkin: string) => {
+    const stepLine = /^(Given|When|Then|And|But|\*)\b\s*(.*)$/i;
+    const steps: { step_number: number; action: string; expected_result: string; step_type: string }[] = [];
+    let lastWasThen = false;
+    for (const raw of gherkin.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const match = line.match(stepLine);
+      if (!match) continue; // Feature/Scenario/Background/Rule/comments
+      const keyword = match[1].toLowerCase();
+      const full = `${match[1]} ${match[2].trim()}`.trim();
+      const isOutcome = keyword === 'then' || ((keyword === 'and' || keyword === 'but' || keyword === '*') && lastWasThen);
+      if (isOutcome && steps.length > 0) {
+        const prev = steps[steps.length - 1];
+        prev.expected_result = prev.expected_result ? `${prev.expected_result}\n${full}` : full;
+      } else {
+        steps.push({ step_number: steps.length + 1, action: full, expected_result: '', step_type: 'manual' });
+      }
+      lastWasThen = keyword === 'then' || (lastWasThen && (keyword === 'and' || keyword === 'but' || keyword === '*'));
+    }
+    return steps;
+  };
+
+  const convertGherkinToSteps = () => {
+    if (!aiAssistantResult?.gherkin) return;
+    const parsed = parseGherkinToSteps(String(aiAssistantResult.gherkin));
+    if (parsed.length === 0) {
+      toast({ variant: 'destructive', title: t('error'), description: t('aiGherkinNoSteps') });
+      return;
+    }
+    const previousSteps = testSteps;
+    const previousMultistep = formData.is_multistep;
+    setTestSteps(parsed);
+    setFormData((current) => ({ ...current, is_multistep: true }));
+    setAiDialogOpen(false);
+    toastWithUndo(t('aiGherkinConverted', { count: parsed.length }), () => {
+      setTestSteps(previousSteps);
+      setFormData((current) => ({ ...current, is_multistep: previousMultistep }));
+    });
+  };
+
+  // Drafts (negative cases / split) are separate test cases; create them in the
+  // current suite/section without disturbing the case being edited. New cases
+  // inherit the source case's reference (traceability) and carry an origin tag.
+  const createDraftAsTestCase = async (draft: any, index: number) => {
+    if (!formData.test_suite_id) {
+      toast({ variant: 'destructive', title: t('validationError'), description: t('testSuiteRequired') });
+      return null;
+    }
+    if (createdDraftInfo[index]) return createdDraftInfo[index];
+    setCreatingDraftIndex(index);
+    try {
+      const draftSteps = Array.isArray(draft.test_steps) ? normalizeAISteps(draft.test_steps) : [];
+      const title = (draftTitleOverrides[index] ?? draft.title ?? '').trim() || draft.title || 'Generated test case';
+      const originTag = aiAssistantAction === 'add_negative_cases' ? 'negative' : aiAssistantAction === 'split_broad_case' ? 'split' : '';
+      const tags = [draft.tags, originTag].map((value) => (value || '').trim()).filter(Boolean).join(',');
+      const created = await testCasesAPI.create({
+        title,
+        description: draft.description || '',
+        preconditions: draft.preconditions || '',
+        steps: draft.steps || '',
+        expected_result: draft.expected_result || '',
+        priority: draft.priority || 'medium',
+        test_type: draft.test_type || 'manual',
+        status: 'active',
+        tags,
+        reference: formData.reference || '',
+        test_suite_id: formData.test_suite_id,
+        section_id: formData.section_id,
+        is_multistep: draftSteps.length > 0,
+        test_steps: draftSteps.length > 0 ? draftSteps : undefined,
+      });
+      setCreatedDraftInfo((prev) => ({ ...prev, [index]: { id: created.id, title } }));
+      toast({ title: t('aiDraftCreated'), description: title });
+      return { id: created.id, title };
+    } catch (error: any) {
+      console.error('Failed to create draft test case:', error);
+      toast({
+        variant: 'destructive',
+        title: t('saveFailed'),
+        description: error.response?.data?.detail || t('aiAssistantFailed'),
+      });
+      return null;
+    } finally {
+      setCreatingDraftIndex(null);
+    }
+  };
+
+  const createAllDrafts = async () => {
+    const drafts = aiAssistantResult?.drafts;
+    if (!Array.isArray(drafts) || drafts.length === 0) return;
+    setCreatingAllDrafts(true);
+    try {
+      for (let index = 0; index < drafts.length; index += 1) {
+        if (!createdDraftInfo[index]) {
+          // Sequential so failures are isolated and the backend isn't hammered.
+          // eslint-disable-next-line no-await-in-loop
+          await createDraftAsTestCase(drafts[index], index);
+        }
+      }
+    } finally {
+      setCreatingAllDrafts(false);
+    }
   };
 
   const runAIAssistant = async (action: AIAssistantAction) => {
@@ -503,6 +696,11 @@ export function TestCaseEdit() {
     setAiAssistantAction(action);
     setAiAssistantLoading(true);
     setAiAssistantResult(null);
+    setCreatedDraftInfo({});
+    setDraftTitleOverrides({});
+    setCreatingDraftIndex(null);
+    setAiStepMode('replace');
+    setAiSelectedSteps(new Set());
     try {
       const result = currentProjectId
         ? await testCasesAPI.assistDraft({
@@ -525,6 +723,10 @@ export function TestCaseEdit() {
             instructions: aiInstructions.trim() || undefined,
           });
       setAiAssistantResult(result);
+      // Default-select every suggested step so "Apply" works with one click.
+      if (Array.isArray(result?.steps) && result.steps.length > 0) {
+        setAiSelectedSteps(new Set(result.steps.map((_: any, index: number) => index)));
+      }
       setAiDialogOpen(true);
     } catch (error: any) {
       console.error('AI test case assistant failed:', error);
@@ -810,6 +1012,8 @@ export function TestCaseEdit() {
     );
   }
 
+  const aiActionsDisabled = loadingAIStatus || aiStatus?.available === false;
+
   return (
     <div className="container mx-auto p-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-4 mb-6">
@@ -830,45 +1034,69 @@ export function TestCaseEdit() {
           )}
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-900 dark:bg-indigo-950/30">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-2">
-                <Label htmlFor="ai-assistant-instructions">{t('aiTestCaseAssistant')}</Label>
-                <Input
-                  id="ai-assistant-instructions"
-                  value={aiInstructions}
-                  onChange={(event) => setAiInstructions(event.target.value)}
-                  placeholder={t('aiAssistantInstructionsPlaceholder')}
-                  maxLength={2000}
-                />
+          <div className="rounded-xl border border-indigo-200/70 bg-gradient-to-br from-indigo-50/80 to-purple-50/40 p-4 dark:border-indigo-900/60 dark:from-indigo-950/30 dark:to-purple-950/20">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('aiTestCaseAssistant')}</h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">{t('aiAssistantPanelDescription')}</p>
+                </div>
               </div>
               {loadingAIStatus ? (
-                <div className="rounded-md border border-slate-200 bg-white/70 p-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300">
-                  <Loader2 className={`inline h-3.5 w-3.5 animate-spin ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/70 px-2.5 py-1 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   {t('loading')}
-                </div>
+                </span>
               ) : aiStatus && !aiStatus.available ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                  <AlertTriangle className={`inline h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                  <AlertTriangle className="h-3.5 w-3.5" />
                   {t('aiEnabledTokenMissing')}
-                </div>
+                </span>
               ) : (
-                <p className="text-xs text-slate-600 dark:text-slate-300">{t('aiDraftReviewRequired')}</p>
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {aiStatus?.active_provider ? t('aiReadyWithProvider', { provider: aiStatus.active_provider }) : t('aiReady')}
+                </span>
               )}
-              <div className="flex flex-wrap gap-2">
-                {([
-                  ['suggest_steps', t('suggestSteps')],
-                  ['improve_expected_result', t('improveExpectedResult')],
-                  ['add_negative_cases', t('addNegativeCases')],
-                  ['convert_to_gherkin', t('convertToGherkin')],
-                  ['split_broad_case', t('splitBroadCase')],
-                ] as [AIAssistantAction, string][]).map(([action, label]) => (
-                  <Button key={action} type="button" variant="outline" size="sm" onClick={() => runAIAssistant(action)} disabled={aiAssistantLoading || loadingAIStatus || aiStatus?.available === false}>
-                    {aiAssistantLoading && aiAssistantAction === action ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Wand2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
-                    {label}
-                  </Button>
-                ))}
-              </div>
+            </div>
+
+            <div className="mt-3 space-y-1.5">
+              <Label htmlFor="ai-assistant-instructions" className="text-xs text-slate-600 dark:text-slate-400">{t('aiAssistantInstructionsLabel')}</Label>
+              <Input
+                id="ai-assistant-instructions"
+                value={aiInstructions}
+                onChange={(event) => setAiInstructions(event.target.value)}
+                placeholder={t('aiAssistantInstructionsPlaceholder')}
+                maxLength={2000}
+                disabled={aiActionsDisabled}
+                className="bg-white/80 dark:bg-slate-950/50"
+              />
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {AI_ASSISTANT_ACTIONS.map(({ action, labelKey, descKey, icon: Icon }) => {
+                const isRunning = aiAssistantLoading && aiAssistantAction === action;
+                return (
+                  <button
+                    key={action}
+                    type="button"
+                    onClick={() => runAIAssistant(action)}
+                    disabled={aiActionsDisabled || aiAssistantLoading}
+                    className="group flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white/80 p-2.5 text-start transition hover:border-indigo-300 hover:bg-white hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950/50 dark:hover:border-indigo-700 dark:hover:bg-slate-900"
+                  >
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-indigo-100 text-indigo-700 transition group-hover:bg-indigo-600 group-hover:text-white dark:bg-indigo-950/60 dark:text-indigo-300">
+                      {isRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">{t(labelKey)}</span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400">{t(descKey)}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1348,44 +1576,169 @@ export function TestCaseEdit() {
       <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
         <DialogContent isRTL={isRTL} className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{t('aiAssistantResult')}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-indigo-600" />
+              {t('aiAssistantResult')}
+            </DialogTitle>
             <DialogDescription>{t('aiAssistantResultDesc')}</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] space-y-4 overflow-y-auto py-2 text-sm">
             {aiAssistantResult?.warnings?.map((warning: string, index: number) => (
-              <div key={index} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                {warning}
+              <div key={index} className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{warning}</span>
               </div>
             ))}
-            {aiAssistantResult?.expected_result && (
-              <PreviewBlock title={t('expectedResult')} value={aiAssistantResult.expected_result} />
+            {(aiAssistantResult?.expected_result || (Array.isArray(aiAssistantResult?.step_expected_results) && aiAssistantResult.step_expected_results.length > 0)) && (
+              <div className="space-y-2">
+                {Array.isArray(aiAssistantResult?.step_expected_results) && aiAssistantResult.step_expected_results.length > 0 ? (
+                  <div className="space-y-2">
+                    <h3 className="font-medium">{t('aiExpectedResultPerStep')}</h3>
+                    <p className="text-xs text-muted-foreground">{t('aiExpectedResultPerStepHint')}</p>
+                    {aiAssistantResult.step_expected_results.map((item: any, index: number) => (
+                      <div key={index} className="rounded-md border p-3 dark:border-slate-800">
+                        <p className="font-medium">#{item.step_number}</p>
+                        <p className="mt-1 text-muted-foreground">{item.expected_result}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <PreviewBlock title={t('expectedResult')} value={aiAssistantResult.expected_result} />
+                )}
+                <Button type="button" size="sm" onClick={applyAIExpectedResult}>
+                  <Check className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('aiApplyExpectedResult')}
+                </Button>
+              </div>
             )}
             {aiAssistantResult?.gherkin && (
-              <PreviewBlock title={t('gherkinSyntax')} value={aiAssistantResult.gherkin} />
+              <div className="space-y-2">
+                <PreviewBlock title={t('gherkinSyntax')} value={aiAssistantResult.gherkin} />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" onClick={applyAIGherkin}>
+                    <Check className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('aiApplyGherkin')}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={convertGherkinToSteps}>
+                    <ListChecks className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('aiConvertGherkinToSteps')}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t('aiGherkinApplyHint')}</p>
+              </div>
             )}
             {Array.isArray(aiAssistantResult?.steps) && aiAssistantResult.steps.length > 0 && (
               <div className="space-y-2">
-                <h3 className="font-medium">{t('testSteps')}</h3>
-                {aiAssistantResult.steps.map((step: any, index: number) => (
-                  <div key={index} className="rounded-md border p-3 dark:border-slate-800">
-                    <p className="font-medium">{index + 1}. {step.action}</p>
-                    <p className="mt-1 text-muted-foreground">{step.expected_result}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-medium">{t('testSteps')}</h3>
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex overflow-hidden rounded-md border dark:border-slate-700">
+                      {(['replace', 'append'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setAiStepMode(mode)}
+                          className={`px-2.5 py-1 text-xs transition ${aiStepMode === mode ? 'bg-indigo-600 text-white' : 'bg-transparent text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+                        >
+                          {mode === 'replace' ? t('aiApplyModeReplace') : t('aiApplyModeAppend')}
+                        </button>
+                      ))}
+                    </div>
+                    <Button type="button" size="sm" onClick={applyAISteps} disabled={aiSelectedSteps.size === 0}>
+                      <Check className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                      {t('aiApplySteps')}
+                    </Button>
                   </div>
-                ))}
+                </div>
+                <p className="text-xs text-muted-foreground">{t('aiStepsSelected', { selected: aiSelectedSteps.size, total: aiAssistantResult.steps.length })}</p>
+                {aiAssistantResult.steps.map((step: any, index: number) => {
+                  const selected = aiSelectedSteps.has(index);
+                  return (
+                    <label
+                      key={index}
+                      className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition dark:border-slate-800 ${selected ? 'border-indigo-300 bg-indigo-50/40 dark:border-indigo-800 dark:bg-indigo-950/20' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleSelectedStep(index)}
+                        className="mt-1 h-4 w-4 accent-indigo-600"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">{index + 1}. {step.action}</span>
+                        <span className="mt-1 block text-muted-foreground">{step.expected_result}</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             )}
             {Array.isArray(aiAssistantResult?.drafts) && aiAssistantResult.drafts.length > 0 && (
               <div className="space-y-2">
-                <h3 className="font-medium">{t('generatedDrafts')}</h3>
-                {aiAssistantResult.drafts.map((draft: any, index: number) => (
-                  <div key={index} className="rounded-md border p-3 dark:border-slate-800">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium">{draft.title}</p>
-                      {typeof draft.confidence === 'number' && <Badge variant="outline">{t('aiConfidence', { confidence: Math.round(draft.confidence * 100) })}</Badge>}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-medium">{t('generatedDrafts')}</h3>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={createAllDrafts}
+                    disabled={creatingAllDrafts || aiAssistantResult.drafts.every((_: any, index: number) => !!createdDraftInfo[index])}
+                  >
+                    {creatingAllDrafts ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <CopyPlus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                    {t('aiCreateAll')}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t('aiDraftsCreateHint')}</p>
+                {aiAssistantResult.drafts.map((draft: any, index: number) => {
+                  const createdInfo = createdDraftInfo[index];
+                  const created = !!createdInfo;
+                  const stepCount = Array.isArray(draft.test_steps) ? draft.test_steps.length : 0;
+                  return (
+                    <div key={index} className="rounded-md border p-3 dark:border-slate-800">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={draftTitleOverrides[index] ?? draft.title ?? ''}
+                          onChange={(event) => setDraftTitleOverrides((prev) => ({ ...prev, [index]: event.target.value }))}
+                          disabled={created}
+                          maxLength={255}
+                          className="h-8 max-w-md flex-1 text-sm font-medium"
+                        />
+                        {typeof draft.confidence === 'number' && <Badge variant="outline">{t('aiConfidence', { confidence: Math.round(draft.confidence * 100) })}</Badge>}
+                        {stepCount > 0 && <Badge variant="secondary">{t('aiStepCount', { count: stepCount })}</Badge>}
+                      </div>
+                      {draft.description && <p className="mt-1 text-muted-foreground">{draft.description}</p>}
+                      <div className="mt-2 flex flex-wrap items-center gap-3">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={created ? 'outline' : 'default'}
+                          disabled={created || creatingDraftIndex === index}
+                          onClick={() => createDraftAsTestCase(draft, index)}
+                        >
+                          {creatingDraftIndex === index ? (
+                            <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                          ) : created ? (
+                            <Check className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                          ) : (
+                            <CopyPlus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                          )}
+                          {created ? t('aiDraftCreated') : t('aiCreateAsNewTestCase')}
+                        </Button>
+                        {created && currentProjectId && (
+                          <a
+                            href={`/projects/${currentProjectId}/test-cases/${createdInfo.id}/edit`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:underline dark:text-indigo-400"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            {t('open')}
+                          </a>
+                        )}
+                      </div>
                     </div>
-                    <p className="mt-1 text-muted-foreground">{draft.description}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             {!aiAssistantResult?.expected_result && !aiAssistantResult?.gherkin && (!Array.isArray(aiAssistantResult?.steps) || aiAssistantResult.steps.length === 0) && (!Array.isArray(aiAssistantResult?.drafts) || aiAssistantResult.drafts.length === 0) && (
@@ -1395,8 +1748,7 @@ export function TestCaseEdit() {
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setAiDialogOpen(false)}>{t('cancel')}</Button>
-            <Button type="button" onClick={() => applyAIAssistantResult()}>{t('applyDraft')}</Button>
+            <Button type="button" variant="outline" onClick={() => setAiDialogOpen(false)}>{t('close')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

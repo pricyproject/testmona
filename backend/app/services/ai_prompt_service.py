@@ -8,14 +8,37 @@ import re
 from typing import Any, Optional
 
 
+def _unescape_literal_whitespace(text: str) -> str:
+    """Restore real whitespace from the literal escape sequences some models
+    double-escape inside JSON strings (``\\n`` instead of a newline), so
+    multi-line output such as Gherkin keeps its line breaks."""
+    if "\\" not in text:
+        return text
+    return (
+        text.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\\t", "\t")
+    )
+
+
 def clean_ai_text(value: Any, max_length: int = 4000) -> str:
     if value is None:
         return ""
     if isinstance(value, (list, dict)):
         value = json.dumps(value, ensure_ascii=False)
-    text = html.unescape(str(value)).replace("\x00", "").strip()
-    text = re.sub(r"\s+\n", "\n", text)
+    text = _unescape_literal_whitespace(html.unescape(str(value))).replace("\x00", "").strip()
+    text = re.sub(r"[ \t]+\n", "\n", text)
     return text[:max_length].strip()
+
+
+def clean_gherkin(value: Any, max_length: int = 8000) -> str:
+    """Clean a Gherkin block while preserving its line structure (indentation
+    and blank lines), only normalising escape sequences and stray nulls."""
+    if not value:
+        return ""
+    text = _unescape_literal_whitespace(html.unescape(str(value))).replace("\x00", "")
+    return text.strip()[:max_length].strip()
 
 
 def strip_html(value: Optional[str]) -> str:
@@ -113,7 +136,12 @@ Reference: {payload.reference or ""}
 def build_test_case_assistant_prompt(action: str, context: str, instructions: Optional[str]) -> str:
     action_guidance = {
         "suggest_steps": "Return improved test_steps and a short warnings list.",
-        "improve_expected_result": "Return a precise expected_result and a short warnings list.",
+        "improve_expected_result": (
+            "Return a precise expected_result and a short warnings list. If the test case "
+            "has multiple steps, ALSO return step_expected_results: a list of "
+            "{step_number, expected_result} improving the expected result of each step "
+            "(keep the same step_number values)."
+        ),
         "add_negative_cases": "Return 2-4 negative or edge-case drafts in drafts.",
         "convert_to_gherkin": "Return gherkin text using Feature/Scenario/Given/When/Then.",
         "split_broad_case": "Return 2-5 smaller focused drafts in drafts.",
@@ -127,6 +155,7 @@ Return only valid JSON with any relevant keys from this schema:
   "drafts": [{{"title":"string","description":"string","preconditions":"string","steps":"string","expected_result":"string","priority":"low|medium|high|critical","test_type":"manual","tags":"string","confidence":0.0,"test_steps":[{{"step_number":1,"action":"string","expected_result":"string","step_type":"manual"}}]}}],
   "steps": [{{"step_number":1,"action":"string","expected_result":"string","step_type":"manual"}}],
   "expected_result": "string",
+  "step_expected_results": [{{"step_number":1,"expected_result":"string"}}],
   "gherkin": "string",
   "warnings": ["string"]
 }}

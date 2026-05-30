@@ -19,6 +19,7 @@ from ..services.ai_prompt_service import (
     build_test_case_context,
     build_test_case_draft_context,
     clean_ai_text,
+    clean_gherkin,
     extract_json_object,
 )
 from ..services.similarity_service import (
@@ -128,6 +129,16 @@ class TestCaseDraftAssistantRequest(TestCaseAssistantRequest):
     test_steps: List[AIDraftStep] = Field(default_factory=list, max_length=30)
 
 
+class AIStepExpectedResult(BaseModel):
+    step_number: int = Field(..., ge=1, le=100)
+    expected_result: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("expected_result", mode="before")
+    @classmethod
+    def normalize_expected_result(cls, value: Any) -> str:
+        return _clean_text(value, max_length=2000)
+
+
 class TestCaseAssistantResponse(BaseModel):
     provider: str
     model: str
@@ -135,6 +146,7 @@ class TestCaseAssistantResponse(BaseModel):
     drafts: List[AIDraftTestCase] = Field(default_factory=list)
     steps: List[AIDraftStep] = Field(default_factory=list)
     expected_result: Optional[str] = None
+    step_expected_results: List[AIStepExpectedResult] = Field(default_factory=list)
     gherkin: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
 
@@ -274,12 +286,28 @@ def _assistant_response_from_parsed(result: Any, action: str, parsed: dict[str, 
             ))
         except Exception as exc:
             logger.warning("Skipping malformed AI step %s: %s", index, exc)
+    step_expected_results: List[AIStepExpectedResult] = []
+    raw_step_expected = parsed.get("step_expected_results")
+    if isinstance(raw_step_expected, list):
+        for index, item in enumerate(raw_step_expected[:100], start=1):
+            if not isinstance(item, dict):
+                continue
+            expected = item.get("expected_result") or item.get("expected")
+            if not expected:
+                continue
+            try:
+                step_expected_results.append(AIStepExpectedResult(
+                    step_number=item.get("step_number") or index,
+                    expected_result=expected,
+                ))
+            except Exception as exc:
+                logger.warning("Skipping malformed AI step expected result %s: %s", index, exc)
     warnings = [str(item) for item in parsed.get("warnings", []) if item]
     if isinstance(raw_drafts, list) and len(drafts) < len(raw_drafts):
         warnings.append("Some AI draft items were ignored because they were incomplete or malformed.")
     if isinstance(raw_steps, list) and len(response_steps) < min(len(raw_steps), 30):
         warnings.append("Some AI steps were ignored because they were incomplete or malformed.")
-    if not drafts and not response_steps and not parsed.get("expected_result") and not parsed.get("gherkin"):
+    if not drafts and not response_steps and not step_expected_results and not parsed.get("expected_result") and not parsed.get("gherkin"):
         warnings.append("AI returned no applicable draft content. Try again with more specific instructions.")
     return TestCaseAssistantResponse(
         provider=result.provider,
@@ -288,7 +316,8 @@ def _assistant_response_from_parsed(result: Any, action: str, parsed: dict[str, 
         drafts=drafts,
         steps=response_steps,
         expected_result=parsed.get("expected_result") if isinstance(parsed.get("expected_result"), str) else None,
-        gherkin=parsed.get("gherkin") if isinstance(parsed.get("gherkin"), str) else None,
+        step_expected_results=step_expected_results,
+        gherkin=(clean_gherkin(parsed.get("gherkin")) or None) if isinstance(parsed.get("gherkin"), str) else None,
         warnings=warnings,
     )
 
