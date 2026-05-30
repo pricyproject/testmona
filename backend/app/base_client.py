@@ -86,8 +86,11 @@ class BaseClient(ABC):
         Returns:
             requests.Response object
         """
-        headers = kwargs.pop('headers', {})
-        headers.update(self.get_headers())
+        # Start from the client's auth headers, then let any per-call headers
+        # override them (e.g. a request-specific Content-Type). The previous
+        # order discarded per-call overrides because get_headers() won.
+        headers = self.get_headers()
+        headers.update(kwargs.pop('headers', {}))
         
         for attempt in range(self.max_retries):
             try:

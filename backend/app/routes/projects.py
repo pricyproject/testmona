@@ -568,6 +568,7 @@ def register_project_routes(app):
 
     @app.get("/test-schedules", response_model=List[schemas.TestSchedule])
     def read_test_schedules(
+        project_id: int = None,
         test_suite_id: int = None,
         skip: int = 0,
         limit: int = 100,
@@ -576,8 +577,8 @@ def register_project_routes(app):
     ):
         if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud_rbac.get_test_schedules(db, test_suite_id=test_suite_id, skip=skip, limit=limit)
+
+        return crud_rbac.get_test_schedules(db, project_id=project_id, test_suite_id=test_suite_id, skip=skip, limit=limit)
 
     @app.post("/test-executions", response_model=schemas.TestExecution)
     def create_test_execution(

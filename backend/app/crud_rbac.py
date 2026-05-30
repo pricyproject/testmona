@@ -55,6 +55,8 @@ def get_test_schedule(db: Session, schedule_id: int):
 
 def get_test_schedules(db: Session, project_id: int = None, test_suite_id: int = None, skip: int = 0, limit: int = 100):
     query = db.query(TestSchedule)
+    if project_id:
+        query = query.filter(TestSchedule.project_id == project_id)
     if test_suite_id:
         query = query.filter(TestSchedule.test_suite_id == test_suite_id)
     return query.offset(skip).limit(limit).all()

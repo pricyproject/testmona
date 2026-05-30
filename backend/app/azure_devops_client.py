@@ -135,9 +135,7 @@ class AzureDevOpsClient(BaseClient):
                     'success': False,
                     'message': f'Failed to get work item type: {type_response.status_code}'
                 }
-            
-            work_item_type_ref = type_response.json()
-            
+
             # Create work item
             payload = [
                 {
@@ -164,13 +162,18 @@ class AzureDevOpsClient(BaseClient):
                     "value": assignee
                 })
             
+            # Azure DevOps work-item create/update use a JSON Patch document and
+            # require the json-patch media type; plain application/json returns 415.
+            patch_headers = dict(self.headers)
+            patch_headers['Content-Type'] = 'application/json-patch+json'
+
             response = self._make_request(
                 'POST',
                 f"{self.api_url}/{self.organization}/{self.project}/_apis/wit/workitems/${work_item_type}",
-                headers=self.headers,
+                headers=patch_headers,
                 json=payload
             )
-            
+
             if response.status_code == 200:
                 work_item = response.json()
                 return {
@@ -227,11 +230,21 @@ class AzureDevOpsClient(BaseClient):
                     "path": "/fields/Microsoft.VSTS.Common.Priority",
                     "value": int(priority)
                 })
-            
+
+            if not payload:
+                return {
+                    'success': False,
+                    'message': 'No fields provided to update'
+                }
+
+            # JSON Patch document requires the json-patch media type.
+            patch_headers = dict(self.headers)
+            patch_headers['Content-Type'] = 'application/json-patch+json'
+
             response = self._make_request(
                 'PATCH',
                 f"{self.api_url}/{self.organization}/{self.project}/_apis/wit/workitems/{work_item_id}",
-                headers=self.headers,
+                headers=patch_headers,
                 json=payload
             )
             

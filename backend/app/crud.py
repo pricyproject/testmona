@@ -2408,25 +2408,18 @@ def calculate_project_kpis(db: Session, project_id: int, time_period: str = "7d"
     time_mapping = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}
     days = time_mapping.get(time_period, 7)
     current_start_date = datetime.now() - timedelta(days=days)
-    previous_start_date = current_start_date - timedelta(days=days)
-    
+
     total_test_cases = db.query(TestCase).join(TestSuite).filter(
         TestSuite.project_id == project_id,
         TestCase.is_deleted == False,
     ).count()
-    
+
     current_results = db.query(TestResult).join(TestRun).filter(
         TestRun.project_id == project_id,
         TestResult.executed_at >= current_start_date,
     ).all()
-    previous_results = db.query(TestResult).join(TestRun).filter(
-        TestRun.project_id == project_id,
-        TestResult.executed_at >= previous_start_date,
-        TestResult.executed_at < current_start_date,
-    ).all()
-    
+
     current_statuses = [_normalized_result_status(result.status) for result in current_results]
-    previous_statuses = [_normalized_result_status(result.status) for result in previous_results]
     executed_statuses = {"passed", "failed", "blocked", "skipped"}
     executed_results = [result for result in current_results if _normalized_result_status(result.status) in executed_statuses]
     
@@ -2546,7 +2539,7 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
         TestRun.created_at < end_date
     ).all()
     
-    prev_completed_runs = [run for run in prev_test_runs if run.status == 'completed']
+    prev_completed_runs = [run for run in prev_test_runs if run.status in ('completed', 'passed', 'failed')]
     prev_cycle_times = []
     for run in prev_completed_runs:
         if hasattr(run, 'completed_at') and run.completed_at:
