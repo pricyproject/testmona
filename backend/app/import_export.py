@@ -2536,7 +2536,7 @@ async def import_projects(
         # Fallback to UTF-8 with error handling
         try:
             decoded_content = content.decode('utf-8', errors='ignore')
-        except:
+        except Exception:
             raise HTTPException(status_code=400, detail="Unable to decode file. Please ensure file is UTF-8 encoded.")
 
     # Determine file format
@@ -3189,7 +3189,7 @@ async def validate_project_import(
     except UnicodeDecodeError:
         try:
             decoded_content = content.decode('utf-8', errors='ignore')
-        except:
+        except Exception:
             raise HTTPException(status_code=400, detail="Unable to decode file. Please ensure file is UTF-8 encoded.")
 
     validation_errors = []

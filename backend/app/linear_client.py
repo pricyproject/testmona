@@ -53,6 +53,23 @@ class LinearClient(BaseClient):
             return int(retry_after)
         return 60  # Default wait time if no Retry-After header
     
+    @staticmethod
+    def _map_priority(priority: Optional[str]) -> int:
+        """Map a textual priority to Linear's integer scale.
+
+        Linear uses: 0 = No priority, 1 = Urgent, 2 = High, 3 = Medium, 4 = Low.
+        The API rejects a string priority, so callers' labels must be converted.
+        """
+        if priority is None:
+            return 0
+        return {
+            'urgent': 1, 'critical': 1,
+            'high': 2,
+            'medium': 3, 'normal': 3,
+            'low': 4,
+            'no priority': 0, 'none': 0,
+        }.get(str(priority).strip().lower(), 0)
+
     def get_error_message(self, status_code: int) -> str:
         """Get error message for Linear status codes."""
         if status_code == 401:
@@ -164,16 +181,17 @@ class LinearClient(BaseClient):
                     'message': 'Team not found'
                 }
             
-            # Create issue mutation
+            # Create issue mutation.
+            # Note: Linear's IssueCreateInput has no "issueType" field and expects
+            # an integer priority, so issue_type is intentionally not sent here.
             mutation = {
                 'query': '''
-                    mutation($title: String!, $description: String!, $teamId: ID!, $issueType: String!, $priority: String!, $assigneeId: String) {
+                    mutation($title: String!, $description: String!, $teamId: String!, $priority: Int, $assigneeId: String) {
                         issueCreate(
                             input: {
                                 title: $title
                                 description: $description
                                 teamId: $teamId
-                                issueType: $issueType
                                 priority: $priority
                                 assigneeId: $assigneeId
                             }
@@ -195,8 +213,7 @@ class LinearClient(BaseClient):
                     'title': title,
                     'description': description,
                     'teamId': team_id,
-                    'issueType': issue_type,
-                    'priority': priority,
+                    'priority': self._map_priority(priority),
                     'assigneeId': assignee_id
                 }
             }
@@ -259,7 +276,7 @@ class LinearClient(BaseClient):
         try:
             mutation = {
                 'query': '''
-                    mutation($issueId: ID!, $title: String, $description: String, $priority: String) {
+                    mutation($issueId: String!, $title: String, $description: String, $priority: Int) {
                         issueUpdate(
                             id: $issueId
                             input: {
@@ -281,7 +298,9 @@ class LinearClient(BaseClient):
                     'issueId': issue_id,
                     'title': title,
                     'description': description,
-                    'priority': priority
+                    # Only convert when a priority was supplied; leave it null
+                    # otherwise so an update doesn't reset it to "No priority".
+                    'priority': self._map_priority(priority) if priority is not None else None
                 }
             }
             

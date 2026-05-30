@@ -85,7 +85,7 @@ class JiraService:
                 timeout=10
             )
             return response.status_code == 200
-        except:
+        except Exception:
             return False
 
     def get_project_info(self) -> Optional[Dict]:
@@ -99,7 +99,7 @@ class JiraService:
             )
             if response.status_code == 200:
                 return response.json()
-        except:
+        except Exception:
             pass
         return None
 

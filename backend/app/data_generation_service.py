@@ -68,12 +68,27 @@ class EmailProvider(BaseDataProvider):
 
 class AddressProvider(BaseDataProvider):
     """Generate realistic addresses"""
-    
+
+    # Map common ISO country codes to valid Faker locales.
+    _COUNTRY_LOCALES = {
+        'US': 'en_US', 'GB': 'en_GB', 'UK': 'en_GB', 'CA': 'en_CA',
+        'AU': 'en_AU', 'IN': 'en_IN', 'DE': 'de_DE', 'FR': 'fr_FR',
+        'ES': 'es_ES', 'IT': 'it_IT', 'NL': 'nl_NL', 'BR': 'pt_BR',
+        'PT': 'pt_PT', 'JP': 'ja_JP', 'CN': 'zh_CN', 'RU': 'ru_RU',
+    }
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.address_type = self.config.get('address_type', 'full')  # full, street, city, state, zip
         self.country = self.config.get('country', 'US')
-        self.fake = Faker(f'/{self.country.lower()}')
+        # Resolve to a valid Faker locale. Accept either a country code
+        # ("US") or a full locale ("en_US"); fall back to the default locale
+        # if the value is unknown so address generation never crashes.
+        locale = self._COUNTRY_LOCALES.get((self.country or '').upper(), self.country)
+        try:
+            self.fake = Faker(locale)
+        except (AttributeError, ValueError, TypeError):
+            self.fake = Faker()
     
     def generate_single(self) -> str:
         if self.address_type == 'street':
