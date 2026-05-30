@@ -336,7 +336,7 @@ export function TestCaseDetail() {
 
   const displaySteps = useMemo(() => {
     const parseLegacyText = (text: string | undefined | null) =>
-      (text || '')
+      (parseCodeFence(text || '')?.code ?? (text || ''))
         .split('\n')
         .map((step) => step.trim())
         .filter(Boolean)
@@ -720,9 +720,7 @@ export function TestCaseDetail() {
                   )
                 ) : testCase.steps ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
-                    <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-700 dark:text-slate-300">
-                      {testCase.steps}
-                    </p>
+                    <StepsTextContent value={testCase.steps} />
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60">
@@ -1112,6 +1110,35 @@ function CustomFieldValueDisplay({
   }
 
   return <p className="whitespace-pre-wrap wrap-break-word text-sm leading-6 text-slate-700 dark:text-slate-300">{value}</p>;
+}
+
+// AI-applied Gherkin is stored as a fenced code block so the markdown step
+// editor preserves its line breaks. Detect that here so the detail view renders
+// it as a clean monospace block instead of leaking the ``` fence markers.
+const STEPS_CODE_FENCE_RE = /^```[ \t]*([\w-]*)[ \t]*\r?\n([\s\S]*?)\r?\n?```$/;
+
+function parseCodeFence(text: string): { language: string; code: string } | null {
+  const match = (text || '').trim().match(STEPS_CODE_FENCE_RE);
+  return match ? { language: match[1] || '', code: match[2] } : null;
+}
+
+function StepsTextContent({ value }: { value: string }) {
+  const fence = parseCodeFence(value);
+  if (fence) {
+    return (
+      <div className="space-y-2">
+        {fence.language && (
+          <span className="inline-block rounded bg-slate-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            {fence.language}
+          </span>
+        )}
+        <pre className="overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-slate-900 p-3 font-mono text-[13px] leading-6 text-slate-100 dark:bg-slate-950">{fence.code}</pre>
+      </div>
+    );
+  }
+  return (
+    <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-700 dark:text-slate-300">{value}</p>
+  );
 }
 
 function PropertyRow({ label, value }: { label: string; value: ReactNode }) {
