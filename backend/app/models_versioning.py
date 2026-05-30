@@ -92,10 +92,13 @@ class TestCaseVersion(Base):
             version += f"-{self.version_label}"
         return version
     
-    @property
-    def is_current_version(self):
-        """Check if this is the current published version"""
-        current = TestCaseVersion.query.filter_by(
+    def is_current_version(self, db) -> bool:
+        """Check if this is the current published version.
+
+        Requires a SQLAlchemy session; this is plain SQLAlchemy, so there is
+        no Flask-style ``Model.query``.
+        """
+        current = db.query(TestCaseVersion).filter_by(
             test_case_id=self.test_case_id,
             status=VersionStatus.PUBLISHED
         ).order_by(
@@ -103,7 +106,7 @@ class TestCaseVersion(Base):
             TestCaseVersion.version_minor.desc(),
             TestCaseVersion.version_patch.desc()
         ).first()
-        return current and current.id == self.id
+        return bool(current and current.id == self.id)
 
 
 class VersionComparison(Base):

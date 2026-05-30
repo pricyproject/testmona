@@ -23,10 +23,12 @@ app.add_middleware(SecurityHeadersMiddleware)
 # Add rate limiting middleware (1000 requests per 60 seconds per IP)
 app.add_middleware(RateLimitMiddleware, calls=1000, period=60)
 
-# Add CORS middleware
+# Add CORS middleware. Origins come from the ALLOWED_ORIGINS setting
+# (comma-separated) so production deployments are not locked to localhost.
+allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=allowed_origins or ["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

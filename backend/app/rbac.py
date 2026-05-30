@@ -154,12 +154,15 @@ def get_user_projects(user: User, db: Session):
     """Get projects with user's role in each project"""
     if getattr(user, "is_superuser", False) or is_role(user, Role.ADMIN) or is_role(user, Role.MANAGER):
         projects = db.query(Project).all()
-        return [{"project": p, "role": role_value(getattr(user, "role", None), Role.ADMIN)} for p in projects]
-    
+        return [
+            {"project": p, "role": role_value(getattr(user, "role", None), Role.ADMIN), "assigned_at": None}
+            for p in projects
+        ]
+
     assignments = db.query(ProjectAssignment).filter(
         ProjectAssignment.user_id == user.id
     ).all()
-    
+
     result = []
     for assignment in assignments:
         project = db.query(Project).filter(
@@ -168,8 +171,8 @@ def get_user_projects(user: User, db: Session):
         if project:
             result.append({
                 "project": project,
-                "role": assignment.role,
+                "role": role_value(assignment.role),
                 "assigned_at": assignment.assigned_at
             })
-    
+
     return result
