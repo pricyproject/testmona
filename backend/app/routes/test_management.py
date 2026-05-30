@@ -1733,10 +1733,50 @@ def register_test_management_routes(app):
         if not rbac.has_permission(current_user, "write", test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        # Snapshot the existing steps so we record a revision only when the step
+        # content actually changes. The editor re-POSTs steps on every save, so
+        # an unconditional revision here would spawn empty/duplicate entries.
+        def _steps_signature(items):
+            return [
+                (
+                    (getattr(step, "action", "") or "").strip(),
+                    (getattr(step, "expected_result", "") or "").strip(),
+                    (getattr(step, "step_type", "") or "").strip(),
+                )
+                for step in sorted(items, key=lambda s: (getattr(s, "step_number", 0) or 0))
+            ]
+
+        before_signature = _steps_signature(crud.get_test_case_steps(db, test_case_id=test_case_id))
+
         if steps:
             crud.update_test_case(db, test_case_id, schemas.TestCaseUpdate(is_multistep=True))
 
-        return crud.create_test_case_steps(db, test_case_id=test_case_id, steps=steps)
+        created_steps = crud.create_test_case_steps(db, test_case_id=test_case_id, steps=steps)
+
+        # Multistep steps live in their own table, so changes here don't flow
+        # through the test-case PUT revision logic; record one explicitly.
+        if _steps_signature(created_steps) != before_signature:
+            try:
+                updated_case = crud.get_test_case(db, test_case_id=test_case_id)
+                revision_data = {
+                    "test_case_id": test_case_id,
+                    "title": updated_case.title,
+                    "description": updated_case.description,
+                    "test_type": updated_case.test_type,
+                    "preconditions": updated_case.preconditions,
+                    "steps": updated_case.steps,
+                    "expected_result": updated_case.expected_result,
+                    "priority": updated_case.priority,
+                    "tags": updated_case.tags,
+                    "changed_fields": {"steps": "updated"},
+                    "change_reason": "Updated test steps",
+                    "created_by": current_user.id,
+                }
+                crud.create_test_case_revision(db, schemas.TestCaseRevisionCreate(**revision_data))
+            except Exception:
+                logger.exception("Failed to create revision for test case steps %s", test_case_id)
+
+        return created_steps
 
     @app.put("/test-case-steps/{step_id}", response_model=schemas.TestCaseStep)
     def update_test_case_step_endpoint(
