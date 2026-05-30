@@ -59,6 +59,10 @@ def get_versions(
         raise HTTPException(status_code=403, detail="No permission to read versions")
     
     versions = versioning_service.get_versions(test_case_id)
+    # The current version is the latest published one; resolve its id once so
+    # the frontend can flag it (avoids an is_current_version query per row).
+    current_version = versioning_service.get_latest_version(test_case_id)
+    current_version_id = current_version.id if current_version else None
     return [
         {
             "id": v.id,
@@ -66,7 +70,14 @@ def get_versions(
             "status": v.status.value,
             "title": v.title,
             "created_at": v.created_at.isoformat(),
-            "creator": v.creator.full_name if v.creator else "Unknown"
+            # Frontend (VersionHistory) reads creator.full_name / creator.username,
+            # so return an object rather than a bare string.
+            "creator": {
+                "id": v.creator.id,
+                "username": v.creator.username,
+                "full_name": v.creator.full_name,
+            } if v.creator else None,
+            "is_current_version": v.id == current_version_id
         }
         for v in versions
     ]
