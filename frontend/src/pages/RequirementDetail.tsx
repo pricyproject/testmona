@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -153,6 +153,8 @@ const GHERKIN_TEMPLATE = [
   '    When ',
   '    Then ',
 ].join('\n');
+const RIGHT_SIDEBAR_VISIBLE_STORAGE_KEY = 'requirementDetail.showRightSidebar';
+
 const GHERKIN_BACKGROUND_TEMPLATE = ['  Background:', '    Given '].join('\n');
 const GHERKIN_SCENARIO_OUTLINE_TEMPLATE = [
   '  Scenario Outline: ',
@@ -326,6 +328,15 @@ export function RequirementDetail() {
     expected_result: '',
   });
   const [showMetadata, setShowMetadata] = useState(true);
+  const [showRightSidebar, setShowRightSidebar] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const stored = window.localStorage.getItem(RIGHT_SIDEBAR_VISIBLE_STORAGE_KEY);
+      return stored === null ? true : stored !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const [showSourceDocument, setShowSourceDocument] = useState(true);
   const [showAcceptanceCriteria, setShowAcceptanceCriteria] = useState(true);
   const [showLinkedTestCases, setShowLinkedTestCases] = useState(true);
@@ -341,6 +352,15 @@ export function RequirementDetail() {
     tags: '',
     estimated_effort: '',
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(RIGHT_SIDEBAR_VISIBLE_STORAGE_KEY, showRightSidebar ? 'true' : 'false');
+    } catch {
+      // localStorage may be unavailable (private mode, quota); ignore.
+    }
+  }, [showRightSidebar]);
 
   useEffect(() => {
     let isMounted = true;
@@ -625,6 +645,8 @@ export function RequirementDetail() {
     () => hasGherkin || hasRenderableContent(acceptanceHtml),
     [hasGherkin, acceptanceHtml],
   );
+  const hasRightSidebarCards = showMetadata || tags.length > 0;
+  const shouldShowRightSidebar = showRightSidebar && hasRightSidebarCards;
   const visibleLinkedTestCases = linkedTestCases;
   const hasMoreLinkedTestCases = linkedTestCasesTotal > visibleLinkedTestCases.length;
   const newTestCaseSections = useMemo(() => {
@@ -655,6 +677,9 @@ export function RequirementDetail() {
 
   const backPath = projectId ? `/projects/${projectId}/requirements` : '/projects';
   const BackIcon = isRTL ? ArrowRight : ArrowLeft;
+  const ToggleRightSidebarIcon = showRightSidebar
+    ? (isRTL ? PanelLeftClose : PanelRightClose)
+    : (isRTL ? PanelLeftOpen : PanelRightOpen);
 
   const refreshRequirementLinks = () => setRefreshLinkedKey((current) => current + 1);
 
@@ -1215,7 +1240,7 @@ export function RequirementDetail() {
           </div>
         </header>
 
-        <div className={`grid gap-6 ${showMetadata ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : ''}`}>
+        <div className={`grid gap-6 ${shouldShowRightSidebar ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : ''}`}>
           <main className="min-w-0 space-y-6">
             {sourceDocument && showSourceDocument && (
               <section className="rounded-md border border-blue-200 bg-blue-50/70 p-5 dark:border-blue-900/60 dark:bg-blue-950/30">
@@ -1245,10 +1270,24 @@ export function RequirementDetail() {
             )}
 
             <section className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-              <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
-                <FileText className="h-4 w-4 text-slate-400" />
-                {t('description')}
-              </h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="flex min-w-0 items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                  <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="truncate">{t('description')}</span>
+                </h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowRightSidebar((current) => !current)}
+                  className="h-9 w-9 shrink-0 rounded-full border-slate-300 bg-slate-50 text-slate-600 shadow-xs hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
+                  aria-label={showRightSidebar ? t('hideSidebar') : t('showSidebar')}
+                  aria-pressed={showRightSidebar}
+                  title={showRightSidebar ? t('hideSidebar') : t('showSidebar')}
+                >
+                  <ToggleRightSidebarIcon className="h-4 w-4" />
+                </Button>
+              </div>
               {hasDescription ? (
                 sourceDocument ? (
                   <p className="max-w-[72ch] whitespace-pre-wrap text-[15px] leading-[1.8] text-slate-700 wrap-anywhere dark:text-slate-300">
@@ -1519,46 +1558,48 @@ export function RequirementDetail() {
             )}
           </main>
 
-          {showMetadata && (
-          <aside className="space-y-6">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t('metadata')}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm">
-                <MetaRow label={t('requirementId')} value={<span className="font-mono">{requirement.requirement_id}</span>} />
-                <MetaRow
-                  label={t('status')}
-                  value={<Badge className={`capitalize ${getStatusBadge(requirement.status)}`}>{requirement.status}</Badge>}
-                />
-                <MetaRow
-                  label={t('priority')}
-                  value={<Badge className={`capitalize ${getPriorityBadge(requirement.priority)}`}>{requirement.priority}</Badge>}
-                />
-                <MetaRow label={t('created')} value={formatDate(requirement.created_at)} icon={<Calendar className="h-4 w-4" />} />
-                <MetaRow label={t('updated')} value={formatDate(requirement.updated_at)} icon={<Calendar className="h-4 w-4" />} />
-                {requirement.estimated_effort !== undefined && requirement.estimated_effort !== null && (
-                  <MetaRow label={t('estimatedEffortHours')} value={`${requirement.estimated_effort}h`} icon={<Clock className="h-4 w-4" />} />
-                )}
-              </CardContent>
-            </Card>
+          {shouldShowRightSidebar && (
+            <aside className="space-y-6">
+              {showMetadata && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{t('metadata')}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm">
+                    <MetaRow label={t('requirementId')} value={<span className="font-mono">{requirement.requirement_id}</span>} />
+                    <MetaRow
+                      label={t('status')}
+                      value={<Badge className={`capitalize ${getStatusBadge(requirement.status)}`}>{requirement.status}</Badge>}
+                    />
+                    <MetaRow
+                      label={t('priority')}
+                      value={<Badge className={`capitalize ${getPriorityBadge(requirement.priority)}`}>{requirement.priority}</Badge>}
+                    />
+                    <MetaRow label={t('created')} value={formatDate(requirement.created_at)} icon={<Calendar className="h-4 w-4" />} />
+                    <MetaRow label={t('updated')} value={formatDate(requirement.updated_at)} icon={<Calendar className="h-4 w-4" />} />
+                    {requirement.estimated_effort !== undefined && requirement.estimated_effort !== null && (
+                      <MetaRow label={t('estimatedEffortHours')} value={`${requirement.estimated_effort}h`} icon={<Clock className="h-4 w-4" />} />
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
-            {tags.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Tag className="h-4 w-4 text-slate-400" />
-                    {t('tags')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {tags.map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </aside>
+              {tags.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Tag className="h-4 w-4 text-slate-400" />
+                      {t('tags')}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-2">
+                      {tags.map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </aside>
           )}
         </div>
 
