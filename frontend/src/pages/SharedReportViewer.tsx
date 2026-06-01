@@ -3,8 +3,15 @@ import { useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, AlertCircle, Printer } from 'lucide-react';
+import { Loader2, AlertCircle, Printer, ShieldCheck } from 'lucide-react';
 import { analyticsAPI } from '@/lib/api';
+import { useTranslation } from '@/hooks/useTranslation';
+
+const activityValue = (activity: any, key: string, legacyKey?: string) =>
+  activity?.[key] ?? (legacyKey ? activity?.[legacyKey] : undefined) ?? 0;
+
+const upcomingCount = (upcoming: any, countKey: string, listKey: string) =>
+  upcoming?.[countKey] ?? (Array.isArray(upcoming?.[listKey]) ? upcoming[listKey].length : 0);
 
 /**
  * Public shared-report viewer. Works for both authenticated and anonymous users —
@@ -12,13 +19,14 @@ import { analyticsAPI } from '@/lib/api';
  */
 export function SharedReportViewer() {
   const { token } = useParams<{ token: string }>();
+  const { t, isRTL } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<any>(null);
 
   useEffect(() => {
     if (!token) {
-      setError('Missing share token.');
+      setError(t('reports_sharedMissingToken'));
       setLoading(false);
       return;
     }
@@ -35,19 +43,20 @@ export function SharedReportViewer() {
       .catch((err: any) => {
         if (cancelled) return;
         const status = err?.response?.status;
-        if (status === 404) setError('This shared report does not exist or has been deactivated.');
-        else if (status === 410) setError('This shared report has expired.');
-        else setError('The shared report could not be loaded.');
+        if (status === 404) setError(t('reports_sharedNotFound'));
+        else if (status === 410) setError(t('reports_sharedExpired'));
+        else if (status === 401) setError(t('reports_sharedRestricted'));
+        else setError(t('reports_sharedLoadFailed'));
         setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, t]);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900" dir={isRTL ? 'rtl' : 'ltr'}>
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
       </div>
     );
@@ -55,11 +64,16 @@ export function SharedReportViewer() {
 
   if (error || !report) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-6" dir={isRTL ? 'rtl' : 'ltr'}>
         <Card className="max-w-md">
           <CardContent className="flex flex-col items-center py-10 text-center">
             <AlertCircle className="h-10 w-10 text-red-500 mb-3" />
-            <p className="text-gray-700 dark:text-gray-200">{error || 'Report unavailable.'}</p>
+            <p className="text-gray-700 dark:text-gray-200">{error || t('reports_sharedUnavailable')}</p>
+            {error === t('reports_sharedRestricted') && (
+              <Button className="mt-4" onClick={() => { window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`; }}>
+                {t('reports_sharedSignIn')}
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -70,18 +84,21 @@ export function SharedReportViewer() {
   const kpis = content.kpis || {};
   const summary = content.summary || {};
   const recent = content.recent_activity || {};
+  const periodLabel = content.period?.label || t('reports_periodLast30d');
+  const snapshotMode = content.snapshot_mode || 'snapshot';
+  const accessLevel = report.access_level === 'edit' ? 'read-only' : report.access_level;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4 print:bg-white print:py-0">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4 print:bg-white print:py-0" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-start justify-between gap-4 print:hidden">
           <div>
-            <p className="text-xs uppercase tracking-wide text-gray-500">Shared Report</p>
+            <p className="text-xs uppercase tracking-wide text-gray-500">{t('reports_sharedReportEyebrow')}</p>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{report.title}</h1>
           </div>
           <Button variant="outline" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-2" />
-            Print / Save as PDF
+            {t('reports_printPdf')}
           </Button>
         </div>
 
@@ -91,9 +108,11 @@ export function SharedReportViewer() {
             <div className="flex items-start justify-between gap-2 flex-wrap">
               <CardTitle className="text-xl">{report.title}</CardTitle>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary" className="capitalize">{report.report_type}</Badge>
-                <Badge variant="outline" className="capitalize">{report.access_level}</Badge>
-                <Badge variant="outline">{report.view_count || 0} views</Badge>
+                <Badge variant="secondary">{t(`reports_reportType_${report.report_type}`)}</Badge>
+                <Badge variant="outline"><ShieldCheck className="h-3 w-3 mr-1" />{t(`reports_access_${accessLevel}`)}</Badge>
+                <Badge variant="outline">{periodLabel}</Badge>
+                <Badge variant="outline">{t(`reports_snapshotMode_${snapshotMode}`)}</Badge>
+                <Badge variant="outline">{t('reports_viewsCount', { count: report.view_count || 0 })}</Badge>
               </div>
             </div>
           </CardHeader>
@@ -101,13 +120,13 @@ export function SharedReportViewer() {
             <p className="text-sm text-gray-600 dark:text-gray-300">
               {content.project_name ? (
                 <>
-                  Project: <span className="font-medium">{content.project_name}</span>
+                  {t('reports_projectLabel')} <span className="font-medium">{content.project_name}</span>
                   {' · '}
                 </>
               ) : null}
-              Generated by {content.generated_by || 'system'}
-              {content.generated_at ? ` on ${new Date(content.generated_at).toLocaleString()}` : ''}
-              {report.expires_at ? ` · Expires ${new Date(report.expires_at).toLocaleDateString()}` : ''}
+              {t('reports_previewGeneratedBy', { user: content.generated_by || 'system' })}
+              {content.generated_at ? t('reports_previewGeneratedAt', { time: new Date(content.generated_at).toLocaleString() }) : ''}
+              {report.expires_at ? ` · ${t('reports_expiresLabel')} ${new Date(report.expires_at).toLocaleDateString()}` : ''}
             </p>
           </CardContent>
         </Card>
@@ -115,20 +134,20 @@ export function SharedReportViewer() {
         {content.kpis && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Key Metrics</CardTitle>
+              <CardTitle className="text-base">{t('reports_previewKeyMetrics')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {([
-                  ['coverage_percent', 'Coverage', '%'],
-                  ['pass_rate_percent', 'Pass Rate', '%'],
-                  ['failure_rate_percent', 'Failure Rate', '%'],
-                  ['flakiness_percent', 'Flakiness', '%'],
-                  ['cycle_time_hours', 'Cycle Time', 'h'],
-                  ['defect_density', 'Defect Density', ''],
+                  ['coverage_percent', 'reports_metricCoverage', '%'],
+                  ['pass_rate_percent', 'reports_metricPassRate', '%'],
+                  ['failure_rate_percent', 'reports_metricFailureRate', '%'],
+                  ['flakiness_percent', 'reports_metricFlakiness', '%'],
+                  ['cycle_time_hours', 'reports_metricCycleTime', 'h'],
+                  ['defect_density', 'reports_metricDefectDensity', ''],
                 ] as [string, string, string][]).map(([key, label, unit]) => (
                   <div key={key} className="rounded-lg border dark:border-gray-700 p-3">
-                    <div className="text-xs text-gray-500">{label}</div>
+                    <div className="text-xs text-gray-500">{t(label)}</div>
                     <div className="text-2xl font-semibold">
                       {kpis[key] ?? 0}
                       {unit}
@@ -143,22 +162,22 @@ export function SharedReportViewer() {
         {content.summary && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Project Summary</CardTitle>
+              <CardTitle className="text-base">{t('reports_previewProjectInventory')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {([
-                  ['total_test_cases', 'Test Cases'],
-                  ['total_test_suites', 'Test Suites'],
-                  ['total_test_runs', 'Test Runs'],
-                  ['total_requirements', 'Requirements'],
-                  ['total_defects', 'Defects'],
+                  ['total_test_cases', 'reports_summaryTestCases'],
+                  ['total_test_suites', 'reports_summaryTestSuites'],
+                  ['total_test_runs', 'reports_summaryTestRuns'],
+                  ['total_requirements', 'reports_summaryRequirements'],
+                  ['total_defects', 'reports_summaryDefects'],
                 ] as [string, string][]).map(([key, label]) => (
                   <div
                     key={key}
                     className="flex justify-between border-b border-gray-100 dark:border-gray-800 py-1.5"
                   >
-                    <span className="text-gray-600 dark:text-gray-300">{label}</span>
+                    <span className="text-gray-600 dark:text-gray-300">{t(label)}</span>
                     <span className="font-semibold">{summary[key] ?? 0}</span>
                   </div>
                 ))}
@@ -170,18 +189,18 @@ export function SharedReportViewer() {
         {content.recent_activity && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Recent Activity</CardTitle>
+              <CardTitle className="text-base">{t('reports_previewPeriodActivity')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-3 gap-3 text-center">
                 {([
-                  ['test_runs_today', 'Runs today'],
-                  ['tests_executed', 'Tests executed'],
-                  ['defects_found', 'Defects found'],
-                ] as [string, string][]).map(([key, label]) => (
+                  ['test_runs_started', 'test_runs_today', 'reports_activityRunsStarted'],
+                  ['tests_executed', '', 'reports_activityTestsExecuted'],
+                  ['defects_found', '', 'reports_activityDefectsFound'],
+                ] as [string, string, string][]).map(([key, legacyKey, label]) => (
                   <div key={key} className="rounded-lg border dark:border-gray-700 p-3">
-                    <div className="text-2xl font-semibold">{recent[key] ?? 0}</div>
-                    <div className="text-xs text-gray-500">{label}</div>
+                    <div className="text-2xl font-semibold">{activityValue(recent, key, legacyKey)}</div>
+                    <div className="text-xs text-gray-500">{t(label)}</div>
                   </div>
                 ))}
               </div>
@@ -189,9 +208,131 @@ export function SharedReportViewer() {
           </Card>
         )}
 
+        {content.kpi_trends && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('reports_previewTrends')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2">
+                {([
+                  ['coverage', 'reports_metricCoverage', '%'],
+                  ['passRate', 'reports_metricPassRate', '%'],
+                  ['failureTrends', 'reports_metricFailureRate', '%'],
+                  ['flakiness', 'reports_metricFlakiness', '%'],
+                  ['cycleTime', 'reports_metricCycleTime', 'h'],
+                  ['defectDensity', 'reports_metricDefectDensity', ''],
+                ] as [string, string, string][]).map(([key, label, unit]) => {
+                  const trend = content.kpi_trends[key] || {};
+                  return (
+                    <div key={key} className="flex items-center justify-between rounded-lg border dark:border-gray-700 px-3 py-2">
+                      <span className="text-gray-600 dark:text-gray-300">{t(label)}</span>
+                      <span className="font-semibold">
+                        {trend.current ?? 0}{unit} · {t(`reports_trend_${trend.trend || 'stable'}`)} {trend.change ?? 0}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {content.team_performance && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('reports_previewTeamPerformance')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                {([
+                  ['active_testers', 'reports_teamActiveTesters'],
+                  ['avg_execution_time', 'reports_teamAvgExecutionTime'],
+                  ['productivity_score', 'reports_teamProductivityScore'],
+                ] as [string, string][]).map(([key, label]) => (
+                  <div key={key} className="rounded-lg border dark:border-gray-700 p-3">
+                    <div className="text-2xl font-semibold">{content.team_performance[key] ?? 0}</div>
+                    <div className="text-xs text-gray-500">{t(label)}</div>
+                  </div>
+                ))}
+              </div>
+              {Array.isArray(content.team_performance.members) && content.team_performance.members.length > 0 && (
+                <div className="mt-3 divide-y rounded-lg border dark:border-gray-700">
+                  {content.team_performance.members.map((member: any) => (
+                    <div key={member.user_id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 px-3 py-2">
+                      <span className="truncate font-medium">{member.name}</span>
+                      <span className="text-gray-600 dark:text-gray-300">
+                        {t('reports_teamMemberStats', {
+                          executed: member.executed,
+                          passed: member.passed,
+                          failed: member.failed,
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {content.upcoming && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t('reports_previewUpcoming')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                {([
+                  { key: 'scheduled_runs_count', listKey: 'scheduled_runs', label: 'reports_upcomingScheduledRuns' },
+                  { key: 'pending_reviews_count', listKey: 'pending_reviews', label: 'reports_upcomingPendingReviews' },
+                  { key: 'release_deadline', label: 'reports_upcomingReleaseDeadline' },
+                ]).map((item) => (
+                  <div key={item.key} className="rounded-lg border dark:border-gray-700 p-3">
+                    <div className="text-2xl font-semibold">
+                      {item.key === 'release_deadline'
+                        ? (content.upcoming[item.key] ?? 'N/A')
+                        : upcomingCount(content.upcoming, item.key, item.listKey || '')}
+                    </div>
+                    <div className="text-xs text-gray-500">{t(item.label)}</div>
+                  </div>
+                ))}
+              </div>
+              {content.upcoming.milestone && (
+                <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+                  {t('reports_upcomingMilestone', {
+                    title: content.upcoming.milestone.title,
+                    date: content.upcoming.milestone.target_date ? new Date(content.upcoming.milestone.target_date).toLocaleDateString() : 'N/A',
+                  })}
+                </p>
+              )}
+              {Array.isArray(content.upcoming.scheduled_runs) && content.upcoming.scheduled_runs.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {content.upcoming.scheduled_runs.slice(0, 5).map((run: any) => (
+                    <div key={run.id} className="flex justify-between rounded border dark:border-gray-700 px-2 py-1">
+                      <span className="truncate">{run.name}</span>
+                      <span className="text-gray-500">{run.assigned_to || run.priority || ''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {Array.isArray(content.upcoming.pending_reviews) && content.upcoming.pending_reviews.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {content.upcoming.pending_reviews.slice(0, 5).map((testCase: any) => (
+                    <div key={testCase.id} className="flex justify-between rounded border dark:border-gray-700 px-2 py-1">
+                      <span className="truncate">{testCase.title}</span>
+                      <span className="text-gray-500">{testCase.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {content.data_available === false && (
           <p className="text-sm text-gray-500 text-center">
-            Analytics data was unavailable when this report was generated.
+            {t('reports_previewDataUnavailable')}
           </p>
         )}
       </div>

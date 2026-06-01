@@ -2,10 +2,14 @@
 Analytics, dashboard, KPI data, test step results, and shareable reports routes.
 """
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
+import csv
+import io
+import json
+import re
 
 from .. import crud, schemas, auth, rbac, models
 from ..database import get_db
@@ -14,7 +18,9 @@ from ..crud import (
     calculate_project_kpis,
     create_kpi_data, get_kpi_data, get_latest_kpi_data,
     create_test_step_result, get_test_step_results, get_test_step_results_by_test_result,
-    create_shareable_report, get_shareable_reports, get_shareable_report_by_token, update_shareable_report,
+    create_shareable_report, get_shareable_reports, get_shareable_report,
+    get_shareable_report_by_token, record_shareable_report_view,
+    update_shareable_report, deactivate_shareable_report,
     create_root_cause_analysis, get_root_cause_analyses, get_root_cause_analysis,
     update_root_cause_analysis, delete_root_cause_analysis,
     create_dashboard_widget, get_dashboard_widgets, get_dashboard_widget,
@@ -24,7 +30,243 @@ from ..crud import (
 from ._analytics_shared import normalize_result_status, build_coverage_report
 
 
-def _build_shareable_report_content(db, project_id, report_type, title, generated_by):
+REPORT_SECTIONS = {"kpis", "summary", "recent_activity", "trends", "team_performance", "upcoming"}
+REPORT_TYPE_SECTIONS = {
+    "summary": {"kpis", "summary"},
+    "executive": {"kpis", "summary", "recent_activity", "trends"},
+    "technical": REPORT_SECTIONS,
+    "release-readiness": {"kpis", "summary", "recent_activity", "trends", "upcoming"},
+    "execution-summary": {"kpis", "summary", "recent_activity", "trends"},
+    "defect-quality": {"kpis", "summary", "recent_activity", "trends"},
+    "coverage-traceability": {"kpis", "summary", "trends"},
+    "flaky-tests": {"kpis", "trends"},
+    "team-activity": {"summary", "recent_activity", "team_performance"},
+    "audit-compliance": {"summary", "recent_activity"},
+    "milestone": {"kpis", "summary", "recent_activity", "upcoming"},
+    "sprint-qa": {"kpis", "summary", "recent_activity", "trends"},
+    "customer-quality": {"kpis", "summary", "recent_activity"},
+}
+
+
+def _period_label(time_range, period_start=None, period_end=None):
+    if time_range == "custom" and period_start and period_end:
+        return f"{period_start.date().isoformat()} to {period_end.date().isoformat()}"
+    return {
+        "24h": "Last 24 hours",
+        "7d": "Last 7 days",
+        "30d": "Last 30 days",
+        "90d": "Last 90 days",
+    }.get(time_range, "Last 30 days")
+
+
+def _period_bounds(time_range, period_start=None, period_end=None):
+    end = period_end or datetime.now()
+    if time_range == "custom" and period_start and period_end:
+        return period_start, period_end
+    days = {
+        "24h": 1,
+        "7d": 7,
+        "30d": 30,
+        "90d": 90,
+    }.get(time_range, 30)
+    return end - timedelta(days=days), end
+
+
+def _default_sections(report_type):
+    return set(REPORT_TYPE_SECTIONS.get(report_type, REPORT_TYPE_SECTIONS["executive"]))
+
+
+def _display_user(user):
+    if not user:
+        return None
+    return user.full_name or user.username or user.email or f"User #{user.id}"
+
+
+def _trend(current, previous):
+    if previous == 0:
+        return {"current": current, "trend": "up" if current > 0 else "stable", "change": current}
+    change = round(current - previous, 1)
+    return {
+        "current": current,
+        "trend": "up" if change > 0 else "down" if change < 0 else "stable",
+        "change": change,
+    }
+
+
+def _metrics_for_period(db, project_id, start_at, end_at):
+    total_test_cases = db.query(models.TestCase).join(models.TestSuite).filter(
+        models.TestSuite.project_id == project_id,
+        models.TestCase.is_deleted == False,
+    ).count()
+    results = db.query(models.TestResult).join(models.TestRun).filter(
+        models.TestRun.project_id == project_id,
+        models.TestResult.executed_at >= start_at,
+        models.TestResult.executed_at < end_at,
+    ).all()
+    executed_statuses = {"passed", "failed", "blocked", "skipped"}
+    statuses = [normalize_result_status(result.status) for result in results]
+    executed_results = [
+        result for result in results
+        if normalize_result_status(result.status) in executed_statuses
+    ]
+    total_tests = len(executed_results)
+    passed = statuses.count("passed")
+    failed = statuses.count("failed")
+    blocked = statuses.count("blocked")
+    skipped = statuses.count("skipped")
+    executed_cases = len({result.test_case_id for result in executed_results})
+    execution_times = [result.execution_time for result in executed_results if result.execution_time is not None]
+    completed_runs = db.query(models.TestRun).filter(
+        models.TestRun.project_id == project_id,
+        models.TestRun.completed_at >= start_at,
+        models.TestRun.completed_at < end_at,
+        models.TestRun.status.in_(["completed", "passed", "failed"]),
+        models.TestRun.created_at.isnot(None),
+        models.TestRun.completed_at.isnot(None),
+    ).all()
+    cycle_times = [
+        (run.completed_at - run.created_at).total_seconds() / 3600
+        for run in completed_runs
+        if run.created_at and run.completed_at
+    ]
+    status_by_case = {}
+    for result in results:
+        status = normalize_result_status(result.status)
+        if status in {"passed", "failed"}:
+            status_by_case.setdefault(result.test_case_id, set()).add(status)
+    flaky_tests = len([
+        test_case_id for test_case_id, case_statuses in status_by_case.items()
+        if {"passed", "failed"}.issubset(case_statuses)
+    ])
+    defects_found = db.query(models.Defect).filter(
+        models.Defect.project_id == project_id,
+        models.Defect.created_at >= start_at,
+        models.Defect.created_at < end_at,
+    ).count()
+    period_days = max((end_at - start_at).total_seconds() / 86400, 1)
+    return {
+        "coverage": round((executed_cases / total_test_cases * 100) if total_test_cases else 0, 1),
+        "pass_rate": round((passed / total_tests * 100) if total_tests else 0, 1),
+        "failure_rate": round((failed / total_tests * 100) if total_tests else 0, 1),
+        "flakiness": round((flaky_tests / len(status_by_case) * 100) if status_by_case else 0, 1),
+        "cycle_time": round((sum(cycle_times) / len(cycle_times)) if cycle_times else 0, 2),
+        "defect_density": round((defects_found / total_test_cases) if total_test_cases else 0, 2),
+        "total_tests": total_tests,
+        "passed_tests": passed,
+        "failed_tests": failed,
+        "blocked_tests": blocked,
+        "skipped_tests": skipped,
+        "avg_execution_time": round((sum(execution_times) / len(execution_times) / 3600) if execution_times else 0, 2),
+        "productivity_score": round(min(100, (total_tests / period_days) * 10), 1),
+        "defects_found": defects_found,
+        "results": results,
+    }
+
+
+def _team_performance_for_period(metrics):
+    member_stats = {}
+    for result in metrics["results"]:
+        if not result.executed_by:
+            continue
+        status = normalize_result_status(result.status)
+        user = result.executor
+        entry = member_stats.setdefault(result.executed_by, {
+            "user_id": result.executed_by,
+            "name": _display_user(user) or f"User #{result.executed_by}",
+            "executed": 0,
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "skipped": 0,
+            "avg_execution_time_hours": 0,
+            "_durations": [],
+        })
+        entry["executed"] += 1
+        if status in {"passed", "failed", "blocked", "skipped"}:
+            entry[status] += 1
+        if result.execution_time is not None:
+            entry["_durations"].append(result.execution_time / 3600)
+    members = []
+    for entry in member_stats.values():
+        durations = entry.pop("_durations")
+        entry["avg_execution_time_hours"] = round(sum(durations) / len(durations), 2) if durations else 0
+        members.append(entry)
+    members.sort(key=lambda item: item["executed"], reverse=True)
+    return {
+        "active_testers": len(member_stats),
+        "avg_execution_time": metrics["avg_execution_time"],
+        "productivity_score": metrics["productivity_score"],
+        "members": members[:10],
+    }
+
+
+def _upcoming_items(db, project_id):
+    scheduled_runs = db.query(models.TestRun).filter(
+        models.TestRun.project_id == project_id,
+        models.TestRun.status == "scheduled",
+    ).order_by(models.TestRun.created_at.asc()).limit(10).all()
+    pending_reviews = db.query(models.TestCase).join(models.TestSuite).filter(
+        models.TestSuite.project_id == project_id,
+        models.TestCase.status.in_(["pending_review", "draft"]),
+        models.TestCase.is_deleted == False,
+    ).order_by(models.TestCase.created_at.desc()).limit(10).all()
+    milestone = db.query(models.Milestone).filter(
+        models.Milestone.project_id == project_id,
+        models.Milestone.target_date.isnot(None),
+        models.Milestone.target_date >= datetime.now(),
+        models.Milestone.status.notin_([models.MilestoneStatus.COMPLETED, models.MilestoneStatus.CANCELLED]),
+    ).order_by(models.Milestone.target_date.asc()).first()
+    return {
+        "scheduled_runs_count": db.query(models.TestRun).filter(
+            models.TestRun.project_id == project_id,
+            models.TestRun.status == "scheduled",
+        ).count(),
+        "pending_reviews_count": db.query(models.TestCase).join(models.TestSuite).filter(
+            models.TestSuite.project_id == project_id,
+            models.TestCase.status.in_(["pending_review", "draft"]),
+            models.TestCase.is_deleted == False,
+        ).count(),
+        "release_deadline": milestone.target_date.strftime("%Y-%m-%d") if milestone and milestone.target_date else "N/A",
+        "milestone": {
+            "id": milestone.id,
+            "title": milestone.title,
+            "target_date": milestone.target_date.isoformat() if milestone.target_date else None,
+        } if milestone else None,
+        "scheduled_runs": [
+            {
+                "id": run.id,
+                "name": run.name,
+                "status": run.status,
+                "priority": run.priority,
+                "assigned_to": _display_user(run.assignee),
+            }
+            for run in scheduled_runs
+        ],
+        "pending_reviews": [
+            {
+                "id": test_case.id,
+                "title": test_case.title,
+                "status": test_case.status,
+                "priority": test_case.priority,
+            }
+            for test_case in pending_reviews
+        ],
+    }
+
+
+def _build_shareable_report_content(
+    db,
+    project_id,
+    report_type,
+    title,
+    generated_by,
+    time_range="30d",
+    period_start=None,
+    period_end=None,
+    include_sections=None,
+    snapshot_mode="snapshot",
+    export_formats=None,
+):
     """Build a point-in-time analytics snapshot to store inside a shareable report.
 
     Without this the report would only carry a metadata header and no data. The
@@ -34,6 +276,7 @@ def _build_shareable_report_content(db, project_id, report_type, title, generate
       - technical: everything, including KPI trends, team performance and upcoming items
     """
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    period_start_at, period_end_at = _period_bounds(time_range, period_start, period_end)
     content = {
         "title": title,
         "report_type": report_type,
@@ -41,13 +284,32 @@ def _build_shareable_report_content(db, project_id, report_type, title, generate
         "generated_by": generated_by,
         "project_id": project_id,
         "project_name": project.name if project else None,
+        "time_range": time_range,
+        "period": {
+            "label": _period_label(time_range, period_start, period_end),
+            "start": period_start_at.isoformat(),
+            "end": period_end_at.isoformat(),
+            "analytics_source_range": "exact" if time_range == "custom" else time_range,
+        },
+        "snapshot_mode": snapshot_mode,
+        "include_sections": list(include_sections or _default_sections(report_type)),
+        "export_formats": list(export_formats or ["json", "csv"]),
     }
     try:
-        analytics = generate_dashboard_analytics(db, project_id, "30d")
-        kpi = analytics.get("kpi_data", {})
-
-        def kpi_value(key):
-            return (kpi.get(key) or {}).get("current", 0)
+        sections = set(content["include_sections"]) & REPORT_SECTIONS
+        duration = period_end_at - period_start_at
+        previous_start_at = period_start_at - duration
+        previous_end_at = period_start_at
+        current_metrics = _metrics_for_period(db, project_id, period_start_at, period_end_at)
+        previous_metrics = _metrics_for_period(db, project_id, previous_start_at, previous_end_at)
+        kpi = {
+            "coverage": _trend(current_metrics["coverage"], previous_metrics["coverage"]),
+            "passRate": _trend(current_metrics["pass_rate"], previous_metrics["pass_rate"]),
+            "failureTrends": _trend(current_metrics["failure_rate"], previous_metrics["failure_rate"]),
+            "flakiness": _trend(current_metrics["flakiness"], previous_metrics["flakiness"]),
+            "cycleTime": _trend(current_metrics["cycle_time"], previous_metrics["cycle_time"]),
+            "defectDensity": _trend(current_metrics["defect_density"], previous_metrics["defect_density"]),
+        }
 
         test_suite_ids = [
             row.id for row in db.query(models.TestSuite.id)
@@ -60,33 +322,224 @@ def _build_shareable_report_content(db, project_id, report_type, title, generate
             if test_suite_ids else 0
         )
 
-        content["summary"] = {
-            "total_test_cases": total_test_cases,
-            "total_test_suites": len(test_suite_ids),
-            "total_test_runs": db.query(models.TestRun).filter(models.TestRun.project_id == project_id).count(),
-            "total_requirements": db.query(models.Requirement).filter(models.Requirement.project_id == project_id).count(),
-            "total_defects": db.query(models.Defect).filter(models.Defect.project_id == project_id).count(),
-        }
-        content["kpis"] = {
-            "coverage_percent": kpi_value("coverage"),
-            "pass_rate_percent": kpi_value("passRate"),
-            "failure_rate_percent": kpi_value("failureTrends"),
-            "flakiness_percent": kpi_value("flakiness"),
-            "cycle_time_hours": kpi_value("cycleTime"),
-            "defect_density": kpi_value("defectDensity"),
-        }
-        if report_type in ("executive", "technical"):
-            content["recent_activity"] = analytics.get("recent_activity", {})
-        if report_type == "technical":
+        if "summary" in sections:
+            content["summary"] = {
+                "scope": "current_inventory",
+                "total_test_cases": total_test_cases,
+                "total_test_suites": len(test_suite_ids),
+                "total_test_runs": db.query(models.TestRun).filter(models.TestRun.project_id == project_id).count(),
+                "total_requirements": db.query(models.Requirement).filter(models.Requirement.project_id == project_id).count(),
+                "total_defects": db.query(models.Defect).filter(models.Defect.project_id == project_id).count(),
+            }
+        if "kpis" in sections:
+            content["kpis"] = {
+                "coverage_percent": current_metrics["coverage"],
+                "pass_rate_percent": current_metrics["pass_rate"],
+                "failure_rate_percent": current_metrics["failure_rate"],
+                "flakiness_percent": current_metrics["flakiness"],
+                "cycle_time_hours": current_metrics["cycle_time"],
+                "defect_density": current_metrics["defect_density"],
+            }
+        if "recent_activity" in sections:
+            content["recent_activity"] = {
+                "scope": "selected_period",
+                "test_runs_started": db.query(models.TestRun).filter(
+                    models.TestRun.project_id == project_id,
+                    models.TestRun.created_at >= period_start_at,
+                    models.TestRun.created_at < period_end_at,
+                ).count(),
+                "tests_executed": current_metrics["total_tests"],
+                "defects_found": current_metrics["defects_found"],
+            }
+        if "trends" in sections:
             content["kpi_trends"] = kpi
-            content["team_performance"] = analytics.get("team_performance", {})
-            content["upcoming"] = analytics.get("upcoming_items", {})
+        if "team_performance" in sections:
+            content["team_performance"] = _team_performance_for_period(current_metrics)
+        if "upcoming" in sections:
+            content["upcoming"] = _upcoming_items(db, project_id)
         content["data_available"] = True
     except Exception as exc:
         print(f"Failed to build shareable report content for project {project_id}: {exc}")
         content["data_available"] = False
         content["error"] = "Analytics data could not be generated for this report."
     return content
+
+
+def _normalized_access_level(access_level):
+    # Legacy reports may contain "edit"; shared reports are view-only until a
+    # real collaborative editing workflow exists.
+    if access_level == "edit":
+        return "read-only"
+    return access_level or "public"
+
+
+def _serialize_shareable_report(report, content=None):
+    return {
+        "id": report.id,
+        "project_id": report.project_id,
+        "title": report.title,
+        "report_type": report.report_type,
+        "report_content": content if content is not None else (report.report_content or {}),
+        "access_level": _normalized_access_level(report.access_level),
+        "shared_with": report.shared_with or [],
+        "share_token": report.share_token,
+        "created_by": report.created_by,
+        "created_by_display": _display_user(getattr(report, "creator", None)) or f"User #{report.created_by}",
+        "view_count": report.view_count or 0,
+        "last_viewed": report.last_viewed,
+        "expires_at": report.expires_at,
+        "created_at": report.created_at,
+        "is_active": report.is_active,
+    }
+
+
+def _legacy_or_live_content(db, report):
+    content = report.report_content or {}
+    if content.get("snapshot_mode") == "live" or ("kpis" not in content and "summary" not in content):
+        period = content.get("period") or {}
+        period_start = _parse_optional_datetime(period.get("start"))
+        period_end = _parse_optional_datetime(period.get("end"))
+        content = _build_shareable_report_content(
+            db,
+            report.project_id,
+            report.report_type,
+            report.title,
+            "system",
+            time_range=content.get("time_range", "30d"),
+            period_start=period_start,
+            period_end=period_end,
+            snapshot_mode=content.get("snapshot_mode", "snapshot"),
+            include_sections=content.get("include_sections"),
+            export_formats=content.get("export_formats"),
+        )
+    return content
+
+
+def _parse_optional_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _shareable_report_payload(db, report, include_token=False):
+    content = _legacy_or_live_content(db, report)
+    payload = _serialize_shareable_report(report, content)
+    if not include_token:
+        payload.pop("share_token", None)
+    payload["expires_at"] = report.expires_at.isoformat() if report.expires_at else None
+    payload["generated_at"] = report.created_at.isoformat() if report.created_at else None
+    return payload
+
+
+def _user_can_open_restricted_report(current_user, report):
+    if not current_user:
+        return False
+    recipients = report.shared_with or []
+    recipient_keys = {str(item).strip().lower() for item in recipients}
+    return (
+        current_user.id == report.created_by
+        or str(current_user.id) in recipient_keys
+        or (current_user.email or "").strip().lower() in recipient_keys
+    )
+
+
+def _optional_user_from_request(request: Request, db: Session):
+    auth_header = request.headers.get("authorization") or ""
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return None
+    try:
+        from jose import JWTError, jwt
+        from ..config import settings
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        username = payload.get("sub")
+        if not username:
+            return None
+        return crud.get_user_by_username(db, username)
+    except Exception:
+        return None
+
+
+def _validate_report_not_expired(report):
+    if not report or not report.is_active:
+        raise HTTPException(status_code=404, detail="Shareable report not found")
+    if report.expires_at and report.expires_at < datetime.now(report.expires_at.tzinfo):
+        raise HTTPException(status_code=410, detail="Shareable report has expired")
+
+
+def _safe_report_filename(report, extension):
+    safe_title = re.sub(r"[^\w.-]+", "_", report.title or f"report-{report.id}").strip("_")
+    return f"{safe_title or f'report-{report.id}'}.{extension}"
+
+
+def _csv_scalar(value):
+    """Render a leaf value as a clean CSV cell (no Python reprs like True/None)."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
+def _flatten_csv_value(section_name, metric_path, value, rows):
+    """Recursively flatten nested dicts/lists into dotted/indexed metric rows so
+    they render as readable cells instead of stringified Python objects."""
+    if isinstance(value, dict):
+        if not value:
+            rows.append({"section": section_name, "metric": metric_path, "value": ""})
+            return
+        for key, sub_value in value.items():
+            child_path = f"{metric_path}.{key}" if metric_path else str(key)
+            _flatten_csv_value(section_name, child_path, sub_value, rows)
+    elif isinstance(value, (list, tuple)):
+        if not value:
+            rows.append({"section": section_name, "metric": metric_path, "value": ""})
+            return
+        for index, sub_value in enumerate(value):
+            _flatten_csv_value(section_name, f"{metric_path}[{index}]", sub_value, rows)
+    else:
+        rows.append({"section": section_name, "metric": metric_path, "value": _csv_scalar(value)})
+
+
+def _flatten_csv_rows(content):
+    rows = []
+    for section_name in ("kpis", "summary", "recent_activity", "kpi_trends", "team_performance", "upcoming"):
+        section = content.get(section_name)
+        if section is None:
+            continue
+        _flatten_csv_value(section_name, "", section, rows)
+    return rows
+
+
+def _csv_response(report, content):
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["section", "metric", "value"])
+    writer.writeheader()
+    rows = _flatten_csv_rows(content)
+    if rows:
+        writer.writerows(rows)
+    else:
+        writer.writerow({"section": "report", "metric": "data_available", "value": _csv_scalar(content.get("data_available", False))})
+    # Prepend a UTF-8 BOM so Excel renders non-ASCII (Persian/Arabic) names and
+    # titles correctly instead of as mojibake.
+    return Response(
+        content="﻿" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_safe_report_filename(report, "csv")}"'},
+    )
+
+
+def _json_download_response(report, payload):
+    return Response(
+        content=json.dumps(payload, default=str, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{_safe_report_filename(report, "json")}"'},
+    )
 
 
 def register_analytics_dashboard_routes(app):
@@ -731,18 +1184,29 @@ def register_analytics_dashboard_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         title = request.title.strip()
-        if not title:
-            raise HTTPException(status_code=400, detail="Report title is required")
-        if request.report_type not in {"executive", "technical", "summary"}:
-            raise HTTPException(status_code=400, detail="Invalid report type")
-        if request.access_level not in {"read-only", "edit"}:
-            raise HTTPException(status_code=400, detail="Invalid access level")
         if request.expires_in_days is not None and not 1 <= request.expires_in_days <= 365:
             raise HTTPException(status_code=400, detail="expires_in_days must be between 1 and 365")
+        duplicate = db.query(models.ShareableReport).filter(
+            models.ShareableReport.project_id == request.project_id,
+            models.ShareableReport.is_active == True,
+            models.ShareableReport.title.ilike(title),
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="An active shareable report with this title already exists")
         
         # Build a real analytics snapshot so the report actually carries data.
         report_content = _build_shareable_report_content(
-            db, request.project_id, request.report_type, title, current_user.username
+            db,
+            request.project_id,
+            request.report_type,
+            title,
+            current_user.username,
+            time_range=request.time_range,
+            period_start=request.period_start,
+            period_end=request.period_end,
+            include_sections=request.include_sections or _default_sections(request.report_type),
+            snapshot_mode=request.snapshot_mode,
+            export_formats=request.export_formats,
         )
         
         # Set expiration date
@@ -794,75 +1258,55 @@ def register_analytics_dashboard_routes(app):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
-        return get_shareable_reports(db, project_id, created_by, skip, limit)
+        reports = get_shareable_reports(db, project_id, created_by, skip, limit)
+        return [_serialize_shareable_report(report) for report in reports]
 
     @app.get("/analytics/shareable-reports/shared/{share_token}")
     def get_shared_report(
         share_token: str,
+        request: Request,
         db: Session = Depends(get_db)
     ):
         """Public viewer endpoint. Returns the report with regenerated content for
         legacy stub reports, enforces active/expiry, and tracks views."""
         report = get_shareable_report_by_token(db, share_token)
-        if not report or not report.is_active:
-            raise HTTPException(status_code=404, detail="Shared report not found or expired")
-        if report.expires_at and report.expires_at < datetime.now(report.expires_at.tzinfo):
-            raise HTTPException(status_code=410, detail="Shareable report has expired")
+        _validate_report_not_expired(report)
+        if _normalized_access_level(report.access_level) == "restricted":
+            current_viewer = _optional_user_from_request(request, db)
+            if not _user_can_open_restricted_report(current_viewer, report):
+                raise HTTPException(status_code=401, detail="Authentication is required to view this restricted report")
 
-        # Legacy reports stored only a metadata stub — regenerate a live snapshot.
-        content = report.report_content or {}
-        if "kpis" not in content and "summary" not in content:
-            content = _build_shareable_report_content(
-                db, report.project_id, report.report_type, report.title, "system"
-            )
+        record_shareable_report_view(db, report)
+        return _shareable_report_payload(db, report)
 
-        # view_count and last_viewed are already incremented inside
-        # get_shareable_report_by_token, so no manual bump needed here.
-
-        return {
-            "id": report.id,
-            "project_id": report.project_id,
-            "title": report.title,
-            "report_type": report.report_type,
-            "report_content": content,
-            "access_level": report.access_level,
-            "shared_with": report.shared_with or [],
-            "view_count": report.view_count,
-            "expires_at": report.expires_at.isoformat() if report.expires_at else None,
-            "generated_at": report.created_at.isoformat() if report.created_at else None,
-        }
-
-    @app.get("/analytics/shareable-reports/{report_id}/download")
-    def download_shareable_report(
+    @app.get("/analytics/shareable-reports/{report_id}/preview")
+    def preview_shareable_report(
         report_id: int,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        report = db.query(models.ShareableReport).filter(
-            models.ShareableReport.id == report_id,
-            models.ShareableReport.is_active == True,
-        ).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Shareable report not found")
+        report = get_shareable_report(db, report_id)
+        _validate_report_not_expired(report)
         if not rbac.has_permission(current_user, "read", report.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        if report.expires_at and report.expires_at < datetime.now(report.expires_at.tzinfo):
-            raise HTTPException(status_code=410, detail="Shareable report has expired")
+        return _shareable_report_payload(db, report, include_token=True)
 
-        # Legacy reports were stored with only a metadata stub (no analytics).
-        # Regenerate a live snapshot for those so the download still has data.
-        content = report.report_content or {}
-        if "kpis" not in content and "summary" not in content:
-            content = _build_shareable_report_content(
-                db, report.project_id, report.report_type, report.title, "system"
-            )
+    @app.get("/analytics/shareable-reports/{report_id}/download")
+    def download_shareable_report(
+        report_id: int,
+        format: str = Query("json", pattern="^(json|csv)$"),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        report = get_shareable_report(db, report_id)
+        _validate_report_not_expired(report)
+        if not rbac.has_permission(current_user, "read", report.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Track downloads so view_count and last_viewed are meaningful, and audit
         # who pulled the report (compliance trail).
         try:
-            report.view_count = (report.view_count or 0) + 1
-            report.last_viewed = datetime.now()
-            db.commit()
+            record_shareable_report_view(db, report)
         except Exception as exc:
             print(f"Failed to record view for shareable report {report.id}: {exc}")
             db.rollback()
@@ -882,18 +1326,10 @@ def register_analytics_dashboard_routes(app):
         except Exception as exc:
             print(f"Failed to write audit for shareable report download: {exc}")
 
-        return {
-            "id": report.id,
-            "project_id": report.project_id,
-            "title": report.title,
-            "report_type": report.report_type,
-            "report_content": content,
-            "access_level": report.access_level,
-            "shared_with": report.shared_with or [],
-            "view_count": report.view_count,
-            "expires_at": report.expires_at.isoformat() if report.expires_at else None,
-            "generated_at": report.created_at.isoformat() if report.created_at else None,
-        }
+        payload = _shareable_report_payload(db, report, include_token=True)
+        if format == "csv":
+            return _csv_response(report, payload["report_content"])
+        return _json_download_response(report, payload)
 
     @app.put("/analytics/shareable-reports/{report_id}", response_model=schemas.ShareableReport)
     def update_shareable_report_endpoint(
@@ -902,14 +1338,26 @@ def register_analytics_dashboard_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        db_report = get_shareable_report_by_token(db, str(report_id))
+        db_report = get_shareable_report(db, report_id)
         if not db_report:
             raise HTTPException(status_code=404, detail="Shareable report not found")
 
         if not rbac.has_permission(current_user, "write", db_report.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_report = update_shareable_report(db, report_id=report_id, report=report)
+        allowed_fields = {"title", "access_level", "shared_with", "expires_at", "is_active"}
+        report_data = {key: value for key, value in report.items() if key in allowed_fields}
+        if "title" in report_data:
+            title = str(report_data["title"]).strip()
+            if not title:
+                raise HTTPException(status_code=400, detail="Report title is required")
+            report_data["title"] = title
+        if "access_level" in report_data:
+            level = str(report_data["access_level"]).strip().lower()
+            if level not in {"public", "restricted", "read-only"}:
+                raise HTTPException(status_code=400, detail="Invalid access level")
+            report_data["access_level"] = level
+        db_report = update_shareable_report(db, report_id=report_id, report_data=report_data)
         
         # Create audit trail
         try:
@@ -929,6 +1377,51 @@ def register_analytics_dashboard_routes(app):
         except Exception as e:
             print(f"Failed to create audit trail for shareable report update: {e}")
 
+        return db_report
+
+    @app.post("/analytics/shareable-reports/{report_id}/regenerate", response_model=schemas.ShareableReport)
+    def regenerate_shareable_report(
+        report_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        db_report = get_shareable_report(db, report_id)
+        _validate_report_not_expired(db_report)
+        if not rbac.has_permission(current_user, "write", db_report.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        existing_content = db_report.report_content or {}
+        period = existing_content.get("period") or {}
+        report_content = _build_shareable_report_content(
+            db,
+            db_report.project_id,
+            db_report.report_type,
+            db_report.title,
+            current_user.username,
+            time_range=existing_content.get("time_range", "30d"),
+            period_start=_parse_optional_datetime(period.get("start")),
+            period_end=_parse_optional_datetime(period.get("end")),
+            include_sections=existing_content.get("include_sections"),
+            snapshot_mode=existing_content.get("snapshot_mode", "snapshot"),
+            export_formats=existing_content.get("export_formats"),
+        )
+        return update_shareable_report(
+            db,
+            report_id=report_id,
+            report_data={"report_content": report_content},
+        )
+
+    @app.delete("/analytics/shareable-reports/{report_id}", response_model=schemas.ShareableReport)
+    def revoke_shareable_report(
+        report_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        db_report = get_shareable_report(db, report_id)
+        if not db_report:
+            raise HTTPException(status_code=404, detail="Shareable report not found")
+        if not rbac.has_permission(current_user, "write", db_report.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        db_report = deactivate_shareable_report(db, report_id)
         return db_report
 
     # Root Cause Analysis

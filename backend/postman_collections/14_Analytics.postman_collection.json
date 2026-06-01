@@ -464,7 +464,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"project_id\": {{testProjectId}},\n  \"title\": \"Executive QA Report\",\n  \"report_type\": \"executive\",\n  \"shared_with\": [\n    \"demo@testmona.com\"\n  ],\n  \"access_level\": \"read-only\",\n  \"expires_in_days\": 30\n}"
+          "raw": "{\n  \"project_id\": {{testProjectId}},\n  \"title\": \"Release Readiness QA Report\",\n  \"report_type\": \"release-readiness\",\n  \"shared_with\": [\n    \"demo@testmona.com\"\n  ],\n  \"access_level\": \"public\",\n  \"expires_in_days\": 30,\n  \"time_range\": \"30d\",\n  \"snapshot_mode\": \"snapshot\",\n  \"include_sections\": [\n    \"kpis\",\n    \"summary\",\n    \"recent_activity\",\n    \"trends\"\n  ],\n  \"export_formats\": [\n    \"json\",\n    \"csv\"\n  ]\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/analytics/shareable-reports",
@@ -476,7 +476,187 @@
             "shareable-reports"
           ]
         },
-        "description": "Create a shareable report with validation and creator attribution."
+        "description": "Create a shareable report with period, audience, content-section, expiry, and export-format validation."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Preview Shareable Report",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/analytics/shareable-reports/{{shareableReportId}}/preview",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "analytics",
+            "shareable-reports",
+            "{{shareableReportId}}",
+            "preview"
+          ]
+        },
+        "description": "Preview a shareable report without increasing view count."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Download Shareable Report JSON",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/analytics/shareable-reports/{{shareableReportId}}/download?format=json",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "analytics",
+            "shareable-reports",
+            "{{shareableReportId}}",
+            "download"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "json"
+            }
+          ]
+        },
+        "description": "Download a shareable report as JSON and record the access."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Download Shareable Report CSV",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/analytics/shareable-reports/{{shareableReportId}}/download?format=csv",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "analytics",
+            "shareable-reports",
+            "{{shareableReportId}}",
+            "download"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "csv"
+            }
+          ]
+        },
+        "description": "Download flattened shareable report metrics as CSV and record the access."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Regenerate Shareable Report",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/analytics/shareable-reports/{{shareableReportId}}/regenerate",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "analytics",
+            "shareable-reports",
+            "{{shareableReportId}}",
+            "regenerate"
+          ]
+        },
+        "description": "Refresh the stored snapshot content for an active shareable report."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response is JSON\", function () {",
+              "    pm.response.to.be.json;",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Revoke Shareable Report",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/analytics/shareable-reports/{{shareableReportId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "analytics",
+            "shareable-reports",
+            "{{shareableReportId}}"
+          ]
+        },
+        "description": "Deactivate a shareable report so the public token no longer works."
       },
       "event": [
         {

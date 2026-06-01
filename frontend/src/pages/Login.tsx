@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { LogIn, Eye, EyeOff } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAppName } from '@/hooks/useAppName';
+import { resolveSafeRedirect } from '@/utils/safeRedirect';
 
 export function Login() {
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
@@ -20,6 +21,7 @@ export function Login() {
   const [showDemoCredentials, setShowDemoCredentials] = useState(true);
   
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuthStore();
   const { t, isRTL } = useTranslation();
   const { appName, appLogoUrl } = useAppName(false);
@@ -72,7 +74,7 @@ export function Login() {
       if (forcePasswordChange) {
         navigate('/change-password');
       } else {
-        navigate('/dashboard');
+        navigate(resolveSafeRedirect(searchParams.get('next')) || '/dashboard');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loginFailed'));
