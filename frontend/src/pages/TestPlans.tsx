@@ -4,19 +4,21 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
-  BarChart3,
   Ban,
   Calendar,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  CirclePlus,
   ClipboardList,
   Clock,
   Edit,
+  Eye,
   FileText,
   Flag,
   Layers,
   Loader2,
+  MoreHorizontal,
   Play,
   Plus,
   Search,
@@ -31,6 +33,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -51,9 +61,10 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { milestonesAPI, testPlansAPI } from '@/lib/api';
+import { milestonesAPI, requirementsAPI, testPlansAPI } from '@/lib/api';
 
 type TestPlanStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'blocked' | 'completed';
+type ExecutionStatus = 'not_started' | 'in_progress' | 'blocked' | 'failed' | 'passed';
 
 interface TestPlan {
   id: number;
@@ -76,6 +87,9 @@ interface TestPlan {
   exit_criteria: string | null;
   risks_assumptions: string | null;
   test_run_count: number;
+  execution_status?: ExecutionStatus | null;
+  execution_progress?: number | null;
+  pass_rate?: number | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -83,6 +97,7 @@ interface TestPlan {
 interface Milestone {
   id: number;
   title: string;
+  target_date?: string | null;
 }
 
 interface FormState {
@@ -97,6 +112,8 @@ interface FormState {
   risks: string;
   startDate: string;
   endDate: string;
+  actualStartDate: string;
+  actualEndDate: string;
   status: TestPlanStatus;
   milestoneId: string;
 }
@@ -113,6 +130,8 @@ const emptyForm: FormState = {
   risks: '',
   startDate: '',
   endDate: '',
+  actualStartDate: '',
+  actualEndDate: '',
   status: 'pending',
   milestoneId: '',
 };
@@ -146,11 +165,24 @@ const formatDate = (value: string | null | undefined, fallback: string): string 
   return Number.isFinite(fallbackDate.getTime()) ? fallbackDate.toLocaleDateString() : fallback;
 };
 
+const EXECUTION_META: Record<
+  ExecutionStatus,
+  { labelKey: string; className: string; dot: string }
+> = {
+  not_started: { labelKey: 'execStatusNotStarted', className: 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300', dot: 'bg-slate-400' },
+  in_progress: { labelKey: 'execStatusInProgress', className: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300', dot: 'bg-blue-500' },
+  blocked: { labelKey: 'execStatusBlocked', className: 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-900/30 dark:text-orange-300', dot: 'bg-orange-500' },
+  failed: { labelKey: 'execStatusFailed', className: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300', dot: 'bg-red-500' },
+  passed: { labelKey: 'execStatusPassed', className: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300', dot: 'bg-emerald-500' },
+};
+
 export function TestPlans() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
   const fromMilestoneIdParam = searchParams.get('milestone_id');
+  const createFromQuery = searchParams.get('create') === '1';
+  const editIdFromQuery = searchParams.get('edit');
   const { t, isRTL } = useTranslation();
 
   const numericProjectId = useMemo(() => {
@@ -174,6 +206,8 @@ export function TestPlans() {
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedPlanIds, setSelectedPlanIds] = useState<number[]>([]);
+  const [bulkMilestoneId, setBulkMilestoneId] = useState<string>('none');
 
   // Dialogs
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -181,17 +215,32 @@ export function TestPlans() {
   const [deleteTarget, setDeleteTarget] = useState<TestPlan | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<TestPlan | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState<'create' | 'edit' | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'scope' | 'schedule' | 'criteria'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'scope' | 'requirements' | 'schedule' | 'criteria'>('overview');
 
   // Form
   const [form, setForm] = useState<FormState>(emptyForm);
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm);
   const [validationErrors, setValidationErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const deepLinkCreateHandled = useRef(false);
+  const deepLinkEditHandled = useRef(false);
+
+  // Requirement scope linking inside the create/edit modal (parity with the detail page)
+  const [reqOptions, setReqOptions] = useState<{ id: number; requirement_id: string; title: string; status?: string | null }[]>([]);
+  const [reqOptionsLoading, setReqOptionsLoading] = useState(false);
+  const [selectedReqIds, setSelectedReqIds] = useState<number[]>([]);
+  const [initialReqIds, setInitialReqIds] = useState<number[]>([]);
+  const [reqSearch, setReqSearch] = useState('');
 
   const loadRequestId = useRef(0);
 
-  const isDirty = !formsEqual(form, initialForm);
+  const sameIdSet = (a: number[], b: number[]) => {
+    if (a.length !== b.length) return false;
+    const setB = new Set(b);
+    return a.every((id) => setB.has(id));
+  };
+  const reqDirty = !sameIdSet(selectedReqIds, initialReqIds);
+  const isDirty = !formsEqual(form, initialForm) || reqDirty;
 
   const loadData = useCallback(async () => {
     if (!numericProjectId) {
@@ -269,6 +318,10 @@ export function TestPlans() {
     return testPlans.filter((plan) => plan.milestone_id === null);
   }, [testPlans, milestoneFilter]);
 
+  useEffect(() => {
+    setSelectedPlanIds((current) => current.filter((id) => testPlans.some((plan) => plan.id === id)));
+  }, [testPlans]);
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
@@ -319,6 +372,8 @@ export function TestPlans() {
     risks_assumptions: form.risks.trim() || null,
     target_start_date: dateInputToIso(form.startDate),
     target_end_date: dateInputToIso(form.endDate),
+    actual_start_date: dateInputToIso(form.actualStartDate),
+    actual_end_date: dateInputToIso(form.actualEndDate),
     milestone_id: form.milestoneId ? Number(form.milestoneId) : null,
     ...(includeStatus ? { status: form.status } : {}),
   });
@@ -341,21 +396,68 @@ export function TestPlans() {
     setInitialForm(emptyForm);
     setValidationErrors({});
     setActiveTab('overview');
+    setSelectedReqIds([]);
+    setInitialReqIds([]);
+    setReqSearch('');
+  };
+
+  // Load the project's requirements once for the in-modal scope picker.
+  const loadReqOptions = async () => {
+    if (!numericProjectId || reqOptions.length > 0) return;
+    setReqOptionsLoading(true);
+    try {
+      const data = await requirementsAPI.getAll(numericProjectId, 0, 500);
+      const list = Array.isArray(data) ? data : [];
+      setReqOptions(
+        list.map((r: any) => ({ id: r.id, requirement_id: r.requirement_id, title: r.title, status: r.status })),
+      );
+    } catch {
+      setReqOptions([]);
+    } finally {
+      setReqOptionsLoading(false);
+    }
+  };
+
+  const syncPlanRequirements = async (planId: number) => {
+    const toLink = selectedReqIds.filter((id) => !initialReqIds.includes(id));
+    const toUnlink = initialReqIds.filter((id) => !selectedReqIds.includes(id));
+    if (toLink.length > 0) {
+      await testPlansAPI.bulkUpdateRequirements(planId, { requirement_ids: toLink, action: 'link' });
+    }
+    if (toUnlink.length > 0) {
+      await testPlansAPI.bulkUpdateRequirements(planId, { requirement_ids: toUnlink, action: 'unlink' });
+    }
+  };
+
+  const toggleReqOption = (id: number) => {
+    setSelectedReqIds((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+    );
   };
 
   const handleCreate = async () => {
     if (!numericProjectId) return;
-    if (!validateForm(true)) return;
+    if (!validateForm(false)) return;
     setIsSubmitting(true);
     setError(null);
     try {
-      await testPlansAPI.create({
+      const created = await testPlansAPI.create({
         project_id: numericProjectId,
         created_by: 0, // backend overrides with the authenticated user id
         status: 'pending',
         ...buildPayload(),
       });
-      showSuccess(t('testPlanCreatedSuccessfully'));
+      // The plan now exists; a failure to link requirements must not be reported
+      // as a failed creation. Surface it as a non-blocking warning instead.
+      let linkWarning = false;
+      if (created?.id && selectedReqIds.length > 0) {
+        try {
+          await testPlansAPI.bulkUpdateRequirements(created.id, { requirement_ids: selectedReqIds, action: 'link' });
+        } catch {
+          linkWarning = true;
+        }
+      }
+      showSuccess(linkWarning ? t('testPlanCreatedRequirementsFailed') : t('testPlanCreatedSuccessfully'));
       setIsCreateOpen(false);
       resetForm();
       await loadData();
@@ -377,7 +479,15 @@ export function TestPlans() {
     setError(null);
     try {
       await testPlansAPI.update(selectedPlan.id, buildPayload(true));
-      showSuccess(t('testPlanUpdatedSuccessfully'));
+      // Plan saved; requirement-link failures are reported separately so a link
+      // error doesn't masquerade as a failed update.
+      let linkWarning = false;
+      try {
+        await syncPlanRequirements(selectedPlan.id);
+      } catch {
+        linkWarning = true;
+      }
+      showSuccess(linkWarning ? t('testPlanCreatedRequirementsFailed') : t('testPlanUpdatedSuccessfully'));
       setIsEditOpen(false);
       setSelectedPlan(null);
       resetForm();
@@ -430,11 +540,59 @@ export function TestPlans() {
     setInitialForm(initial);
     setValidationErrors({});
     setActiveTab('overview');
+    setSelectedReqIds([]);
+    setInitialReqIds([]);
+    setReqSearch('');
+    void loadReqOptions();
     setIsCreateOpen(true);
   };
 
+  useEffect(() => {
+    if (!createFromQuery || deepLinkCreateHandled.current || !numericProjectId || isLoading) return;
+    if (fromMilestoneIdParam && milestones.length === 0) return;
+    deepLinkCreateHandled.current = true;
+    openCreateDialog();
+  }, [createFromQuery, fromMilestoneIdParam, isLoading, milestones.length, numericProjectId]);
+
+  // Deep-link edit: ?edit=<id> opens the editor for that plan once data has loaded
+  // (used by the "Edit" action on the test plan detail page). The plan may be
+  // outside the current filter/page, so fall back to fetching it by id.
+  useEffect(() => {
+    if (!editIdFromQuery || deepLinkEditHandled.current || isLoading || !numericProjectId) return;
+    deepLinkEditHandled.current = true;
+    const inList = testPlans.find((p) => String(p.id) === editIdFromQuery);
+    if (inList) {
+      openEdit(inList);
+      return;
+    }
+    const id = Number(editIdFromQuery);
+    if (!Number.isInteger(id) || id <= 0) return;
+    testPlansAPI
+      .getById(id)
+      .then((plan) => {
+        if (plan && plan.project_id === numericProjectId) openEdit(plan as TestPlan);
+      })
+      .catch(() => {
+        /* invalid/forbidden edit id — leave the list as-is */
+      });
+  }, [editIdFromQuery, isLoading, testPlans, numericProjectId]);
+
   const openEdit = (plan: TestPlan) => {
     setSelectedPlan(plan);
+    setReqSearch('');
+    void loadReqOptions();
+    // Seed the requirement selection from the plan's currently-linked requirements.
+    testPlansAPI
+      .getRequirements(plan.id, { linked: true, limit: 500 })
+      .then((data) => {
+        const ids = Array.isArray(data?.items) ? data.items.map((r: any) => r.id) : [];
+        setSelectedReqIds(ids);
+        setInitialReqIds(ids);
+      })
+      .catch(() => {
+        setSelectedReqIds([]);
+        setInitialReqIds([]);
+      });
     const next: FormState = {
       title: plan.title || '',
       description: plan.description || '',
@@ -447,6 +605,8 @@ export function TestPlans() {
       risks: plan.risks_assumptions || '',
       startDate: toDateInputValue(plan.target_start_date),
       endDate: toDateInputValue(plan.target_end_date),
+      actualStartDate: toDateInputValue(plan.actual_start_date),
+      actualEndDate: toDateInputValue(plan.actual_end_date),
       status: plan.status,
       milestoneId: plan.milestone_id ? String(plan.milestone_id) : '',
     };
@@ -495,6 +655,48 @@ export function TestPlans() {
   const setField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setValidationErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  };
+
+  const setMilestoneField = (value: string) => {
+    const nextMilestoneId = value === 'none' ? '' : value;
+    const selectedMilestone = milestones.find((m) => String(m.id) === nextMilestoneId);
+    setForm((prev) => ({
+      ...prev,
+      milestoneId: nextMilestoneId,
+      endDate: selectedMilestone?.target_date && !prev.endDate
+        ? toDateInputValue(selectedMilestone.target_date)
+        : prev.endDate,
+    }));
+    setValidationErrors((prev) => (prev.milestoneId ? { ...prev, milestoneId: undefined } : prev));
+  };
+
+  const togglePlanSelection = (planId: number) => {
+    setSelectedPlanIds((current) =>
+      current.includes(planId) ? current.filter((id) => id !== planId) : [...current, planId],
+    );
+  };
+
+  const clearSelection = () => {
+    setSelectedPlanIds([]);
+    setBulkMilestoneId('none');
+  };
+
+  const handleBulkMove = async () => {
+    if (selectedPlanIds.length === 0) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const milestone_id = bulkMilestoneId === 'none' ? null : Number(bulkMilestoneId);
+      await Promise.all(selectedPlanIds.map((id) => testPlansAPI.update(id, { milestone_id })));
+      showSuccess(t('testPlansMovedSuccessfully', { count: selectedPlanIds.length }));
+      clearSelection();
+      await loadData();
+    } catch (err: any) {
+      const apiMsg = extractApiError(err);
+      setError(apiMsg || t('failedToUpdateTestPlan'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getStatusConfig = (status: string) => {
@@ -555,11 +757,20 @@ export function TestPlans() {
 
   const renderPlanForm = (mode: 'create' | 'edit') => {
     const isEdit = mode === 'edit';
+    // Bidirectional date awareness: warn if the plan's target end is past the
+    // linked milestone's target date.
+    const linkedMilestone = milestones.find((m) => String(m.id) === form.milestoneId);
+    const milestoneOverrun = Boolean(
+      linkedMilestone?.target_date &&
+        form.endDate &&
+        form.endDate > toDateInputValue(linkedMilestone.target_date),
+    );
     return (
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)} onKeyDown={handleKeyDown}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="overview">{t('testPlanTabOverview')}</TabsTrigger>
           <TabsTrigger value="scope">{t('testPlanTabScope')}</TabsTrigger>
+          <TabsTrigger value="requirements">{t('testPlanTabRequirements')}</TabsTrigger>
           <TabsTrigger value="schedule">{t('testPlanTabSchedule')}</TabsTrigger>
           <TabsTrigger value="criteria">{t('testPlanTabCriteria')}</TabsTrigger>
         </TabsList>
@@ -606,11 +817,10 @@ export function TestPlans() {
             <div className="space-y-1.5">
               <Label>
                 {t('linkedMilestone')}
-                {!isEdit && <span className="ml-1 text-red-500">*</span>}
               </Label>
               <Select
                 value={form.milestoneId || 'none'}
-                onValueChange={(v) => setField('milestoneId', v === 'none' ? '' : v)}
+                onValueChange={setMilestoneField}
               >
                 <SelectTrigger
                   className={validationErrors.milestoneId ? 'border-red-400 focus-visible:ring-red-300' : ''}
@@ -618,7 +828,7 @@ export function TestPlans() {
                   <SelectValue placeholder={t('noMilestone')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">{isEdit ? t('noMilestone') : t('selectMilestone')}</SelectItem>
+                  <SelectItem value="none">{t('noMilestone')}</SelectItem>
                   {milestones.map((m) => (
                     <SelectItem key={m.id} value={String(m.id)}>
                       {m.title}
@@ -690,6 +900,51 @@ export function TestPlans() {
           </div>
         </TabsContent>
 
+        <TabsContent value="requirements" className="space-y-3 pt-4">
+          <div className="flex items-center justify-between">
+            <Label>{t('linkedRequirements')}</Label>
+            <Badge variant="outline">{selectedReqIds.length}</Badge>
+          </div>
+          <div className="relative">
+            <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
+            <Input
+              value={reqSearch}
+              placeholder={t('searchRequirements')}
+              className={isRTL ? 'pr-9' : 'pl-9'}
+              onChange={(e) => setReqSearch(e.target.value)}
+            />
+          </div>
+          <div className="max-h-[40vh] space-y-1.5 overflow-y-auto rounded-lg border p-2">
+            {reqOptionsLoading ? (
+              <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {t('loading')}
+              </div>
+            ) : reqOptions.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">{t('noRequirementsLinked')}</p>
+            ) : (
+              reqOptions
+                .filter((r) => {
+                  const q = reqSearch.trim().toLowerCase();
+                  return !q || r.title.toLowerCase().includes(q) || r.requirement_id.toLowerCase().includes(q);
+                })
+                .map((r) => (
+                  <label
+                    key={r.id}
+                    className="flex cursor-pointer items-center gap-3 rounded-md p-2 text-sm hover:bg-muted/60"
+                  >
+                    <Checkbox checked={selectedReqIds.includes(r.id)} onCheckedChange={() => toggleReqOption(r.id)} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{r.title}</p>
+                      <p className="text-xs text-muted-foreground">{r.requirement_id}</p>
+                    </div>
+                    {r.status && <Badge variant="outline" className="shrink-0">{r.status}</Badge>}
+                  </label>
+                ))
+            )}
+          </div>
+        </TabsContent>
+
         <TabsContent value="schedule" className="space-y-4 pt-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
@@ -715,6 +970,34 @@ export function TestPlans() {
               {validationErrors.endDate && (
                 <p className="text-xs text-red-500">{validationErrors.endDate}</p>
               )}
+            </div>
+          </div>
+          {milestoneOverrun && (
+            <Alert variant="destructive" className="border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{t('planEndExceedsMilestone')}</AlertDescription>
+            </Alert>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="fp-actual-start">{t('actualStartDate')}</Label>
+              <Input
+                id="fp-actual-start"
+                type="date"
+                value={form.actualStartDate}
+                max={form.actualEndDate || undefined}
+                onChange={(e) => setField('actualStartDate', e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="fp-actual-end">{t('actualEndDate')}</Label>
+              <Input
+                id="fp-actual-end"
+                type="date"
+                value={form.actualEndDate}
+                min={form.actualStartDate || undefined}
+                onChange={(e) => setField('actualEndDate', e.target.value)}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -1043,6 +1326,38 @@ export function TestPlans() {
       </Card>
 
       {/* Content */}
+      {!isLoading && selectedPlanIds.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm font-medium">
+              {t('selectedTestPlansCount', { count: selectedPlanIds.length })}
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Select value={bulkMilestoneId} onValueChange={setBulkMilestoneId}>
+                <SelectTrigger className="sm:w-[240px]">
+                  <SelectValue placeholder={t('moveToMilestone')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t('noMilestone')}</SelectItem>
+                  {milestones.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      {m.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button size="sm" onClick={handleBulkMove} disabled={isSubmitting}>
+                {isSubmitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                {t('moveToMilestone')}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={clearSelection}>
+                {t('clearSelection')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {isLoading ? (
         <Card>
           <CardContent className="flex min-h-72 items-center justify-center text-muted-foreground">
@@ -1087,9 +1402,28 @@ export function TestPlans() {
                 <div className={`h-1 ${statusCfg.barClass}`} />
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between gap-3">
+                    <Checkbox
+                      checked={selectedPlanIds.includes(plan.id)}
+                      onCheckedChange={() => togglePlanSelection(plan.id)}
+                      aria-label={t('selectTestPlan')}
+                      className="mt-1 shrink-0"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <Badge className={`flex items-center gap-1 px-2 py-0.5 text-xs ${statusCfg.className}`}>
+                        {plan.execution_status && (
+                          <Badge
+                            variant="outline"
+                            className={`flex items-center gap-1 px-2 py-0.5 text-xs ${EXECUTION_META[plan.execution_status].className}`}
+                            title={t('derivedFromRuns')}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${EXECUTION_META[plan.execution_status].dot}`} />
+                            {t(EXECUTION_META[plan.execution_status].labelKey as any)}
+                          </Badge>
+                        )}
+                        <Badge
+                          className={`flex items-center gap-1 px-2 py-0.5 text-xs ${statusCfg.className}`}
+                          title={t('manualStatus')}
+                        >
                           {statusCfg.icon}
                           {statusCfg.label}
                         </Badge>
@@ -1109,7 +1443,13 @@ export function TestPlans() {
                           </span>
                         )}
                       </div>
-                      <h3 className="truncate text-base font-semibold leading-tight">{plan.title}</h3>
+                      <h3
+                        className="truncate text-base font-semibold leading-tight cursor-pointer hover:underline"
+                        onClick={() => navigate(`/projects/${projectId}/test-plans/${plan.id}`)}
+                        title={t('openTestPlan')}
+                      >
+                        {plan.title}
+                      </h3>
                       {plan.description && (
                         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{plan.description}</p>
                       )}
@@ -1171,45 +1511,47 @@ export function TestPlans() {
                   )}
 
                   <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-3">
-                    <Button variant="outline" size="sm" onClick={() => openEdit(plan)}>
-                      <Edit className="mr-1.5 h-3.5 w-3.5" />
-                      {t('edit')}
-                    </Button>
+                    {/* Primary action is driven by run state, not the manual status. */}
                     <Button
-                      variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/projects/${projectId}/test-runs?test_plan_id=${plan.id}`)}
+                      onClick={() => navigate(`/projects/${projectId}/test-runs?test_plan_id=${plan.id}${plan.milestone_id ? `&milestone_id=${plan.milestone_id}` : ''}${plan.test_run_count === 0 ? '&create=1' : ''}`)}
                     >
-                      <Play className="mr-1.5 h-3.5 w-3.5" />
-                      {t('viewTestRuns')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(`/projects/${projectId}/reports?test_plan_id=${plan.id}`)}
-                    >
-                      <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
-                      {t('generateReport')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => setDeleteTarget(plan)}
-                      disabled={isDeleting === plan.id}
-                    >
-                      {isDeleting === plan.id ? (
-                        <>
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          {t('deleting')}
-                        </>
+                      {plan.test_run_count === 0 ? (
+                        <CirclePlus className="mr-1.5 h-3.5 w-3.5" />
                       ) : (
-                        <>
-                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                          {t('delete')}
-                        </>
+                        <Play className="mr-1.5 h-3.5 w-3.5" />
                       )}
+                      {plan.test_run_count === 0 ? t('startNewRun') : t('viewTestRuns')}
                     </Button>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${projectId}/test-plans/${plan.id}`)}>
+                      <Eye className="mr-1.5 h-3.5 w-3.5" />
+                      {t('openTestPlan')}
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" aria-label={t('moreActions')} disabled={isDeleting === plan.id}>
+                          {isDeleting === plan.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEdit(plan)}>
+                          <Edit className="mr-2 h-3.5 w-3.5" />
+                          {t('edit')}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setDeleteTarget(plan)}
+                        >
+                          <Trash2 className="mr-2 h-3.5 w-3.5" />
+                          {t('delete')}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </CardContent>
               </Card>

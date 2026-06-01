@@ -13,6 +13,7 @@ import {
   FileCheck2,
   Gauge,
   Loader2,
+  MoreHorizontal,
   Pencil,
   PlayCircle,
   Plus,
@@ -35,6 +36,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -45,7 +52,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { milestonesAPI } from '@/lib/api';
+import { milestonesAPI, testPlansAPI } from '@/lib/api';
 import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 
@@ -53,6 +60,7 @@ interface MilestoneFormState {
   title: string;
   description: string;
   targetDate: string;
+  actualDate: string;
   status: MilestoneStatus;
 }
 
@@ -75,6 +83,7 @@ const defaultForm: MilestoneFormState = {
   title: '',
   description: '',
   targetDate: '',
+  actualDate: '',
   status: 'planned',
 };
 
@@ -190,6 +199,7 @@ export function Milestones() {
       title: milestone.title,
       description: milestone.description || '',
       targetDate: milestone.target_date ? toDateInputValue(milestone.target_date) : '',
+      actualDate: milestone.actual_date ? toDateInputValue(milestone.actual_date) : '',
       status: milestone.status,
     });
     setFormError(null);
@@ -213,6 +223,20 @@ export function Milestones() {
       return;
     }
 
+    // Completion guard: don't let a milestone be marked completed while it still
+    // carries failing runs, blockers, or open critical defects without confirming.
+    if (
+      editingMilestone &&
+      form.status === 'completed' &&
+      editingMilestone.status !== 'completed' &&
+      (['at_risk', 'blocked'].includes(editingMilestone.health) ||
+        editingMilestone.failed_count > 0 ||
+        editingMilestone.critical_defect_count > 0) &&
+      !window.confirm(t('completeMilestoneRiskConfirm'))
+    ) {
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       setError(null);
@@ -221,20 +245,36 @@ export function Milestones() {
       // Build a base payload; only include target_date in update when actually changed
       const description = form.description.trim() || null;
       const targetDateIso = form.targetDate ? dateInputToIso(form.targetDate) : null;
+      const actualDateIso = form.actualDate ? dateInputToIso(form.actualDate) : null;
 
       if (editingMilestone) {
+        const previousTargetDate = editingMilestone.target_date ? toDateInputValue(editingMilestone.target_date) : '';
         const updatePayload: Record<string, unknown> = {
           title: trimmedTitle,
           description,
           status: form.status,
           target_date: targetDateIso,
+          actual_date: actualDateIso,
         };
         await milestonesAPI.update(editingMilestone.id, updatePayload);
+        if (
+          form.targetDate &&
+          form.targetDate !== previousTargetDate &&
+          (editingMilestone.linked_test_plans || []).length > 0 &&
+          window.confirm(t('syncMilestonePlanDatesConfirm', { count: editingMilestone.linked_test_plans.length }))
+        ) {
+          await Promise.all(
+            editingMilestone.linked_test_plans.map((plan) =>
+              testPlansAPI.update(plan.id, { target_end_date: targetDateIso }),
+            ),
+          );
+        }
       } else {
         await milestonesAPI.create({
           title: trimmedTitle,
           description: description ?? undefined,
           target_date: targetDateIso ?? undefined,
+          actual_date: actualDateIso ?? undefined,
           status: form.status,
           project_id: currentProjectId,
         });
@@ -380,6 +420,17 @@ export function Milestones() {
                       </Select>
                     </div>
                   </div>
+                  {(form.status === 'completed' || form.actualDate) && (
+                    <div className="space-y-2 sm:max-w-[calc(50%-0.5rem)]">
+                      <Label htmlFor="milestone-actual">{t('actualDate')}</Label>
+                      <Input
+                        id="milestone-actual"
+                        type="date"
+                        value={form.actualDate}
+                        onChange={(event) => setForm((current) => ({ ...current, actualDate: event.target.value }))}
+                      />
+                    </div>
+                  )}
                 </div>
                 {formError && (
                   <Alert variant="destructive">
@@ -580,25 +631,51 @@ export function Milestones() {
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-2 border-t pt-4">
-                    <Button size="sm" onClick={() => navigate(`/projects/${currentProjectId}/milestones/${milestone.id}`)}>
-                      {t('openMilestoneDetail')}
-                      <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
-                    </Button>
+                  <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+                    {/* Primary action is contextual: empty milestones nudge toward
+                        creating a plan, otherwise open the readiness rollup. */}
+                    {milestone.test_plan_count === 0 ? (
+                      <Button size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}&create=1`)}>
+                        {t('createTestPlan')}
+                        <Plus className="ml-2 h-3.5 w-3.5" />
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => navigate(`/projects/${currentProjectId}/milestones/${milestone.id}`)}>
+                        {t('openMilestoneDetail')}
+                        <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}`)}>
                       {t('viewTestPlans')}
                       <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/test-runs?milestone_id=${milestone.id}`)}>
-                      {t('viewTestRuns')}
-                      <ArrowUpRight className="ml-2 h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/defects?milestone_id=${milestone.id}`)}>
-                      {t('viewDefects')}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${currentProjectId}/requirements?milestone_id=${milestone.id}`)}>
-                      {t('viewRequirements')}
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" aria-label={t('moreActions')}>
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {milestone.test_plan_count > 0 && (
+                          <DropdownMenuItem onClick={() => navigate(`/projects/${currentProjectId}/test-plans?milestone_id=${milestone.id}&create=1`)}>
+                            <Plus className="mr-2 h-3.5 w-3.5" />
+                            {t('createTestPlan')}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onClick={() => navigate(`/projects/${currentProjectId}/test-runs?milestone_id=${milestone.id}`)}>
+                          <PlayCircle className="mr-2 h-3.5 w-3.5" />
+                          {t('viewTestRuns')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate(`/projects/${currentProjectId}/defects?milestone_id=${milestone.id}`)}>
+                          <Bug className="mr-2 h-3.5 w-3.5" />
+                          {t('viewDefects')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate(`/projects/${currentProjectId}/requirements?milestone_id=${milestone.id}`)}>
+                          <FileCheck2 className="mr-2 h-3.5 w-3.5" />
+                          {t('viewRequirements')}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </CardContent>
               </Card>

@@ -193,6 +193,31 @@ def _test_plan_to_requirement_response(test_plan, linked: bool = False):
     )
 
 
+def _get_test_plan_or_404(db: Session, test_plan_id: int):
+    test_plan = db.query(models.TestPlan).filter(models.TestPlan.id == test_plan_id).first()
+    if test_plan is None:
+        raise HTTPException(status_code=404, detail="Test plan not found")
+    return test_plan
+
+
+def _linked_test_plan_requirement_ids(db: Session, test_plan_id: int) -> set[int]:
+    rows = db.query(models.requirement_test_plan_links.c.requirement_id).filter(
+        models.requirement_test_plan_links.c.test_plan_id == test_plan_id,
+    ).all()
+    return {row[0] for row in rows}
+
+
+def _requirement_to_test_plan_response(requirement, linked: bool = False):
+    return schemas.TestPlanLinkedRequirement(
+        id=requirement.id,
+        requirement_id=requirement.requirement_id,
+        title=requirement.title,
+        status=_enum_value(requirement.status),
+        priority=_enum_value(requirement.priority),
+        linked=linked,
+    )
+
+
 def _project_test_case_query(db: Session, project_id: int):
     return db.query(models.TestCase).join(models.TestSuite).filter(
         models.TestSuite.project_id == project_id,
@@ -1927,21 +1952,12 @@ def register_requirements_defects_plans_routes(app):
             limit=limit,
         )
 
-        from ..models import TestRun as TR, Milestone as MS
-        from sqlalchemy import func as sqlfunc
+        from ..services.test_plan_service import compute_plan_executions
 
-        # Build test_run counts in a single query for performance
+        # Derived execution rollups (run counts + truth-from-runs status) for the
+        # whole page in two batched queries.
         plan_ids = [tp.id for tp in test_plans]
-        if plan_ids:
-            counts_q = (
-                db.query(TR.test_plan_id, sqlfunc.count(TR.id).label("cnt"))
-                .filter(TR.test_plan_id.in_(plan_ids))
-                .group_by(TR.test_plan_id)
-                .all()
-            )
-            run_counts = {row.test_plan_id: row.cnt for row in counts_q}
-        else:
-            run_counts = {}
+        executions = compute_plan_executions(db, plan_ids)
 
         return [
             {
@@ -1964,9 +1980,24 @@ def register_requirements_defects_plans_routes(app):
                 "entry_criteria": tp.entry_criteria,
                 "exit_criteria": tp.exit_criteria,
                 "risks_assumptions": tp.risks_assumptions,
-                "test_run_count": run_counts.get(tp.id, 0),
+                "test_run_count": executions.get(tp.id, {}).get("run_count", 0),
                 "created_at": tp.created_at,
                 "updated_at": tp.updated_at,
+                **{
+                    key: executions.get(tp.id, {}).get(key)
+                    for key in (
+                        "execution_status",
+                        "execution_progress",
+                        "pass_rate",
+                        "result_count",
+                        "passed_count",
+                        "failed_count",
+                        "blocked_count",
+                        "skipped_count",
+                        "not_tested_count",
+                        "executed_count",
+                    )
+                },
             }
             for tp in test_plans
         ]
@@ -1984,14 +2015,10 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        from ..models import TestRun as TR
-        from sqlalchemy import func as sqlfunc
+        from ..services.test_plan_service import compute_plan_execution
 
-        run_count = (
-            db.query(sqlfunc.count(TR.id))
-            .filter(TR.test_plan_id == test_plan.id)
-            .scalar()
-        ) or 0
+        execution = compute_plan_execution(db, test_plan.id)
+        requirement_count = len(test_plan.requirements)
 
         return {
             "id": test_plan.id,
@@ -2013,9 +2040,25 @@ def register_requirements_defects_plans_routes(app):
             "entry_criteria": test_plan.entry_criteria,
             "exit_criteria": test_plan.exit_criteria,
             "risks_assumptions": test_plan.risks_assumptions,
-            "test_run_count": run_count,
+            "test_run_count": execution.get("run_count", 0),
+            "requirement_count": requirement_count,
             "created_at": test_plan.created_at,
             "updated_at": test_plan.updated_at,
+            **{
+                key: execution.get(key)
+                for key in (
+                    "execution_status",
+                    "execution_progress",
+                    "pass_rate",
+                    "result_count",
+                    "passed_count",
+                    "failed_count",
+                    "blocked_count",
+                    "skipped_count",
+                    "not_tested_count",
+                    "executed_count",
+                )
+            },
         }
 
     @app.put("/test-plans/{test_plan_id}", response_model=schemas.TestPlan)
@@ -2110,6 +2153,120 @@ def register_requirements_defects_plans_routes(app):
             logger.exception("Failed to create audit trail for test plan deletion")
 
         return {"message": "Test plan deleted successfully"}
+
+    @app.get("/test-plans/{test_plan_id}/requirements", response_model=schemas.TestPlanLinkedRequirementList)
+    def search_test_plan_requirements(
+        test_plan_id: int = Path(..., ge=1),
+        search: Optional[str] = Query(None, max_length=100),
+        linked: Optional[bool] = Query(None),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(25, ge=1, le=500),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        test_plan = _get_test_plan_or_404(db, test_plan_id)
+        if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        linked_requirement_ids = _linked_test_plan_requirement_ids(db, test_plan.id)
+        query = db.query(models.Requirement).filter(
+            models.Requirement.project_id == test_plan.project_id,
+        )
+
+        if linked is True:
+            if not linked_requirement_ids:
+                return schemas.TestPlanLinkedRequirementList(items=[], total=0, skip=skip, limit=limit)
+            query = query.filter(models.Requirement.id.in_(linked_requirement_ids))
+        elif linked is False and linked_requirement_ids:
+            query = query.filter(models.Requirement.id.notin_(linked_requirement_ids))
+
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            query = query.filter(or_(
+                models.Requirement.title.ilike(term),
+                models.Requirement.requirement_id.ilike(term),
+            ))
+
+        total = query.count()
+        requirements = query.order_by(models.Requirement.created_at.desc()).offset(skip).limit(limit).all()
+        return schemas.TestPlanLinkedRequirementList(
+            items=[
+                _requirement_to_test_plan_response(requirement, linked=requirement.id in linked_requirement_ids)
+                for requirement in requirements
+            ],
+            total=total,
+            skip=skip,
+            limit=limit,
+        )
+
+    @app.post("/test-plans/{test_plan_id}/requirements/bulk", response_model=schemas.TestPlanLinkedRequirementBulkResponse)
+    def bulk_update_test_plan_requirements(
+        request: schemas.TestPlanLinkedRequirementBulkRequest,
+        test_plan_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        test_plan = _get_test_plan_or_404(db, test_plan_id)
+        if not rbac.has_permission(current_user, "write", test_plan.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        unique_requirement_ids = list(dict.fromkeys(request.requirement_ids))
+        requirements = db.query(models.Requirement).filter(
+            models.Requirement.id.in_(unique_requirement_ids)
+        ).all()
+        requirements_by_id = {requirement.id: requirement for requirement in requirements}
+        missing_ids = [rid for rid in unique_requirement_ids if rid not in requirements_by_id]
+        if missing_ids:
+            raise HTTPException(status_code=404, detail=f"Requirement(s) not found: {missing_ids}")
+        wrong_project_ids = [
+            requirement.id
+            for requirement in requirements
+            if requirement.project_id != test_plan.project_id
+        ]
+        if wrong_project_ids:
+            raise HTTPException(status_code=400, detail=f"Requirement(s) do not belong to this test plan's project: {wrong_project_ids}")
+
+        linked_requirement_ids = _linked_test_plan_requirement_ids(db, test_plan.id)
+        linked_count = 0
+        unlinked_count = 0
+        skipped_count = 0
+
+        try:
+            if request.action == "link":
+                for requirement_id in unique_requirement_ids:
+                    if requirement_id in linked_requirement_ids:
+                        skipped_count += 1
+                        continue
+                    db.execute(models.requirement_test_plan_links.insert().values(
+                        requirement_id=requirement_id,
+                        test_plan_id=test_plan.id,
+                    ))
+                    linked_count += 1
+            else:
+                for requirement_id in unique_requirement_ids:
+                    if requirement_id not in linked_requirement_ids:
+                        skipped_count += 1
+                        continue
+                    db.execute(models.requirement_test_plan_links.delete().where(
+                        models.requirement_test_plan_links.c.requirement_id == requirement_id,
+                        models.requirement_test_plan_links.c.test_plan_id == test_plan.id,
+                    ))
+                    unlinked_count += 1
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Failed to update requirement links")
+
+        refreshed_ids = _linked_test_plan_requirement_ids(db, test_plan.id)
+        return schemas.TestPlanLinkedRequirementBulkResponse(
+            linked_count=linked_count,
+            unlinked_count=unlinked_count,
+            skipped_count=skipped_count,
+            items=[
+                _requirement_to_test_plan_response(requirements_by_id[rid], linked=rid in refreshed_ids)
+                for rid in unique_requirement_ids
+            ],
+        )
 
     # Milestones Endpoints
     @app.post("/milestones", response_model=schemas.Milestone)
@@ -2314,33 +2471,10 @@ def register_requirements_defects_plans_routes(app):
 
         return get_project_milestone_stats(db, project_id)
 
-    @app.get("/milestones/{milestone_id}/test-plans")
-    def get_milestone_test_plans(
-        milestone_id: int = Path(..., ge=1),
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        from ..models import Milestone, TestPlan
-
-        milestone = db.query(Milestone).filter(Milestone.id == milestone_id).first()
-        if not milestone:
-            raise HTTPException(status_code=404, detail="Milestone not found")
-
-        if not rbac.has_permission(current_user, "read", milestone.project_id, db):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-        test_plans = db.query(TestPlan).filter(TestPlan.milestone_id == milestone_id).all()
-        return [
-            {
-                "id": tp.id,
-                "title": tp.title,
-                "description": tp.description,
-                "status": tp.status.value if tp.status else None,
-                "target_start_date": tp.target_start_date,
-                "target_end_date": tp.target_end_date
-            }
-            for tp in test_plans
-        ]
+    # NOTE: the milestone detail page reads linked plans from the enriched
+    # ``GET /milestones/{id}`` payload (``linked_test_plans``), so a separate
+    # ``GET /milestones/{id}/test-plans`` endpoint was unused and divergent and
+    # has been removed.
 
     @app.get("/milestones/{milestone_id}/runs", response_model=List[schemas.TestRun])
     def get_milestone_runs(

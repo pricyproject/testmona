@@ -1,4 +1,5 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom';
+import { resolveSafeRedirect } from '@/utils/safeRedirect';
 import { Layout } from '@/components/Layout';
 import { ProjectGuard } from '@/components/ProjectGuard';
 import { ThemeProvider } from '@/contexts/ThemeContext';
@@ -29,6 +30,7 @@ const TestCaseExecution = lazyPage(() => import('@/pages/TestCaseExecution'), 'T
 const SectionRedirect = lazyPage(() => import('@/pages/SectionRedirect'), 'SectionRedirect');
 const Environments = lazyPage(() => import('@/pages/Environments'), 'Environments');
 const TestPlans = lazyPage(() => import('@/pages/TestPlans'), 'TestPlans');
+const TestPlanDetail = lazyPage(() => import('@/pages/TestPlanDetail'), 'TestPlanDetail');
 const TestRuns = lazyPage(() => import('@/pages/TestRuns'), 'TestRuns');
 const TestRunDetail = lazyPage(() => import('@/pages/TestRunDetail'), 'TestRunDetail');
 const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunReport');
@@ -52,6 +54,16 @@ const Webhooks = lazyPage(() => import('@/pages/Webhooks'), 'Webhooks');
 function RedirectToTestSuites() {
   const { projectId } = useParams<{ projectId: string }>();
   return <Navigate to={`/projects/${projectId || ''}/test-suites`} replace />;
+}
+
+// An already-authenticated user landing on /login or /signup (e.g. via a
+// `?next=` deep link, or because auth flips to true while the URL is still on
+// the auth screen) must be sent to their intended destination, not blanket
+// /projects. Honoring `next` here closes the race where this redirect would
+// otherwise fire before the Login page's own post-login navigation.
+function PostAuthRedirect() {
+  const [searchParams] = useSearchParams();
+  return <Navigate to={resolveSafeRedirect(searchParams.get('next')) || '/projects'} replace />;
 }
 
 function PageFallback() {
@@ -146,8 +158,8 @@ function AppWithRouter() {
       <Suspense fallback={<PageFallback />}>
         <Routes>
         <Route path="/" element={<Navigate to="/projects" replace />} />
-        <Route path="/login" element={<Navigate to="/projects" replace />} />
-        <Route path="/signup" element={<Navigate to="/projects" replace />} />
+        <Route path="/login" element={<PostAuthRedirect />} />
+        <Route path="/signup" element={<PostAuthRedirect />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/dashboard" element={<Dashboard />} />
         
@@ -246,6 +258,11 @@ function AppWithRouter() {
         <Route path="/projects/:projectId/test-plans" element={
           <ProjectGuard>
             <TestPlans />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/test-plans/:testPlanId" element={
+          <ProjectGuard>
+            <TestPlanDetail />
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/reports" element={

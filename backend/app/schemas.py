@@ -2217,6 +2217,42 @@ class RequirementLinkedTestPlanBulkResponse(BaseModel):
     items: List[RequirementLinkedTestPlan]
 
 
+# --- Test plan -> requirement linking (the inverse of the above) ---
+class TestPlanLinkedRequirement(BaseModel):
+    id: int
+    requirement_id: str
+    title: str
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    linked: bool = False
+
+
+class TestPlanLinkedRequirementList(BaseModel):
+    items: List[TestPlanLinkedRequirement]
+    total: int
+    skip: int
+    limit: int
+
+
+class TestPlanLinkedRequirementBulkRequest(BaseModel):
+    requirement_ids: List[int] = Field(..., min_length=1, max_length=200)
+    action: str = Field(..., pattern="^(link|unlink)$")
+
+    @field_validator('requirement_ids')
+    @classmethod
+    def validate_requirement_ids(cls, v: List[int]) -> List[int]:
+        if any(requirement_id <= 0 for requirement_id in v):
+            raise ValueError('requirement_ids must contain positive integers')
+        return v
+
+
+class TestPlanLinkedRequirementBulkResponse(BaseModel):
+    linked_count: int = 0
+    unlinked_count: int = 0
+    skipped_count: int = 0
+    items: List[TestPlanLinkedRequirement]
+
+
 class RequirementRelationshipCount(BaseModel):
     total: int = 0
     items: List[Dict[str, Any]] = Field(default_factory=list)
@@ -3156,6 +3192,7 @@ class ShareableReport(ShareableReportBase):
     project_id: int
     share_token: str
     created_by: int
+    created_by_display: Optional[str] = None
     view_count: int
     last_viewed: Optional[datetime]
     created_at: datetime
@@ -3260,9 +3297,113 @@ class ShareableReportRequest(BaseModel):
     project_id: int
     title: str
     report_type: str
-    shared_with: List[Union[int, str]]
-    access_level: str = "read-only"
+    shared_with: List[Union[int, str]] = Field(default_factory=list)
+    access_level: str = "public"
     expires_in_days: Optional[int] = None
+    time_range: str = "30d"
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    snapshot_mode: str = "snapshot"
+    include_sections: List[str] = Field(default_factory=list)
+    export_formats: List[str] = Field(default_factory=lambda: ["json", "csv"])
+
+    @field_validator('title')
+    @classmethod
+    def validate_shareable_report_title(cls, v):
+        title = (v or "").strip()
+        if not title:
+            raise ValueError('Report title is required')
+        if len(title) > 200:
+            raise ValueError('Report title cannot exceed 200 characters')
+        return title
+
+    @field_validator('report_type')
+    @classmethod
+    def validate_shareable_report_type(cls, v):
+        value = (v or "").strip().lower()
+        allowed = {
+            "summary", "executive", "technical",
+            "release-readiness", "execution-summary", "defect-quality",
+            "coverage-traceability", "flaky-tests", "team-activity",
+            "audit-compliance", "milestone", "sprint-qa", "customer-quality",
+        }
+        if value not in allowed:
+            raise ValueError('Invalid report type')
+        return value
+
+    @field_validator('access_level')
+    @classmethod
+    def validate_shareable_access_level(cls, v):
+        value = (v or "public").strip().lower()
+        if value not in {"public", "restricted", "read-only"}:
+            raise ValueError('Invalid access level')
+        return value
+
+    @field_validator('time_range')
+    @classmethod
+    def validate_shareable_time_range(cls, v):
+        value = (v or "30d").strip().lower()
+        if value not in {"24h", "7d", "30d", "90d", "custom"}:
+            raise ValueError('time_range must be one of 24h, 7d, 30d, 90d, or custom')
+        return value
+
+    @field_validator('snapshot_mode')
+    @classmethod
+    def validate_shareable_snapshot_mode(cls, v):
+        value = (v or "snapshot").strip().lower()
+        if value not in {"snapshot", "live"}:
+            raise ValueError('snapshot_mode must be snapshot or live')
+        return value
+
+    @field_validator('include_sections')
+    @classmethod
+    def validate_shareable_sections(cls, v):
+        allowed = {"kpis", "summary", "recent_activity", "trends", "team_performance", "upcoming"}
+        sections = [str(item).strip().lower() for item in (v or []) if str(item).strip()]
+        invalid = [item for item in sections if item not in allowed]
+        if invalid:
+            raise ValueError(f"Invalid report sections: {', '.join(invalid)}")
+        return list(dict.fromkeys(sections))
+
+    @field_validator('export_formats')
+    @classmethod
+    def validate_shareable_export_formats(cls, v):
+        allowed = {"json", "csv"}
+        formats = [str(item).strip().lower() for item in (v or []) if str(item).strip()]
+        invalid = [item for item in formats if item not in allowed]
+        if invalid:
+            raise ValueError(f"Invalid export formats: {', '.join(invalid)}")
+        return list(dict.fromkeys(formats or ["json", "csv"]))
+
+    @field_validator('shared_with')
+    @classmethod
+    def validate_shareable_recipients(cls, v):
+        recipients = []
+        email_pattern = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+        for item in v or []:
+            if isinstance(item, int):
+                if item <= 0:
+                    raise ValueError('Recipient user IDs must be positive')
+                recipients.append(item)
+                continue
+            value = str(item).strip()
+            if not value:
+                continue
+            if not email_pattern.match(value):
+                raise ValueError(f"Invalid recipient email: {value}")
+            recipients.append(value.lower())
+        return list(dict.fromkeys(recipients))
+
+    @model_validator(mode='after')
+    def validate_shareable_period(self):
+        if self.time_range == "custom":
+            if not self.period_start or not self.period_end:
+                raise ValueError('Custom reports require period_start and period_end')
+            if self.period_start >= self.period_end:
+                raise ValueError('period_start must be before period_end')
+        if self.access_level == "restricted" and not self.shared_with:
+            raise ValueError('Restricted reports require at least one recipient')
+        return self
 
 
 class RootCauseAnalysisRequest(BaseModel):

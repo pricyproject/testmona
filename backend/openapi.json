@@ -5924,6 +5924,15 @@
         ],
         "parameters": [
           {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
             "name": "test_suite_id",
             "in": "query",
             "required": false,
@@ -12009,6 +12018,162 @@
         }
       }
     },
+    "/test-plans/{test_plan_id}/requirements": {
+      "get": {
+        "summary": "Search Test Plan Requirements",
+        "operationId": "search_test_plan_requirements_test_plans__test_plan_id__requirements_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Test Plan Id"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "linked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Linked"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestPlanLinkedRequirementList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/test-plans/{test_plan_id}/requirements/bulk": {
+      "post": {
+        "summary": "Bulk Update Test Plan Requirements",
+        "operationId": "bulk_update_test_plan_requirements_test_plans__test_plan_id__requirements_bulk_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Test Plan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestPlanLinkedRequirementBulkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestPlanLinkedRequirementBulkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/milestones": {
       "post": {
         "summary": "Create Milestone Endpoint",
@@ -12279,49 +12444,6 @@
               "type": "integer",
               "minimum": 1,
               "title": "Project Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/milestones/{milestone_id}/test-plans": {
-      "get": {
-        "summary": "Get Milestone Test Plans",
-        "operationId": "get_milestone_test_plans_milestones__milestone_id__test_plans_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "milestone_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "title": "Milestone Id"
             }
           }
         ],
@@ -14580,6 +14702,48 @@
         }
       }
     },
+    "/analytics/shareable-reports/{report_id}/preview": {
+      "get": {
+        "summary": "Preview Shareable Report",
+        "operationId": "preview_shareable_report_analytics_shareable_reports__report_id__preview_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Report Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/analytics/shareable-reports/{report_id}/download": {
       "get": {
         "summary": "Download Shareable Report",
@@ -14597,6 +14761,17 @@
             "schema": {
               "type": "integer",
               "title": "Report Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(json|csv)$",
+              "default": "json",
+              "title": "Format"
             }
           }
         ],
@@ -14653,6 +14828,92 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareableReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Revoke Shareable Report",
+        "operationId": "revoke_shareable_report_analytics_shareable_reports__report_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Report Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareableReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/shareable-reports/{report_id}/regenerate": {
+      "post": {
+        "summary": "Regenerate Shareable Report",
+        "operationId": "regenerate_shareable_report_analytics_shareable_reports__report_id__regenerate_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Report Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -20099,6 +20360,28 @@
           "provider"
         ],
         "title": "AIProviderConfigPayload"
+      },
+      "AIStepExpectedResult": {
+        "properties": {
+          "step_number": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Step Number"
+          },
+          "expected_result": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Expected Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step_number",
+          "expected_result"
+        ],
+        "title": "AIStepExpectedResult"
       },
       "AITestRequest": {
         "properties": {
@@ -31378,6 +31661,17 @@
             "type": "integer",
             "title": "Created By"
           },
+          "created_by_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By Display"
+          },
           "view_count": {
             "type": "integer",
             "title": "View Count"
@@ -31451,7 +31745,7 @@
           "access_level": {
             "type": "string",
             "title": "Access Level",
-            "default": "read-only"
+            "default": "public"
           },
           "expires_in_days": {
             "anyOf": [
@@ -31463,14 +31757,61 @@
               }
             ],
             "title": "Expires In Days"
+          },
+          "time_range": {
+            "type": "string",
+            "title": "Time Range",
+            "default": "30d"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Start"
+          },
+          "period_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "snapshot_mode": {
+            "type": "string",
+            "title": "Snapshot Mode",
+            "default": "snapshot"
+          },
+          "include_sections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Include Sections"
+          },
+          "export_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Export Formats"
           }
         },
         "type": "object",
         "required": [
           "project_id",
           "title",
-          "report_type",
-          "shared_with"
+          "report_type"
         ],
         "title": "ShareableReportRequest"
       },
@@ -32202,6 +32543,13 @@
               }
             ],
             "title": "Expected Result"
+          },
+          "step_expected_results": {
+            "items": {
+              "$ref": "#/components/schemas/AIStepExpectedResult"
+            },
+            "type": "array",
+            "title": "Step Expected Results"
           },
           "gherkin": {
             "anyOf": [
@@ -34810,6 +35158,142 @@
           "created_by"
         ],
         "title": "TestPlanCreate"
+      },
+      "TestPlanLinkedRequirement": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "requirement_id": {
+            "type": "string",
+            "title": "Requirement Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "linked": {
+            "type": "boolean",
+            "title": "Linked",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "requirement_id",
+          "title"
+        ],
+        "title": "TestPlanLinkedRequirement"
+      },
+      "TestPlanLinkedRequirementBulkRequest": {
+        "properties": {
+          "requirement_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Requirement Ids"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^(link|unlink)$",
+            "title": "Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requirement_ids",
+          "action"
+        ],
+        "title": "TestPlanLinkedRequirementBulkRequest"
+      },
+      "TestPlanLinkedRequirementBulkResponse": {
+        "properties": {
+          "linked_count": {
+            "type": "integer",
+            "title": "Linked Count",
+            "default": 0
+          },
+          "unlinked_count": {
+            "type": "integer",
+            "title": "Unlinked Count",
+            "default": 0
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count",
+            "default": 0
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TestPlanLinkedRequirement"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "TestPlanLinkedRequirementBulkResponse"
+      },
+      "TestPlanLinkedRequirementList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TestPlanLinkedRequirement"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "skip": {
+            "type": "integer",
+            "title": "Skip"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "skip",
+          "limit"
+        ],
+        "title": "TestPlanLinkedRequirementList"
       },
       "TestPlanUpdate": {
         "properties": {

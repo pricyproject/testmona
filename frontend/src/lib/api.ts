@@ -1149,10 +1149,6 @@ export const milestonesAPI = {
     const response = await api.get(`/milestones/stats/${projectId}`);
     return response.data;
   },
-  getTestPlans: async (id: number) => {
-    const response = await api.get(`/milestones/${id}/test-plans`);
-    return response.data;
-  },
   getRuns: async (id: number) => {
     const response = await api.get(`/milestones/${id}/runs`);
     return response.data;
@@ -1226,8 +1222,23 @@ export const analyticsAPI = {
     const response = await api.post('/analytics/shareable-reports', report);
     return response.data;
   },
-  downloadShareableReport: async (reportId: number) => {
-    const response = await api.get(`/analytics/shareable-reports/${reportId}/download`);
+  previewShareableReport: async (reportId: number) => {
+    const response = await api.get(`/analytics/shareable-reports/${reportId}/preview`);
+    return response.data;
+  },
+  downloadShareableReport: async (reportId: number, format: 'json' | 'csv' = 'json') => {
+    const response = await api.get(`/analytics/shareable-reports/${reportId}/download`, {
+      params: { format },
+      responseType: format === 'csv' ? 'blob' : 'json',
+    });
+    return response.data;
+  },
+  regenerateShareableReport: async (reportId: number) => {
+    const response = await api.post(`/analytics/shareable-reports/${reportId}/regenerate`);
+    return response.data;
+  },
+  revokeShareableReport: async (reportId: number) => {
+    const response = await api.delete(`/analytics/shareable-reports/${reportId}`);
     return response.data;
   },
   // Dashboard widget persistence — used so layout syncs across devices for a user.
@@ -1904,6 +1915,26 @@ export const testPlansAPI = {
   },
   delete: async (id: number) => {
     const response = await api.delete(`/test-plans/${id}`);
+    return response.data;
+  },
+  getRequirements: async (
+    id: number,
+    filters: { search?: string; linked?: boolean; skip?: number; limit?: number } = {},
+  ) => {
+    const params = new URLSearchParams({
+      skip: String(filters.skip ?? 0),
+      limit: String(filters.limit ?? 50),
+    });
+    if (filters.search) params.append('search', filters.search);
+    if (filters.linked !== undefined) params.append('linked', String(filters.linked));
+    const response = await api.get(`/test-plans/${id}/requirements?${params}`);
+    return response.data;
+  },
+  bulkUpdateRequirements: async (
+    id: number,
+    payload: { requirement_ids: number[]; action: 'link' | 'unlink' },
+  ) => {
+    const response = await api.post(`/test-plans/${id}/requirements/bulk`, payload);
     return response.data;
   },
 };

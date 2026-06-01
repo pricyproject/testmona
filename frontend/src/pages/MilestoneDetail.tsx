@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
@@ -13,10 +13,14 @@ import {
   ClipboardList,
   FileCheck2,
   Gauge,
+  Link2,
   Loader2,
   PlayCircle,
+  Plus,
+  Search,
   ShieldAlert,
   Target,
+  Unlink,
   XCircle,
 } from 'lucide-react';
 
@@ -24,6 +28,16 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -34,8 +48,10 @@ import {
 } from '@/components/ui/table';
 
 import { useTranslation } from '@/hooks/useTranslation';
-import { milestonesAPI, getApiErrorMessage } from '@/lib/api';
+import { milestonesAPI, testPlansAPI, getApiErrorMessage } from '@/lib/api';
 import type { Milestone, MilestoneHealth, MilestoneStatus } from '@/types';
+
+type CandidatePlan = { id: number; title: string; status: string | null; milestone_id: number | null };
 
 type RunRow = {
   id: number;
@@ -132,6 +148,31 @@ export function MilestoneDetail() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Link/unlink plan management
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [candidatePlans, setCandidatePlans] = useState<CandidatePlan[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [planSearch, setPlanSearch] = useState('');
+  const [selectedPlanIds, setSelectedPlanIds] = useState<number[]>([]);
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!numericProjectId || !numericMilestoneId || !Number.isFinite(numericMilestoneId)) return;
+    const [milestoneData, runsData] = await Promise.all([
+      milestonesAPI.getById(numericMilestoneId),
+      milestonesAPI.getRuns(numericMilestoneId).catch(() => []),
+    ]);
+    if (milestoneData.project_id !== numericProjectId) {
+      setError(t('milestoneNotInProject'));
+      setMilestone(null);
+      setRuns([]);
+      return;
+    }
+    setMilestone(milestoneData);
+    setRuns(Array.isArray(runsData) ? runsData : []);
+  }, [numericProjectId, numericMilestoneId, t]);
+
   useEffect(() => {
     if (!numericProjectId) {
       setError(t('invalidProjectId'));
@@ -148,19 +189,7 @@ export function MilestoneDetail() {
       setIsLoading(true);
       setError(null);
       try {
-        const [milestoneData, runsData] = await Promise.all([
-          milestonesAPI.getById(numericMilestoneId),
-          milestonesAPI.getRuns(numericMilestoneId).catch(() => []),
-        ]);
-        if (cancelled) return;
-        if (milestoneData.project_id !== numericProjectId) {
-          setError(t('milestoneNotInProject'));
-          setMilestone(null);
-          setRuns([]);
-          return;
-        }
-        setMilestone(milestoneData);
-        setRuns(Array.isArray(runsData) ? runsData : []);
+        await reload();
       } catch (err) {
         if (cancelled) return;
         setError(getApiErrorMessage(err, t('failedToLoadMilestone')));
@@ -171,7 +200,71 @@ export function MilestoneDetail() {
     return () => {
       cancelled = true;
     };
-  }, [numericProjectId, numericMilestoneId, t]);
+  }, [numericProjectId, numericMilestoneId, t, reload]);
+
+  const openLinkDialog = async () => {
+    if (!numericProjectId || !numericMilestoneId) return;
+    setLinkOpen(true);
+    setPlanSearch('');
+    setSelectedPlanIds([]);
+    setCandidatesLoading(true);
+    try {
+      const plans = await testPlansAPI.getAll(numericProjectId, { limit: 500 });
+      // Only offer plans not already attached to a milestone. Re-assigning a plan
+      // that already belongs to another milestone is the job of the bulk "move"
+      // action on the Test Plans page, so we don't silently steal it here.
+      const list: CandidatePlan[] = (Array.isArray(plans) ? plans : []).filter(
+        (p: CandidatePlan) => p.milestone_id == null,
+      );
+      setCandidatePlans(list);
+    } catch {
+      setCandidatePlans([]);
+    } finally {
+      setCandidatesLoading(false);
+    }
+  };
+
+  const togglePlan = (id: number) => {
+    setSelectedPlanIds((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+    );
+  };
+
+  const saveLinks = async () => {
+    if (!numericMilestoneId || selectedPlanIds.length === 0) return;
+    setLinkSaving(true);
+    setError(null);
+    try {
+      await Promise.all(
+        selectedPlanIds.map((id) => testPlansAPI.update(id, { milestone_id: numericMilestoneId })),
+      );
+      setLinkOpen(false);
+      await reload();
+    } catch (err) {
+      setError(getApiErrorMessage(err, t('failedToLoadMilestone')));
+    } finally {
+      setLinkSaving(false);
+    }
+  };
+
+  const unlinkPlan = async (planId: number) => {
+    setUnlinkingId(planId);
+    setError(null);
+    try {
+      await testPlansAPI.update(planId, { milestone_id: null });
+      await reload();
+    } catch (err) {
+      setError(getApiErrorMessage(err, t('failedToLoadMilestone')));
+    } finally {
+      setUnlinkingId(null);
+    }
+  };
+
+  const filteredCandidatePlans = useMemo(() => {
+    const q = planSearch.trim().toLowerCase();
+    if (!q) return candidatePlans;
+    return candidatePlans.filter((p) => p.title.toLowerCase().includes(q));
+  }, [candidatePlans, planSearch]);
 
   // Per-plan rollup: aggregate the runs returned for this milestone, grouped
   // by their test_plan_id. Runs not linked to any plan (direct milestone
@@ -365,6 +458,10 @@ export function MilestoneDetail() {
               {t('viewTestPlans')}
               <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
+            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&create=1`)} className="gap-1">
+              <Plus className="h-3.5 w-3.5" />
+              {t('createTestPlan')}
+            </Button>
             <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/test-runs?milestone_id=${milestone.id}`)} className="gap-1">
               <PlayCircle className="h-3.5 w-3.5" />
               {t('viewTestRuns')}
@@ -385,9 +482,15 @@ export function MilestoneDetail() {
             <ClipboardList className="h-4 w-4" />
             {t('planBreakdown')}
           </CardTitle>
-          <span className="text-xs text-muted-foreground">
-            {milestone.test_plan_count} {milestone.test_plan_count === 1 ? t('testPlanSingular') : t('testPlans').toLowerCase()}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">
+              {milestone.test_plan_count} {milestone.test_plan_count === 1 ? t('testPlanSingular') : t('testPlans').toLowerCase()}
+            </span>
+            <Button size="sm" variant="outline" onClick={openLinkDialog} className="gap-1.5">
+              <Link2 className="h-3.5 w-3.5" />
+              {t('linkExistingPlan')}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {planRollups.length === 0 ? (
@@ -438,15 +541,31 @@ export function MilestoneDetail() {
                       </TableCell>
                       <TableCell className={textEnd}>
                         {row.planId != null ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => navigate(`/projects/${projectId}/test-runs?test_plan_id=${row.planId}`)}
-                            className="gap-1"
-                          >
-                            {t('viewTestRuns')}
-                            <ArrowUpRight className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className={`flex items-center gap-1 ${isRTL ? 'justify-start' : 'justify-end'}`}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => navigate(`/projects/${projectId}/test-runs?test_plan_id=${row.planId}`)}
+                              className="gap-1"
+                            >
+                              {t('viewTestRuns')}
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-muted-foreground hover:text-destructive"
+                              title={t('unlinkPlan')}
+                              disabled={unlinkingId === row.planId}
+                              onClick={() => unlinkPlan(row.planId as number)}
+                            >
+                              {unlinkingId === row.planId ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Unlink className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                          </div>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
@@ -562,6 +681,59 @@ export function MilestoneDetail() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={linkOpen} onOpenChange={(open) => (open ? null : setLinkOpen(false))}>
+        <DialogContent isRTL={isRTL} className="max-h-[85vh] overflow-hidden sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>{t('linkExistingPlan')}</DialogTitle>
+            <DialogDescription>{t('viewTestPlans')}</DialogDescription>
+          </DialogHeader>
+          <div className="relative">
+            <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
+            <Input
+              value={planSearch}
+              placeholder={t('searchTestPlans')}
+              className={isRTL ? 'pr-9' : 'pl-9'}
+              onChange={(e) => setPlanSearch(e.target.value)}
+            />
+          </div>
+          <div className="max-h-[45vh] space-y-1.5 overflow-y-auto pr-1">
+            {candidatesLoading ? (
+              <div className="flex min-h-24 items-center justify-center text-muted-foreground">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {t('loading')}
+              </div>
+            ) : filteredCandidatePlans.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">{t('noUnlinkedPlans')}</p>
+            ) : (
+              filteredCandidatePlans.map((plan) => (
+                <label
+                  key={plan.id}
+                  className="flex cursor-pointer items-center gap-3 rounded-lg border p-2.5 text-sm hover:bg-muted/60"
+                >
+                  <Checkbox
+                    checked={selectedPlanIds.includes(plan.id)}
+                    onCheckedChange={() => togglePlan(plan.id)}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{plan.title}</p>
+                  </div>
+                  {plan.status && <Badge variant="outline" className="shrink-0">{plan.status}</Badge>}
+                </label>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkOpen(false)} disabled={linkSaving}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={saveLinks} disabled={linkSaving || selectedPlanIds.length === 0}>
+              {linkSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t('linkPlanToMilestone')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
