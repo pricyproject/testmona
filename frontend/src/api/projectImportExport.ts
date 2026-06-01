@@ -8,7 +8,10 @@ export const projectImportExportAPI = {
     params.append('include_data', includeData.toString());
     if (fields) params.append('fields', fields);
     if (statusFilter) params.append('status_filter', statusFilter);
-    const response = await api.get(`/import-export/export/projects?${params}`);
+    // Trailing slash matches the backend route exactly; without it FastAPI
+    // issues a 307 redirect (extra round trip, and the auth header can be
+    // dropped on redirect).
+    const response = await api.get(`/import-export/export/projects/?${params}`);
     return response.data;
   },
   
@@ -26,7 +29,9 @@ export const projectImportExportAPI = {
     if (selectedRows && selectedRows.length > 0) {
       formData.append('selected_rows', selectedRows.join(','));
     }
-    const response = await api.post('/import-export/import/projects', formData, {
+    // Trailing slash matches the backend route exactly. A 307 redirect on a
+    // multipart POST is fragile (body/headers re-sent), so hit the real path.
+    const response = await api.post('/import-export/import/projects/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return response.data;

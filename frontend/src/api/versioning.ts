@@ -1,264 +1,129 @@
+import { api } from '@/lib/api';
 import { TestCaseVersion, VersionComparisonResponse, VersionStatsResponse } from '../types/versioning';
 
-const API_BASE = '/api/versioning';
+// Routed through the shared axios client (`@/lib/api`) so every request carries
+// the Bearer token and benefits from the 401-refresh / error handling used by
+// the rest of the app. The backend versioning router is mounted at `/versioning`
+// (no `/api` prefix), matching the axios baseURL.
+const API_BASE = '/versioning';
 
 export const versioningApi = {
   // Version CRUD operations
   async createVersion(testCaseId: number, versionData: any) {
-    const response = await fetch(`${API_BASE}/test-cases/${testCaseId}/versions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(versionData),
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to create version');
-    }
-    
-    return response.json();
+    const response = await api.post(`${API_BASE}/test-cases/${testCaseId}/versions`, versionData);
+    return response.data;
   },
 
   async getVersions(testCaseId: number): Promise<TestCaseVersion[]> {
-    const response = await fetch(`${API_BASE}/test-cases/${testCaseId}/versions`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch versions');
-    }
-    
-    return response.json();
+    const response = await api.get(`${API_BASE}/test-cases/${testCaseId}/versions`);
+    return response.data;
   },
 
   async getLatestVersion(testCaseId: number): Promise<TestCaseVersion | null> {
-    const response = await fetch(`${API_BASE}/test-cases/${testCaseId}/versions/latest`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch latest version');
-    }
-    
-    const data = await response.json();
-    return data; // Returns null if no version exists
+    const response = await api.get(`${API_BASE}/test-cases/${testCaseId}/versions/latest`);
+    return response.data; // Returns null if no version exists
   },
 
   async getVersion(versionId: number): Promise<TestCaseVersion> {
-    const response = await fetch(`${API_BASE}/versions/${versionId}`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch version');
-    }
-    
-    return response.json();
+    const response = await api.get(`${API_BASE}/versions/${versionId}`);
+    return response.data;
   },
 
   async updateVersion(versionId: number, updateData: any): Promise<TestCaseVersion> {
-    const response = await fetch(`${API_BASE}/versions/${versionId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(updateData),
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to update version');
-    }
-    
-    return response.json();
+    const response = await api.put(`${API_BASE}/versions/${versionId}`, updateData);
+    return response.data;
   },
 
   async publishVersion(versionId: number): Promise<any> {
-    const response = await fetch(`${API_BASE}/versions/${versionId}/publish`, {
-      method: 'POST',
-    });
-    
-    if (!response.ok) {
-      throw new Error('Failed to publish version');
-    }
-    
-    return response.json();
+    const response = await api.post(`${API_BASE}/versions/${versionId}/publish`);
+    return response.data;
   },
 
   // Comparison operations
   async compareVersions(fromVersionId: number, toVersionId: number): Promise<VersionComparisonResponse> {
-    const response = await fetch(`${API_BASE}/versions/compare`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from_version_id: fromVersionId,
-        to_version_id: toVersionId,
-      }),
+    const response = await api.post(`${API_BASE}/versions/compare`, {
+      from_version_id: fromVersionId,
+      to_version_id: toVersionId,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to compare versions');
-    }
-    
-    return response.json();
+    return response.data;
   },
 
   // Branch operations
   async createBranch(parentVersionId: number, branchName: string, reason: string): Promise<TestCaseVersion> {
-    const response = await fetch(`${API_BASE}/versions/branch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        parent_version_id: parentVersionId,
-        branch_name: branchName,
-        reason: reason,
-      }),
+    const response = await api.post(`${API_BASE}/versions/branch`, {
+      parent_version_id: parentVersionId,
+      branch_name: branchName,
+      reason: reason,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to create branch');
-    }
-    
-    return response.json();
+    return response.data;
   },
 
   async mergeBranch(branchVersionId: number, targetVersionId: number, mergeReason: string): Promise<TestCaseVersion> {
-    const response = await fetch(`${API_BASE}/versions/merge`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        branch_version_id: branchVersionId,
-        target_version_id: targetVersionId,
-        merge_reason: mergeReason,
-      }),
+    const response = await api.post(`${API_BASE}/versions/merge`, {
+      branch_version_id: branchVersionId,
+      target_version_id: targetVersionId,
+      merge_reason: mergeReason,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to merge branch');
-    }
-    
-    return response.json();
+    return response.data;
   },
 
   // Rollback operations
   async rollbackToVersion(testCaseId: number, targetVersionId: number, reason: string): Promise<TestCaseVersion> {
-    const response = await fetch(`${API_BASE}/test-cases/${testCaseId}/rollback`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        target_version_id: targetVersionId,
-        reason: reason,
-      }),
+    const response = await api.post(`${API_BASE}/test-cases/${testCaseId}/rollback`, {
+      target_version_id: targetVersionId,
+      reason: reason,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to rollback version');
-    }
-    
-    return response.json();
+    return response.data;
   },
 
   // Lock operations
   async lockVersion(testCaseId: number, versionId: number | null, lockType: string, reason: string, expiresHours: number = 24): Promise<any> {
-    const response = await fetch(`${API_BASE}/lock`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        test_case_id: testCaseId,
-        version_id: versionId,
-        lock_type: lockType,
-        reason: reason,
-        expires_hours: expiresHours,
-      }),
+    const response = await api.post(`${API_BASE}/lock`, {
+      test_case_id: testCaseId,
+      version_id: versionId,
+      lock_type: lockType,
+      reason: reason,
+      expires_hours: expiresHours,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to lock version');
-    }
-    
-    return response.json();
+    return response.data;
   },
 
   async releaseLocks(testCaseId: number, versionId?: number): Promise<void> {
-    const url = versionId 
-      ? `${API_BASE}/lock/${testCaseId}?version_id=${versionId}`
-      : `${API_BASE}/lock/${testCaseId}`;
-    
-    const response = await fetch(url, {
-      method: 'DELETE',
+    await api.delete(`${API_BASE}/lock/${testCaseId}`, {
+      params: versionId != null ? { version_id: versionId } : undefined,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to release locks');
-    }
   },
 
   // Tag operations
   async addTag(versionId: number, tagName: string, tagType: string = 'release', description?: string, color: string = '#007bff'): Promise<any> {
-    const response = await fetch(`${API_BASE}/tags`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        version_id: versionId,
-        tag_name: tagName,
-        tag_type: tagType,
-        description: description,
-        color: color,
-      }),
+    const response = await api.post(`${API_BASE}/tags`, {
+      version_id: versionId,
+      tag_name: tagName,
+      tag_type: tagType,
+      description: description,
+      color: color,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to add tag');
-    }
-    
-    return response.json();
+    return response.data;
   },
 
   // History and stats
   async getVersionHistory(testCaseId: number): Promise<any> {
-    const response = await fetch(`${API_BASE}/test-cases/${testCaseId}/history`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch version history');
-    }
-    
-    return response.json();
+    const response = await api.get(`${API_BASE}/test-cases/${testCaseId}/history`);
+    return response.data;
   },
 
   async getVersionStats(testCaseId: number): Promise<VersionStatsResponse> {
-    const response = await fetch(`${API_BASE}/test-cases/${testCaseId}/stats`);
-    
-    if (!response.ok) {
-      throw new Error('Failed to fetch version stats');
-    }
-    
-    return response.json();
+    const response = await api.get(`${API_BASE}/test-cases/${testCaseId}/stats`);
+    return response.data;
   },
 
   // Bulk operations
   async bulkOperation(testCaseIds: number[], operation: string, parameters: any): Promise<any> {
-    const response = await fetch(`${API_BASE}/bulk-operation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        test_case_ids: testCaseIds,
-        operation: operation,
-        parameters: parameters,
-      }),
+    const response = await api.post(`${API_BASE}/bulk-operation`, {
+      test_case_ids: testCaseIds,
+      operation: operation,
+      parameters: parameters,
     });
-    
-    if (!response.ok) {
-      throw new Error('Failed to perform bulk operation');
-    }
-    
-    return response.json();
+    return response.data;
   },
 };
