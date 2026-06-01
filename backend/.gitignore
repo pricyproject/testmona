@@ -209,6 +209,7 @@ Thumbs.db
 # Test files
 test_*.py
 !app/routes/test_management.py
+!app/services/test_plan_service.py
 !test_*.py.bak
 test_csv_import.py
 test_custom_fields.py
