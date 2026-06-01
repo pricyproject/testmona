@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronRight, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { useProjectStore } from '@/stores/projectStore';
 import { NotificationDropdown } from '@/components/NotificationDropdown';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { api } from '@/lib/api';
+import { playNotificationSound } from '@/lib/notificationSound';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/locales/translations';
 import {
@@ -67,6 +68,11 @@ export function Navbar({
   const { selectedProject, projects } = useProjectStore();
   const { t, isRTL } = useTranslation();
   const [unreadCount, setUnreadCount] = useState(0);
+  // Track the previous unread count + sound preferences so we can chime only
+  // when a genuinely new notification arrives (and the user allows it).
+  const prevUnreadRef = useRef<number | null>(null);
+  const soundEnabledRef = useRef(true);
+  const mutedRef = useRef(false);
 
   const sectionLabel = (segment: string): string => {
     const key = SECTION_LABEL_KEYS[segment];
@@ -118,21 +124,50 @@ export function Navbar({
   useEffect(() => {
     if (!user) return;
 
+    const fetchPrefs = async () => {
+      try {
+        const { data } = await api.get('/users/me/notification-preferences');
+        soundEnabledRef.current = data.notification_sound_enabled !== false;
+        const mutedUntil = data.notifications_muted_until
+          ? new Date(data.notifications_muted_until).getTime()
+          : 0;
+        mutedRef.current = Boolean(data.do_not_disturb) || mutedUntil > Date.now();
+      } catch {
+        // Keep current defaults if prefs can't be loaded.
+      }
+    };
+
     const fetchUnreadCount = async () => {
       try {
         const response = await api.get('/notifications/unread/count');
-        setUnreadCount(response.data.unread_count);
+        const next: number = response.data.unread_count;
+        const prev = prevUnreadRef.current;
+        // Chime only when the count rises (new arrival) — never on first load,
+        // when reading reduces the count, or while muted/sound-disabled.
+        if (prev !== null && next > prev && soundEnabledRef.current && !mutedRef.current) {
+          playNotificationSound();
+        }
+        prevUnreadRef.current = next;
+        setUnreadCount(next);
       } catch (error) {
         console.error('Failed to fetch unread count:', error);
       }
     };
 
+    const refresh = () => {
+      fetchPrefs();
+      fetchUnreadCount();
+    };
+
+    fetchPrefs();
     fetchUnreadCount();
-    window.addEventListener('notifications:refresh', fetchUnreadCount);
+    window.addEventListener('notifications:refresh', refresh);
     const interval = setInterval(fetchUnreadCount, 60000);
+    const prefsInterval = setInterval(fetchPrefs, 300000);
     return () => {
-      window.removeEventListener('notifications:refresh', fetchUnreadCount);
+      window.removeEventListener('notifications:refresh', refresh);
       clearInterval(interval);
+      clearInterval(prefsInterval);
     };
   }, [user]);
 

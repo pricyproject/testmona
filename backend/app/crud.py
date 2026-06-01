@@ -2140,10 +2140,10 @@ def search_notifications(db: Session, user_id: int, search_query: str, skip: int
     if not search_query or not search_query.strip():
         return []
     # Escape SQL wildcard characters to prevent SQL injection
-    escaped_query = search_query.replace('%', '\\%').replace('_', '\\_')
+    escaped_query = search_query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
     query = db.query(Notification).filter(
         Notification.user_id == user_id,
-        (Notification.title.ilike(f'%{escaped_query}%')) | (Notification.message.ilike(f'%{escaped_query}%'))
+        (Notification.title.ilike(f'%{escaped_query}%', escape='\\')) | (Notification.message.ilike(f'%{escaped_query}%', escape='\\'))
     )
     return query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
 
@@ -2163,9 +2163,9 @@ def get_notifications_filtered_and_searched(db: Session, user_id: int, notificat
     
     if search_query and search_query.strip():
         # Escape SQL wildcard characters to prevent SQL injection
-        escaped_query = search_query.replace('%', '\\%').replace('_', '\\_')
+        escaped_query = search_query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         query = query.filter(
-            (Notification.title.ilike(f'%{escaped_query}%')) | (Notification.message.ilike(f'%{escaped_query}%'))
+            (Notification.title.ilike(f'%{escaped_query}%', escape='\\')) | (Notification.message.ilike(f'%{escaped_query}%', escape='\\'))
         )
     
     return query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
@@ -2177,8 +2177,9 @@ def bulk_update_notifications(db: Session, user_id: int, notification_ids: List[
         Notification.user_id == user_id,
         Notification.id.in_(notification_ids)
     )
+    result = 0
     if is_read is not None:
-        result = query.update({"is_read": is_read})
+        result = query.update({"is_read": is_read}, synchronize_session=False)
     safe_commit(db)
     return result
 
@@ -2279,11 +2280,18 @@ def get_shareable_reports(db: Session, project_id: int, created_by: int = None, 
     return query.order_by(ShareableReport.created_at.desc()).offset(skip).limit(limit).all()
 
 
+def get_shareable_report(db: Session, report_id: int):
+    return db.query(ShareableReport).filter(ShareableReport.id == report_id).first()
+
+
 def get_shareable_report_by_token(db: Session, share_token: str):
     report = db.query(ShareableReport).filter(ShareableReport.share_token == share_token, ShareableReport.is_active == True).first()
+    return report
+
+
+def record_shareable_report_view(db: Session, report: ShareableReport):
     if report:
-        # Increment view count and update last viewed
-        report.view_count += 1
+        report.view_count = (report.view_count or 0) + 1
         report.last_viewed = func.now()
         safe_commit(db)
     return report
@@ -2294,6 +2302,15 @@ def update_shareable_report(db: Session, report_id: int, report_data: dict):
     if db_report:
         for key, value in report_data.items():
             setattr(db_report, key, value)
+        safe_commit(db)
+        db.refresh(db_report)
+    return db_report
+
+
+def deactivate_shareable_report(db: Session, report_id: int):
+    db_report = db.query(ShareableReport).filter(ShareableReport.id == report_id).first()
+    if db_report:
+        db_report.is_active = False
         safe_commit(db)
         db.refresh(db_report)
     return db_report

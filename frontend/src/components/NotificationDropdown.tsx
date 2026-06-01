@@ -40,7 +40,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const [searchDebounceTimer, setSearchDebounceTimer] = useState<NodeJS.Timeout | null>(null);
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
 
   const decodeHtmlEntities = (value: string) => {
     if (!value || typeof document === 'undefined') return value;
@@ -50,14 +50,15 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   };
 
   const formatRelatedEntityType = (entityType?: string | null) => {
+    if (!entityType) return '';
     const labels: Record<string, string> = {
-      test_run: 'test run',
-      test_case: 'test case',
-      defect: 'defect',
-      requirement: 'requirement',
+      test_run: t('entityTestRun'),
+      test_case: t('entityTestCase'),
+      defect: t('entityDefect'),
+      requirement: t('entityRequirement'),
     };
 
-    return entityType ? labels[entityType] || entityType.replace(/_/g, ' ') : '';
+    return labels[entityType] || entityType.replace(/_/g, ' ');
   };
 
   const viewRelatedEntity = async (notification: Notification) => {
@@ -81,22 +82,31 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     }
   };
 
-  const fetchNotifications = async (pageNum: number = 0, append: boolean = false) => {
+  const fetchNotifications = async (
+    pageNum: number = 0,
+    append: boolean = false,
+    overrides?: { search?: string; filter?: string | null }
+  ) => {
     if (!user) return;
+
+    // Use overrides when provided so callers aren't bitten by stale closures
+    // (e.g. the debounced search timer captures the value before state updates).
+    const effectiveSearch = overrides && 'search' in overrides ? overrides.search : searchQuery;
+    const effectiveFilter = overrides && 'filter' in overrides ? overrides.filter : filterType;
 
     setLoading(true);
     try {
       const limit = 50;
       const skip = pageNum * limit;
       let url = `/notifications/?skip=${skip}&limit=${limit}`;
-      
-      if (searchQuery && searchQuery.trim()) {
-        url += `&search=${encodeURIComponent(searchQuery.trim())}`;
+
+      if (effectiveSearch && effectiveSearch.trim()) {
+        url += `&search=${encodeURIComponent(effectiveSearch.trim())}`;
       }
-      if (filterType) {
-        url += `&notification_type=${filterType}`;
+      if (effectiveFilter) {
+        url += `&notification_type=${effectiveFilter}`;
       }
-      
+
       const response = await api.get(url);
       
       if (append) {
@@ -123,11 +133,12 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
       clearTimeout(searchDebounceTimer);
     }
     
-    // Set new timer for debounced search
+    // Set new timer for debounced search. Pass the latest value explicitly so we
+    // don't fetch with the previous keystroke's searchQuery from a stale closure.
     const timer = setTimeout(() => {
-      fetchNotifications(0, false);
+      fetchNotifications(0, false, { search: value });
     }, 300);
-    
+
     setSearchDebounceTimer(timer);
   };
 
@@ -137,6 +148,9 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
       console.error('Invalid notification ID:', notificationId);
       return;
     }
+
+    // Avoid drifting the unread count when the notification is already read.
+    if (notifications.find(n => n.id === notificationId)?.is_read) return;
 
     try {
       await api.put(`/notifications/${notificationId}`, { is_read: true });
@@ -196,6 +210,9 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
       return;
     }
 
+    // Avoid drifting the unread count when the notification is already unread.
+    if (notifications.find(n => n.id === notificationId)?.is_read === false) return;
+
     try {
       await api.put(`/notifications/${notificationId}/mark-unread`);
       setNotifications(prev =>
@@ -242,7 +259,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const bulkMarkRead = async () => {
     if (selectedIds.size === 0) return;
     try {
-      await api.post('/notifications/bulk-update/', {
+      await api.post('/notifications/bulk-update', {
         notification_ids: Array.from(selectedIds),
         is_read: true
       });
@@ -263,7 +280,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     try {
-      await api.delete('/notifications/bulk-delete/', {
+      await api.delete('/notifications/bulk-delete', {
         data: { notification_ids: Array.from(selectedIds) }
       });
       const unreadInSelection = notifications.filter(n => selectedIds.has(n.id) && !n.is_read).length;
@@ -290,6 +307,8 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     try {
       const response = await api.put('/users/me/notification-preferences', prefs);
       setNotificationPrefs(response.data);
+      // Let the navbar re-read sound/DND state so the chime respects it at once.
+      window.dispatchEvent(new CustomEvent('notifications:refresh'));
     } catch (error) {
       console.error('Failed to update notification preferences:', error);
       alert('Failed to update notification preferences. Please try again.');
@@ -310,21 +329,30 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     let interval: NodeJS.Timeout;
     if (autoRefresh && isOpen) {
       interval = setInterval(() => {
+        // Refresh the first page; reset paging so we don't leave a stale tail.
+        setPage(0);
+        setHasMore(true);
         fetchNotifications(0, false);
       }, 30000); // Refresh every 30 seconds
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [autoRefresh, isOpen]);
+    // Re-arm when the active filter/search changes so the timer closure stays fresh.
+  }, [autoRefresh, isOpen, filterType, searchQuery]);
 
-  // Fetch notifications when filterType or page changes
+  // Fetch the first page whenever the dropdown opens or the active filter
+  // changes. Pagination (loadMore/loadAll) manages its own fetches, so `page`
+  // is intentionally NOT a dependency here — otherwise appending a page would
+  // immediately clobber the list with a fresh non-append fetch.
   useEffect(() => {
-    if (isOpen) {
-      setNotifications([]);
-      fetchNotifications(page, false);
-    }
-  }, [filterType, page, isOpen]);
+    if (!isOpen) return;
+    setPage(0);
+    setHasMore(true);
+    setSelectedIds(new Set());
+    setNotifications([]);
+    fetchNotifications(0, false, { filter: filterType });
+  }, [isOpen, filterType, user]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -360,20 +388,25 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     return t('info');
   };
 
+  const localeTag = language === 'fa' ? 'fa-IR' : language === 'ar' ? 'ar' : 'en-US';
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
     const now = new Date();
-    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    // Clamp future timestamps (clock skew) to "just now" instead of negatives.
+    const diffInHours = Math.max(0, Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60)));
 
-    if (diffInHours < 1) return 'Just now';
-    if (diffInHours < 24) return `${diffInHours}h ago`;
+    if (diffInHours < 1) return t('justNow');
+    if (diffInHours < 24) return t('hoursAgoShort', { count: diffInHours });
     const diffInDays = Math.floor(diffInHours / 24);
-    if (diffInDays < 7) return `${diffInDays}d ago`;
-    return date.toLocaleDateString();
+    if (diffInDays < 7) return t('daysAgoShort', { count: diffInDays });
+    return date.toLocaleDateString(localeTag);
   };
 
   const getDateGroup = (dateString: string) => {
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'dateOlder';
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const yesterday = new Date(today);
@@ -381,10 +414,10 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     const thisWeek = new Date(today);
     thisWeek.setDate(thisWeek.getDate() - 7);
 
-    if (date >= today) return 'Today';
-    if (date >= yesterday) return 'Yesterday';
-    if (date >= thisWeek) return 'This Week';
-    return 'Older';
+    if (date >= today) return 'today';
+    if (date >= yesterday) return 'yesterday';
+    if (date >= thisWeek) return 'thisWeek';
+    return 'dateOlder';
   };
 
   const groupNotificationsByDate = (notifs: Notification[]) => {
@@ -397,11 +430,18 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     return groups;
   };
 
-  const unreadTypeCounts = useMemo(() => ({
-    error: notifications.filter((notification) => !notification.is_read && notification.type === 'error').length,
-    warning: notifications.filter((notification) => !notification.is_read && notification.type === 'warning').length,
-    info: notifications.filter((notification) => !notification.is_read && notification.type === 'info').length,
-  }), [notifications]);
+  // Build per-type unread chips for the header summary, keeping only the types
+  // that actually have unread items so we don't show noisy "0 Error" labels.
+  const unreadTypeChips = useMemo(() => {
+    const countByType = (type: string) =>
+      notifications.filter((n) => !n.is_read && n.type === type).length;
+    return [
+      { type: 'error', label: t('error'), count: countByType('error'), dot: 'bg-red-500', text: 'text-red-600 dark:text-red-300' },
+      { type: 'warning', label: t('warning'), count: countByType('warning'), dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-300' },
+      { type: 'success', label: t('success'), count: countByType('success'), dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-300' },
+      { type: 'info', label: t('info'), count: countByType('info'), dot: 'bg-blue-500', text: 'text-blue-600 dark:text-blue-300' },
+    ].filter((chip) => chip.count > 0);
+  }, [notifications, t]);
 
   const filterOptions = [
     { value: null, label: t('filterAll') },
@@ -411,17 +451,19 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     { value: 'error', label: t('error') },
   ];
 
+  // Open-only side effects. The list fetch lives in the [isOpen, filterType]
+  // effect above; here we just reset transient UI state and load prefs. The
+  // filter is reset on close (not open) so reopening doesn't trigger a second
+  // fetch from a filterType change colliding with the open fetch.
   useEffect(() => {
     if (isOpen) {
-      setPage(0);
-      setHasMore(true);
       setSearchQuery('');
-      setFilterType(null);
-      setSelectedIds(new Set());
-      fetchNotifications(0, false);
+      setBulkMode(false);
       fetchNotificationPrefs();
+    } else {
+      setFilterType(null);
     }
-  }, [isOpen, user]);
+  }, [isOpen]);
 
   return (
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
@@ -445,7 +487,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
 
       <DropdownMenuContent
         className="relative w-[min(92vw,440px)] overflow-hidden rounded-2xl border-slate-200/80 bg-white p-0 shadow-2xl shadow-slate-900/12 dark:border-slate-800 dark:bg-slate-950"
-        align="end"
+        align={isRTL ? 'start' : 'end'}
         forceMount
       >
         <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/70">
@@ -459,16 +501,20 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                   </Badge>
                 )}
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
                 <span>{t('notificationSummary', { count: notifications.length })}</span>
-                {unreadCount > 0 && (
-                  <>
-                    <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700" />
-                    <span className="text-red-600 dark:text-red-300">{unreadTypeCounts.error} {t('error')}</span>
-                    <span className="text-amber-600 dark:text-amber-300">{unreadTypeCounts.warning} {t('warning')}</span>
-                    <span className="text-blue-600 dark:text-blue-300">{unreadTypeCounts.info} {t('info')}</span>
-                  </>
+                {unreadTypeChips.length > 0 && (
+                  <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700" />
                 )}
+                {unreadTypeChips.map((chip) => (
+                  <span
+                    key={chip.type}
+                    className={`inline-flex items-center gap-1 font-medium ${chip.text}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />
+                    {chip.count} {chip.label}
+                  </span>
+                ))}
               </div>
             </div>
 
@@ -526,7 +572,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                   }
                   setSearchQuery('');
                   setPage(0);
-                  fetchNotifications(0, false);
+                  fetchNotifications(0, false, { search: '' });
                 }}
                 className={`absolute top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 ${isRTL ? 'left-2' : 'right-2'}`}
                 aria-label={t('clearSearch')}
@@ -593,7 +639,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                 {Object.entries(groupNotificationsByDate(notifications)).map(([groupName, groupNotifs]) => (
                   <div key={groupName}>
                     <div className="sticky top-0 z-1 border-y border-slate-100 bg-slate-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-400">
-                      {groupName}
+                      {t(groupName)}
                     </div>
                     <div className="divide-y divide-slate-100 dark:divide-slate-900">
                       {groupNotifs.map((notification) => {
@@ -714,9 +760,11 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
           )}
         </div>
 
-        {notifications.length > 0 && (
-          <div className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900/60">
-            {hasMore && (
+        {/* Footer always renders so prefs (DND/sound/mute) and settings stay
+            reachable even when the list is empty — otherwise a user who muted
+            everything could never toggle it back from here. */}
+        <div className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900/60">
+            {notifications.length > 0 && hasMore && (
               <div className="grid grid-cols-2 border-b border-slate-200 dark:border-slate-800">
                 <button
                   type="button"
@@ -730,7 +778,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                   type="button"
                   onClick={loadAll}
                   disabled={loading}
-                  className="border-l border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
+                  className={`py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 ${isRTL ? 'border-r border-slate-200 dark:border-slate-800' : 'border-l border-slate-200 dark:border-slate-800'}`}
                 >
                   {t('loadAll')}
                 </button>
@@ -786,7 +834,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                navigate('/settings');
+                navigate('/settings?tab=test-management#notification-settings');
                 setIsOpen(false);
               }}
               className="flex w-full items-center justify-center gap-2 border-t border-slate-200 px-4 py-3 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 dark:border-slate-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
@@ -795,7 +843,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
               {t('notificationSettingsTitle')}
             </button>
           </div>
-        )}
 
         {showClearConfirm && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-xs">

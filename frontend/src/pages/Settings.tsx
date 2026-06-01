@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -221,6 +222,18 @@ export function Settings() {
   const { appName, appLogoUrl, setAppName: setStoredAppName, setAppLogoUrl: setStoredAppLogoUrl } = useAppName(false);
   const { user } = useAuthStore();
   const { toast } = useToast();
+  // Drive the active tab from the URL so other pages can deep-link to a section
+  // (e.g. the notification dropdown jumping to Notification Settings).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'general';
+  const handleTabChange = (value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === 'general') next.delete('tab');
+      else next.set('tab', value);
+      return next;
+    }, { replace: true });
+  };
   const [integrations, setIntegrations] = useState<IssueTrackerIntegration[]>([]);
   const [loadingIntegrations, setLoadingIntegrations] = useState(true);
   const [isIntegrationDialogOpen, setIsIntegrationDialogOpen] = useState(false);
@@ -594,7 +607,18 @@ export function Settings() {
     notification_sound_enabled: true,
     notifications_muted_until: null
   });
-  
+
+  // When deep-linked with #notification-settings (e.g. from the notification
+  // dropdown), scroll the card into view once the test-management tab is shown.
+  useEffect(() => {
+    if (activeTab !== 'test-management') return;
+    if (window.location.hash !== '#notification-settings') return;
+    const timer = setTimeout(() => {
+      document.getElementById('notification-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [activeTab, loadingTestManagement]);
+
   const [automationSettings, setAutomationSettings] = useState<AutomationSettings>({
     ai_suggestions: false,
     smart_step_recommendations: true,
@@ -2147,7 +2171,7 @@ export function Settings() {
         </div>
       </div>
 
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="inline-flex h-12 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-full">
           <TabsTrigger value="general" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <Globe className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
@@ -3209,7 +3233,7 @@ export function Settings() {
           </Card>
 
           {/* Notification Settings */}
-          <Card>
+          <Card id="notification-settings" className="scroll-mt-24">
             <CardHeader className="border-b border-gray-100 dark:border-gray-800">
               <div className="flex items-center space-x-2 rtl:space-x-reverse">
                 <Zap className="h-5 w-5 text-yellow-600" />
