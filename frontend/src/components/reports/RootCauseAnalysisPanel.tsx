@@ -161,7 +161,7 @@ export function RootCauseAnalysisPanel({ ctx }: { ctx: ReportsData }) {
       >
         <DialogContent isRTL={isRTL} className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{t('addRootCauseAnalysis')}</DialogTitle>
+            <DialogTitle>{editingId != null ? t('editRootCauseAnalysis') : t('addRootCauseAnalysis')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
             <div>
@@ -280,7 +280,7 @@ export function RootCauseAnalysisPanel({ ctx }: { ctx: ReportsData }) {
               onClick={handleSave}
               disabled={!newAnalysis.analysis_title.trim() || !newAnalysis.root_cause.trim() || saving}
             >
-              {saving ? t('creating') : editingId != null ? t('save') : t('add')}
+              {saving ? t('saving') : editingId != null ? t('save') : t('add')}
             </Button>
           </DialogFooter>
         </DialogContent>

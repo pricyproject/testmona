@@ -48,6 +48,9 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
         setError(t('pleaseTypeDelete'));
         return;
       }
+      // Clear the step-1 phrase so the step-2 field doesn't start pre-filled
+      // with "DELETE" (which doesn't match the "DELETE MY ACCOUNT" it expects).
+      setConfirmText('');
       setStep(2);
       return;
     }
