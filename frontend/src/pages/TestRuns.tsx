@@ -98,7 +98,6 @@ export function TestRuns() {
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [touchedFields, setTouchedFields] = useState<Record<string, boolean>>({});
   const runNameInputRef = useRef<HTMLInputElement>(null);
-  const [selectedTestRun, setSelectedTestRun] = useState<TestRun | null>(null);
   const [testRuns, setTestRuns] = useState<TestRun[]>([]);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [testSuites, setTestSuites] = useState<any[]>([]);
@@ -125,9 +124,11 @@ export function TestRuns() {
   const currentProjectId = projectId ? parseInt(projectId) : null;
   const linkedTestPlanId = parsePositiveQueryNumber(searchParams.get('test_plan_id'));
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
+  const createFromQuery = searchParams.get('create') === '1';
   const linkedEnvironmentId = parsePositiveQueryNumber(
     searchParams.get('environment_id') || searchParams.get('environment')
   );
+  const createFromQueryHandled = useRef(false);
 
   const totalPages = Math.max(1, Math.ceil(testRuns.length / itemsPerPage));
   const hasActiveTestRunFilters =
@@ -327,6 +328,12 @@ export function TestRuns() {
       setTimeout(() => runNameInputRef.current?.focus(), 100);
     }
   }, [isCreateDialogOpen]);
+
+  useEffect(() => {
+    if (!createFromQuery || createFromQueryHandled.current) return;
+    createFromQueryHandled.current = true;
+    setIsCreateDialogOpen(true);
+  }, [createFromQuery]);
 
   // Track unsaved changes
   useEffect(() => {
@@ -1359,7 +1366,7 @@ export function TestRuns() {
                 <Card
                   key={run.id}
                   className="group relative cursor-pointer overflow-hidden border-slate-200/80 bg-white shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl dark:border-slate-800 dark:bg-slate-950"
-                  onClick={() => setSelectedTestRun(run)}
+                  onClick={() => navigate(`/projects/${currentProjectId}/test-runs/${run.id}`)}
                 >
                   <div className={`absolute inset-x-0 top-0 h-1 bg-linear-to-r ${statusMeta.accentClass}`} />
                   <CardHeader className="pb-3">
@@ -1502,91 +1509,6 @@ export function TestRuns() {
         </div>
       )}
 
-      {/* Test Details Dialog */}
-      <Dialog open={!!selectedTestRun} onOpenChange={() => setSelectedTestRun(null)}>
-        <DialogContent isRTL={isRTL} className={`max-w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto ${isRTL ? 'rtl' : 'ltr'}`}>
-          <DialogHeader>
-            <DialogTitle>{t('testRunDetails')}: {selectedTestRun?.name}</DialogTitle>
-            <DialogDescription>
-              {t('testRunDetailsDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            {selectedTestRun && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">{t('status')}</Label>
-                    <Badge variant="outline" className={`${getStatusMeta(selectedTestRun.status).badgeClass} mt-1 gap-1.5`}>
-                      {(() => {
-                        const StatusIcon = getStatusMeta(selectedTestRun.status).icon;
-                        return <StatusIcon className="h-3.5 w-3.5" />;
-                      })()}
-                      {getStatusMeta(selectedTestRun.status).label}
-                    </Badge>
-                  </div>
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">{t('projectIdLabel')}</Label>
-                    <p className="text-sm">{selectedTestRun.project_id}</p>
-                  </div>
-                </div>
-                
-                {selectedTestRun.description && (
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">{t('description')}</Label>
-                    <p className="text-sm mt-1">{selectedTestRun.description}</p>
-                  </div>
-                )}
-                
-                {selectedTestRun.environment && (
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">{t('environmentLabel')}</Label>
-                    <p className="text-sm mt-1">{selectedTestRun.environment.name}</p>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">{t('created')}</Label>
-                    <p className="text-sm mt-1">{new Date(selectedTestRun.created_at).toLocaleString()}</p>
-                  </div>
-                  {selectedTestRun.started_at && (
-                    <div>
-                      <Label className="text-sm font-medium text-gray-600">{t('started')}</Label>
-                      <p className="text-sm mt-1">{new Date(selectedTestRun.started_at).toLocaleString()}</p>
-                    </div>
-                  )}
-                </div>
-                
-                {selectedTestRun.completed_at && (
-                  <div>
-                    <Label className="text-sm font-medium text-gray-600">{t('completedLabel')}</Label>
-                    <p className="text-sm mt-1">{new Date(selectedTestRun.completed_at).toLocaleString()}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setSelectedTestRun(null)}
-            >
-              {t('close')}
-            </Button>
-            <Button
-              onClick={() => {
-                if (selectedTestRun) {
-                  navigate(`/projects/${currentProjectId}/test-runs/${selectedTestRun.id}`);
-                  setSelectedTestRun(null);
-                }
-              }}
-            >
-              {t('viewFullDetails')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
