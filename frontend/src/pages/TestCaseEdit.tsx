@@ -13,7 +13,8 @@ import { ReferenceField } from '@/components/ui/reference-field';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Sparkles, ListChecks, Target, FileCode2, Split, ShieldAlert, Check, CopyPlus, ExternalLink, type LucideIcon } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
-import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset } from '@/lib/api';
+import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
+import { loadProjectParameters } from '@/utils/parameters';
 import { CustomFieldDefinition } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
@@ -90,6 +91,7 @@ export function TestCaseEdit() {
   const [testTypeOptions, setTestTypeOptions] = useState<SelectOption[]>([]);
   const [testTypesLoading, setTestTypesLoading] = useState(false);
   const [datasets, setDatasets] = useState<TestDataset[]>([]);
+  const [globalParams, setGlobalParams] = useState<GlobalParameter[]>([]);
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
   const [aiAssistantAction, setAiAssistantAction] = useState<AIAssistantAction>('suggest_steps');
   const [aiInstructions, setAiInstructions] = useState('');
@@ -419,6 +421,19 @@ export function TestCaseEdit() {
       .list(currentProjectId)
       .then((rows) => { if (!cancelled) setDatasets(rows); })
       .catch(() => { if (!cancelled) setDatasets([]); });
+    return () => { cancelled = true; };
+  }, [currentProjectId]);
+
+  // Global parameters this case can reference as ${name} in its step text.
+  useEffect(() => {
+    if (!currentProjectId) {
+      setGlobalParams([]);
+      return;
+    }
+    let cancelled = false;
+    loadProjectParameters(currentProjectId)
+      .then((rows) => { if (!cancelled) setGlobalParams(rows); })
+      .catch(() => { if (!cancelled) setGlobalParams([]); });
     return () => { cancelled = true; };
   }, [currentProjectId]);
 
@@ -1276,6 +1291,26 @@ export function TestCaseEdit() {
               );
             })()}
           </div>
+
+          {globalParams.length > 0 && (
+            <div>
+              <Label>{t('globalParameters')}</Label>
+              <p className="text-xs text-muted-foreground mt-1">{t('globalParamsEditorHint')}</p>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {globalParams.map((p) => (
+                  <Badge
+                    key={p.id}
+                    variant="secondary"
+                    className="font-mono text-[10px] cursor-pointer"
+                    title={p.is_encrypted ? t('encrypted') : p.value}
+                    onClick={() => navigator.clipboard?.writeText(`\${${p.name}}`)}
+                  >
+                    {`\${${p.name}}`}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <Label htmlFor="tags">{t('tags')}</Label>

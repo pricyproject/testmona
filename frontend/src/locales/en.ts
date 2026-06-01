@@ -3259,6 +3259,9 @@ export const en = {
   iterationPreviewHint: 'Step text below has this row\'s values substituted.',
   iterationOutcome: 'Outcome for this iteration',
   statusDerivedFromIterations: 'Overall status is set automatically from the per-iteration outcomes above.',
+  globalParamsResolvedHint: 'Step text below has this project\'s global parameters resolved to their values.',
+  globalParamsReferencedHint: 'This case references these global parameters; they are resolved into step text during a run.',
+  globalParamsEditorHint: 'Reference these in step text as ${name}. Click a chip to copy it.',
 
   // Global parameters
   globalParametersDescription: 'Reusable single-value parameters for this project (constants, endpoints, secrets).',

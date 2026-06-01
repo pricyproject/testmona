@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
-import { datasetsAPI, defectsAPI, executionSettingsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI, type TestDataset } from '@/lib/api';
+import { datasetsAPI, defectsAPI, executionSettingsAPI, getApiErrorMessage, testCasesAPI, testResultsAPI, testRunsAPI, usersAPI, type GlobalParameter, type TestDataset } from '@/lib/api';
+import { loadProjectParameters, paramsToMap, resolveParameters } from '@/utils/parameters';
 import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -140,6 +141,8 @@ export function TestCaseExecution() {
   const [dataset, setDataset] = useState<TestDataset | null>(null);
   const [activeIteration, setActiveIteration] = useState(0);
   const [iterationStatuses, setIterationStatuses] = useState<Record<number, string>>({});
+  // Project-wide global parameters resolved into step text via ${name}.
+  const [globalParams, setGlobalParams] = useState<GlobalParameter[]>([]);
   const [testRun, setTestRun] = useState<any>(null);
   const [executionHistory, setExecutionHistory] = useState<any[]>([]);
   const [historyLoadError, setHistoryLoadError] = useState(false);
@@ -568,19 +571,36 @@ export function TestCaseExecution() {
     return () => { cancelled = true; };
   }, [datasetId]);
 
+  // Load the project's global parameters so ${name} placeholders resolve during
+  // execution, with or without a dataset attached.
+  useEffect(() => {
+    const numericProjectId = Number(projectId);
+    if (!Number.isFinite(numericProjectId)) {
+      setGlobalParams([]);
+      return;
+    }
+    let cancelled = false;
+    loadProjectParameters(numericProjectId)
+      .then((rows) => { if (!cancelled) setGlobalParams(rows); })
+      .catch(() => { if (!cancelled) setGlobalParams([]); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const globalMap = useMemo(() => paramsToMap(globalParams), [globalParams]);
+
   const hasIterations = !!dataset && Array.isArray(dataset.rows) && dataset.rows.length > 0;
   const activeRow = hasIterations ? (dataset!.rows[activeIteration] || {}) : null;
 
-  // Replace ${param} placeholders with the active iteration's values; unknown
-  // placeholders are left as-is so the tester can still see the template.
-  const substitute = (text: string | null | undefined): string => {
-    if (!text) return text || '';
-    if (!activeRow) return text;
-    return text.replace(/\$\{([^}]+)\}/g, (match, key) => {
-      const k = String(key).trim();
-      return Object.prototype.hasOwnProperty.call(activeRow, k) ? (activeRow[k] ?? '') : match;
-    });
-  };
+  // Resolve global parameters only — used in the canonical steps panel, which
+  // shows the case template independent of any dataset iteration.
+  const resolveGlobals = (text: string | null | undefined): string =>
+    resolveParameters(text, globalMap);
+
+  // Resolve global parameters plus the active iteration's row values; dataset
+  // row values override a same-named global parameter. Unknown placeholders are
+  // left as-is so the tester can still see the template.
+  const substitute = (text: string | null | undefined): string =>
+    resolveParameters(text, activeRow ? { ...globalMap, ...activeRow } : globalMap);
 
   // Overall status derived from per-iteration outcomes: fail wins, then block,
   // then any unset row keeps it pending, otherwise pass.
@@ -1780,11 +1800,15 @@ export function TestCaseExecution() {
                     </div>
                   </div>
 
+                  {globalParams.length > 0 && (
+                    <p className="text-[11px] text-muted-foreground">{t('globalParamsResolvedHint')}</p>
+                  )}
+
                   {testCase.preconditions && (
                     <div>
                       <Label className="text-xs font-medium text-gray-700">Preconditions</Label>
-                      <p className="text-xs text-gray-600 bg-gray-50 p-2 rounded mt-1">
-                        {testCase.preconditions}
+                      <p className="text-xs text-gray-600 bg-gray-50 p-2 rounded mt-1 whitespace-pre-wrap">
+                        {resolveGlobals(testCase.preconditions)}
                       </p>
                     </div>
                   )}
@@ -1812,11 +1836,11 @@ export function TestCaseExecution() {
                               <div className="space-y-1">
                                 <div>
                                   <span className="text-xs font-medium text-gray-600">Action:</span>
-                                  <p className="text-xs text-gray-600 mt-0.5">{step.action}</p>
+                                  <p className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">{resolveGlobals(step.action)}</p>
                                 </div>
                                 <div>
                                   <span className="text-xs font-medium text-gray-600">Expected:</span>
-                                  <p className="text-xs text-gray-600 mt-0.5">{step.expected_result}</p>
+                                  <p className="text-xs text-gray-600 mt-0.5 whitespace-pre-wrap">{resolveGlobals(step.expected_result)}</p>
                                 </div>
                               </div>
                             </div>
@@ -1835,7 +1859,7 @@ export function TestCaseExecution() {
                     <div>
                       <Label className="text-xs font-medium text-gray-700">Test Steps</Label>
                       <pre className="text-xs text-gray-600 bg-gray-50 p-2 rounded whitespace-pre-wrap mt-1">
-                        {testCase.steps}
+                        {resolveGlobals(testCase.steps)}
                       </pre>
                     </div>
                   )}
@@ -1843,8 +1867,8 @@ export function TestCaseExecution() {
                   {!testCase.is_multistep && testCase.expected_result && (
                     <div>
                       <Label className="text-xs font-medium text-gray-700">Expected Result</Label>
-                      <p className="text-xs text-gray-600 bg-green-50 p-2 rounded mt-1">
-                        {testCase.expected_result}
+                      <p className="text-xs text-gray-600 bg-green-50 p-2 rounded mt-1 whitespace-pre-wrap">
+                        {resolveGlobals(testCase.expected_result)}
                       </p>
                     </div>
                   )}

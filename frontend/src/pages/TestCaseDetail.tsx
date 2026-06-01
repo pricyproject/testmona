@@ -16,6 +16,7 @@ import {
   Play,
   Share2,
   Tag,
+  Wrench,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,7 +24,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
-import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset } from '@/lib/api';
+import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
+import { loadProjectParameters, paramsToMap, referencedKeys, resolveParameters } from '@/utils/parameters';
 import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSuite } from '@/types';
 
 type SectionCrumb = { id: number; name: string };
@@ -70,6 +72,7 @@ export function TestCaseDetail() {
   const navigate = useNavigate();
   const [testCase, setTestCase] = useState<TestCase | null>(null);
   const [dataset, setDataset] = useState<TestDataset | null>(null);
+  const [globalParams, setGlobalParams] = useState<GlobalParameter[]>([]);
   const [testSuite, setTestSuite] = useState<TestSuite | null>(null);
   const [section, setSection] = useState<{ name: string; path: SectionCrumb[] } | null>(null);
   const [testSteps, setTestSteps] = useState<Array<{
@@ -334,6 +337,21 @@ export function TestCaseDetail() {
     return () => { cancelled = true; };
   }, [attachedDatasetId]);
 
+  // Load the project's global parameters so we can show which ones this case
+  // references via ${name} and what they resolve to.
+  useEffect(() => {
+    const numericProjectId = Number(effectiveProjectId);
+    if (!Number.isFinite(numericProjectId)) {
+      setGlobalParams([]);
+      return;
+    }
+    let cancelled = false;
+    loadProjectParameters(numericProjectId)
+      .then((rows) => { if (!cancelled) setGlobalParams(rows); })
+      .catch(() => { if (!cancelled) setGlobalParams([]); });
+    return () => { cancelled = true; };
+  }, [effectiveProjectId]);
+
   const displaySteps = useMemo(() => {
     const parseLegacyText = (text: string | undefined | null) =>
       (parseCodeFence(text || '')?.code ?? (text || ''))
@@ -361,6 +379,24 @@ export function TestCaseDetail() {
     }
     return parsed;
   }, [isMultistepCase, testCase, testSteps]);
+
+  // Global parameters actually referenced by this case's text, paired with the
+  // value they resolve to during a run.
+  const referencedParams = useMemo(() => {
+    if (globalParams.length === 0) return [];
+    const text = [
+      testCase?.preconditions,
+      testCase?.steps,
+      testCase?.expected_result,
+      ...displaySteps.flatMap((s) => [s.action, s.expected_result]),
+    ].filter(Boolean).join('\n');
+    const keys = new Set(referencedKeys(text));
+    return globalParams.filter((p) => keys.has(p.name));
+  }, [globalParams, testCase, displaySteps]);
+
+  // Resolve ${name} placeholders to their global-parameter values for display.
+  const globalMap = useMemo(() => paramsToMap(globalParams), [globalParams]);
+  const resolve = (text: string | null | undefined): string => resolveParameters(text, globalMap);
 
   const latestExecution = testRunHistory[0];
   const uniqueRunCount = new Set(
@@ -614,7 +650,7 @@ export function TestCaseDetail() {
               <CardContent className="pt-0">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
                   <p className="whitespace-pre-wrap wrap-break-word text-[15px] leading-7 text-slate-700 dark:text-slate-300">
-                    {testCase.preconditions || t('noPreconditions')}
+                    {testCase.preconditions ? resolve(testCase.preconditions) : t('noPreconditions')}
                   </p>
                 </div>
               </CardContent>
@@ -663,6 +699,42 @@ export function TestCaseDetail() {
               </Card>
             )}
 
+            {referencedParams.length > 0 && (
+              <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
+                    <span className="rounded-lg bg-amber-100 p-1.5 dark:bg-amber-900/30">
+                      <Wrench className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                    </span>
+                    {t('globalParameters')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0 space-y-2">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{t('globalParamsReferencedHint')}</p>
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-slate-950/60">
+                          <th className="px-3 py-2 text-left font-mono text-xs text-slate-700 dark:text-slate-300">{t('name')}</th>
+                          <th className="px-3 py-2 text-left text-xs text-slate-500">{t('value')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {referencedParams.map((p) => (
+                          <tr key={p.id} className="border-t border-slate-200 dark:border-slate-800">
+                            <td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{`\${${p.name}}`}</td>
+                            <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                              {p.is_encrypted ? <span className="text-slate-400">••••••</span> : p.value}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
               <CardHeader className="pb-3">
                 <CardTitle className="flex flex-wrap items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
@@ -699,13 +771,13 @@ export function TestCaseDetail() {
                             <div>
                               <h5 className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">{t('action')}</h5>
                               <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-600 dark:text-slate-300">
-                                {step.action || t('noStepsDefined')}
+                                {step.action ? resolve(step.action) : t('noStepsDefined')}
                               </p>
                             </div>
                             <div>
                               <h5 className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">{t('expectedResult')}</h5>
                               <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-600 dark:text-slate-300">
-                                {step.expected_result || t('noExpectedResults')}
+                                {step.expected_result ? resolve(step.expected_result) : t('noExpectedResults')}
                               </p>
                             </div>
                           </div>
@@ -720,7 +792,7 @@ export function TestCaseDetail() {
                   )
                 ) : testCase.steps ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
-                    <StepsTextContent value={testCase.steps} />
+                    <StepsTextContent value={resolve(testCase.steps)} />
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60">
@@ -745,7 +817,7 @@ export function TestCaseDetail() {
                   {testCase.expected_result ? (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
                       <p className="whitespace-pre-wrap wrap-break-word text-sm leading-7 text-slate-700 dark:text-slate-300">
-                        {testCase.expected_result}
+                        {resolve(testCase.expected_result)}
                       </p>
                     </div>
                   ) : (
