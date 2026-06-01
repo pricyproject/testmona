@@ -681,7 +681,6 @@ export function TestCaseEdit() {
       for (let index = 0; index < drafts.length; index += 1) {
         if (!createdDraftInfo[index]) {
           // Sequential so failures are isolated and the backend isn't hammered.
-          // eslint-disable-next-line no-await-in-loop
           await createDraftAsTestCase(drafts[index], index);
         }
       }

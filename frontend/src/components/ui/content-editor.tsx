@@ -51,6 +51,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { sanitizeHtml } from '@/lib/sanitize';
 import { useTranslation } from '@/hooks/useTranslation';
 
 type ContentFormat = 'markdown' | 'html';
@@ -342,7 +343,7 @@ export function ContentEditor({
   const dirLabel =
     dirMode === 'auto' ? t('contentEditorDirAuto') : dirMode === 'rtl' ? t('contentEditorDirRtl') : t('contentEditorDirLtr');
 
-  const previewHtml = format === 'markdown' ? markdownToHtml(value || '') : value || '';
+  const previewHtml = sanitizeHtml(format === 'markdown' ? markdownToHtml(value || '') : value || '');
 
   if (!editor) {
     return (

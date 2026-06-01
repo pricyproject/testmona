@@ -5,7 +5,6 @@ import { aiManagerAPI, AIManagerStatus, api, testCasesAPI, testSuitesAPI, sectio
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { IntelligentReferenceField } from '@/components/ui/intelligent-reference-field';
 import { useToast } from '@/hooks/use-toast';
 import {
   Dialog,

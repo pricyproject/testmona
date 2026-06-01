@@ -48,7 +48,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter } from '@/lib/api';
 import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus } from '@/types';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
-import { GherkinViewer } from '@/components/requirements/GherkinViewer';
+import { GherkinEditor } from '@/components/requirements/GherkinEditor';
 import { isGherkinText } from '@/components/requirements/gherkin';
 import { decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup, richTextToMarkdownForEdit } from '@/components/requirements/richText';
 import { diffWords } from 'diff';
@@ -352,7 +352,7 @@ export function Requirements() {
     const arr = [...filteredRequirements];
     const dir = sortDir === 'asc' ? 1 : -1;
     arr.sort((a, b) => {
-      let cmp = 0;
+      let cmp: number;
       switch (sortBy) {
         case 'title':
           cmp = (a.title || '').localeCompare(b.title || '');
@@ -392,7 +392,8 @@ export function Requirements() {
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -1259,36 +1260,15 @@ export function Requirements() {
         </div>
       </div>
       {useGherkinSyntax ? (
-        <div className="space-y-2">
-          <Textarea
-            id={`${idPrefix}-acceptanceCriteria`}
-            value={reqAcceptanceCriteria}
-            onChange={(e) => setReqAcceptanceCriteria(e.target.value)}
-            placeholder={t('gherkinAcceptancePlaceholder')}
-            dir={isRTL ? 'rtl' : 'ltr'}
-            className="min-h-[190px] font-mono text-sm leading-6"
-          />
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => insertGherkinSnippet(gherkinTemplate)}
-            >
-              {t('insertGherkinTemplate')}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => insertGherkinSnippet(gherkinBackgroundTemplate)}>
-              {t('insertGherkinBackground')}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => insertGherkinSnippet(gherkinScenarioOutlineTemplate)}>
-              {t('insertScenarioOutline')}
-            </Button>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('gherkinPreview')}</div>
-            <GherkinViewer value={reqAcceptanceCriteria} emptyLabel={t('noAcceptanceCriteriaProvided')} />
-          </div>
-        </div>
+        <GherkinEditor
+          id={`${idPrefix}-acceptanceCriteria`}
+          ariaLabel={t('acceptanceCriteria')}
+          value={reqAcceptanceCriteria}
+          onChange={setReqAcceptanceCriteria}
+          placeholder={t('gherkinAcceptancePlaceholder')}
+          minHeight="210px"
+          emptyPreviewLabel={t('noAcceptanceCriteriaProvided')}
+        />
       ) : (
         <ContentEditor
           value={reqAcceptanceCriteria}

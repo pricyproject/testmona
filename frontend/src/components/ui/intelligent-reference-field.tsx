@@ -101,7 +101,9 @@ export function IntelligentReferenceField({
         type: 'requirement',
         id: req.id.toString(),
         title: req.title,
-        subtitle: `REQ-${req.requirement_id}`,
+        // `requirement_id` is already the human key (e.g. "REQ-001"); don't
+        // prefix it again or selecting writes "REQ-REQ-001" into the field.
+        subtitle: req.requirement_id,
         url: undefined
       }));
 

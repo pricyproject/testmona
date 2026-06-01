@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
+import { GherkinEditor } from '@/components/requirements/GherkinEditor';
 import { isGherkinText } from '@/components/requirements/gherkin';
 import { decodeHtmlEntities, decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup } from '@/components/requirements/richText';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
@@ -31,61 +32,8 @@ import { RequirementComments } from '@/components/requirements/RequirementCommen
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { aiManagerAPI, AIManagerStatus, requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
+import { sanitizeHtml } from '@/lib/sanitize';
 import { Requirement, RequirementLinkedTestCase, RequirementLinkedTestCaseHistoryItem, RequirementRelationshipSummary, RequirementTraceabilitySummary, TestCaseSection, TestSuite } from '@/types';
-
-const ALLOWED_HTML_TAGS = new Set([
-  'a', 'b', 'blockquote', 'br', 'code', 'col', 'colgroup', 'div', 'em', 'figure', 'figcaption',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'label', 'li', 'mark', 'ol', 'p', 'pre',
-  's', 'section', 'small', 'span', 'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td',
-  'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
-]);
-const ALLOWED_HTML_ATTRS = new Set([
-  'href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'start', 'type',
-  'data-type', 'data-checked',
-]);
-const FORBIDDEN_HTML_TAGS = new Set([
-  'script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button',
-  'textarea', 'select', 'option', 'link', 'meta', 'base', 'noscript',
-]);
-
-// Defensive client-side sanitizer: keeps a known-safe subset of TipTap output
-// and strips scripts, event handlers and unsafe URLs before it is rendered.
-const sanitizeRichHtml = (rawHtml: string): string => {
-  if (typeof window === 'undefined' || !rawHtml) return '';
-  const documentValue = new DOMParser().parseFromString(rawHtml, 'text/html');
-
-  const visit = (parent: Element) => {
-    Array.from(parent.children).forEach((child) => {
-      const tag = child.tagName.toLowerCase();
-      if (FORBIDDEN_HTML_TAGS.has(tag)) {
-        child.remove();
-        return;
-      }
-
-      Array.from(child.attributes).forEach((attr) => {
-        const name = attr.name.toLowerCase();
-        const isUnsafeUrl = (name === 'href' || name === 'src')
-          && /^\s*(javascript|vbscript|data:text\/html)/i.test(attr.value);
-        if (name.startsWith('on') || !ALLOWED_HTML_ATTRS.has(name) || isUnsafeUrl) {
-          child.removeAttribute(attr.name);
-        }
-      });
-
-      if (!ALLOWED_HTML_TAGS.has(tag)) {
-        child.removeAttribute('class');
-      }
-      if (tag === 'a' && child.getAttribute('href')) {
-        child.setAttribute('target', '_blank');
-        child.setAttribute('rel', 'noreferrer noopener');
-      }
-
-      visit(child);
-    });
-  };
-
-  visit(documentValue.body);
-  return documentValue.body.innerHTML;
-};
 
 const hasRenderableContent = (decodedHtml: string): boolean => {
   if (!decodedHtml.trim()) return false;
@@ -2197,45 +2145,14 @@ export function RequirementDetail() {
                   </div>
                 </div>
                 {editGherkin ? (
-                  <div className="space-y-2">
-                    <Textarea
-                      value={editForm.acceptance_criteria}
-                      onChange={(event) => setEditForm((current) => ({ ...current, acceptance_criteria: event.target.value }))}
-                      placeholder={t('gherkinAcceptancePlaceholder')}
-                      dir={isRTL ? 'rtl' : 'ltr'}
-                      className="min-h-[180px] font-mono text-sm leading-6"
-                    />
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => insertEditGherkinSnippet(GHERKIN_TEMPLATE)}
-                      >
-                        {t('insertGherkinTemplate')}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => insertEditGherkinSnippet(GHERKIN_BACKGROUND_TEMPLATE)}
-                      >
-                        {t('insertGherkinBackground')}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => insertEditGherkinSnippet(GHERKIN_SCENARIO_OUTLINE_TEMPLATE)}
-                      >
-                        {t('insertScenarioOutline')}
-                      </Button>
-                    </div>
-                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{t('gherkinPreview')}</p>
-                      <GherkinViewer value={editForm.acceptance_criteria} emptyLabel={t('noAcceptanceCriteriaProvided')} />
-                    </div>
-                  </div>
+                  <GherkinEditor
+                    ariaLabel={t('acceptanceCriteria')}
+                    value={editForm.acceptance_criteria}
+                    onChange={(value) => setEditForm((current) => ({ ...current, acceptance_criteria: value }))}
+                    placeholder={t('gherkinAcceptancePlaceholder')}
+                    minHeight="200px"
+                    emptyPreviewLabel={t('noAcceptanceCriteriaProvided')}
+                  />
                 ) : (
                   <ContentEditor
                     value={editForm.acceptance_criteria}
@@ -2305,7 +2222,7 @@ export function RequirementDetail() {
 
 function RichTextContent({ html }: { html: string }) {
   const isHtml = isHtmlMarkup(html);
-  const safeHtml = useMemo(() => (isHtml ? sanitizeRichHtml(html) : ''), [isHtml, html]);
+  const safeHtml = useMemo(() => (isHtml ? sanitizeHtml(html) : ''), [isHtml, html]);
 
   if (!isHtml) {
     return (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +27,7 @@ export function ReferenceField({
   className = ""
 }: ReferenceFieldProps) {
   const { t, isRTL } = useTranslation();
+  const inputId = useId();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Requirement[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -154,12 +155,12 @@ export function ReferenceField({
 
   return (
     <div className={`relative ${className}`} dir={isRTL ? 'rtl' : 'ltr'}>
-      <Label htmlFor="reference" className="text-sm font-medium">
+      <Label htmlFor={inputId} className="text-sm font-medium">
         {t('reference')}
       </Label>
       <div className="relative mt-1">
         <Input
-          id="reference"
+          id={inputId}
           value={searchQuery || value}
           onChange={handleInputChange}
           placeholder={finalPlaceholder}
