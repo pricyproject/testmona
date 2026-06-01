@@ -96,7 +96,6 @@ export function TestRunDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [filter, setFilter] = useState<string>(() => searchParams.get('status') || 'all');
   const [resultSearchQuery, setResultSearchQuery] = useState(() => searchParams.get('q') || '');
-  const [chartFilter, setChartFilter] = useState<string>('all'); // New state for chart filtering
   const [isAddTestCasesOpen, setIsAddTestCasesOpen] = useState(false);
   const [selectedTestCasesForRemoval, setSelectedTestCasesForRemoval] = useState<number[]>([]);
   const [availableTestCases, setAvailableTestCases] = useState<any[]>([]);
@@ -205,68 +204,82 @@ export function TestRunDetail() {
       { key: 'not_tested', name: t('notTested'), value: statusCounts.not_tested || 0, color: '#94a3b8' },
     ].filter(item => item.value > 0);
 
-    // Bar chart data by section
-    const sectionData = testResults.reduce((acc: any[], result) => {
-      // Get section name from the test_case object
-      let sectionName = t('noSection');
-      
-      // First try to get section from the nested section object (preferred)
-      if (result.test_case?.section?.name) {
-        sectionName = result.test_case.section.name;
-      } else if (result.test_case?.section_id) {
-        // Fallback: try to find section name from sections array
-        const section = sections.find(s => s.id === result.test_case.section_id);
-        if (section) {
-          sectionName = section.name;
-        } else {
-          // Last resort: use section ID
-          sectionName = `Section ${result.test_case.section_id}`;
-        }
-      }
-      
+    // Bar chart data by section. Group on the same identity the results table
+    // filters by (section name, or a "no section" sentinel) so that clicking a
+    // bar narrows the table to exactly the rows that bar represents. `filterValue`
+    // is what the table's sectionFilter compares against; `name` is the label.
+    const sectionMap = new Map<string, any>();
+    testResults.forEach((result) => {
+      const rawName = result.test_case?.section?.name?.trim();
+      const filterValue = rawName || NO_SECTION;
       const normalizedStatus = normalizeResultStatus(result.status);
-      const existingSection = acc.find(item => item.name === sectionName);
-      
-      if (existingSection) {
-        existingSection[normalizedStatus] = (existingSection[normalizedStatus] || 0) + 1;
-        existingSection.total++;
-      } else {
-        acc.push({
-          name: sectionName,
-          pass: normalizedStatus === 'pass' ? 1 : 0,
-          fail: normalizedStatus === 'fail' ? 1 : 0,
-          block: normalizedStatus === 'block' ? 1 : 0,
-          skip: normalizedStatus === 'skip' ? 1 : 0,
-          not_tested: normalizedStatus === 'not_tested' ? 1 : 0,
-          total: 1,
-        });
+
+      let entry = sectionMap.get(filterValue);
+      if (!entry) {
+        entry = {
+          name: rawName || t('noSection'),
+          filterValue,
+          pass: 0,
+          fail: 0,
+          block: 0,
+          skip: 0,
+          not_tested: 0,
+          total: 0,
+        };
+        sectionMap.set(filterValue, entry);
       }
-      return acc;
-    }, []);
+      entry[normalizedStatus] = (entry[normalizedStatus] || 0) + 1;
+      entry.total++;
+    });
+    const sectionData = Array.from(sectionMap.values());
 
-    // Calculate pass rate by section
+    // Pass rate per section, expressed over executed results only (pending tests
+    // aren't failures, so they must not drag the rate toward 0).
     sectionData.forEach(section => {
-      section.passRate = section.total > 0 ? Math.round((section.pass / section.total) * 100) : 0;
+      const executed = section.total - section.not_tested;
+      section.passRate = executed > 0 ? Math.round((section.pass / executed) * 100) : 0;
     });
 
-    const sortedResults = [...testResults].sort((a, b) => {
-      const firstDate = new Date(a.executed_at || a.updated_at || a.created_at || testRun?.created_at || 0).getTime();
-      const secondDate = new Date(b.executed_at || b.updated_at || b.created_at || testRun?.created_at || 0).getTime();
-      return firstDate - secondDate;
+    // The trend shows how the pass rate evolved as tests were *executed*, with
+    // one point per execution day. Tests that haven't run yet have no point on
+    // the timeline. Aggregating by day (rather than per result) is what keeps the
+    // chart stable: a calendar date appears exactly once, so it never shows two
+    // conflicting values, and editing a result only moves it between day buckets
+    // instead of reshuffling a positional index across the whole series.
+    const executedResults = testResults.filter((result) => isResultComplete(result.status));
+    const resultTimestamp = (result: any) => {
+      const time = new Date(
+        result.executed_at || result.updated_at || result.created_at || testRun?.created_at || 0,
+      ).getTime();
+      return Number.isNaN(time) ? 0 : time;
+    };
+
+    // Bucket executed results by calendar day using a stable, locale-independent key.
+    const dayBuckets = new Map<string, { time: number; label: string; passed: number; total: number }>();
+    executedResults.forEach((result) => {
+      const day = new Date(resultTimestamp(result));
+      const dayKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      let bucket = dayBuckets.get(dayKey);
+      if (!bucket) {
+        bucket = { time: day.getTime(), label: day.toLocaleDateString(), passed: 0, total: 0 };
+        dayBuckets.set(dayKey, bucket);
+      }
+      bucket.total += 1;
+      if (normalizeResultStatus(result.status) === 'pass') {
+        bucket.passed += 1;
+      }
     });
 
+    const sortedDays = Array.from(dayBuckets.values()).sort((a, b) => a.time - b.time);
     let cumulativeTotal = 0;
     let cumulativePassed = 0;
-    const trendData = sortedResults.map((result, index) => {
-      cumulativeTotal += 1;
-      if (normalizeResultStatus(result.status) === 'pass') {
-        cumulativePassed += 1;
-      }
-
-      const resultDate = result.executed_at || result.updated_at || result.created_at || testRun?.created_at;
-
+    const trendData = sortedDays.map((bucket, index) => {
+      cumulativeTotal += bucket.total;
+      cumulativePassed += bucket.passed;
       return {
-        date: resultDate ? new Date(resultDate).toLocaleDateString() : `${t('result')} ${index + 1}`,
+        // `order` is the unique X position (day sequence); `date` is the label.
+        order: index + 1,
+        date: bucket.label,
         passRate: cumulativeTotal > 0 ? Math.round((cumulativePassed / cumulativeTotal) * 100) : 0,
         totalTests: cumulativeTotal,
       };
@@ -867,9 +880,9 @@ export function TestRunDetail() {
       const normalizedStatus = filterData.value.toLowerCase();
       const mappedStatus = statusMap[normalizedStatus] || normalizedStatus;
       setFilter(mappedStatus);
-    } else if (filterData.type === 'section') {
-      // Filter by section - this would require a different filter approach
-      console.log('Filter by section:', filterData.value);
+    } else if (filterData.type === 'section' && filterData.value) {
+      // Toggle the table's section facet so a second click clears it
+      setSectionFilter((prev) => (prev === filterData.value ? 'all' : filterData.value));
     }
   };
 
@@ -1006,6 +1019,12 @@ export function TestRunDetail() {
     setLinkType('found');
     setDefectSearch('');
   };
+
+  // The result the Link Defect dialog is acting on, used to show which test case
+  // the defect is being attached to.
+  const linkTargetResult = linkDialogResultId !== null
+    ? testResults.find((result) => result.id === linkDialogResultId) || null
+    : null;
 
   const refreshResultLinks = async (resultId: number) => {
     const links = await testResultsAPI.getDefectLinks(resultId);
@@ -1258,14 +1277,24 @@ export function TestRunDetail() {
   const handleAssignRun = async (value: string) => {
     if (!id) return;
 
+    const nextAssigneeId = value === 'unassigned' ? null : parseInt(value, 10);
+    const normalizedId = Number.isInteger(nextAssigneeId) ? nextAssigneeId : null;
+    const prevAssignedTo = testRun?.assigned_to ?? null;
+    if (normalizedId === prevAssignedTo) return;
+
+    // Optimistically reflect the choice so the field doesn't flicker back to the
+    // old value while the request is in flight.
+    setTestRun((prev: any) => (prev ? { ...prev, assigned_to: normalizedId } : prev));
+
     try {
       setIsAssigningRun(true);
-      const nextAssigneeId = value === 'unassigned' ? null : parseInt(value, 10);
-      const updatedRun = await testRunsAPI.assign(parseInt(id, 10), Number.isInteger(nextAssigneeId) ? nextAssigneeId : null);
+      const updatedRun = await testRunsAPI.assign(parseInt(id, 10), normalizedId);
       setTestRun((prev: any) => ({ ...prev, ...updatedRun }));
     } catch (error) {
       console.error('Failed to assign test run:', error);
       setError(t('failedToAssignTestRun'));
+      // Revert the optimistic change if the server rejected it.
+      setTestRun((prev: any) => (prev ? { ...prev, assigned_to: prevAssignedTo } : prev));
     } finally {
       setIsAssigningRun(false);
     }
@@ -1355,20 +1384,20 @@ export function TestRunDetail() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-300 sm:text-sm">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 h-9 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <Calendar className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('createdLabel')}: {formattedCreatedDate}
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 h-9 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <RefreshCw className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('lastUpdated')}: {formattedUpdatedDate}
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 h-9 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <BarChart3 className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   {t('totalTestsWithCount', { count: totalTests })}
                 </span>
-                <div className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 py-1.5 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
+                <div className="inline-flex items-center gap-2 rounded-full bg-white/75 px-3 h-9 shadow-xs ring-1 ring-slate-200/80 backdrop-blur-sm dark:bg-white/10 dark:ring-white/10">
                   <User className="h-4 w-4 text-cyan-600 dark:text-cyan-200" />
                   <span className="shrink-0">{t('assignedToLabel')}:</span>
                   <Select
@@ -1388,7 +1417,11 @@ export function TestRunDetail() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {isAssigningRun && <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-600 dark:text-cyan-200" />}
+                  {/* Fixed slot keeps the pill width stable so the row doesn't
+                      reflow when the spinner toggles during assignment. */}
+                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    {isAssigningRun && <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-600 dark:text-cyan-200" />}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2401,13 +2434,25 @@ export function TestRunDetail() {
       {/* Link Defect Dialog */}
       <Dialog open={linkDialogResultId !== null} onOpenChange={(open) => !open && setLinkDialogResultId(null)}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>{t('linkDefectToResult')}</DialogTitle>
+          <DialogHeader className="min-w-0">
+            <DialogTitle className="truncate">{t('linkDefectToResult')}</DialogTitle>
             <DialogDescription>{t('linkDefectToResultDesc')}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {/* min-w-0 lets this column shrink inside the grid-based DialogContent so
+              a long defect/test-case title truncates instead of widening the modal. */}
+          <div className="min-w-0 space-y-4 py-2">
+            {linkTargetResult && (
+              <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2 dark:border-gray-700">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  {t('testCaseLabel')}
+                </p>
+                <p className="truncate text-sm font-medium" title={linkTargetResult.test_case?.title || `TC-${linkTargetResult.test_case_id}`}>
+                  {linkTargetResult.test_case?.title || `TC-${linkTargetResult.test_case_id}`}
+                </p>
+              </div>
+            )}
+            <div className="min-w-0 space-y-1.5">
+              <label htmlFor="runLinkDefectSelect" className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 {t('defect')}
               </label>
               <SearchableDefectSelect
@@ -2418,12 +2463,12 @@ export function TestRunDetail() {
                 onSearchChange={setDefectSearch}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 {t('linkType')}
               </label>
               <Select value={linkType} onValueChange={setLinkType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full min-w-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="found">{t('linkTypeFound')}</SelectItem>
                   <SelectItem value="blocked_by">{t('linkTypeBlockedBy')}</SelectItem>

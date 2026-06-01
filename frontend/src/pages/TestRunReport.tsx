@@ -54,9 +54,24 @@ export function TestRunReport() {
     try {
       setLoading(true);
       const parsedProjectId = projectId ? parseInt(projectId, 10) : undefined;
+      const parsedTestRunId = parseInt(testRunId!);
+      // The report is an authoritative, complete document, so it must include
+      // every result — not just the first page. Walk pages until one comes back
+      // short, rather than relying on the API's default 100-row cap.
+      const fetchAllResults = async () => {
+        const pageSize = 200;
+        const all: any[] = [];
+        for (let skip = 0; ; skip += pageSize) {
+          const page = await testResultsAPI.getAll(parsedTestRunId, undefined, skip, pageSize);
+          if (!Array.isArray(page) || page.length === 0) break;
+          all.push(...page);
+          if (page.length < pageSize) break;
+        }
+        return all;
+      };
       const [runData, resultsData, usersData, customFieldsData, projectData] = await Promise.all([
-        testRunsAPI.getById(parseInt(testRunId!)),
-        testResultsAPI.getAll(parseInt(testRunId!)),
+        testRunsAPI.getById(parsedTestRunId),
+        fetchAllResults(),
         usersAPI.getAll(),
         parsedProjectId ? customFieldsAPI.getDefinitions(parsedProjectId, 'test_case').catch(() => []) : Promise.resolve([]),
         parsedProjectId ? projectsAPI.getById(parsedProjectId).catch(() => null) : Promise.resolve(null),
@@ -492,9 +507,9 @@ export function TestRunReport() {
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('testCaseLabel')}</th>
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('statusLabel')}</th>
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('priority')}</th>
-                  <th className="px-4 py-2 text-left">{t('customFields')}</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('customFields')}</th>
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('executedBy')}</th>
-                  <th className="px-4 py-2 text-left">{t('executionStartedLabel')}</th>
+                  <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('executionStartedLabel')}</th>
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('executedAt')}</th>
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('duration')}</th>
                   <th className="px-4 py-2 text-left print:px-2 print:py-1">{t('comments')}</th>

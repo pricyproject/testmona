@@ -106,12 +106,12 @@ export function SearchableDefectSelect({
     setIsOpen(false);
   };
 
-  const displayValue = selectedDefect
-    ? `${selectedDefect.defect_id || `#${selectedDefect.id}`} — ${selectedDefect.title || ''}`.trim()
-    : placeholder || t('linkExistingDefect');
+  const selectedDefectCode = selectedDefect
+    ? selectedDefect.defect_id || `#${selectedDefect.id}`
+    : '';
 
   return (
-    <div ref={rootRef} className={cn('relative', className)} dir={isRTL ? 'rtl' : 'ltr'}>
+    <div ref={rootRef} className={cn('relative w-full min-w-0', className)} dir={isRTL ? 'rtl' : 'ltr'}>
       <Button
         id={id}
         type="button"
@@ -120,14 +120,25 @@ export function SearchableDefectSelect({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         onClick={() => setIsOpen((open) => !open)}
-        className={cn('w-full justify-between font-normal', !selectedDefect && 'text-muted-foreground')}
+        className={cn('flex w-full min-w-0 items-center justify-between gap-2 font-normal', !selectedDefect && 'text-muted-foreground')}
       >
-        <span className="min-w-0 truncate text-left rtl:text-right">{displayValue}</span>
+        {selectedDefect ? (
+          // Keep the defect code fully visible and only truncate the title, so a
+          // long title can never push the trigger (and its modal) past its width.
+          <span className="flex min-w-0 items-center gap-1.5 text-start">
+            <span className="shrink-0 font-medium">{selectedDefectCode}</span>
+            {selectedDefect.title ? (
+              <span className="min-w-0 truncate text-muted-foreground">{`— ${selectedDefect.title}`}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="min-w-0 truncate text-start">{placeholder || t('linkExistingDefect')}</span>
+        )}
         <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
       </Button>
 
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+        <div className="absolute z-50 mt-1 w-full min-w-0 rounded-md border bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
           <div className="border-b p-2 dark:border-gray-700">
             <div className="relative">
               <Search className={cn('absolute top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400', isRTL ? 'right-3' : 'left-3')} />

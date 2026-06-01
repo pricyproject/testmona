@@ -40,6 +40,9 @@ interface TestRunChartProps {
 
 interface SectionData {
   name: string;
+  // Value the results table filters by when this bar is clicked (section name,
+  // or a "no section" sentinel). Falls back to `name` when absent.
+  filterValue?: string;
   pass: number;
   fail: number;
   block: number;
@@ -50,6 +53,9 @@ interface SectionData {
 }
 
 interface TrendData {
+  // Unique, monotonically increasing X position (execution order). Used as the
+  // axis key so same-day points don't collapse into one category.
+  order: number;
   date: string;
   passRate: number;
   totalTests: number;
@@ -68,9 +74,14 @@ const EmptyChart = () => {
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
 
+  // The trend chart keys its X axis by execution order (a number) but wants the
+  // human-readable date in the tooltip heading; fall back to the axis label for
+  // the pie/bar charts, which carry no `date`.
+  const heading = payload[0]?.payload?.date ?? label;
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white/95 p-3 text-xs shadow-xl backdrop-blur-sm dark:border-slate-800 dark:bg-slate-950/95">
-      {label && <div className="mb-2 font-semibold text-slate-900 dark:text-slate-100">{label}</div>}
+      {heading && <div className="mb-2 font-semibold text-slate-900 dark:text-slate-100">{heading}</div>}
       <div className="space-y-1.5">
         {payload.map((item: any) => (
           <div key={`${item.name}-${item.dataKey}`} className="flex min-w-32 items-center justify-between gap-4">
@@ -78,7 +89,9 @@ const ChartTooltip = ({ active, payload, label }: any) => {
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color || item.payload?.color }} />
               {item.name}
             </span>
-            <span className="font-semibold text-slate-950 dark:text-slate-50">{item.value}</span>
+            <span className="font-semibold text-slate-950 dark:text-slate-50">
+              {item.dataKey === 'passRate' ? `${item.value}%` : item.value}
+            </span>
           </div>
         ))}
       </div>
@@ -169,7 +182,7 @@ export function TestRunPieChart({ data, title, onChartClick }: TestRunChartProps
                 </button>
               ))}
             </div>
-            {topResult && (
+            {topResult && total > 0 && (
               <div className="rounded-xl bg-slate-950 px-3 py-2 text-xs text-white dark:bg-slate-100 dark:text-slate-950">
                 {t('leadingResultAtPercent', { name: topResult.name, percent: Math.round((topResult.value / total) * 100) })}
               </div>
@@ -191,7 +204,7 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
 
   const handleBarClick = (entry: any) => {
     if (onChartClick && entry?.name) {
-      onChartClick({ type: 'section', value: entry.name });
+      onChartClick({ type: 'section', value: entry.filterValue ?? entry.name });
     }
   };
 
@@ -237,7 +250,7 @@ export function TestRunBarChart({ data, title, onChartClick }: { data: SectionDa
                 />
                 <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
                 <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="pass" stackId="results" fill={COLORS.pass} name={t('passed')} radius={[8, 8, 0, 0]} onClick={handleBarClick} cursor="pointer" />
+                <Bar dataKey="pass" stackId="results" fill={COLORS.pass} name={t('passed')} radius={[0, 0, 8, 8]} onClick={handleBarClick} cursor="pointer" />
                 <Bar dataKey="fail" stackId="results" fill={COLORS.fail} name={t('failed')} onClick={handleBarClick} cursor="pointer" />
                 <Bar dataKey="block" stackId="results" fill={COLORS.block} name={t('blocked')} onClick={handleBarClick} cursor="pointer" />
                 <Bar dataKey="skip" stackId="results" fill={COLORS.skip} name={t('skipped')} onClick={handleBarClick} cursor="pointer" />
@@ -308,7 +321,14 @@ export function TestRunTrendChart({ data, title }: { data: TrendData[]; title: s
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#dbeafe" />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                <XAxis
+                  dataKey="order"
+                  type="category"
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  tickFormatter={(value) => data.find((point) => point.order === value)?.date ?? ''}
+                />
                 <YAxis domain={[0, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(value) => `${value}%`} />
                 <Tooltip content={<ChartTooltip />} />
                 <Area type="monotone" dataKey="passRate" name={t('passRatePercent')} stroke={COLORS.trend} strokeWidth={3} fill="url(#passRateGradient)" activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }} />
