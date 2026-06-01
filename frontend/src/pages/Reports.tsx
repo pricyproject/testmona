@@ -1,23 +1,77 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, BarChart3, Share2 } from 'lucide-react';
+import { AlertCircle, ArrowUpRight, BarChart3, Share2 } from 'lucide-react';
 import { useReportsData } from '@/hooks/useReportsData';
 import { SectionNav } from '@/components/reports/SectionNav';
 import { OverviewSection } from '@/components/reports/OverviewSection';
 import { CoverageRiskSection } from '@/components/reports/CoverageRiskSection';
 import { ActivitySection } from '@/components/reports/ActivitySection';
 import { ShareExportFlow } from '@/components/reports/ShareExportFlow';
+import { milestonesAPI, testPlansAPI } from '@/lib/api';
+
+type ScopedReportEntity = {
+  type: 'test-plan' | 'milestone';
+  id: number;
+  name: string;
+  href: string;
+};
+
+const parsePositiveId = (value: string | null): number | null => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
 
 export function Reports() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
   const ctx = useReportsData(projectId);
   const [shareOpen, setShareOpen] = useState(false);
+  const [scopedEntity, setScopedEntity] = useState<ScopedReportEntity | null>(null);
 
   const { activeSection, error, sectionLoading, handleGenerateAnalytics } = ctx;
   const isLoading = sectionLoading(activeSection);
+  const numericProjectId = parsePositiveId(projectId || null);
+  const testPlanId = parsePositiveId(searchParams.get('test_plan_id'));
+  const milestoneId = parsePositiveId(searchParams.get('milestone_id'));
+  const scope = useMemo(() => {
+    if (testPlanId) return { type: 'test-plan' as const, id: testPlanId };
+    if (milestoneId) return { type: 'milestone' as const, id: milestoneId };
+    return null;
+  }, [testPlanId, milestoneId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setScopedEntity(null);
+    if (!scope || !numericProjectId) return;
+
+    const loadScope = async () => {
+      try {
+        const entity = scope.type === 'test-plan'
+          ? await testPlansAPI.getById(scope.id)
+          : await milestonesAPI.getById(scope.id);
+        if (cancelled || entity?.project_id !== numericProjectId) return;
+        setScopedEntity({
+          type: scope.type,
+          id: scope.id,
+          name: entity.title || entity.name || `#${scope.id}`,
+          href: scope.type === 'test-plan'
+            ? `/projects/${numericProjectId}/test-plans/${scope.id}`
+            : `/projects/${numericProjectId}/milestones/${scope.id}`,
+        });
+      } catch {
+        if (!cancelled) setScopedEntity(null);
+      }
+    };
+
+    void loadScope();
+    return () => {
+      cancelled = true;
+    };
+  }, [numericProjectId, scope]);
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -37,6 +91,19 @@ export function Reports() {
           </Button>
         </div>
       </div>
+
+      {scopedEntity && (
+        <div className="flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{t('reportsScopedToEntity', { name: scopedEntity.name })}</span>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => navigate(scopedEntity.href)} className="shrink-0 gap-1">
+            {t('viewScopedReport')}
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
 
       {/* Product-level sections instead of exposing every backing report as a tab. */}
       <SectionNav ctx={ctx} />

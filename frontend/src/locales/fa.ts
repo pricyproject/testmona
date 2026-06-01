@@ -2583,6 +2583,8 @@ export const fa = {
   // Reports - Page chrome
   reportsPageTitle: 'گزارش‌ها و تحلیل‌ها',
   reportsPageSubtitle: 'بینش‌ها و تحلیل‌های جامع تست',
+  reportsScopedToEntity: 'تحلیل‌ها در سطح پروژه نمایش داده می‌شوند. برای گزارش اجرای اختصاصی، {name} را باز کنید.',
+  viewScopedReport: 'مشاهده گزارش محدوده',
   reportsExportReport: 'خروجی گزارش',
   reportsGenerateAnalytics: 'تولید تحلیل‌ها',
   reportsGroupOverview: 'کلیات',

@@ -2712,6 +2712,8 @@ export const en = {
   // Reports - Page chrome
   reportsPageTitle: 'Reports & Analytics',
   reportsPageSubtitle: 'Comprehensive testing insights and analytics',
+  reportsScopedToEntity: 'Showing project-wide analytics. Open {name} for its own execution report.',
+  viewScopedReport: 'View scoped report',
   reportsExportReport: 'Export Report',
   reportsGenerateAnalytics: 'Generate Analytics',
   reportsGroupOverview: 'Overview',

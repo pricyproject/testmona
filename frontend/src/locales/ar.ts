@@ -2614,6 +2614,8 @@ export const ar = {
   // Reports - Page chrome
   reportsPageTitle: 'التقارير والتحليلات',
   reportsPageSubtitle: 'رؤى وتحليلات شاملة للاختبار',
+  reportsScopedToEntity: 'يتم عرض تحليلات على مستوى المشروع. افتح {name} لعرض تقرير التنفيذ الخاص به.',
+  viewScopedReport: 'عرض التقرير المخصص',
   reportsExportReport: 'تصدير التقرير',
   reportsGenerateAnalytics: 'إنشاء التحليلات',
   reportsGroupOverview: 'نظرة عامة',
