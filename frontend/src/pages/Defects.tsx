@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { defectsAPI, getApiErrorMessage, projectAssignmentsAPI, testCasesAPI, testResultsAPI } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage, projectAssignmentsAPI, requirementsAPI, testCasesAPI, testResultsAPI } from '@/lib/api';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SavedFilters } from '@/components/SavedFilters';
 import { BulkEditDefectsDialog } from '@/components/BulkEditDefectsDialog';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
+import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 import { SearchableTestCaseSelect } from '@/components/Defects/SearchableTestCaseSelect';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -182,6 +183,7 @@ export function Defects() {
   
   const [defects, setDefects] = useState<any[]>([]);
   const [testCases, setTestCases] = useState<any[]>([]);
+  const [requirements, setRequirements] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -377,6 +379,7 @@ export function Defects() {
   const [defectTags, setDefectTags] = useState('');
   const [defectJiraLink, setDefectJiraLink] = useState('');
   const [defectTestCaseId, setDefectTestCaseId] = useState('none');
+  const [defectRequirementId, setDefectRequirementId] = useState('none');
   const [defectTouchedFields, setDefectTouchedFields] = useState<Record<string, boolean>>({});
 
   // Draft state
@@ -388,10 +391,14 @@ export function Defects() {
 
   const draftStorageKey = projectId ? `defects.reportDefectDraft.project-${projectId}` : null;
 
-  const hasUnsavedChanges = defectTitle.trim() !== '' || defectDescription.trim() !== '' || defectSteps.trim() !== '';
+  const hasUnsavedChanges = defectTitle.trim() !== ''
+    || defectDescription.trim() !== ''
+    || defectSteps.trim() !== ''
+    || (defectRequirementId && defectRequirementId !== 'none');
   const externalIssueValue = defectJiraLink.trim();
   const isExternalIssueUrlInvalid = externalIssueValue !== '' && !/^https?:\/\/\S+$/i.test(externalIssueValue);
   const selectedDefectTestCase = testCases.find((testCase) => String(testCase.id) === defectTestCaseId) || null;
+  const selectedDefectRequirement = requirements.find((requirement) => String(requirement.id) === defectRequirementId) || null;
   const isDuplicateDefectId = defectId.trim() !== '' && defects.some((defect) =>
     String(defect.defect_id || '').toLowerCase() === defectId.trim().toLowerCase()
   );
@@ -420,6 +427,7 @@ export function Defects() {
     setDefectTags('');
     setDefectJiraLink('');
     setDefectTestCaseId('none');
+    setDefectRequirementId('none');
     setDefectTouchedFields({});
   };
 
@@ -480,6 +488,21 @@ export function Defects() {
         // Load test cases for dropdown
         const testCasesData = await testCasesAPI.getAll(parseInt(projectId));
         setTestCases(testCasesData);
+
+        // Load requirements for defect traceability links. Keep the defect
+        // list usable even if this secondary relationship data fails.
+        try {
+          const requirementsData = await requirementsAPI.getAll(parseInt(projectId), 0, 500);
+          setRequirements(Array.isArray(requirementsData) ? requirementsData : []);
+        } catch (requirementsError) {
+          console.warn('Failed to load requirements for defect linking:', requirementsError);
+          setRequirements([]);
+          toast({
+            title: t('error'),
+            description: getApiErrorMessage(requirementsError, t('failedToLoadRequirements')),
+            variant: 'destructive',
+          });
+        }
 
         // Load project members so the bulk-edit assignee dropdown can show
         // real users instead of relying on whatever ids happen to appear on
@@ -586,6 +609,7 @@ export function Defects() {
           defectTags: string;
           defectJiraLink: string;
           defectTestCaseId: string;
+          defectRequirementId: string;
         }>;
         if (typeof draft.defectId === 'string') setDefectId(draft.defectId);
         if (typeof draft.defectTitle === 'string') setDefectTitle(draft.defectTitle);
@@ -597,6 +621,7 @@ export function Defects() {
         if (typeof draft.defectTags === 'string') setDefectTags(draft.defectTags);
         if (typeof draft.defectJiraLink === 'string') setDefectJiraLink(draft.defectJiraLink);
         if (typeof draft.defectTestCaseId === 'string') setDefectTestCaseId(draft.defectTestCaseId);
+        if (typeof draft.defectRequirementId === 'string') setDefectRequirementId(draft.defectRequirementId);
         setDraftStatus('restored');
       } else {
         setDraftStatus('idle');
@@ -632,6 +657,7 @@ export function Defects() {
         defectTags,
         defectJiraLink,
         defectTestCaseId,
+        defectRequirementId,
         savedAt: new Date().toISOString(),
       };
 
@@ -641,7 +667,8 @@ export function Defects() {
         || defectEnvironment.trim() !== ''
         || defectTags.trim() !== ''
         || defectJiraLink.trim() !== ''
-        || (defectTestCaseId && defectTestCaseId !== 'none');
+        || (defectTestCaseId && defectTestCaseId !== 'none')
+        || (defectRequirementId && defectRequirementId !== 'none');
 
       try {
         if (hasContent) {
@@ -676,6 +703,7 @@ export function Defects() {
     defectTags,
     defectJiraLink,
     defectTestCaseId,
+    defectRequirementId,
   ]);
 
   useEffect(() => () => {
@@ -739,6 +767,7 @@ export function Defects() {
           defect.defect_id,
           defect.tags,
           defect.environment,
+          defect.requirement_id,
         ]
           .map((value) => String(value || '').toLowerCase())
           .join(' ');
@@ -808,6 +837,7 @@ export function Defects() {
     const trimmedDefectId = defectId.trim() || getNextDefectId();
     const trimmedTitle = defectTitle.trim();
     const selectedTestCaseId = defectTestCaseId && defectTestCaseId !== 'none' ? Number(defectTestCaseId) : null;
+    const selectedRequirementId = defectRequirementId && defectRequirementId !== 'none' ? Number(defectRequirementId) : null;
 
     if (!trimmedDefectId || !trimmedTitle || !projectId) {
       toast({
@@ -845,6 +875,15 @@ export function Defects() {
       return;
     }
 
+    if (selectedRequirementId !== null && !Number.isFinite(selectedRequirementId)) {
+      toast({
+        title: t('validationError'),
+        description: t('invalidRequirementId'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsCreating(true);
       const defectData = {
@@ -858,6 +897,7 @@ export function Defects() {
         tags: defectTags.trim(),
         external_issue_url: externalIssueValue || null,
         test_case_id: selectedTestCaseId,
+        requirement_id: selectedRequirementId,
         project_id: parseInt(projectId),
       };
 
@@ -897,6 +937,7 @@ export function Defects() {
     setDefectTags(defect.tags || '');
     setDefectJiraLink(defect.external_issue_url || defect.jira_link || '');
     setDefectTestCaseId(defect.test_case_id?.toString() || 'none');
+    setDefectRequirementId(defect.requirement_id?.toString() || 'none');
     setIsEditDialogOpen(true);
   };
 
@@ -906,6 +947,7 @@ export function Defects() {
     const trimmedDefectId = defectId.trim();
     const trimmedTitle = defectTitle.trim();
     const selectedTestCaseId = defectTestCaseId && defectTestCaseId !== 'none' ? Number(defectTestCaseId) : null;
+    const selectedRequirementId = defectRequirementId && defectRequirementId !== 'none' ? Number(defectRequirementId) : null;
 
     if (!trimmedDefectId || !trimmedTitle) {
       toast({
@@ -925,6 +967,15 @@ export function Defects() {
       return;
     }
 
+    if (selectedRequirementId !== null && !Number.isFinite(selectedRequirementId)) {
+      toast({
+        title: t('validationError'),
+        description: t('invalidRequirementId'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const defectData = {
         defect_id: trimmedDefectId,
@@ -938,6 +989,7 @@ export function Defects() {
         tags: defectTags.trim(),
         external_issue_url: defectJiraLink.trim() || null,
         test_case_id: selectedTestCaseId,
+        requirement_id: selectedRequirementId,
       };
 
       const updatedDefect = await defectsAPI.update(editingDefect.id, defectData);
@@ -1644,7 +1696,7 @@ export function Defects() {
               {/* Links */}
               <section className="space-y-4">
                 <SectionHeader icon={<Link2 className="h-4 w-4" />} title={t('defectModalLinks')} accent="text-emerald-600" isRTL={isRTL} />
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
                     <Label htmlFor="defectTestCase" className="text-sm">{t('testCase')}</Label>
                     <SearchableTestCaseSelect
@@ -1656,6 +1708,20 @@ export function Defects() {
                     {selectedDefectTestCase && (
                       <p className="truncate text-xs text-gray-500" title={selectedDefectTestCase.title}>
                         {selectedDefectTestCase.title}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="defectRequirement" className="text-sm">{t('requirement')}</Label>
+                    <SearchableRequirementSelect
+                      id="defectRequirement"
+                      value={defectRequirementId}
+                      onChange={setDefectRequirementId}
+                      requirements={requirements}
+                    />
+                    {selectedDefectRequirement && (
+                      <p className="truncate text-xs text-gray-500" title={selectedDefectRequirement.title}>
+                        {selectedDefectRequirement.requirement_id}
                       </p>
                     )}
                   </div>
@@ -1906,6 +1972,9 @@ export function Defects() {
             const syncStatus = defect.sync_status || defect.external_sync_status;
             const externalUrl = defect.external_issue_url || defect.jira_link;
             const accentClass = SEVERITY_STRIPE[defect.severity] || 'bg-slate-300';
+            const linkedRequirement = defect.requirement_id
+              ? requirements.find((requirement) => requirement.id === defect.requirement_id)
+              : null;
             return (
               <Card key={defect.id} className="group relative overflow-hidden border-slate-200 transition hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:hover:border-slate-700">
                 <div className={`absolute inset-y-0 ${isRTL ? 'right-0' : 'left-0'} w-1 ${accentClass}`} aria-hidden="true" />
@@ -1969,6 +2038,15 @@ export function Defects() {
                             <Link2 className="h-3 w-3" aria-hidden="true" />
                             {t('viewTestExecution')}
                           </button>
+                        )}
+                        {defect.requirement_id && (
+                          <Link
+                            to={`/projects/${projectId}/requirements/${defect.requirement_id}`}
+                            className="inline-flex items-center gap-1 text-emerald-700 hover:underline dark:text-emerald-300"
+                          >
+                            <FileText className="h-3 w-3" aria-hidden="true" />
+                            {linkedRequirement?.requirement_id || `${t('requirement')} #${defect.requirement_id}`}
+                          </Link>
                         )}
                         {externalUrl && (
                           <button
@@ -2629,6 +2707,18 @@ export function Defects() {
                 value={defectTestCaseId}
                 onChange={setDefectTestCaseId}
                 testCases={testCases}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="editDefectRequirement" className="text-right">
+                {t('requirement')}
+              </Label>
+              <SearchableRequirementSelect
+                id="editDefectRequirement"
+                value={defectRequirementId}
+                onChange={setDefectRequirementId}
+                requirements={requirements}
                 className="col-span-3"
               />
             </div>

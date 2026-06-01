@@ -34,7 +34,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { defectsAPI, getApiErrorMessage, testResultsAPI } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage, requirementsAPI, testResultsAPI } from '@/lib/api';
+import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 
 type DefectDetailResponse = {
   defect: any;
@@ -60,6 +61,7 @@ type DefectEditForm = {
   browser_info: string;
   tags: string;
   external_issue_url: string;
+  requirement_id: string;
 };
 
 const formatDateTime = (value?: string | null): string => {
@@ -90,6 +92,7 @@ const buildEditForm = (defect: any): DefectEditForm => ({
   browser_info: defect?.browser_info || '',
   tags: defect?.tags || '',
   external_issue_url: defect?.external_issue_url || '',
+  requirement_id: defect?.requirement_id ? String(defect.requirement_id) : 'none',
 });
 
 const statusClass = (status?: string | null): string => {
@@ -123,6 +126,7 @@ export function DefectDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<DefectEditForm>(() => buildEditForm(null));
+  const [requirements, setRequirements] = useState<any[]>([]);
 
   const numericDefectId = Number(defectId);
 
@@ -159,6 +163,34 @@ export function DefectDetail() {
     return () => controller.abort();
   }, [defectId, projectId]);
 
+  useEffect(() => {
+    const numericProjectId = Number(projectId);
+    if (!Number.isInteger(numericProjectId) || numericProjectId <= 0) {
+      setRequirements([]);
+      return;
+    }
+
+    let isMounted = true;
+    requirementsAPI.getAll(numericProjectId, 0, 500)
+      .then((items) => {
+        if (isMounted) setRequirements(Array.isArray(items) ? items : []);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        console.error('Failed to load requirements for defect edit:', err);
+        setRequirements([]);
+        toast({
+          title: t('error'),
+          description: getApiErrorMessage(err, t('failedToLoadRequirements')),
+          variant: 'destructive',
+        });
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId, t, toast]);
+
   const defect = detail?.defect;
   const tags = useMemo(() => splitTags(defect?.tags), [defect?.tags]);
 
@@ -180,6 +212,9 @@ export function DefectDetail() {
     const trimmedId = editForm.defect_id.trim();
     const trimmedTitle = editForm.title.trim();
     const externalUrl = editForm.external_issue_url.trim();
+    const selectedRequirementId = editForm.requirement_id && editForm.requirement_id !== 'none'
+      ? Number(editForm.requirement_id)
+      : null;
 
     if (!trimmedId || !trimmedTitle) {
       toast({
@@ -194,6 +229,15 @@ export function DefectDetail() {
       toast({
         title: t('validationError'),
         description: t('externalIssueUrlInvalid'),
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (selectedRequirementId !== null && !Number.isFinite(selectedRequirementId)) {
+      toast({
+        title: t('validationError'),
+        description: t('invalidRequirementId'),
         variant: 'destructive',
       });
       return;
@@ -215,6 +259,7 @@ export function DefectDetail() {
         browser_info: editForm.browser_info.trim(),
         tags: editForm.tags.trim(),
         external_issue_url: externalUrl || null,
+        requirement_id: selectedRequirementId,
       });
       setDetail((prev) => prev ? { ...prev, defect: updatedDefect } : prev);
       setEditForm(buildEditForm(updatedDefect));
@@ -379,6 +424,15 @@ export function DefectDetail() {
                 </Select>
               </Field>
             </div>
+
+            <Field label={t('requirement')}>
+              <SearchableRequirementSelect
+                id="defectDetailRequirement"
+                value={editForm.requirement_id}
+                onChange={(value) => updateEditField('requirement_id', value)}
+                requirements={requirements}
+              />
+            </Field>
 
             <Field label={t('description')}>
               <Textarea
