@@ -3,9 +3,8 @@ import { htmlToMarkdown } from '@/components/ui/content-editor';
 export const decodeHtmlEntities = (value?: string | null): string => {
   if (!value) return '';
   if (typeof window === 'undefined') return value;
-  const textarea = document.createElement('textarea');
-  textarea.innerHTML = value;
-  return textarea.value;
+  const parsed = new DOMParser().parseFromString(value, 'text/html');
+  return parsed.documentElement.textContent ?? '';
 };
 
 export const decodeEntitiesDeep = (value?: string | null): string => {

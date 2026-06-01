@@ -676,7 +676,13 @@ export function ContentEditor({
           <div
             className="rich-text-preview prose prose-sm max-w-none px-4 py-3 dark:prose-invert"
             dir={resolvedDir}
-            dangerouslySetInnerHTML={{ __html: previewHtml || `<p class="text-slate-400">${placeholder || ''}</p>` }}
+            dangerouslySetInnerHTML={{
+              __html: sanitizeHtml(
+                previewHtml || `<p class="text-slate-400">${(placeholder || '').replace(/[&<>"']/g, (ch) => (
+                  ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+                ))}</p>`
+              ),
+            }}
           />
         )}
       </div>

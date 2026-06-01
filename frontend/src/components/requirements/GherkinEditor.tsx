@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
 import { GherkinViewer } from '@/components/requirements/GherkinViewer';
+import { sanitizeHtml } from '@/lib/sanitize';
 import {
   formatGherkin,
   lintGherkin,
@@ -190,7 +191,7 @@ export function GherkinEditor({
 
   const issues = useMemo(() => lintGherkin(value), [value]);
   const summary = useMemo(() => summarizeGherkin(value), [value]);
-  const highlighted = useMemo(() => highlightGherkin(value), [value]);
+  const highlighted = useMemo(() => sanitizeHtml(highlightGherkin(value)), [value]);
 
   const syncScroll = useCallback(() => {
     const textarea = textareaRef.current;
