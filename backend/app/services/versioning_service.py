@@ -2,13 +2,12 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 from datetime import datetime, timedelta
-import json
 import difflib
 
-from ..models import TestCase, User
+from ..models import TestCase
 from ..models_versioning import (
-    TestCaseVersion, VersionComparison, VersionTag, VersionLock, 
-    VersionWorkflow, VersionStatus, VersionAction
+    TestCaseVersion, VersionComparison, VersionTag, VersionLock,
+    VersionStatus
 )
 from ..schemas import (
     TestCaseVersionCreate, TestCaseVersionUpdate

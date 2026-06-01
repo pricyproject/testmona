@@ -4,8 +4,9 @@ from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta
 from fastapi import Depends
 import json
+import logging
 
-from ..models import AuditTrail, User, Project, EntityType
+from ..models import AuditTrail, User, EntityType
 from .request_context import current_client_ip, current_user_agent
 from ..schemas_audit import (
     AuditTrailCreate, AuditTrailUpdate, AuditTrailResponse, 
@@ -13,6 +14,9 @@ from ..schemas_audit import (
     ActivityCount, EntityCount, TopUser
 )
 from ..database import get_db
+
+logger = logging.getLogger(__name__)
+
 
 class AuditService:
     def __init__(self, db: Session):
@@ -71,9 +75,9 @@ class AuditService:
                 return entity_enabled
             
             return True
-        except Exception as e:
+        except Exception:
             # If there's any error checking config, default to enabled to avoid losing audit data
-            print(f"Error checking audit config: {e}")
+            logger.exception("Error checking audit config; defaulting to enabled")
             return True
 
     def create_audit_trail(self, audit_data: AuditTrailCreate) -> Optional[AuditTrail]:
@@ -174,7 +178,7 @@ class AuditService:
             entity_type=entity_type,
             entity_id=entity_id,
             total_changes=len(audit_trails),
-            history=[AuditTrailResponse.from_orm(audit) for audit in audit_trails]
+            history=[AuditTrailResponse.model_validate(audit) for audit in audit_trails]
         )
 
     def get_user_activity_summary(self, user_id: int, days: int = 30) -> ActivitySummary:
@@ -284,7 +288,6 @@ class AuditService:
         )
 
         # Get top users with user information
-        from ..models import User
         top_users = (
             self.db.query(
                 AuditTrail.user_id,

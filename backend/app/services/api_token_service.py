@@ -68,8 +68,15 @@ def get_user_for_token(db: Session, raw_token: str) -> Optional[User]:
         return None
     if token.revoked_at is not None:
         return None
-    if token.expires_at is not None and token.expires_at <= datetime.now(timezone.utc):
-        return None
+    if token.expires_at is not None:
+        # SQLite (the default backend) returns naive datetimes even for
+        # ``DateTime(timezone=True)`` columns; assume UTC so we never compare a
+        # naive value against an aware ``now`` (which raises TypeError).
+        expires_at = token.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            return None
 
     # Update last_used_at; failures here shouldn't break the request.
     try:
