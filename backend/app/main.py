@@ -60,6 +60,7 @@ from .routes.saved_filters_and_bulk import register_saved_filters_and_bulk_route
 from .routes.datasets import register_dataset_routes
 from .routes.ai_manager import register_ai_manager_routes
 from .routes.ai_generation import register_ai_generation_routes
+from .routes.requirement_chat import register_requirement_chat_routes
 
 register_common_routes(app)
 register_auth_routes(app)
@@ -83,6 +84,7 @@ register_saved_filters_and_bulk_routes(app)
 register_dataset_routes(app)
 register_ai_manager_routes(app)
 register_ai_generation_routes(app)
+register_requirement_chat_routes(app)
 
 
 @app.on_event("startup")

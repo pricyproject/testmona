@@ -61,9 +61,78 @@ class AIProviderConfigPayload(BaseModel):
         return stripped or None
 
 
+SOURCE_TYPES = ("requirements", "defects", "test_plans", "test_cases")
+ROUTING_TASKS = ("qa", "generation", "assistant")
+
+
+class RequirementChatSettingsPayload(BaseModel):
+    enabled: bool = True
+    max_context_requirements: int = Field(default=40, ge=1, le=200)
+    history_turns: int = Field(default=6, ge=0, le=20)
+    source_types: List[str] = Field(default_factory=lambda: ["requirements"])
+
+    @field_validator("source_types")
+    @classmethod
+    def validate_source_types(cls, value: List[str]) -> List[str]:
+        cleaned = [v for v in (value or []) if v in SOURCE_TYPES]
+        return cleaned or ["requirements"]
+
+
+class TestCaseGenerationSettingsPayload(BaseModel):
+    default_count: int = Field(default=5, ge=1, le=20)
+    max_tokens: int = Field(default=3000, ge=256, le=4000)
+
+
+class RoutingTargetPayload(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = Field(default=None, max_length=160)
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_AI_PROVIDERS:
+            raise ValueError("Unsupported routing provider")
+        return normalized
+
+    @field_validator("model")
+    @classmethod
+    def normalize_model(cls, value: Optional[str]) -> Optional[str]:
+        return (value or "").strip() or None
+
+
+class RoutingSettingsPayload(BaseModel):
+    qa: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
+    generation: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
+    assistant: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
+
+
+class FallbackSettingsPayload(BaseModel):
+    enabled: bool = False
+    order: List[str] = Field(default_factory=list)
+
+    @field_validator("order")
+    @classmethod
+    def validate_order(cls, value: List[str]) -> List[str]:
+        seen: List[str] = []
+        for item in value or []:
+            normalized = str(item or "").strip().lower()
+            if normalized in SUPPORTED_AI_PROVIDERS and normalized not in seen:
+                seen.append(normalized)
+        return seen
+
+
 class AIManagerSettingsPayload(BaseModel):
     active_provider: str = Field(..., description="Supported values: openai, openrouter, anthropic, huggingface, litellm")
     per_project_monthly_token_limit: Optional[int] = Field(default=None, ge=1, le=1_000_000_000)
+    requirement_chat: Optional[RequirementChatSettingsPayload] = None
+    system_prompt: Optional[str] = Field(default=None, max_length=2000)
+    compact_payload_default: Optional[bool] = None
+    test_case_generation: Optional[TestCaseGenerationSettingsPayload] = None
+    routing: Optional[RoutingSettingsPayload] = None
+    fallback: Optional[FallbackSettingsPayload] = None
     providers: List[AIProviderConfigPayload] = Field(default_factory=list)
 
     @field_validator("active_provider")
@@ -110,10 +179,30 @@ class AICompletionResult(BaseModel):
     total_tokens: int = 0
 
 
+DEFAULT_REQUIREMENT_CHAT = {
+    "enabled": True,
+    "max_context_requirements": 40,
+    "history_turns": 6,
+    "source_types": ["requirements"],
+}
+DEFAULT_TEST_CASE_GENERATION = {
+    "default_count": 5,
+    "max_tokens": 3000,
+}
+DEFAULT_ROUTING = {task: {"provider": None, "model": None} for task in ROUTING_TASKS}
+DEFAULT_FALLBACK = {"enabled": False, "order": []}
+
+
 def default_ai_config() -> Dict[str, Any]:
     return {
         "active_provider": "openai",
         "per_project_monthly_token_limit": None,
+        "requirement_chat": dict(DEFAULT_REQUIREMENT_CHAT),
+        "system_prompt": "",
+        "compact_payload_default": True,
+        "test_case_generation": dict(DEFAULT_TEST_CASE_GENERATION),
+        "routing": {task: dict(target) for task, target in DEFAULT_ROUTING.items()},
+        "fallback": dict(DEFAULT_FALLBACK),
         "providers": {
             provider: {
                 "provider": provider,
@@ -210,6 +299,32 @@ def _load_ai_config(db: Session) -> Dict[str, Any]:
         if active_provider in SUPPORTED_AI_PROVIDERS:
             config["active_provider"] = active_provider
         config["per_project_monthly_token_limit"] = stored.get("per_project_monthly_token_limit")
+        stored_chat = stored.get("requirement_chat")
+        if isinstance(stored_chat, dict):
+            config["requirement_chat"].update(
+                {k: v for k, v in stored_chat.items() if k in DEFAULT_REQUIREMENT_CHAT}
+            )
+        if isinstance(stored.get("system_prompt"), str):
+            config["system_prompt"] = stored["system_prompt"]
+        if "compact_payload_default" in stored:
+            config["compact_payload_default"] = bool(stored.get("compact_payload_default"))
+        if isinstance(stored.get("test_case_generation"), dict):
+            config["test_case_generation"].update(
+                {k: v for k, v in stored["test_case_generation"].items() if k in DEFAULT_TEST_CASE_GENERATION}
+            )
+        if isinstance(stored.get("routing"), dict):
+            for task in ROUTING_TASKS:
+                target = stored["routing"].get(task)
+                if isinstance(target, dict):
+                    config["routing"][task] = {
+                        "provider": target.get("provider"),
+                        "model": target.get("model"),
+                    }
+        if isinstance(stored.get("fallback"), dict):
+            config["fallback"] = {
+                "enabled": bool(stored["fallback"].get("enabled")),
+                "order": list(stored["fallback"].get("order") or []),
+            }
         for provider, provider_config in (stored.get("providers") or {}).items():
             normalized_provider = str(provider or "").strip().lower()
             if normalized_provider in config["providers"] and isinstance(provider_config, dict):
@@ -242,11 +357,95 @@ def _public_provider_config(provider_config: Dict[str, Any]) -> Dict[str, Any]:
     return public_config
 
 
+def _normalize_requirement_chat(raw: Any) -> Dict[str, Any]:
+    chat = dict(DEFAULT_REQUIREMENT_CHAT)
+    if not isinstance(raw, dict):
+        return chat
+
+    def _int(key: str, lo: int, hi: int) -> int:
+        try:
+            value = int(raw[key]) if raw.get(key) is not None else chat[key]
+        except (TypeError, ValueError):
+            value = chat[key]
+        return min(hi, max(lo, value))
+
+    chat["enabled"] = bool(raw.get("enabled", chat["enabled"]))
+    chat["max_context_requirements"] = _int("max_context_requirements", 1, 200)
+    chat["history_turns"] = _int("history_turns", 0, 20)
+    raw_sources = raw.get("source_types")
+    if isinstance(raw_sources, list):
+        cleaned = [s for s in raw_sources if s in SOURCE_TYPES]
+        chat["source_types"] = cleaned or ["requirements"]
+    else:
+        chat["source_types"] = list(DEFAULT_REQUIREMENT_CHAT["source_types"])
+    return chat
+
+
+def _normalize_test_case_generation(raw: Any) -> Dict[str, Any]:
+    cfg = dict(DEFAULT_TEST_CASE_GENERATION)
+    if isinstance(raw, dict):
+        def _int(key: str, lo: int, hi: int) -> int:
+            try:
+                value = int(raw[key]) if raw.get(key) is not None else cfg[key]
+            except (TypeError, ValueError):
+                value = cfg[key]
+            return min(hi, max(lo, value))
+        cfg["default_count"] = _int("default_count", 1, 20)
+        cfg["max_tokens"] = _int("max_tokens", 256, 4000)
+    return cfg
+
+
+def _normalize_routing(raw: Any) -> Dict[str, Any]:
+    routing = {task: {"provider": None, "model": None} for task in ROUTING_TASKS}
+    if isinstance(raw, dict):
+        for task in ROUTING_TASKS:
+            target = raw.get(task)
+            if isinstance(target, dict):
+                provider = str(target.get("provider") or "").strip().lower()
+                model = str(target.get("model") or "").strip()
+                routing[task] = {
+                    "provider": provider if provider in SUPPORTED_AI_PROVIDERS else None,
+                    "model": model or None,
+                }
+    return routing
+
+
+def _normalize_fallback(raw: Any) -> Dict[str, Any]:
+    fb = {"enabled": False, "order": []}
+    if isinstance(raw, dict):
+        fb["enabled"] = bool(raw.get("enabled"))
+        order: List[str] = []
+        for item in raw.get("order") or []:
+            normalized = str(item or "").strip().lower()
+            if normalized in SUPPORTED_AI_PROVIDERS and normalized not in order:
+                order.append(normalized)
+        fb["order"] = order
+    return fb
+
+
+def get_requirement_chat_settings(db: Session) -> Dict[str, Any]:
+    return _normalize_requirement_chat(_load_ai_config(db).get("requirement_chat"))
+
+
+def get_test_case_generation_settings(db: Session) -> Dict[str, Any]:
+    return _normalize_test_case_generation(_load_ai_config(db).get("test_case_generation"))
+
+
+def get_compact_payload_default(db: Session) -> bool:
+    return bool(_load_ai_config(db).get("compact_payload_default", True))
+
+
 def get_ai_manager_settings(db: Session) -> Dict[str, Any]:
     config = _load_ai_config(db)
     return {
         "active_provider": config["active_provider"],
         "per_project_monthly_token_limit": config.get("per_project_monthly_token_limit"),
+        "requirement_chat": _normalize_requirement_chat(config.get("requirement_chat")),
+        "system_prompt": str(config.get("system_prompt") or ""),
+        "compact_payload_default": bool(config.get("compact_payload_default", True)),
+        "test_case_generation": _normalize_test_case_generation(config.get("test_case_generation")),
+        "routing": _normalize_routing(config.get("routing")),
+        "fallback": _normalize_fallback(config.get("fallback")),
         "providers": [_public_provider_config(config["providers"][provider]) for provider in sorted(config["providers"])],
     }
 
@@ -267,11 +466,18 @@ def get_ai_manager_status(db: Session) -> Dict[str, Any]:
     safe_provider = None
     if provider:
         safe_provider = {key: value for key, value in provider.items() if key != "api_key_masked"}
+    chat = _normalize_requirement_chat(settings.get("requirement_chat"))
     return {
         "active_provider": active_provider,
         "available": available,
         "reason": reason,
         "provider": safe_provider,
+        "requirement_chat_enabled": chat["enabled"],
+        "requirement_chat_source_types": chat["source_types"],
+        "compact_payload_default": bool(settings.get("compact_payload_default", True)),
+        "test_case_default_count": _normalize_test_case_generation(
+            settings.get("test_case_generation")
+        )["default_count"],
     }
 
 
@@ -280,6 +486,18 @@ def update_ai_manager_settings(db: Session, payload: AIManagerSettingsPayload) -
 
     config["active_provider"] = payload.active_provider
     config["per_project_monthly_token_limit"] = payload.per_project_monthly_token_limit
+    if payload.requirement_chat is not None:
+        config["requirement_chat"] = _normalize_requirement_chat(payload.requirement_chat.model_dump())
+    if payload.system_prompt is not None:
+        config["system_prompt"] = payload.system_prompt.strip()
+    if payload.compact_payload_default is not None:
+        config["compact_payload_default"] = bool(payload.compact_payload_default)
+    if payload.test_case_generation is not None:
+        config["test_case_generation"] = _normalize_test_case_generation(payload.test_case_generation.model_dump())
+    if payload.routing is not None:
+        config["routing"] = _normalize_routing(payload.routing.model_dump())
+    if payload.fallback is not None:
+        config["fallback"] = _normalize_fallback(payload.fallback.model_dump())
     for provider_payload in payload.providers:
         provider_config = config["providers"][provider_payload.provider]
         provider_config.update(
@@ -350,11 +568,27 @@ def _build_usage_limits(db: Session, usage: Dict[str, Any]) -> Dict[str, Any]:
         })
     project_entries.sort(key=lambda item: item["used_tokens"], reverse=True)
 
+    operations = monthly_bucket.get("operations") if isinstance(monthly_bucket.get("operations"), dict) else {}
+    by_operation = [
+        {
+            "operation": str(op),
+            "requests": int(stats.get("requests") or 0),
+            "failures": int(stats.get("failures") or 0),
+            "total_tokens": int(stats.get("total_tokens") or 0),
+            "prompt_tokens": int(stats.get("prompt_tokens") or 0),
+            "completion_tokens": int(stats.get("completion_tokens") or 0),
+        }
+        for op, stats in operations.items()
+        if isinstance(stats, dict)
+    ]
+    by_operation.sort(key=lambda item: item["total_tokens"], reverse=True)
+
     return {
         "current_month": current_month,
         "active_provider": config["active_provider"],
         "providers": provider_limits,
         "active_provider_limit": provider_limits.get(config["active_provider"]),
+        "by_operation": by_operation,
         "project_monthly_limit": {
             "limit": project_limit,
             "total_projects": len(project_entries),
@@ -430,6 +664,8 @@ def _ensure_monthly_usage(usage: Dict[str, Any]) -> str:
         current_bucket["projects"] = {}
     if not isinstance(current_bucket.get("users"), dict):
         current_bucket["users"] = {}
+    if not isinstance(current_bucket.get("operations"), dict):
+        current_bucket["operations"] = {}
     for provider in SUPPORTED_AI_PROVIDERS:
         if not isinstance(current_bucket["providers"].get(provider), dict):
             current_bucket["providers"][provider] = {}
@@ -477,7 +713,14 @@ def _record_usage(
         "completion_tokens": 0,
         "total_tokens": 0,
     }) if user_id is not None else None
-    targets = [usage["totals"], bucket, month_provider_bucket]
+    operation_bucket = monthly_bucket["operations"].setdefault(operation or "completion", {
+        "requests": 0,
+        "failures": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    })
+    targets = [usage["totals"], bucket, month_provider_bucket, operation_bucket]
     if project_bucket is not None:
         targets.append(project_bucket)
     if user_bucket is not None:
@@ -554,6 +797,17 @@ def _usage_from_openai_payload(data: Dict[str, Any]) -> tuple[int, int]:
     return int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
 
 
+def _operation_task(operation: str) -> Optional[str]:
+    """Map an operation string to a routing task group."""
+    if operation == "requirement_project_qa":
+        return "qa"
+    if operation == "requirement_test_case_generation":
+        return "generation"
+    if operation.startswith("test_case_assistant"):
+        return "assistant"
+    return None
+
+
 async def generate_ai_completion(
     db: Session,
     request: AICompletionRequest,
@@ -563,113 +817,156 @@ async def generate_ai_completion(
     entity_type: Optional[str] = None,
     entity_id: Optional[int] = None,
 ) -> AICompletionResult:
-    provider_config = _get_private_config(db, request.provider, project_id=project_id)
-    provider = provider_config["provider"]
-    model = provider_config.get("model") or DEFAULT_MODELS[provider]
-    base_url = str(provider_config.get("base_url") or DEFAULT_BASE_URLS[provider]).rstrip("/")
-    provider_timeout = int(provider_config.get("request_timeout_seconds") or DEFAULT_AI_REQUEST_TIMEOUT_SECONDS)
-    timeout = min(
-        MAX_AI_REQUEST_TIMEOUT_SECONDS,
-        max(provider_timeout, request.timeout_seconds or provider_timeout),
-    )
-    api_key = provider_config["api_key_plain"]
-    prompt_tokens = 0
-    completion_tokens = 0
+    config = _load_ai_config(db)
+    system_prompt = str(config.get("system_prompt") or "").strip()
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
-            if provider in {"openai", "openrouter", "huggingface", "litellm"}:
-                headers = {"Content-Type": "application/json"}
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                response = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers=headers,
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": request.prompt}],
-                        "max_tokens": request.max_tokens,
-                        "temperature": request.temperature,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                choices = data.get("choices") or []
-                content = (((choices[0] if choices else {}).get("message") or {}).get("content") or "").strip()
-                prompt_tokens, completion_tokens = _usage_from_openai_payload(data)
-            elif provider == "anthropic":
-                response = await client.post(
-                    f"{base_url}/messages",
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": request.prompt}],
-                        "max_tokens": request.max_tokens,
-                        "temperature": request.temperature,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                content_blocks = data.get("content") or []
-                content = "\n".join(
-                    str(block.get("text") or "")
-                    for block in content_blocks
-                    if isinstance(block, dict) and block.get("type") == "text"
-                ).strip()
-                usage = data.get("usage") or {}
-                prompt_tokens = int(usage.get("input_tokens") or 0)
-                completion_tokens = int(usage.get("output_tokens") or 0)
-            else:
-                raise HTTPException(status_code=400, detail="Unsupported AI provider")
+    # Task-group routing: an operation can pin a provider/model override.
+    route = _normalize_routing(config.get("routing")).get(_operation_task(operation)) or {}
+    routed_provider = route.get("provider")
+    routed_model = route.get("model")
+    chosen_provider = request.provider or routed_provider or config["active_provider"]
 
-        if not content:
-            raise HTTPException(status_code=502, detail="AI provider returned an empty response")
+    # Fallback chain (errors + token limits, per admin config). An explicit
+    # request.provider (e.g. the connection test) pins that provider and never
+    # falls back, so a failure surfaces instead of being masked by another.
+    fallback = _normalize_fallback(config.get("fallback"))
+    candidates = [chosen_provider]
+    if fallback["enabled"] and not request.provider:
+        for prov in fallback["order"]:
+            if prov not in candidates:
+                candidates.append(prov)
 
-        _record_usage(
-            db, provider, model, operation, prompt_tokens, completion_tokens, True,
-            project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+    async def _attempt(prov: str, model_override: Optional[str]) -> AICompletionResult:
+        # Raises HTTPException on any failure (after recording usage for call
+        # failures); pre-call config/limit errors propagate without a usage row.
+        provider_config = _get_private_config(db, prov, project_id=project_id)
+        provider = provider_config["provider"]
+        model = model_override or provider_config.get("model") or DEFAULT_MODELS[provider]
+        base_url = str(provider_config.get("base_url") or DEFAULT_BASE_URLS[provider]).rstrip("/")
+        provider_timeout = int(provider_config.get("request_timeout_seconds") or DEFAULT_AI_REQUEST_TIMEOUT_SECONDS)
+        timeout = min(
+            MAX_AI_REQUEST_TIMEOUT_SECONDS,
+            max(provider_timeout, request.timeout_seconds or provider_timeout),
         )
-        return AICompletionResult(
-            provider=provider,
-            model=model,
-            content=content,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-        )
-    except httpx.TimeoutException as exc:
-        logger.warning("AI provider request timed out for %s after %s seconds", provider, timeout)
-        _record_usage(
-            db, provider, model, operation, 0, 0, False, f"timeout after {timeout} seconds",
-            project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
-        )
-        raise HTTPException(
-            status_code=504,
-            detail=f"AI provider request timed out after {timeout} seconds. Try fewer test cases, a faster model, or increase the provider timeout in AI Manager.",
-        ) from exc
-    except httpx.HTTPStatusError as exc:
-        detail = "AI provider request failed"
+        api_key = provider_config["api_key_plain"]
+        prompt_tokens = 0
+        completion_tokens = 0
         try:
-            provider_error = exc.response.json()
-            detail = str(provider_error.get("error") or provider_error.get("message") or detail)
-        except Exception:
-            detail = exc.response.text[:300] or detail
-        logger.warning("AI provider HTTP error for %s: %s", provider, detail)
-        _record_usage(
-            db, provider, model, operation, 0, 0, False, detail[:200],
-            project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
-        )
-        raise HTTPException(status_code=502, detail="AI provider request failed. Check provider credentials, model, and quota.") from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Unexpected AI provider error for %s", provider)
-        _record_usage(
-            db, provider, model, operation, 0, 0, False, "unexpected_error",
-            project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
-        )
-        raise HTTPException(status_code=500, detail="Unexpected AI provider error") from exc
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+                if provider in {"openai", "openrouter", "huggingface", "litellm"}:
+                    headers = {"Content-Type": "application/json"}
+                    if api_key:
+                        headers["Authorization"] = f"Bearer {api_key}"
+                    messages = []
+                    if system_prompt:
+                        messages.append({"role": "system", "content": system_prompt})
+                    messages.append({"role": "user", "content": request.prompt})
+                    response = await client.post(
+                        f"{base_url}/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": model,
+                            "messages": messages,
+                            "max_tokens": request.max_tokens,
+                            "temperature": request.temperature,
+                        },
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    choices = data.get("choices") or []
+                    content = (((choices[0] if choices else {}).get("message") or {}).get("content") or "").strip()
+                    prompt_tokens, completion_tokens = _usage_from_openai_payload(data)
+                elif provider == "anthropic":
+                    body = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": request.prompt}],
+                        "max_tokens": request.max_tokens,
+                        "temperature": request.temperature,
+                    }
+                    if system_prompt:
+                        body["system"] = system_prompt
+                    response = await client.post(
+                        f"{base_url}/messages",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01",
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    content_blocks = data.get("content") or []
+                    content = "\n".join(
+                        str(block.get("text") or "")
+                        for block in content_blocks
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    ).strip()
+                    usage = data.get("usage") or {}
+                    prompt_tokens = int(usage.get("input_tokens") or 0)
+                    completion_tokens = int(usage.get("output_tokens") or 0)
+                else:
+                    raise HTTPException(status_code=400, detail="Unsupported AI provider")
+
+            if not content:
+                raise HTTPException(status_code=502, detail="AI provider returned an empty response")
+
+            _record_usage(
+                db, provider, model, operation, prompt_tokens, completion_tokens, True,
+                project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+            )
+            return AICompletionResult(
+                provider=provider,
+                model=model,
+                content=content,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+            )
+        except httpx.TimeoutException as exc:
+            logger.warning("AI provider request timed out for %s after %s seconds", provider, timeout)
+            _record_usage(
+                db, provider, model, operation, 0, 0, False, f"timeout after {timeout} seconds",
+                project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+            )
+            raise HTTPException(
+                status_code=504,
+                detail=f"AI provider request timed out after {timeout} seconds. Try fewer test cases, a faster model, or increase the provider timeout in AI Manager.",
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = "AI provider request failed"
+            try:
+                provider_error = exc.response.json()
+                detail = str(provider_error.get("error") or provider_error.get("message") or detail)
+            except Exception:
+                detail = exc.response.text[:300] or detail
+            logger.warning("AI provider HTTP error for %s: %s", provider, detail)
+            _record_usage(
+                db, provider, model, operation, 0, 0, False, detail[:200],
+                project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+            )
+            raise HTTPException(status_code=502, detail="AI provider request failed. Check provider credentials, model, and quota.") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Unexpected AI provider error for %s", provider)
+            _record_usage(
+                db, provider, model, operation, 0, 0, False, "unexpected_error",
+                project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+            )
+            raise HTTPException(status_code=500, detail="Unexpected AI provider error") from exc
+
+    primary_exc: Optional[HTTPException] = None
+    for prov in candidates:
+        model_override = routed_model if prov == routed_provider else None
+        try:
+            return await _attempt(prov, model_override)
+        except HTTPException as exc:
+            # Keep the primary provider's error as the root cause to surface if
+            # every candidate fails (more meaningful than a fallback's error).
+            if primary_exc is None:
+                primary_exc = exc
+            if len(candidates) > 1:
+                logger.warning("AI provider %s failed (%s); trying next candidate", prov, exc.detail)
+            continue
+    raise primary_exc or HTTPException(status_code=500, detail="Unexpected AI provider error")

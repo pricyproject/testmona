@@ -62,13 +62,103 @@ def extract_json_object(raw: str) -> dict[str, Any]:
     return json.loads(cleaned[start : end + 1])
 
 
-def build_requirement_test_case_prompt(requirement: Any, count: int, instructions: Optional[str]) -> str:
-    return f"""
-You are a senior QA test designer. Generate exactly {count} review-ready manual test case drafts for this requirement.
-Return only valid JSON using this schema:
-{{
+def _toon_scalar(value: Any) -> str:
+    """Render a scalar for TOON. Quote only when the value would otherwise be
+    ambiguous (contains a delimiter, newline, or leading/trailing space)."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    if text == "":
+        return '""'
+    needs_quote = (
+        text != text.strip()
+        or any(ch in text for ch in (",", ":", "\n", '"', "[", "]", "{", "}"))
+    )
+    if not needs_quote:
+        return text
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{escaped}"'
+
+
+def encode_toon(data: Any, indent: int = 0) -> str:
+    """Minimal Token-Oriented Object Notation encoder.
+
+    TOON drops JSON's repeated keys, braces and quotes in favour of
+    indentation and a tabular form for uniform object arrays, which lowers the
+    token count an LLM has to read. Supports scalars, nested mappings, scalar
+    lists and lists of flat uniform objects (rendered as ``key[N]{cols}:`` rows).
+    """
+    pad = "  " * indent
+    if isinstance(data, dict):
+        lines: list[str] = []
+        for key, value in data.items():
+            if isinstance(value, dict):
+                lines.append(f"{pad}{key}:")
+                lines.append(encode_toon(value, indent + 1))
+            elif isinstance(value, list):
+                lines.append(_encode_toon_list(key, value, indent))
+            else:
+                lines.append(f"{pad}{key}: {_toon_scalar(value)}")
+        return "\n".join(line for line in lines if line)
+    if isinstance(data, list):
+        return _encode_toon_list("items", data, indent)
+    return f"{pad}{_toon_scalar(data)}"
+
+
+def _encode_toon_list(key: str, value: list, indent: int) -> str:
+    pad = "  " * indent
+    row_pad = "  " * (indent + 1)
+    if not value:
+        return f"{pad}{key}[0]:"
+    flat_objects = all(
+        isinstance(item, dict)
+        and all(not isinstance(v, (dict, list)) for v in item.values())
+        for item in value
+    )
+    if flat_objects:
+        columns = list(value[0].keys())
+        if all(list(item.keys()) == columns for item in value):
+            header = f"{pad}{key}[{len(value)}]{{{','.join(columns)}}}:"
+            rows = [
+                row_pad + ",".join(_toon_scalar(item[col]) for col in columns)
+                for item in value
+            ]
+            return "\n".join([header, *rows])
+    if all(not isinstance(item, (dict, list)) for item in value):
+        joined = ",".join(_toon_scalar(item) for item in value)
+        return f"{pad}{key}[{len(value)}]: {joined}"
+    # Fallback: nested objects/lists, encode element by element.
+    lines = [f"{pad}{key}[{len(value)}]:"]
+    for item in value:
+        lines.append(encode_toon(item, indent + 1))
+    return "\n".join(lines)
+
+
+def _requirement_payload(requirement: Any) -> dict[str, Any]:
+    return {
+        "key": requirement.requirement_id,
+        "title": requirement.title,
+        "priority": getattr(requirement.priority, "value", requirement.priority),
+        "status": getattr(requirement.status, "value", requirement.status),
+        "description": strip_html(requirement.description),
+        "acceptance_criteria": strip_html(requirement.acceptance_criteria),
+        "tags": requirement.tags or "",
+    }
+
+
+def build_requirement_test_case_prompt(
+    requirement: Any,
+    count: int,
+    instructions: Optional[str],
+    use_toon: bool = False,
+) -> str:
+    schema = """{
   "drafts": [
-    {{
+    {
       "title": "string",
       "description": "string",
       "preconditions": "string",
@@ -79,22 +169,239 @@ Return only valid JSON using this schema:
       "tags": "comma,separated,tags",
       "confidence": 0.0,
       "test_steps": [
-        {{"step_number": 1, "action": "string", "expected_result": "string", "step_type": "manual"}}
+        {"step_number": 1, "action": "string", "expected_result": "string", "step_type": "manual"}
       ]
-    }}
+    }
   ],
   "warnings": ["string"]
-}}
+}"""
+    # In TOON mode we also send a minified schema spec instead of the
+    # pretty-printed example above. The model still returns the same JSON, but
+    # the prompt carries far fewer structural tokens (whitespace/quotes), which
+    # is the bulk of the per-request saving for a single requirement.
+    compact_schema = (
+        'Return JSON only: {"drafts":[{title,description,preconditions,'
+        'steps(numbered summary),expected_result,'
+        'priority(low|medium|high|critical),'
+        'test_type(manual|smoke|regression|integration|security|performance|usability),'
+        'tags(comma separated),confidence(0..1),'
+        'test_steps:[{step_number,action,expected_result,step_type:manual}]}],'
+        '"warnings":[string]}'
+    )
+    if use_toon:
+        requirement_block = "requirement (TOON):\n" + encode_toon(_requirement_payload(requirement))
+        schema_intro = compact_schema
+        schema_block = ""
+    else:
+        payload = _requirement_payload(requirement)
+        requirement_block = "\n".join(
+            [
+                f"Requirement key: {payload['key']}",
+                f"Title: {payload['title']}",
+                f"Priority: {payload['priority']}",
+                f"Status: {payload['status']}",
+                f"Description: {payload['description']}",
+                f"Acceptance criteria: {payload['acceptance_criteria']}",
+                f"Tags: {payload['tags']}",
+            ]
+        )
+        schema_intro = "Return only valid JSON using this schema:"
+        schema_block = schema
+    parts = [
+        f"You are a senior QA test designer. Generate exactly {count} review-ready manual test case drafts for this requirement.",
+        schema_intro,
+        *([schema_block] if schema_block else []),
+        "",
+        requirement_block,
+        f"Additional instructions: {instructions or 'None'}",
+    ]
+    return "\n".join(parts).strip()
 
-Requirement key: {requirement.requirement_id}
-Title: {requirement.title}
-Priority: {getattr(requirement.priority, "value", requirement.priority)}
-Status: {getattr(requirement.status, "value", requirement.status)}
-Description: {strip_html(requirement.description)}
-Acceptance criteria: {strip_html(requirement.acceptance_criteria)}
-Tags: {requirement.tags or ""}
-Additional instructions: {instructions or "None"}
-""".strip()
+
+# The AICompletionRequest prompt field is capped at 12000 chars; stay safely
+# under it so a long history + many requirements can never overflow it.
+QA_PROMPT_CHAR_CEILING = 11500
+_QA_HISTORY_CHAR_BUDGET = 1500
+
+
+def _qa_history_block(history: Optional[list[dict[str, str]]]) -> str:
+    """Render recent turns oldest-first, dropping the oldest until the block
+    fits a small budget (so a long conversation can't bloat the prompt)."""
+    if not history:
+        return ""
+    turns: list[str] = []
+    for turn in history:
+        role = "assistant" if str(turn.get("role")) == "assistant" else "user"
+        content = clean_ai_text(turn.get("content", ""), 500)
+        if content:
+            turns.append(f"{role}: {content}")
+    # Keep the most recent turns within budget.
+    kept: list[str] = []
+    used = 0
+    for line in reversed(turns):
+        if used + len(line) > _QA_HISTORY_CHAR_BUDGET and kept:
+            break
+        kept.insert(0, line)
+        used += len(line) + 1
+    if not kept:
+        return ""
+    return "Recent conversation (oldest first):\n" + "\n".join(kept) + "\n\n"
+
+
+# Per-row room (chars) for the small fixed fields + TOON structure, so the
+# remaining budget can be devoted to description/acceptance_criteria text.
+_QA_ROW_OVERHEAD = 560
+_QA_INSTRUCTIONS = (
+    "You are a QA documentation assistant for a software project. Answer the user's "
+    "question using ONLY the requirements provided below (TOON format: the header "
+    "`requirements[N]{cols}:` names the columns, each following line is one "
+    "requirement's values in that order). If the answer is not contained in these "
+    "requirements, say so plainly. Put the requirement keys you relied on ONLY in the "
+    "`sources` array — do not list or repeat them inside the answer text.\n"
+    'Return JSON only: {"answer": "string (concise, may use GitHub-flavored markdown)", "sources": [{"key": "REQ-x"}]}'
+)
+
+
+def _plain_text(value: Any) -> str:
+    """Stored requirement content is HTML-*escaped* (e.g. ``&lt;p&gt;``), so
+    unescape entities first, THEN strip the resulting tags, leaving clean text
+    the model can read (and whitespace collapsed by ``strip_html``)."""
+    if not value:
+        return ""
+    return strip_html(html.unescape(str(value)))
+
+
+def _split_text_budget(desc: str, accept: str, budget: int) -> tuple[str, str]:
+    """Fit description + acceptance_criteria into ``budget`` chars. When both
+    are long, split evenly; when one is short, give the slack to the other so a
+    long acceptance-criteria block (where answers often live) isn't truncated."""
+    if budget <= 0:
+        return "", ""
+    if len(desc) + len(accept) <= budget:
+        return desc, accept
+    half = budget // 2
+    if len(desc) <= half:
+        return desc, accept[: budget - len(desc)]
+    if len(accept) <= half:
+        return desc[: budget - len(accept)], accept
+    return desc[:half], accept[: budget - half]
+
+
+def _qa_row(req: Any, text_budget: int) -> dict[str, Any]:
+    desc = _plain_text(req.description)
+    accept = _plain_text(req.acceptance_criteria)
+    desc, accept = _split_text_budget(desc, accept, text_budget)
+    return {
+        "key": (_plain_text(req.requirement_id) or "")[:50],
+        "title": (_plain_text(req.title) or "")[:200],
+        "priority": getattr(req.priority, "value", req.priority) or "",
+        "status": getattr(req.status, "value", req.status) or "",
+        "description": desc,
+        "acceptance_criteria": accept,
+        "tags": (_plain_text(req.tags) or "")[:300],
+    }
+
+
+def build_requirement_qa_prompt(
+    requirements: list[Any],
+    question: str,
+    history: Optional[list[dict[str, str]]] = None,
+) -> str:
+    """Prompt for answering a question across many project requirements.
+
+    The requirements are encoded as a single TOON table (keys written once for
+    all rows). The available prompt budget is distributed across the selected
+    requirements, so a single requirement can use almost the whole budget for
+    its content (avoiding answers like "AC7.1 doesn't exist" caused by over-
+    aggressive per-field truncation). The assembled prompt is guaranteed to stay
+    under :data:`QA_PROMPT_CHAR_CEILING`: rows are dropped from the end (least
+    relevant first — callers pass them ranked) until it fits, with a final
+    hard-truncate as a backstop.
+    """
+    history_block = _qa_history_block(history)
+    question_text = clean_ai_text(question, 2000)
+
+    def assemble(current_rows: list[dict[str, Any]]) -> str:
+        table = encode_toon({"requirements": current_rows}) if current_rows else "requirements[0]:"
+        return f"{_QA_INSTRUCTIONS}\n\n{history_block}{table}\n\nQuestion: {question_text}".strip()
+
+    n = len(requirements)
+    if n == 0:
+        return assemble([])
+
+    fixed = len(_QA_INSTRUCTIONS) + len(history_block) + len(question_text) + 80
+    available_text = max(0, QA_PROMPT_CHAR_CEILING - fixed - n * _QA_ROW_OVERHEAD)
+    per_req_text = available_text // n
+
+    rows = [_qa_row(req, per_req_text) for req in requirements]
+    prompt = assemble(rows)
+    # TOON quoting/escaping can push us over the estimate: drop the lowest-ranked
+    # requirements until it fits, then hard-truncate as a last resort.
+    while len(prompt) > QA_PROMPT_CHAR_CEILING and len(rows) > 1:
+        rows = rows[:-1]
+        prompt = assemble(rows)
+    if len(prompt) > QA_PROMPT_CHAR_CEILING:
+        prompt = prompt[:QA_PROMPT_CHAR_CEILING]
+    return prompt
+
+
+_DOC_ROW_OVERHEAD = 300
+_DOC_QA_INSTRUCTIONS = (
+    "You are a QA documentation assistant for a software project. Answer the user's "
+    "question using ONLY the project items provided below (TOON format: the header "
+    "`docs[N]{cols}:` names the columns, each following line is one item's values in "
+    "that order; `type` is requirement/defect/test_plan/test_case). If the answer is "
+    "not contained in these items, say so plainly. Put the keys you relied on ONLY in "
+    "the `sources` array — do not list or repeat them inside the answer text.\n"
+    'Return JSON only: {"answer": "string (concise, may use GitHub-flavored markdown)", "sources": [{"key": "REQ-x"}]}'
+)
+
+
+def build_doc_qa_prompt(
+    docs: list[Any],
+    question: str,
+    history: Optional[list[dict[str, str]]] = None,
+) -> str:
+    """Project-wide Q&A prompt over mixed document types (requirements, defects,
+    test plans, test cases). Each ``doc`` has ``type``, ``key``, ``title``,
+    ``content``. Packs into one uniform TOON table within the prompt ceiling."""
+    history_block = _qa_history_block(history)
+    question_text = clean_ai_text(question, 2000)
+
+    def assemble(current: list[Any]) -> str:
+        rows = [
+            {"key": d.key, "type": d.type, "title": clean_ai_text(d.title, 200), "content": d.content}
+            for d in current
+        ]
+        table = encode_toon({"docs": rows}) if rows else "docs[0]:"
+        return f"{_DOC_QA_INSTRUCTIONS}\n\n{history_block}{table}\n\nQuestion: {question_text}".strip()
+
+    n = len(docs)
+    if n == 0:
+        return assemble([])
+
+    fixed = len(_DOC_QA_INSTRUCTIONS) + len(history_block) + len(question_text) + 80
+    available = max(0, QA_PROMPT_CHAR_CEILING - fixed - n * _DOC_ROW_OVERHEAD)
+    per_doc = available // n
+
+    # Build budget-limited shallow copies (don't mutate the retrieval objects).
+    class _Row:
+        __slots__ = ("type", "key", "title", "content")
+
+        def __init__(self, d):
+            self.type = d.type
+            self.key = d.key
+            self.title = d.title
+            self.content = clean_ai_text(_plain_text(d.content), max(0, per_doc))
+
+    rows = [_Row(d) for d in docs]
+    prompt = assemble(rows)
+    while len(prompt) > QA_PROMPT_CHAR_CEILING and len(rows) > 1:
+        rows = rows[:-1]
+        prompt = assemble(rows)
+    if len(prompt) > QA_PROMPT_CHAR_CEILING:
+        prompt = prompt[:QA_PROMPT_CHAR_CEILING]
+    return prompt
 
 
 def build_test_case_context(test_case: Any, steps: list[Any]) -> str:

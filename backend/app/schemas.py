@@ -2056,6 +2056,139 @@ class RequirementCommentView(BaseModel):
         from_attributes = True
 
 
+# --- Requirement project-wide AI chat --------------------------------------
+
+class RequirementChatSource(BaseModel):
+    type: str = "requirement"
+    id: Optional[int] = None
+    requirement_id: Optional[int] = None  # legacy field (pre multi-source rows)
+    key: str
+    title: str
+
+
+class RequirementChatMessageView(BaseModel):
+    id: int
+    role: str
+    content: str
+    sources: List[RequirementChatSource] = Field(default_factory=list)
+    prompt_tokens: Optional[int] = None
+    created_at: datetime
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def coerce_sources(cls, value):
+        # User turns persist sources as NULL; default_factory only fills a
+        # missing key, not an explicit None, so coerce it here.
+        return value or []
+
+    class Config:
+        from_attributes = True
+
+
+CHAT_SHARE_SCOPES = {"private", "project"}
+
+
+class RequirementChatConversationView(BaseModel):
+    id: int
+    public_id: str
+    project_id: int
+    title: str
+    archived: bool = False
+    share_scope: str = "private"
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    messages: List[RequirementChatMessageView] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+class RequirementChatSharedView(BaseModel):
+    """A conversation fetched via its share link; read_only when the requester
+    is not the owner."""
+    conversation: RequirementChatConversationView
+    read_only: bool = False
+
+
+class RequirementChatConversationUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    archived: Optional[bool] = None
+    share_scope: Optional[str] = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Title must not be empty")
+        return cleaned
+
+    @field_validator("share_scope")
+    @classmethod
+    def validate_share_scope(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in CHAT_SHARE_SCOPES:
+            raise ValueError("Invalid share scope")
+        return normalized
+
+
+_CHAT_SOURCE_TYPES = {"requirements", "defects", "test_plans", "test_cases"}
+
+
+def _clean_source_types(value: Optional[List[str]]) -> Optional[List[str]]:
+    if value is None:
+        return None
+    cleaned = [v for v in value if v in _CHAT_SOURCE_TYPES]
+    # de-duplicate while preserving order
+    seen: List[str] = []
+    for v in cleaned:
+        if v not in seen:
+            seen.append(v)
+    return seen
+
+
+class RequirementChatAsk(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    conversation_id: Optional[int] = Field(default=None, ge=1)
+    # Optional per-ask scope override; intersected server-side with the
+    # admin-enabled scopes so a user can only narrow, never broaden.
+    source_types: Optional[List[str]] = None
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("Question must not be empty")
+        return cleaned
+
+    @field_validator("source_types")
+    @classmethod
+    def validate_source_types(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        return _clean_source_types(value)
+
+
+class RequirementChatRegenerate(BaseModel):
+    source_types: Optional[List[str]] = None
+
+    @field_validator("source_types")
+    @classmethod
+    def validate_source_types(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        return _clean_source_types(value)
+
+
+class RequirementChatAskResponse(BaseModel):
+    conversation_id: int
+    message: RequirementChatMessageView
+    retrieval_truncated: bool = False
+    requirements_considered: int = 0
+    requirements_used: int = 0
+
+
 # --- Coverage badges (batched per project) ---------------------------------
 
 class RequirementCoverageItem(BaseModel):
@@ -4023,6 +4156,9 @@ __all__ = [
     "RequirementTrackerImportRequest",
     "RequirementVersionView", "RequirementVersionAuthor", "RequirementVersionRestore",
     "RequirementCommentCreate", "RequirementCommentUpdate", "RequirementCommentView",
+    "RequirementChatSource", "RequirementChatMessageView", "RequirementChatConversationView",
+    "RequirementChatConversationUpdate", "RequirementChatSharedView",
+    "RequirementChatAsk", "RequirementChatRegenerate", "RequirementChatAskResponse",
     "RequirementCoverageItem", "RequirementCoverageList",
     "BulkRequirementUpdate", "BulkRequirementDelete",
     "RequirementTraceabilitySummary", "RequirementLinkedTestCase", "RequirementLinkedTestCaseList",

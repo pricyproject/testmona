@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 from .. import crud, schemas, rbac
 from ..auth import get_current_active_user
 from ..database import get_db
-from ..services.ai_manager import AICompletionRequest, generate_ai_completion
+from ..services.ai_manager import (
+    AICompletionRequest,
+    generate_ai_completion,
+    get_compact_payload_default,
+    get_test_case_generation_settings,
+)
 from ..services.ai_prompt_service import (
     build_requirement_test_case_prompt,
     build_test_case_assistant_prompt,
@@ -92,8 +97,10 @@ class AIDraftTestCase(BaseModel):
 
 
 class RequirementTestCaseGenerationRequest(BaseModel):
-    count: int = Field(default=5, ge=1, le=10)
+    # All optional: when omitted, defaults come from AI Manager settings.
+    count: Optional[int] = Field(default=None, ge=1, le=20)
     instructions: Optional[str] = Field(default=None, max_length=2000)
+    payload_format: Optional[Literal["text", "toon"]] = None
 
 
 class RequirementTestCaseGenerationResponse(BaseModel):
@@ -102,6 +109,7 @@ class RequirementTestCaseGenerationResponse(BaseModel):
     model: str
     drafts: List[AIDraftTestCase]
     warnings: List[str] = Field(default_factory=list)
+    prompt_tokens: int = 0
 
 
 class TestCaseAssistantRequest(BaseModel):
@@ -457,11 +465,24 @@ def register_ai_generation_routes(app):
         if not rbac.has_permission(current_user, "write", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        # Resolve defaults from AI Manager settings when the client omits them.
+        gen_settings = get_test_case_generation_settings(db)
+        count = payload.count or gen_settings["default_count"]
+        if payload.payload_format is not None:
+            use_toon = payload.payload_format == "toon"
+        else:
+            use_toon = get_compact_payload_default(db)
+
         result = await generate_ai_completion(
             db,
             AICompletionRequest(
-                prompt=build_requirement_test_case_prompt(requirement, payload.count, payload.instructions),
-                max_tokens=3000,
+                prompt=build_requirement_test_case_prompt(
+                    requirement,
+                    count,
+                    payload.instructions,
+                    use_toon=use_toon,
+                ),
+                max_tokens=gen_settings["max_tokens"],
                 temperature=0.2,
                 timeout_seconds=180,
             ),
@@ -498,6 +519,7 @@ def register_ai_generation_routes(app):
             model=result.model,
             drafts=drafts,
             warnings=warnings,
+            prompt_tokens=result.prompt_tokens,
         )
 
     @app.post(

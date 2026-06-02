@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 from typing import Optional
 from .database import Base
 import enum
+import uuid
 
 # Import versioning models
 from .models_versioning import (
@@ -1073,6 +1074,51 @@ class RequirementComment(Base):
         cascade="all, delete-orphan",
         backref=backref("parent", remote_side=[id]),
     )
+
+
+class RequirementChatConversation(Base):
+    """A saved, project-scoped AI chat thread asking questions across a
+    project's requirements. Messages hang off it in creation order."""
+    __tablename__ = "requirement_chat_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Unguessable identifier used in share links (never expose the numeric id).
+    public_id = Column(String(32), nullable=False, unique=True, index=True, default=lambda: uuid.uuid4().hex)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(255), nullable=False, default="New conversation")
+    archived = Column(Boolean, default=False, nullable=False)
+    # 'private' = owner only; 'project' = any project member with read access.
+    share_scope = Column(String(16), nullable=False, default="private")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    project = relationship("Project")
+    author = relationship("User", foreign_keys=[created_by])
+    messages = relationship(
+        "RequirementChatMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        # id is the tiebreaker: a user turn and its reply can share a
+        # second-resolution created_at, and must still sort in insert order.
+        order_by="RequirementChatMessage.created_at, RequirementChatMessage.id",
+    )
+
+
+class RequirementChatMessage(Base):
+    """One turn in a :class:`RequirementChatConversation`. Assistant turns may
+    carry ``sources`` (the requirements cited) and the prompt token count."""
+    __tablename__ = "requirement_chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("requirement_chat_conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(16), nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    sources = Column(JSON)  # list of {requirement_id, key, title} for assistant turns
+    prompt_tokens = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    conversation = relationship("RequirementChatConversation", back_populates="messages")
 
 
 class Defect(Base):

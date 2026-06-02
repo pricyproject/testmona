@@ -18,7 +18,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -1434,6 +1434,109 @@ def get_requirements(
             .distinct()
         )
     return query.offset(skip).limit(limit).all()
+
+
+# --- Requirement project-wide AI chat --------------------------------------
+
+def create_chat_conversation(db: Session, project_id: int, created_by: int, title: str = "New conversation"):
+    conversation = RequirementChatConversation(
+        project_id=project_id,
+        created_by=created_by,
+        title=(title or "New conversation")[:255],
+    )
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def get_chat_conversations(db: Session, project_id: int, created_by: int,
+                           archived: bool = False, skip: int = 0, limit: int = 100):
+    return (
+        db.query(RequirementChatConversation)
+        .filter(
+            RequirementChatConversation.project_id == project_id,
+            RequirementChatConversation.created_by == created_by,
+            RequirementChatConversation.archived == archived,
+        )
+        .order_by(RequirementChatConversation.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def get_chat_conversation_by_public_id(db: Session, public_id: str):
+    return (
+        db.query(RequirementChatConversation)
+        .filter(RequirementChatConversation.public_id == public_id)
+        .first()
+    )
+
+
+def update_chat_conversation(db: Session, conversation_id: int,
+                             title: Optional[str] = None, archived: Optional[bool] = None,
+                             share_scope: Optional[str] = None):
+    conversation = get_chat_conversation(db, conversation_id)
+    if conversation is None:
+        return None
+    if title is not None:
+        conversation.title = title[:255]
+    if archived is not None:
+        conversation.archived = archived
+    if share_scope is not None:
+        conversation.share_scope = share_scope
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def get_chat_conversation(db: Session, conversation_id: int):
+    return (
+        db.query(RequirementChatConversation)
+        .filter(RequirementChatConversation.id == conversation_id)
+        .first()
+    )
+
+
+def add_chat_message(db: Session, conversation_id: int, role: str, content: str,
+                     sources: Optional[list] = None, prompt_tokens: Optional[int] = None):
+    message = RequirementChatMessage(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        sources=sources if sources is not None else [],
+        prompt_tokens=prompt_tokens,
+    )
+    db.add(message)
+    # Touch the parent so conversation lists sort by latest activity.
+    conversation = get_chat_conversation(db, conversation_id)
+    if conversation is not None:
+        conversation.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(message)
+    return message
+
+
+def delete_chat_messages(db: Session, message_ids: list):
+    if not message_ids:
+        return 0
+    deleted = (
+        db.query(RequirementChatMessage)
+        .filter(RequirementChatMessage.id.in_(message_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return deleted
+
+
+def delete_chat_conversation(db: Session, conversation_id: int):
+    conversation = get_chat_conversation(db, conversation_id)
+    if conversation is None:
+        return None
+    db.delete(conversation)
+    db.commit()
+    return conversation
 
 
 def create_requirement(db: Session, requirement: RequirementCreate):
