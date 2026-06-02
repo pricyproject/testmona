@@ -481,6 +481,52 @@ export interface RequirementComment {
   replies: RequirementComment[];
 }
 
+export type RequirementChatSourceType = 'requirement' | 'defect' | 'test_plan' | 'test_case';
+
+export interface RequirementChatSource {
+  type?: RequirementChatSourceType;
+  id?: number | null;
+  requirement_id?: number | null; // legacy rows
+  key: string;
+  title: string;
+}
+
+export interface RequirementChatMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  sources: RequirementChatSource[];
+  prompt_tokens?: number | null;
+  created_at: string;
+}
+
+export type RequirementChatShareScope = 'private' | 'project';
+
+export interface RequirementChatConversation {
+  id: number;
+  public_id: string;
+  project_id: number;
+  title: string;
+  archived: boolean;
+  share_scope: RequirementChatShareScope;
+  created_at: string;
+  updated_at?: string | null;
+  messages: RequirementChatMessage[];
+}
+
+export interface RequirementChatSharedView {
+  conversation: RequirementChatConversation;
+  read_only: boolean;
+}
+
+export interface RequirementChatAskResponse {
+  conversation_id: number;
+  message: RequirementChatMessage;
+  retrieval_truncated: boolean;
+  requirements_considered: number;
+  requirements_used: number;
+}
+
 export interface RequirementLinkedTestCase extends TestCase {
   suite_name?: string;
   section_name?: string;

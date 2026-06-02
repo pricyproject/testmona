@@ -45,14 +45,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2, BrainCircuit, KeyRound, PlayCircle } from 'lucide-react';
+import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2, BrainCircuit, KeyRound, PlayCircle, ChevronDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 import { Switch } from '@/components/ui/switch';
-import { api, auditAPI, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary } from '@/lib/api';
+import { api, auditAPI, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary, AISourceType, AIRoutingSettings } from '@/lib/api';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
 import { useAuthStore } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -202,11 +202,33 @@ const defaultAIProviders: AIProviderConfig[] = [
   { provider: 'litellm', enabled: false, model: 'gpt-4o-mini', base_url: 'http://localhost:4000/v1', request_timeout_seconds: 60, monthly_token_limit: null },
 ];
 
+const defaultRequirementChatSettings = {
+  enabled: true,
+  max_context_requirements: 40,
+  history_turns: 6,
+  source_types: ['requirements'] as AISourceType[],
+};
+
+const defaultRoutingSettings: AIRoutingSettings = {
+  qa: { provider: null, model: null },
+  generation: { provider: null, model: null },
+  assistant: { provider: null, model: null },
+};
+
 const defaultAIManagerSettings: AIManagerSettings = {
   active_provider: 'openai',
   per_project_monthly_token_limit: null,
+  requirement_chat: defaultRequirementChatSettings,
+  system_prompt: '',
+  compact_payload_default: true,
+  test_case_generation: { default_count: 5, max_tokens: 3000 },
+  routing: defaultRoutingSettings,
+  fallback: { enabled: false, order: [] },
   providers: defaultAIProviders,
 };
+
+const AI_SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases'];
+const AI_ROUTING_TASKS: Array<keyof AIRoutingSettings> = ['qa', 'generation', 'assistant'];
 
 const aiProviderLabels: Record<AIProviderName, string> = {
   openai: 'OpenAI',
@@ -214,6 +236,33 @@ const aiProviderLabels: Record<AIProviderName, string> = {
   anthropic: 'Claude',
   huggingface: 'Hugging Face',
   litellm: 'LiteLLM',
+};
+
+// Friendly label for a usage `operation` string (test_case_assistant_* collapse to one).
+const aiOperationLabel = (operation: string, t: (k: string) => string): string => {
+  if (operation === 'requirement_project_qa') return t('opRequirementQa');
+  if (operation === 'requirement_test_case_generation') return t('opTestCaseGeneration');
+  if (operation.startsWith('test_case_assistant')) return t('opTestCaseAssistant');
+  if (operation === 'connection_test') return t('opConnectionTest');
+  if (operation === 'completion') return t('opCompletion');
+  return operation;
+};
+
+// Aggregate per-operation usage rows into friendly-label buckets.
+const aggregateAISpend = (
+  rows: Array<{ operation: string; requests: number; failures: number; total_tokens: number }>,
+  t: (k: string) => string,
+): Array<{ label: string; requests: number; failures: number; total_tokens: number }> => {
+  const map = new Map<string, { label: string; requests: number; failures: number; total_tokens: number }>();
+  for (const row of rows) {
+    const label = aiOperationLabel(row.operation, t);
+    const entry = map.get(label) || { label, requests: 0, failures: 0, total_tokens: 0 };
+    entry.requests += row.requests || 0;
+    entry.failures += row.failures || 0;
+    entry.total_tokens += row.total_tokens || 0;
+    map.set(label, entry);
+  }
+  return Array.from(map.values()).sort((a, b) => b.total_tokens - a.total_tokens);
 };
 
 export function Settings() {
@@ -627,6 +676,9 @@ export function Settings() {
     performance_optimization: true
   });
   const [aiManagerSettings, setAIManagerSettings] = useState<AIManagerSettings>(defaultAIManagerSettings);
+  // Per-provider expand override; when unset a provider follows its enabled state
+  // (active = expanded, inactive = collapsed).
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [aiUsage, setAIUsage] = useState<AIUsageSummary | null>(null);
   const [loadingAIManager, setLoadingAIManager] = useState(false);
   const [savingAIManager, setSavingAIManager] = useState(false);
@@ -860,6 +912,12 @@ export function Settings() {
       setAIManagerSettings({
         active_provider: settings.active_provider,
         per_project_monthly_token_limit: settings.per_project_monthly_token_limit ?? null,
+        requirement_chat: settings.requirement_chat ?? defaultRequirementChatSettings,
+        system_prompt: settings.system_prompt ?? '',
+        compact_payload_default: settings.compact_payload_default ?? true,
+        test_case_generation: settings.test_case_generation ?? defaultAIManagerSettings.test_case_generation,
+        routing: settings.routing ?? defaultRoutingSettings,
+        fallback: settings.fallback ?? { enabled: false, order: [] },
         providers: defaultAIProviders.map((defaults) => ({
           ...defaults,
           ...(settings.providers.find((provider) => provider.provider === defaults.provider) || {}),
@@ -1280,6 +1338,12 @@ export function Settings() {
       const payload: AIManagerSettings = {
         active_provider: aiManagerSettings.active_provider,
         per_project_monthly_token_limit: aiManagerSettings.per_project_monthly_token_limit || null,
+        requirement_chat: aiManagerSettings.requirement_chat ?? defaultRequirementChatSettings,
+        system_prompt: aiManagerSettings.system_prompt ?? '',
+        compact_payload_default: aiManagerSettings.compact_payload_default ?? true,
+        test_case_generation: aiManagerSettings.test_case_generation ?? defaultAIManagerSettings.test_case_generation,
+        routing: aiManagerSettings.routing ?? defaultRoutingSettings,
+        fallback: aiManagerSettings.fallback ?? { enabled: false, order: [] },
         providers: aiManagerSettings.providers.map((provider) => ({
           ...provider,
           api_key: provider.api_key?.trim() || undefined,
@@ -1290,6 +1354,12 @@ export function Settings() {
       setAIManagerSettings({
         active_provider: savedSettings.active_provider,
         per_project_monthly_token_limit: savedSettings.per_project_monthly_token_limit ?? null,
+        requirement_chat: savedSettings.requirement_chat ?? defaultRequirementChatSettings,
+        system_prompt: savedSettings.system_prompt ?? '',
+        compact_payload_default: savedSettings.compact_payload_default ?? true,
+        test_case_generation: savedSettings.test_case_generation ?? defaultAIManagerSettings.test_case_generation,
+        routing: savedSettings.routing ?? defaultRoutingSettings,
+        fallback: savedSettings.fallback ?? { enabled: false, order: [] },
         providers: defaultAIProviders.map((defaults) => ({
           ...defaults,
           ...(savedSettings.providers.find((provider) => provider.provider === defaults.provider) || {}),
@@ -3579,10 +3649,277 @@ export function Settings() {
                   </div>
                 </div>
 
+                {/* Requirement AI assistant (project-wide Q&A) settings */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{t('reqChatSettingsTitle')}</h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{t('reqChatSettingsDesc')}</p>
+                    </div>
+                    <Switch
+                      checked={aiManagerSettings.requirement_chat?.enabled ?? true}
+                      onCheckedChange={(checked) => setAIManagerSettings((current) => ({
+                        ...current,
+                        requirement_chat: { ...(current.requirement_chat ?? defaultRequirementChatSettings), enabled: checked },
+                      }))}
+                    />
+                  </div>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>{t('reqChatMaxRequirements')}</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={200}
+                        disabled={!(aiManagerSettings.requirement_chat?.enabled ?? true)}
+                        value={aiManagerSettings.requirement_chat?.max_context_requirements ?? 40}
+                        onChange={(event) => setAIManagerSettings((current) => ({
+                          ...current,
+                          requirement_chat: {
+                            ...(current.requirement_chat ?? defaultRequirementChatSettings),
+                            max_context_requirements: Math.min(200, Math.max(1, Number(event.target.value) || 40)),
+                          },
+                        }))}
+                      />
+                      <p className="text-xs text-slate-400">{t('reqChatMaxRequirementsHint')}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t('reqChatHistoryTurns')}</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={20}
+                        disabled={!(aiManagerSettings.requirement_chat?.enabled ?? true)}
+                        value={aiManagerSettings.requirement_chat?.history_turns ?? 6}
+                        onChange={(event) => setAIManagerSettings((current) => ({
+                          ...current,
+                          requirement_chat: {
+                            ...(current.requirement_chat ?? defaultRequirementChatSettings),
+                            history_turns: Math.min(20, Math.max(0, Number(event.target.value) || 0)),
+                          },
+                        }))}
+                      />
+                      <p className="text-xs text-slate-400">{t('reqChatHistoryTurnsHint')}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <Label>{t('aiSourceScope')}</Label>
+                    <p className="text-xs text-slate-400">{t('aiSourceScopeHint')}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {AI_SOURCE_TYPES.map((type) => {
+                        const selected = (aiManagerSettings.requirement_chat?.source_types ?? ['requirements']).includes(type);
+                        const isRequirements = type === 'requirements';
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            disabled={isRequirements}
+                            onClick={() => setAIManagerSettings((current) => {
+                              const chat = current.requirement_chat ?? defaultRequirementChatSettings;
+                              const set = new Set(chat.source_types ?? ['requirements']);
+                              if (selected) set.delete(type); else set.add(type);
+                              set.add('requirements'); // always keep requirements
+                              return { ...current, requirement_chat: { ...chat, source_types: AI_SOURCE_TYPES.filter((t2) => set.has(t2)) } };
+                            })}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-gray-300 text-gray-600 hover:border-primary/40 dark:border-gray-600 dark:text-gray-300'} ${isRequirements ? 'opacity-70' : ''}`}
+                          >
+                            {t(`aiSource_${type}`)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Org guidance / custom system prompt */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <Label>{t('aiOrgGuidance')}</Label>
+                  <p className="mb-2 text-xs text-slate-400">{t('aiOrgGuidanceHint')}</p>
+                  <Textarea
+                    value={aiManagerSettings.system_prompt ?? ''}
+                    onChange={(event) => setAIManagerSettings((current) => ({ ...current, system_prompt: event.target.value }))}
+                    placeholder={t('aiOrgGuidancePlaceholder')}
+                    maxLength={2000}
+                    rows={3}
+                  />
+                </div>
+
+                {/* Test-case generation defaults + global compact payload */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{t('aiTestCaseGenTitle')}</h4>
+                  <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>{t('aiTestCaseGenCount')}</Label>
+                      <Input
+                        type="number" min={1} max={20}
+                        value={aiManagerSettings.test_case_generation?.default_count ?? 5}
+                        onChange={(event) => setAIManagerSettings((current) => ({
+                          ...current,
+                          test_case_generation: {
+                            default_count: Math.min(20, Math.max(1, Number(event.target.value) || 5)),
+                            max_tokens: current.test_case_generation?.max_tokens ?? 3000,
+                          },
+                        }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t('aiTestCaseGenMaxTokens')}</Label>
+                      <Input
+                        type="number" min={256} max={4000}
+                        value={aiManagerSettings.test_case_generation?.max_tokens ?? 3000}
+                        onChange={(event) => setAIManagerSettings((current) => ({
+                          ...current,
+                          test_case_generation: {
+                            default_count: current.test_case_generation?.default_count ?? 5,
+                            max_tokens: Math.min(4000, Math.max(256, Number(event.target.value) || 3000)),
+                          },
+                        }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div>
+                      <Label>{t('aiCompactDefault')}</Label>
+                      <p className="text-xs text-slate-400">{t('aiCompactDefaultHint')}</p>
+                    </div>
+                    <Switch
+                      checked={aiManagerSettings.compact_payload_default ?? true}
+                      onCheckedChange={(checked) => setAIManagerSettings((current) => ({ ...current, compact_payload_default: checked }))}
+                    />
+                  </div>
+                </div>
+
+                {/* Per-task model routing */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{t('aiRoutingTitle')}</h4>
+                  <p className="mb-3 text-xs text-slate-400">{t('aiRoutingHint')}</p>
+                  <div className="space-y-3">
+                    {AI_ROUTING_TASKS.map((task) => {
+                      const target = aiManagerSettings.routing?.[task] ?? { provider: null, model: null };
+                      return (
+                        <div key={task} className="grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
+                          <Label className="text-sm">{t(`aiRouting_${task}`)}</Label>
+                          <Select
+                            value={target.provider ?? 'active'}
+                            onValueChange={(value) => setAIManagerSettings((current) => ({
+                              ...current,
+                              routing: {
+                                ...(current.routing ?? defaultRoutingSettings),
+                                // Reset model when reverting to the active provider.
+                                [task]: value === 'active'
+                                  ? { provider: null, model: null }
+                                  : { provider: value as AIProviderName, model: target.model },
+                              },
+                            }))}
+                          >
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">{t('aiRoutingUseActive')}</SelectItem>
+                              {aiManagerSettings.providers.map((p) => (
+                                <SelectItem key={p.provider} value={p.provider}>{aiProviderLabels[p.provider]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            value={target.model ?? ''}
+                            disabled={!target.provider}
+                            placeholder={t('aiRoutingModelPlaceholder')}
+                            onChange={(event) => setAIManagerSettings((current) => ({
+                              ...current,
+                              routing: {
+                                ...(current.routing ?? defaultRoutingSettings),
+                                [task]: { provider: target.provider, model: event.target.value || null },
+                              },
+                            }))}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Fallback provider chain */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{t('aiFallbackTitle')}</h4>
+                      <p className="text-xs text-slate-400">{t('aiFallbackHint')}</p>
+                    </div>
+                    <Switch
+                      checked={aiManagerSettings.fallback?.enabled ?? false}
+                      onCheckedChange={(checked) => setAIManagerSettings((current) => ({
+                        ...current,
+                        fallback: { enabled: checked, order: current.fallback?.order ?? [] },
+                      }))}
+                    />
+                  </div>
+                  {(aiManagerSettings.fallback?.enabled ?? false) && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-slate-400">{t('aiFallbackOrderHint')}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {aiManagerSettings.providers.map((p) => {
+                          const order = aiManagerSettings.fallback?.order ?? [];
+                          const idx = order.indexOf(p.provider);
+                          const selected = idx >= 0;
+                          return (
+                            <button
+                              key={p.provider}
+                              type="button"
+                              onClick={() => setAIManagerSettings((current) => {
+                                const cur = current.fallback?.order ?? [];
+                                const next = selected ? cur.filter((x) => x !== p.provider) : [...cur, p.provider];
+                                return { ...current, fallback: { enabled: current.fallback?.enabled ?? true, order: next } };
+                              })}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-gray-300 text-gray-600 hover:border-primary/40 dark:border-gray-600 dark:text-gray-300'}`}
+                            >
+                              {selected ? `${idx + 1}. ` : ''}{aiProviderLabels[p.provider]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Spend by feature */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <h4 className="text-sm font-semibold text-slate-900 dark:text-white">{t('aiSpendTitle')}</h4>
+                  <p className="mb-3 text-xs text-slate-400">{t('aiSpendHint')}</p>
+                  {(() => {
+                    const spendRows = aggregateAISpend(aiUsageLimits?.by_operation ?? [], t);
+                    if (spendRows.length === 0) {
+                      return <p className="text-xs text-slate-400">{t('aiSpendEmpty')}</p>;
+                    }
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-gray-500 dark:text-gray-400">
+                              <th className="py-1 pe-4 font-medium">{t('aiSpendFeature')}</th>
+                              <th className="py-1 pe-4 font-medium">{t('aiSpendRequests')}</th>
+                              <th className="py-1 font-medium">{t('aiSpendTokens')}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {spendRows.map((row) => (
+                              <tr key={row.label} className="border-t border-gray-100 dark:border-gray-800">
+                                <td className="py-1.5 pe-4">{row.label}</td>
+                                <td className="py-1.5 pe-4 tabular-nums">{row.requests}{row.failures ? ` (${row.failures} ${t('failed')})` : ''}</td>
+                                <td className="py-1.5 tabular-nums">{formatAIUsageNumber(row.total_tokens)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div className="space-y-4">
                   {aiManagerSettings.providers.map((provider) => {
                     const providerUsage: Record<string, number> = aiUsage?.providers?.[provider.provider] || {};
                     const providerLimit = aiUsageLimits?.providers?.[provider.provider] || null;
+                    const expanded = expandedProviders[provider.provider] ?? provider.enabled;
                     return (
                       <div key={provider.provider} className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
                         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
@@ -3607,19 +3944,34 @@ export function Settings() {
                             <Badge variant={getAIUsageBadgeVariant(providerLimit?.status)}>
                               {getAIUsageStatusLabel(providerLimit?.status)}
                             </Badge>
+                            {expanded && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full sm:w-auto sm:min-w-36"
+                                onClick={() => handleTestAIProvider(provider.provider)}
+                                disabled={testingAIProvider === provider.provider || !provider.enabled}
+                              >
+                                {testingAIProvider === provider.provider ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <PlayCircle className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
+                                {t('testAIProvider')}
+                              </Button>
+                            )}
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full sm:w-auto sm:min-w-36"
-                              onClick={() => handleTestAIProvider(provider.provider)}
-                              disabled={testingAIProvider === provider.provider || !provider.enabled}
+                              variant="ghost"
+                              size="icon"
+                              className="shrink-0"
+                              onClick={() => setExpandedProviders((current) => ({ ...current, [provider.provider]: !expanded }))}
+                              aria-expanded={expanded}
+                              aria-label={expanded ? t('collapse') : t('expand')}
+                              title={expanded ? t('collapse') : t('expand')}
                             >
-                              {testingAIProvider === provider.provider ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <PlayCircle className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
-                              {t('testAIProvider')}
+                              <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? '' : '-rotate-90'}`} />
                             </Button>
                           </div>
                         </div>
 
+                        {expanded && (
+                        <>
                         <div className="mt-4 rounded-md bg-slate-50 p-3 dark:bg-slate-950">
                           <div className="mb-1 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
                             <span>{t('monthlyUsage')}</span>
@@ -3672,6 +4024,8 @@ export function Settings() {
                             <Input value={provider.base_url} onChange={(event) => updateAIProvider(provider.provider, { base_url: event.target.value })} />
                           </div>
                         </div>
+                        </>
+                        )}
                       </div>
                     );
                   })}

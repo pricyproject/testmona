@@ -102,6 +102,7 @@ const GHERKIN_TEMPLATE = [
   '    Then ',
 ].join('\n');
 const RIGHT_SIDEBAR_VISIBLE_STORAGE_KEY = 'requirementDetail.showRightSidebar';
+const TOON_PAYLOAD_STORAGE_KEY = 'requirementDetail.useToonPayload';
 
 const GHERKIN_BACKGROUND_TEMPLATE = ['  Background:', '    Given '].join('\n');
 const GHERKIN_SCENARIO_OUTLINE_TEMPLATE = [
@@ -260,6 +261,14 @@ export function RequirementDetail() {
   const [aiStatus, setAiStatus] = useState<AIManagerStatus | null>(null);
   const [loadingAIStatus, setLoadingAIStatus] = useState(false);
   const [aiGenerationForm, setAiGenerationForm] = useState({ count: 5, instructions: '' });
+  const [useToonPayload, setUseToonPayload] = useState(() => {
+    try {
+      return localStorage.getItem(TOON_PAYLOAD_STORAGE_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [lastPromptTokens, setLastPromptTokens] = useState<number | null>(null);
   const [activeAIDraftIndex, setActiveAIDraftIndex] = useState(0);
   const [dupFindings, setDupFindings] = useState<Record<number, DuplicateFinding>>({});
   const [dupSummary, setDupSummary] = useState<Pick<DuplicateCheckResult, 'duplicate_count' | 'similar_count' | 'existing_compared' | 'existing_truncated'> | null>(null);
@@ -368,7 +377,21 @@ export function RequirementDetail() {
       setLoadingAIStatus(true);
       try {
         const status = await aiManagerAPI.getStatus();
-        if (isMounted) setAiStatus(status);
+        if (isMounted) {
+          setAiStatus(status);
+          // Seed admin defaults: count always, TOON toggle only when the user
+          // has no saved preference (localStorage still overrides).
+          if (typeof status.test_case_default_count === 'number') {
+            setAiGenerationForm((current) => ({ ...current, count: status.test_case_default_count as number }));
+          }
+          try {
+            if (localStorage.getItem(TOON_PAYLOAD_STORAGE_KEY) === null && typeof status.compact_payload_default === 'boolean') {
+              setUseToonPayload(status.compact_payload_default);
+            }
+          } catch {
+            // localStorage unavailable; keep current toggle value.
+          }
+        }
       } catch (error) {
         console.error('Failed to load AI status:', error);
         if (isMounted) setAiStatus({ active_provider: 'openai', available: false, reason: 'active_provider_not_configured' });
@@ -956,9 +979,11 @@ export function RequirementDetail() {
       const result = await requirementsAPI.generateTestCases(requirement.id, {
         count: aiGenerationForm.count,
         instructions: aiGenerationForm.instructions.trim() || undefined,
+        payload_format: useToonPayload ? 'toon' : 'text',
       });
       const generatedDrafts: AIDraftTestCase[] = (result.drafts || []).map((draft: AIDraftTestCase) => ({ ...draft, selected: true }));
       setAiDrafts(generatedDrafts);
+      setLastPromptTokens(typeof result.prompt_tokens === 'number' ? result.prompt_tokens : null);
       setActiveAIDraftIndex(0);
       setAiWarnings(result.warnings || []);
       toast({ title: t('success'), description: t('aiDraftsGenerated', { count: result.drafts?.length || 0 }) });
@@ -1611,6 +1636,34 @@ export function RequirementDetail() {
                     maxLength={2000}
                   />
                 </div>
+              </div>
+              <div className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+                <div className="space-y-0.5">
+                  <Label htmlFor="toon-payload" className="flex items-center gap-2">
+                    {t('toonPayloadLabel')}
+                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                      {t('toonPayloadBadge')}
+                    </span>
+                  </Label>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{t('toonPayloadHint')}</p>
+                  {lastPromptTokens !== null && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {t('toonPromptTokens', { count: lastPromptTokens })}
+                    </p>
+                  )}
+                </div>
+                <Switch
+                  id="toon-payload"
+                  checked={useToonPayload}
+                  onCheckedChange={(checked) => {
+                    setUseToonPayload(checked);
+                    try {
+                      localStorage.setItem(TOON_PAYLOAD_STORAGE_KEY, String(checked));
+                    } catch {
+                      // localStorage may be unavailable (private mode, quota); ignore.
+                    }
+                  }}
+                />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">

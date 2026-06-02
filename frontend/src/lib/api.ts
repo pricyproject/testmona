@@ -57,9 +57,45 @@ export interface AIProviderConfig {
   api_key_required?: boolean;
 }
 
+export type AISourceType = "requirements" | "defects" | "test_plans" | "test_cases";
+
+export interface RequirementChatSettings {
+  enabled: boolean;
+  max_context_requirements: number;
+  history_turns: number;
+  source_types: AISourceType[];
+}
+
+export interface AIRoutingTarget {
+  provider: AIProviderName | null;
+  model: string | null;
+}
+
+export interface AIRoutingSettings {
+  qa: AIRoutingTarget;
+  generation: AIRoutingTarget;
+  assistant: AIRoutingTarget;
+}
+
+export interface AIFallbackSettings {
+  enabled: boolean;
+  order: AIProviderName[];
+}
+
+export interface AITestCaseGenerationSettings {
+  default_count: number;
+  max_tokens: number;
+}
+
 export interface AIManagerSettings {
   active_provider: AIProviderName;
   per_project_monthly_token_limit?: number | null;
+  requirement_chat?: RequirementChatSettings;
+  system_prompt?: string;
+  compact_payload_default?: boolean;
+  test_case_generation?: AITestCaseGenerationSettings;
+  routing?: AIRoutingSettings;
+  fallback?: AIFallbackSettings;
   providers: AIProviderConfig[];
 }
 
@@ -68,6 +104,19 @@ export interface AIManagerStatus {
   available: boolean;
   reason?: "active_provider_not_configured" | "active_provider_disabled" | "token_missing" | null;
   provider?: AIProviderConfig | null;
+  requirement_chat_enabled?: boolean;
+  requirement_chat_source_types?: AISourceType[];
+  compact_payload_default?: boolean;
+  test_case_default_count?: number;
+}
+
+export interface AIOperationUsage {
+  operation: string;
+  requests: number;
+  failures: number;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
 }
 
 export interface AIUsageLimitEntry {
@@ -91,6 +140,7 @@ export interface AIUsageSummary {
     active_provider: AIProviderName;
     providers: Record<AIProviderName, AIUsageLimitEntry>;
     active_provider_limit?: AIUsageLimitEntry | null;
+    by_operation?: AIOperationUsage[];
     project_monthly_limit: {
       limit: number | null;
       total_projects: number;
@@ -565,7 +615,7 @@ export const requirementsAPI = {
     const response = await api.post(`/requirements/${id}/test-cases`, payload);
     return response.data;
   },
-  generateTestCases: async (id: number, payload: { count?: number; instructions?: string }) => {
+  generateTestCases: async (id: number, payload: { count?: number; instructions?: string; payload_format?: 'text' | 'toon' }) => {
     const response = await api.post(`/requirements/${id}/ai/test-cases`, payload);
     return response.data;
   },
@@ -622,6 +672,46 @@ export const requirementsAPI = {
   },
   getRelationships: async (id: number) => {
     const response = await api.get(`/requirements/${id}/relationships`);
+    return response.data;
+  },
+};
+
+// Project-wide requirement AI chat
+export const requirementChatAPI = {
+  listConversations: async (projectId: number, archived = false) => {
+    const response = await api.get(`/projects/${projectId}/ai/conversations`, { params: { archived } });
+    return response.data;
+  },
+  getConversation: async (projectId: number, conversationId: number) => {
+    const response = await api.get(`/projects/${projectId}/ai/conversations/${conversationId}`);
+    return response.data;
+  },
+  getConversationByLink: async (projectId: number, publicId: string) => {
+    const response = await api.get(`/projects/${projectId}/ai/conversations/by-link/${publicId}`);
+    return response.data;
+  },
+  createConversation: async (projectId: number) => {
+    const response = await api.post(`/projects/${projectId}/ai/conversations`);
+    return response.data;
+  },
+  updateConversation: async (projectId: number, conversationId: number, payload: { title?: string; archived?: boolean; share_scope?: 'private' | 'project' }) => {
+    const response = await api.patch(`/projects/${projectId}/ai/conversations/${conversationId}`, payload);
+    return response.data;
+  },
+  deleteConversation: async (projectId: number, conversationId: number) => {
+    const response = await api.delete(`/projects/${projectId}/ai/conversations/${conversationId}`);
+    return response.data;
+  },
+  ask: async (projectId: number, payload: { question: string; conversation_id?: number; source_types?: AISourceType[] }, signal?: AbortSignal) => {
+    const response = await api.post(`/projects/${projectId}/ai/ask`, payload, { signal });
+    return response.data;
+  },
+  regenerate: async (projectId: number, conversationId: number, sourceTypes?: AISourceType[], signal?: AbortSignal) => {
+    const response = await api.post(
+      `/projects/${projectId}/ai/conversations/${conversationId}/regenerate`,
+      { source_types: sourceTypes },
+      { signal },
+    );
     return response.data;
   },
 };

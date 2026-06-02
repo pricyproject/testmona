@@ -122,6 +122,7 @@ export function Sidebar({
         items: [
           { name: t('projects'), href: '/projects', icon: FolderOpen },
           { name: t('overview'), href: '/dashboard', icon: LayoutDashboard },
+          { name: t('navAskAi'), href: `/projects/${projectId}/ask`, icon: Sparkles },
         ]
       },
       {

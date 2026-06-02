@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2, ArrowUpDown, ArrowUp, ArrowDown, Bookmark, BookmarkPlus, Star, X, ListChecks, ShieldCheck, ShieldAlert, ShieldX, Loader2, Tag } from 'lucide-react';
+import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2, ArrowUpDown, ArrowUp, ArrowDown, Bookmark, BookmarkPlus, Star, X, ListChecks, ShieldCheck, ShieldAlert, ShieldX, Loader2, Tag, Sparkles, Copy, Check } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
@@ -47,6 +47,9 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter } from '@/lib/api';
 import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus } from '@/types';
+import { RequirementChatPanel } from '@/components/requirements/RequirementChatPanel';
+import { useAuthStore } from '@/stores/authStore';
+import { canWriteResults } from '@/utils/roles';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { GherkinEditor } from '@/components/requirements/GherkinEditor';
 import { isGherkinText } from '@/components/requirements/gherkin';
@@ -65,10 +68,13 @@ export function Requirements() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const { user } = useAuthStore();
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [copiedKeyId, setCopiedKeyId] = useState<number | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -873,6 +879,16 @@ export function Requirements() {
     }
   };
 
+  const handleCopyRequirementId = async (requirement: Requirement) => {
+    try {
+      await navigator.clipboard.writeText(requirement.requirement_id);
+      setCopiedKeyId(requirement.id);
+      setTimeout(() => setCopiedKeyId((cur) => (cur === requirement.id ? null : cur)), 1500);
+    } catch {
+      toast({ title: t('error'), description: t('copyFailed'), variant: 'destructive' });
+    }
+  };
+
   const openDeleteDialog = (requirement: Requirement) => {
     setRequirementToDelete(requirement);
     setDeleteConfirmationName('');
@@ -1563,16 +1579,31 @@ export function Requirements() {
           <h1 className="text-3xl font-bold">{t('requirements')}</h1>
           <p className="text-gray-600 dark:text-gray-400">{t('requirementsDescription')}</p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={(open) => !open && handleDialogClose('create')}>
-          <DialogTrigger asChild>
-            <Button onClick={handleOpenCreateDialog}>
-              <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {t('addRequirement')}
+        <div className="flex items-center gap-2">
+          {canWriteResults(user) && requirements.length > 0 && (
+            <Button variant="outline" onClick={() => setIsChatOpen(true)}>
+              <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('reqChatButton')}
             </Button>
-          </DialogTrigger>
-          {renderRequirementDialogContent('create')}
-        </Dialog>
+          )}
+          <Dialog open={isCreateDialogOpen} onOpenChange={(open) => !open && handleDialogClose('create')}>
+            <DialogTrigger asChild>
+              <Button onClick={handleOpenCreateDialog}>
+                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('addRequirement')}
+              </Button>
+            </DialogTrigger>
+            {renderRequirementDialogContent('create')}
+          </Dialog>
+        </div>
       </div>
+      {projectId && (
+        <RequirementChatPanel
+          projectId={parseInt(projectId)}
+          open={isChatOpen}
+          onOpenChange={setIsChatOpen}
+        />
+      )}
 
       {/* Enhanced Search and Filters */}
       <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-4">
@@ -1791,7 +1822,18 @@ export function Requirements() {
                   />
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <span className="font-mono text-sm text-gray-500 dark:text-gray-400">{requirement.requirement_id}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="font-mono text-sm text-gray-500 dark:text-gray-400">{requirement.requirement_id}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyRequirementId(requirement)}
+                          className="text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200"
+                          aria-label={t('copyRequirementId')}
+                          title={copiedKeyId === requirement.id ? t('copied') : t('copyRequirementId')}
+                        >
+                          {copiedKeyId === requirement.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </span>
                       <Badge className={getStatusBadge(requirement.status)}>
                         <div className="flex items-center gap-1">
                           {getStatusIcon(requirement.status)}
@@ -1803,7 +1845,15 @@ export function Requirements() {
                       </Badge>
                       {renderCoverageBadge(requirement)}
                     </div>
-                    <CardTitle className="text-lg mb-1">{requirement.title}</CardTitle>
+                    <CardTitle className="text-lg mb-1">
+                      <button
+                        type="button"
+                        onClick={() => handleViewRequirement(requirement)}
+                        className="text-start hover:text-primary hover:underline focus:outline-none focus-visible:underline"
+                      >
+                        {requirement.title}
+                      </button>
+                    </CardTitle>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
                       {toDisplayText(requirement.description) || t('noDescriptionProvided')}
                     </p>
@@ -1836,16 +1886,8 @@ export function Requirements() {
               <CardContent>
                 <div className="flex justify-between items-center">
                   <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleViewRequirement(requirement)}
-                    >
-                      <Eye className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                      {t('view')}
-                    </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       onClick={() => handleEditRequirement(requirement)}
                     >
