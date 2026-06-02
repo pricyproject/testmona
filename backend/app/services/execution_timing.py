@@ -60,22 +60,32 @@ def apply_test_result_execution_timing(test_result: Any, incoming_data: Mapping[
     """Keep execution start and elapsed seconds consistent for result status changes."""
     status = incoming_data.get("status", getattr(test_result, "status", None))
     
+    # When the client sends an authoritative duration alongside a state change
+    # (the execution page computes elapsed time itself), trust it and skip the
+    # clock-based recompute below — recomputing would clobber the client value
+    # since crud copies fields *before* calling this function.
+    client_execution_time = incoming_data.get("execution_time")
+    has_client_time = client_execution_time is not None
+
     # Handle pause/resume state changes
     execution_state = incoming_data.get("execution_state")
     if execution_state:
         setattr(test_result, "execution_state", execution_state)
-        
+
         # Handle pause timing
         if execution_state == "paused":
             setattr(test_result, "paused_at", _utc_now())
-            # Update execution_time to current elapsed time when pausing
-            started_at = getattr(test_result, "execution_started_at", None)
-            if started_at:
-                now = _utc_now()
-                elapsed_seconds = max(0.0, (now - _as_aware_utc(started_at)).total_seconds())
-                elapsed_seconds -= _safe_seconds(getattr(test_result, "total_paused_time", 0))
-                elapsed_seconds += _safe_seconds(getattr(test_result, "manual_time_adjustment", 0))
-                setattr(test_result, "execution_time", round(max(0.0, elapsed_seconds), 2))
+            if has_client_time:
+                setattr(test_result, "execution_time", round(max(0.0, _safe_seconds(client_execution_time)), 2))
+            else:
+                # Update execution_time to current elapsed time when pausing
+                started_at = getattr(test_result, "execution_started_at", None)
+                if started_at:
+                    now = _utc_now()
+                    elapsed_seconds = max(0.0, (now - _as_aware_utc(started_at)).total_seconds())
+                    elapsed_seconds -= _safe_seconds(getattr(test_result, "total_paused_time", 0))
+                    elapsed_seconds += _safe_seconds(getattr(test_result, "manual_time_adjustment", 0))
+                    setattr(test_result, "execution_time", round(max(0.0, elapsed_seconds), 2))
         elif execution_state == "running":
             # Resume from pause
             paused_at = getattr(test_result, "paused_at", None)
@@ -86,14 +96,21 @@ def apply_test_result_execution_timing(test_result: Any, incoming_data: Mapping[
                 total_paused_time += pause_duration
                 setattr(test_result, "total_paused_time", total_paused_time)
                 setattr(test_result, "paused_at", None)
-                # Update execution_time to current elapsed time when resuming
-                started_at = getattr(test_result, "execution_started_at", None)
-                if started_at:
-                    now = _utc_now()
-                    elapsed_seconds = max(0.0, (now - _as_aware_utc(started_at)).total_seconds())
-                    elapsed_seconds -= total_paused_time
-                    elapsed_seconds += _safe_seconds(getattr(test_result, "manual_time_adjustment", 0))
-                    setattr(test_result, "execution_time", round(max(0.0, elapsed_seconds), 2))
+                if has_client_time:
+                    setattr(test_result, "execution_time", round(max(0.0, _safe_seconds(client_execution_time)), 2))
+                else:
+                    # Update execution_time to current elapsed time when resuming
+                    started_at = getattr(test_result, "execution_started_at", None)
+                    if started_at:
+                        now = _utc_now()
+                        elapsed_seconds = max(0.0, (now - _as_aware_utc(started_at)).total_seconds())
+                        elapsed_seconds -= total_paused_time
+                        elapsed_seconds += _safe_seconds(getattr(test_result, "manual_time_adjustment", 0))
+                        setattr(test_result, "execution_time", round(max(0.0, elapsed_seconds), 2))
+            elif has_client_time:
+                # Resuming with an authoritative client duration but no recorded
+                # pause (e.g. the page never persisted paused_at) — still trust it.
+                setattr(test_result, "execution_time", round(max(0.0, _safe_seconds(client_execution_time)), 2))
     
         
     # Only apply timing logic for completed statuses and not during pause/resume state changes

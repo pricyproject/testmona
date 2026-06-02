@@ -625,7 +625,14 @@ def get_test_results(db: Session, test_run_id: Optional[int] = None, test_case_i
         selectinload(TestResult.defect_links).joinedload(TestResultDefectLink.defect),
     ).filter(
         TestResult.test_case_id.isnot(None),
-        TestResult.test_run_id.isnot(None)
+        TestResult.test_run_id.isnot(None),
+        # Exclude results whose test case has been soft-deleted (or no longer
+        # exists). Keeping them surfaces "ghost" cases in run listings and feeds
+        # deleted cases into the execution prev/next navigation, which then 404
+        # on load.
+        TestResult.test_case.has(
+            (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))
+        ),
     )
     if test_run_id:
         query = query.filter(TestResult.test_run_id == test_run_id)
@@ -2259,6 +2266,20 @@ def get_test_step_results(db: Session, project_id: int = None, test_run_id: int 
 
 def get_test_step_results_by_test_result(db: Session, test_result_id: int):
     return db.query(TestStepResult).filter(TestStepResult.test_result_id == test_result_id).order_by(TestStepResult.step_number).all()
+
+
+def replace_test_step_results(db: Session, test_result_id: int, step_results: list):
+    """Replace all per-step results for a test result with the provided list.
+
+    Used by the execution page to record each step's outcome in one shot.
+    """
+    db.query(TestStepResult).filter(TestStepResult.test_result_id == test_result_id).delete()
+    for item in step_results:
+        data = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+        data.pop("test_result_id", None)
+        db.add(TestStepResult(test_result_id=test_result_id, **data))
+    safe_commit(db)
+    return get_test_step_results_by_test_result(db, test_result_id)
 
 
 # Shareable Reports CRUD

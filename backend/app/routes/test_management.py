@@ -2669,6 +2669,37 @@ def register_test_management_routes(app):
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Failed to reset test result time: {str(e)}")
 
+    @app.get("/test-results/{test_result_id}/step-results", response_model=List[schemas.TestStepResult])
+    def get_result_step_results(
+        test_result_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Per-step pass/fail outcomes recorded for a test result."""
+        db_test_result = crud.get_test_result(db, test_result_id=test_result_id)
+        if db_test_result is None:
+            raise HTTPException(status_code=404, detail="Test result not found")
+        test_run = crud.get_test_run(db, test_run_id=db_test_result.test_run_id)
+        if test_run and not rbac.has_permission(current_user, "read", test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to view this test result")
+        return crud.get_test_step_results_by_test_result(db, test_result_id)
+
+    @app.put("/test-results/{test_result_id}/step-results", response_model=List[schemas.TestStepResult])
+    def set_result_step_results(
+        test_result_id: int,
+        step_results: List[schemas.TestStepResultBase],
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Replace the per-step outcomes for a test result in one shot."""
+        db_test_result = crud.get_test_result(db, test_result_id=test_result_id)
+        if db_test_result is None:
+            raise HTTPException(status_code=404, detail="Test result not found")
+        test_run = crud.get_test_run(db, test_run_id=db_test_result.test_run_id)
+        if test_run and not rbac.has_permission(current_user, "write", test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to modify this test result")
+        return crud.replace_test_step_results(db, test_result_id, step_results)
+
     @app.get("/test-cases/{test_case_id}/execution-history")
     def get_test_case_execution_history(
         test_case_id: int,

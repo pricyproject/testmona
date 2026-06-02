@@ -811,6 +811,33 @@ export const testResultsAPI = {
     const response = await api.put(`/test-results/${id}/reset-time`);
     return response.data;
   },
+  pause: async (id: number) => {
+    const response = await api.put(`/test-results/${id}/pause`);
+    return response.data;
+  },
+  resume: async (id: number) => {
+    const response = await api.put(`/test-results/${id}/resume`);
+    return response.data;
+  },
+  addTime: async (id: number, hours: number) => {
+    const response = await api.put(`/test-results/${id}/add-time`, { hours });
+    return response.data;
+  },
+  // Per-step pass/fail outcomes for a result
+  getStepResults: async (id: number) => {
+    const response = await api.get(`/test-results/${id}/step-results`);
+    return response.data;
+  },
+  saveStepResults: async (id: number, stepResults: Array<{
+    step_number: number;
+    step_name: string;
+    step_status: string;
+    step_duration?: number;
+    error_message?: string | null;
+  }>) => {
+    const response = await api.put(`/test-results/${id}/step-results`, stepResults);
+    return response.data;
+  },
   // Defect links for a specific execution result
   getDefectLinks: async (id: number) => {
     const response = await api.get(`/test-results/${id}/defect-links`);
