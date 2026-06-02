@@ -67,7 +67,7 @@ export function Layout({ children }: LayoutProps) {
   };
 
   return (
-    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200 flex print:block print:bg-white ${isRTL ? 'font-vazir' : ''}`}>
+    <div className={`h-screen overflow-hidden bg-gray-50 dark:bg-gray-900 transition-colors duration-200 flex print:block print:h-auto print:overflow-visible print:bg-white ${isRTL ? 'font-vazir' : ''}`}>
       {/* Sidebar */}
       <div className="print:hidden">
         <Sidebar
@@ -94,8 +94,10 @@ export function Layout({ children }: LayoutProps) {
           />
         </div>
 
-        {/* Page content */}
-        <main className="flex-1 p-6 overflow-auto print:p-0 print:overflow-visible">
+        {/* Page content — `min-h-0` lets this flex child shrink so its own
+            overflow scrolls (instead of growing the page), which is what makes
+            `position: sticky` work for descendants. */}
+        <main className="flex-1 min-h-0 p-6 overflow-auto print:p-0 print:overflow-visible">
           {children}
         </main>
       </div>
