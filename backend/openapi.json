@@ -9600,6 +9600,116 @@
         }
       }
     },
+    "/test-results/{test_result_id}/step-results": {
+      "get": {
+        "summary": "Get Result Step Results",
+        "description": "Per-step pass/fail outcomes recorded for a test result.",
+        "operationId": "get_result_step_results_test_results__test_result_id__step_results_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_result_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Result Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TestStepResult"
+                  },
+                  "title": "Response Get Result Step Results Test Results  Test Result Id  Step Results Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set Result Step Results",
+        "description": "Replace the per-step outcomes for a test result in one shot.",
+        "operationId": "set_result_step_results_test_results__test_result_id__step_results_put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "test_result_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Test Result Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TestStepResultBase"
+                },
+                "title": "Step Results"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TestStepResult"
+                  },
+                  "title": "Response Set Result Step Results Test Results  Test Result Id  Step Results Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/test-cases/{test_case_id}/execution-history": {
       "get": {
         "summary": "Get Test Case Execution History",
@@ -20130,6 +20240,439 @@
           }
         ]
       }
+    },
+    "/projects/{project_id}/ai/conversations": {
+      "get": {
+        "summary": "List Conversations",
+        "operationId": "list_conversations_projects__project_id__ai_conversations_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Archived"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequirementChatConversationView"
+                  },
+                  "title": "Response List Conversations Projects  Project Id  Ai Conversations Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Conversation",
+        "operationId": "create_conversation_projects__project_id__ai_conversations_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementChatConversationView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/ai/conversations/by-link/{public_id}": {
+      "get": {
+        "summary": "Get Shared Conversation",
+        "operationId": "get_shared_conversation_projects__project_id__ai_conversations_by_link__public_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "public_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Public Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementChatSharedView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/ai/conversations/{conversation_id}": {
+      "get": {
+        "summary": "Get Conversation",
+        "operationId": "get_conversation_projects__project_id__ai_conversations__conversation_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementChatConversationView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update Conversation",
+        "operationId": "update_conversation_projects__project_id__ai_conversations__conversation_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementChatConversationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementChatConversationView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete Conversation",
+        "operationId": "delete_conversation_projects__project_id__ai_conversations__conversation_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/ai/ask": {
+      "post": {
+        "summary": "Ask About Requirements",
+        "operationId": "ask_about_requirements_projects__project_id__ai_ask_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementChatAsk"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementChatAskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{project_id}/ai/conversations/{conversation_id}/regenerate": {
+      "post": {
+        "summary": "Regenerate Answer",
+        "operationId": "regenerate_answer_projects__project_id__ai_conversations__conversation_id__regenerate_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequirementChatRegenerate",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementChatAskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -20271,6 +20814,69 @@
               }
             ],
             "title": "Per Project Monthly Token Limit"
+          },
+          "requirement_chat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequirementChatSettingsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "compact_payload_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compact Payload Default"
+          },
+          "test_case_generation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TestCaseGenerationSettingsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "routing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutingSettingsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackSettingsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "providers": {
             "items": {
@@ -26154,6 +26760,24 @@
         ],
         "title": "ExportTestCasesResponse"
       },
+      "FallbackSettingsPayload": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Order"
+          }
+        },
+        "type": "object",
+        "title": "FallbackSettingsPayload"
+      },
       "FlakinessEntry": {
         "properties": {
           "runs": {
@@ -29625,6 +30249,345 @@
         ],
         "title": "Requirement"
       },
+      "RequirementChatAsk": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "source_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "RequirementChatAsk"
+      },
+      "RequirementChatAskResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "integer",
+            "title": "Conversation Id"
+          },
+          "message": {
+            "$ref": "#/components/schemas/RequirementChatMessageView"
+          },
+          "retrieval_truncated": {
+            "type": "boolean",
+            "title": "Retrieval Truncated",
+            "default": false
+          },
+          "requirements_considered": {
+            "type": "integer",
+            "title": "Requirements Considered",
+            "default": 0
+          },
+          "requirements_used": {
+            "type": "integer",
+            "title": "Requirements Used",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message"
+        ],
+        "title": "RequirementChatAskResponse"
+      },
+      "RequirementChatConversationUpdate": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
+          "share_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Scope"
+          }
+        },
+        "type": "object",
+        "title": "RequirementChatConversationUpdate"
+      },
+      "RequirementChatConversationView": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "public_id": {
+            "type": "string",
+            "title": "Public Id"
+          },
+          "project_id": {
+            "type": "integer",
+            "title": "Project Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived",
+            "default": false
+          },
+          "share_scope": {
+            "type": "string",
+            "title": "Share Scope",
+            "default": "private"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementChatMessageView"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "public_id",
+          "project_id",
+          "title",
+          "created_at"
+        ],
+        "title": "RequirementChatConversationView"
+      },
+      "RequirementChatMessageView": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/RequirementChatSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Tokens"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "RequirementChatMessageView"
+      },
+      "RequirementChatRegenerate": {
+        "properties": {
+          "source_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Types"
+          }
+        },
+        "type": "object",
+        "title": "RequirementChatRegenerate"
+      },
+      "RequirementChatSettingsPayload": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "max_context_requirements": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Max Context Requirements",
+            "default": 40
+          },
+          "history_turns": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "History Turns",
+            "default": 6
+          },
+          "source_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Types"
+          }
+        },
+        "type": "object",
+        "title": "RequirementChatSettingsPayload"
+      },
+      "RequirementChatSharedView": {
+        "properties": {
+          "conversation": {
+            "$ref": "#/components/schemas/RequirementChatConversationView"
+          },
+          "read_only": {
+            "type": "boolean",
+            "title": "Read Only",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation"
+        ],
+        "title": "RequirementChatSharedView",
+        "description": "A conversation fetched via its share link; read_only when the requester\nis not the owner."
+      },
+      "RequirementChatSource": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "requirement"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "requirement_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "title"
+        ],
+        "title": "RequirementChatSource"
+      },
       "RequirementCommentCreate": {
         "properties": {
           "body": {
@@ -30730,11 +31693,17 @@
       "RequirementTestCaseGenerationRequest": {
         "properties": {
           "count": {
-            "type": "integer",
-            "maximum": 10.0,
-            "minimum": 1.0,
-            "title": "Count",
-            "default": 5
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
           },
           "instructions": {
             "anyOf": [
@@ -30747,6 +31716,21 @@
               }
             ],
             "title": "Instructions"
+          },
+          "payload_format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "toon"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Format"
           }
         },
         "type": "object",
@@ -30779,6 +31763,11 @@
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens",
+            "default": 0
           }
         },
         "type": "object",
@@ -31424,6 +32413,50 @@
           "project_id"
         ],
         "title": "RootCauseAnalysisCreate"
+      },
+      "RoutingSettingsPayload": {
+        "properties": {
+          "qa": {
+            "$ref": "#/components/schemas/RoutingTargetPayload"
+          },
+          "generation": {
+            "$ref": "#/components/schemas/RoutingTargetPayload"
+          },
+          "assistant": {
+            "$ref": "#/components/schemas/RoutingTargetPayload"
+          }
+        },
+        "type": "object",
+        "title": "RoutingSettingsPayload"
+      },
+      "RoutingTargetPayload": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "title": "RoutingTargetPayload"
       },
       "SavedFilterCreate": {
         "properties": {
@@ -32879,6 +33912,26 @@
           "project_id"
         ],
         "title": "TestCaseDraftAssistantRequest"
+      },
+      "TestCaseGenerationSettingsPayload": {
+        "properties": {
+          "default_count": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Default Count",
+            "default": 5
+          },
+          "max_tokens": {
+            "type": "integer",
+            "maximum": 4000.0,
+            "minimum": 256.0,
+            "title": "Max Tokens",
+            "default": 3000
+          }
+        },
+        "type": "object",
+        "title": "TestCaseGenerationSettingsPayload"
       },
       "TestCaseLinkedRequirement": {
         "properties": {
@@ -37356,6 +38409,67 @@
           "created_at"
         ],
         "title": "TestStepResult"
+      },
+      "TestStepResultBase": {
+        "properties": {
+          "step_number": {
+            "type": "integer",
+            "title": "Step Number"
+          },
+          "step_name": {
+            "type": "string",
+            "title": "Step Name"
+          },
+          "step_status": {
+            "type": "string",
+            "title": "Step Status"
+          },
+          "step_duration": {
+            "type": "number",
+            "title": "Step Duration",
+            "default": 0.0
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "screenshot_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screenshot Path"
+          },
+          "step_data": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "step_number",
+          "step_name",
+          "step_status"
+        ],
+        "title": "TestStepResultBase"
       },
       "TestStepResultCreate": {
         "properties": {
