@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronRight, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun, User } from 'lucide-react';
+import { ChevronRight, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Settings, Sun, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
 import { useProjectStore } from '@/stores/projectStore';
@@ -171,7 +171,9 @@ export function Navbar({
     };
   }, [user]);
 
-  const SidebarToggleIcon = isSidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
+  const SidebarToggleIcon = isRTL
+    ? (isSidebarCollapsed ? PanelRightOpen : PanelRightClose)
+    : (isSidebarCollapsed ? PanelLeftOpen : PanelLeftClose);
   const iconButtonClass = 'h-9 w-9 rounded-lg p-0 text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white';
 
   return (

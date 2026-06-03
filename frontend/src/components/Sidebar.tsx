@@ -178,8 +178,17 @@ export function Sidebar({
 
   const navigation = buildNavigation();
 
-  const isActive = (href: string) => location.pathname === href;
-  const showCollapsed = isCollapsed && !isHovering;
+  const isActive = (href: string) => {
+    if (location.pathname === href) return true;
+    // Keep a section highlighted while on its nested detail pages, but never let
+    // the bare "/projects" root light up on every project-scoped page.
+    if (href === '/projects') return false;
+    return location.pathname.startsWith(`${href}/`);
+  };
+  // Collapsing is a desktop affordance. When the mobile drawer is open we always
+  // show full-width labels (touch can't hover to peek). `isOpen` is only ever
+  // true on mobile, so this is a no-op on desktop.
+  const showCollapsed = isCollapsed && !isHovering && !isOpen;
 
   return (
     <>
@@ -193,11 +202,14 @@ export function Sidebar({
 
       {/* Sidebar */}
       <div
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
         className={`
-          bg-white dark:bg-gray-900 shadow-lg border-r border-gray-200 dark:border-gray-700
+          bg-white dark:bg-gray-900 shadow-lg border-e border-gray-200 dark:border-gray-700
           flex flex-col transition-all duration-300 ease-in-out
           ${showCollapsed ? 'w-16' : 'w-64'}
-          ${isOpen ? 'fixed lg:static top-0 bottom-0 left-0 z-50 lg:z-auto translate-x-0 lg:translate-x-0' : 'fixed lg:static top-0 bottom-0 left-0 z-50 lg:z-auto -translate-x-full lg:translate-x-0'}
+          fixed lg:static top-0 bottom-0 start-0 z-50 lg:z-auto lg:translate-x-0
+          ${isOpen ? 'translate-x-0' : (isRTL ? 'translate-x-full' : '-translate-x-full')}
           min-w-0 h-screen lg:relative
         `}
       >
@@ -231,7 +243,7 @@ export function Sidebar({
               className="lg:hidden"
               onClick={onClose}
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className={`h-4 w-4 ${isRTL ? 'rotate-180' : ''}`} />
             </Button>
           )}
         </div>
@@ -282,7 +294,7 @@ export function Sidebar({
                             className={`
                               group flex items-center py-2.5 text-sm font-medium rounded-lg transition-all duration-300 ease-in-out relative overflow-hidden
                               ${isItemActive
-                                ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-700 shadow-xs dark:bg-blue-900/20 dark:text-blue-400'
+                                ? 'bg-blue-50 text-blue-700 border-e-2 border-blue-700 shadow-xs dark:bg-blue-900/20 dark:text-blue-400'
                                 : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 hover:shadow-xs dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
                               }
                               ${showCollapsed ? 'justify-center px-1' : 'px-3'}
@@ -329,7 +341,7 @@ export function Sidebar({
             title={isCollapsed ? t('expandSidebar') : t('collapseSidebar')}
           >
             <ChevronLeft className={`h-4 w-4 transition-transform duration-300 ease-in-out ${
-              isRTL ? (isCollapsed ? '-rotate-180' : 'rotate-180') : (isCollapsed ? 'rotate-180' : '')
+              isCollapsed !== isRTL ? 'rotate-180' : ''
             }`} />
             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${isRTL ? 'mr-2' : 'ml-2'} ${
               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'

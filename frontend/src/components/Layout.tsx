@@ -15,7 +15,12 @@ export function Layout({ children }: LayoutProps) {
   const { theme, toggleTheme } = useTheme();
   const { language } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+  // Collapsed by default; remember the user's choice across reloads.
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem('sidebarCollapsed');
+    return stored === null ? true : stored === 'true';
+  });
   const [isHovering, setIsHovering] = React.useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = React.useState(false);
 
@@ -62,8 +67,11 @@ export function Layout({ children }: LayoutProps) {
   };
 
   const handleSidebarToggle = () => {
-    console.log('Layout handleSidebarToggle called, current state:', sidebarCollapsed);
-    setSidebarCollapsed(!sidebarCollapsed);
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      window.localStorage.setItem('sidebarCollapsed', String(next));
+      return next;
+    });
   };
 
   return (
