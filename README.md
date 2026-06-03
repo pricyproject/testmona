@@ -33,7 +33,7 @@ cd frontend
 npm run dev
 ```
 
-Open the app at [http://localhost:3000](http://localhost:3000). The backend API is available at [http://localhost:8000](http://localhost:8000), and Swagger docs are available at [http://localhost:8000/docs](http://localhost:8000/docs).
+Open the app at [http://localhost:3000](http://localhost:3000). The backend API is available at [http://localhost:8000](http://localhost:8000), and Swagger docs are available at [http://localhost:8000/api-docs](http://localhost:8000/api-docs).
 
 ## Docker
 
