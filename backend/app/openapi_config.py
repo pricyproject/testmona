@@ -164,6 +164,10 @@ def get_openapi_config():
                 "description": "Requirements management and traceability"
             },
             {
+                "name": "Docs",
+                "description": "Doc Hub spaces, folders, Markdown docs, version history, sharing, import/export, and requirement conversion"
+            },
+            {
                 "name": "Defects",
                 "description": "Defect tracking, management, and resolution"
             },
