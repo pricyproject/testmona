@@ -1,7 +1,7 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from .models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity
+from .models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
 import re
 import html
 
@@ -4276,3 +4276,493 @@ __all__ = [
     "NotificationSettingsBase", "NotificationSettingsCreate", "NotificationSettingsUpdate", "NotificationSettings",
     "AutomationSettingsBase", "AutomationSettingsCreate", "AutomationSettingsUpdate", "AutomationSettings"
 ]
+
+
+# ===========================================================================
+# Doc Hub — Docs-as-Code documentation
+# ===========================================================================
+
+DOC_TITLE_MAX = 255
+DOC_TAGS_MAX = 500
+
+
+def _clean_plain_text(value: Optional[str], *, max_len: Optional[int] = None) -> Optional[str]:
+    """Strip and HTML-escape a short plain-text field (title/tags/classification).
+
+    Unescape first so re-saving an already-escaped value stays idempotent. The
+    canonical ``content_markdown`` is intentionally NOT escaped here — it is
+    sanitized on render by the frontend so Markdown stays clean and diffable.
+    """
+    if value is None:
+        return None
+    cleaned = html.escape(html.unescape(value)).strip()
+    if max_len is not None and len(cleaned) > max_len:
+        cleaned = cleaned[:max_len]
+    return cleaned
+
+
+class DocSpaceBase(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    classification: Optional[str] = Field(default=None, max_length=100)
+    icon: Optional[str] = Field(default=None, max_length=50)
+    color: Optional[str] = Field(default=None, max_length=20)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("Space name cannot be empty")
+        return cleaned
+
+    @field_validator("classification", "icon", "color")
+    @classmethod
+    def _strip_optional_short_text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class DocSpaceCreate(DocSpaceBase):
+    # NULL => a global space, otherwise project-scoped.
+    project_id: Optional[int] = None
+
+
+class DocSpaceUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    classification: Optional[str] = Field(default=None, max_length=100)
+    icon: Optional[str] = Field(default=None, max_length=50)
+    color: Optional[str] = Field(default=None, max_length=20)
+    order_index: Optional[int] = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Space name cannot be empty")
+        return cleaned
+
+    @field_validator("classification", "icon", "color")
+    @classmethod
+    def _strip_optional_short_text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class DocSpace(DocSpaceBase):
+    id: int
+    uuid: Optional[str] = None
+    slug: str
+    project_id: Optional[int] = None
+    order_index: int = 0
+    doc_count: int = 0
+    created_by: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocFolderBase(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    parent_folder_id: Optional[int] = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("Folder name cannot be empty")
+        return cleaned
+
+
+class DocFolderCreate(DocFolderBase):
+    space_id: int
+
+
+class DocFolderUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    parent_folder_id: Optional[int] = None
+    order_index: Optional[int] = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Folder name cannot be empty")
+        return cleaned
+
+
+class DocFolder(DocFolderBase):
+    id: int
+    uuid: Optional[str] = None
+    space_id: int
+    order_index: int = 0
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocBase(BaseModel):
+    title: str = Field(min_length=1, max_length=DOC_TITLE_MAX)
+    content_markdown: Optional[str] = ""
+    classification: Optional[str] = Field(default=None, max_length=100)
+    status: DocStatus = DocStatus.DRAFT
+    tags: Optional[str] = Field(default=None, max_length=DOC_TAGS_MAX)
+    dir: Optional[str] = "auto"
+    language: Optional[str] = Field(default=None, max_length=20)
+    folder_id: Optional[int] = None
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("Title cannot be empty")
+        return cleaned
+
+    @field_validator("content_markdown", mode="before")
+    @classmethod
+    def _normalize_content(cls, v: Optional[str]) -> str:
+        return v or ""
+
+    @field_validator("classification", "tags", "language")
+    @classmethod
+    def _strip_optional_text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+    @field_validator("dir")
+    @classmethod
+    def _validate_dir(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return "auto"
+        if v not in {"ltr", "rtl", "auto"}:
+            raise ValueError("dir must be one of: ltr, rtl, auto")
+        return v
+
+
+class DocCreate(DocBase):
+    space_id: int
+
+
+class DocUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=DOC_TITLE_MAX)
+    content_markdown: Optional[str] = None
+    classification: Optional[str] = Field(default=None, max_length=100)
+    status: Optional[DocStatus] = None
+    tags: Optional[str] = Field(default=None, max_length=DOC_TAGS_MAX)
+    dir: Optional[str] = None
+    language: Optional[str] = Field(default=None, max_length=20)
+    folder_id: Optional[int] = None
+    space_id: Optional[int] = None
+    # Optional note stored on the version snapshot created by this save.
+    change_note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("dir")
+    @classmethod
+    def _validate_dir(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in {"ltr", "rtl", "auto"}:
+            raise ValueError("dir must be one of: ltr, rtl, auto")
+        return v
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Title cannot be empty")
+        return cleaned
+
+    @field_validator("content_markdown", mode="before")
+    @classmethod
+    def _normalize_content(cls, v: Optional[str]) -> Optional[str]:
+        return "" if v is None else v
+
+    @field_validator("classification", "tags", "language", "change_note")
+    @classmethod
+    def _strip_optional_text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class DocSuggestion(BaseModel):
+    """A smart, auto-computed "you might also want" document suggestion."""
+    id: int
+    uuid: Optional[str] = None
+    title: str
+    slug: str
+    space_id: int
+    project_id: Optional[int] = None
+    classification: Optional[str] = None
+    status: DocStatus
+    tags: Optional[str] = None
+    excerpt: Optional[str] = None
+    current_version: int = 0
+    score: float = 0.0
+    matched_tags: List[str] = Field(default_factory=list)
+
+
+class DocFacetValue(BaseModel):
+    value: str
+    count: int
+
+
+class DocFacets(BaseModel):
+    tags: List[DocFacetValue] = Field(default_factory=list)
+    classifications: List[DocFacetValue] = Field(default_factory=list)
+
+
+class DocListItem(BaseModel):
+    """Lightweight doc row for the hub list (excludes full content)."""
+    id: int
+    uuid: Optional[str] = None
+    title: str
+    slug: str
+    space_id: int
+    folder_id: Optional[int] = None
+    project_id: Optional[int] = None
+    classification: Optional[str] = None
+    status: DocStatus
+    tags: Optional[str] = None
+    dir: Optional[str] = None
+    language: Optional[str] = None
+    excerpt: Optional[str] = None
+    current_version: int = 0
+    share_scope: str = "private"
+    view_count: Optional[int] = None
+    last_viewed_at: Optional[datetime] = None
+    my_last_visited_at: Optional[datetime] = None
+    created_by: int
+    updated_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class Doc(DocBase):
+    id: int
+    uuid: Optional[str] = None
+    slug: str
+    space_id: int
+    project_id: Optional[int] = None
+    current_version: int = 0
+    public_id: Optional[str] = None
+    share_scope: str = "private"
+    share_expires_at: Optional[datetime] = None
+    view_count: Optional[int] = None
+    last_viewed_at: Optional[datetime] = None
+    created_by: int
+    updated_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    # Per-request capability flags for the current user (set by the route).
+    can_edit: bool = False
+    can_delete: bool = False
+    can_share: bool = False
+    can_view_stats: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class DocShareUpdate(BaseModel):
+    share_scope: str = "private"  # private | public
+    share_expires_at: Optional[datetime] = None
+
+    @field_validator("share_scope", mode="before")
+    @classmethod
+    def _validate_scope(cls, v: str) -> str:
+        normalized = str(v or "").strip().lower()
+        if normalized not in {"private", "public"}:
+            raise ValueError("share_scope must be 'private' or 'public'")
+        return normalized
+
+
+class DocShareInfo(BaseModel):
+    share_scope: str
+    public_id: Optional[str] = None
+    share_expires_at: Optional[datetime] = None
+    share_url: Optional[str] = None
+
+
+class DocPublicView(BaseModel):
+    """Read-only doc payload served over a public share link (no auth)."""
+    id: int
+    uuid: Optional[str] = None
+    title: str
+    slug: str
+    content_markdown: str = ""
+    classification: Optional[str] = None
+    tags: Optional[str] = None
+    dir: Optional[str] = "auto"
+    status: DocStatus
+    current_version: int = 0
+    updated_at: Optional[datetime] = None
+
+    @field_validator("content_markdown", mode="before")
+    @classmethod
+    def _normalize_content(cls, v: Optional[str]) -> str:
+        return v or ""
+
+    class Config:
+        from_attributes = True
+
+
+class DocVersionAuthor(BaseModel):
+    id: int
+    username: str
+    full_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocVersionView(BaseModel):
+    id: int
+    doc_id: int
+    version_number: int
+    action: str
+    title: str
+    content_markdown: Optional[str] = None
+    status: Optional[str] = None
+    classification: Optional[str] = None
+    tags: Optional[str] = None
+    change_note: Optional[str] = None
+    created_at: datetime
+    author: Optional[DocVersionAuthor] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocVersionRestore(BaseModel):
+    change_note: Optional[str] = Field(default=None, max_length=500)
+
+
+class DocRequirementLinkView(BaseModel):
+    id: int
+    doc_id: int
+    requirement_id: int
+    requirement_key: Optional[str] = None
+    requirement_title: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DocRelatedLinkCreate(BaseModel):
+    related_doc_id: int = Field(ge=1)
+
+
+class DocRelatedLinkView(BaseModel):
+    id: int
+    doc_id: int
+    related_doc_id: int
+    related_doc_title: Optional[str] = None
+    related_doc_project_id: Optional[int] = None
+    created_at: datetime
+
+
+class DocStats(BaseModel):
+    doc_id: int
+    view_count: int = 0
+    unique_visitors: int = 0
+    last_viewed_at: Optional[datetime] = None
+    latest_visits: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class DocStatsMostViewed(BaseModel):
+    id: int
+    title: str
+    space_id: int
+    project_id: Optional[int] = None
+    status: str
+    view_count: int = 0
+    last_viewed_at: Optional[datetime] = None
+
+
+class DocStatsOverview(BaseModel):
+    total_docs: int = 0
+    total_views: int = 0
+    unique_visitors: int = 0
+    by_status: Dict[str, int] = Field(default_factory=dict)
+    most_viewed: List[DocStatsMostViewed] = Field(default_factory=list)
+
+
+# --- Doc -> Requirement converter ------------------------------------------
+
+class DocConvertRequest(BaseModel):
+    mode: str = "single"  # single | split
+    heading_level: int = Field(default=2, ge=1, le=3)  # used by split mode
+    target_project_id: Optional[int] = None  # required when the doc is global
+    folder_id: Optional[int] = None  # requirement folder
+    default_status: RequirementStatus = RequirementStatus.DRAFT
+    default_priority: Priority = Priority.MEDIUM
+    # Optional per-item title overrides keyed by section index (from preview).
+    items: Optional[List["DocConvertItem"]] = None
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        if v not in {"single", "split"}:
+            raise ValueError("mode must be 'single' or 'split'")
+        return v
+
+
+class DocConvertItem(BaseModel):
+    index: int
+    title: str = Field(min_length=1, max_length=255)
+    include: bool = True
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("Requirement title cannot be empty")
+        return cleaned
+
+
+class DocConvertPreviewItem(BaseModel):
+    index: int
+    title: str
+    description_html: str
+    is_acceptance_criteria: bool = False
+
+
+class DocConvertPreview(BaseModel):
+    mode: str
+    items: List[DocConvertPreviewItem]
+
+
+class DocConvertResult(BaseModel):
+    created: List["Requirement"]
+    links: List[DocRequirementLinkView]
+
+
+DocConvertRequest.model_rebuild()
+DocConvertResult.model_rebuild()
