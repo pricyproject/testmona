@@ -32,13 +32,22 @@ import {
   Code2,
   Image as ImageIcon,
   Minus,
+  Eraser,
   Pilcrow,
   Eye,
   Pencil,
   FileCode,
   ALargeSmall,
+  AtSign,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Combine,
+  Heading,
   Maximize2,
   Minimize2,
+  Trash2,
   Undo2,
   Redo2,
 } from 'lucide-react';
@@ -48,6 +57,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -61,6 +72,10 @@ type DirOption = 'ltr' | 'rtl' | 'auto';
 interface MentionItem {
   id: string;
   label: string;
+  href?: string;
+  /** 'people' inserts a plain @username (for mention notifications); 'links'
+   *  inserts a navigable link. Items without a group fall back to href/plain. */
+  group?: 'people' | 'links';
 }
 
 export interface ContentEditorProps {
@@ -81,23 +96,6 @@ const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 const HTML_TAG_PROBE = /<\/?[a-z][^>]*>/i;
 
 const lowlight = createLowlight(common);
-
-const RTL_CHARS =
-  /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
-
-function detectDirection(text: string, hint: 'ltr' | 'rtl' | 'auto'): 'ltr' | 'rtl' {
-  if (hint !== 'auto') return hint;
-  let withoutTags = text;
-  let previous: string;
-  do {
-    previous = withoutTags;
-    withoutTags = withoutTags.replace(/<[^>]+>/g, '');
-  } while (withoutTags !== previous);
-  const stripped = withoutTags.replace(/\s/g, '');
-  if (!stripped) return 'ltr';
-  const rtl = (stripped.match(RTL_CHARS) || []).length;
-  return rtl / stripped.length > 0.3 ? 'rtl' : 'ltr';
-}
 
 const turndown = new TurndownService({
   headingStyle: 'atx',
@@ -132,6 +130,91 @@ turndown.addRule('fencedCodeBlockWithLang', {
   },
 });
 
+const escapeHtmlText = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Read a column's persisted pixel width from a cell's TipTap `data-colwidth`
+// attribute (a comma list for merged cells; the first entry is this column).
+const cellWidth = (cell: Element): number | null => {
+  const raw = cell.getAttribute('data-colwidth');
+  if (!raw) return null;
+  const n = parseInt(raw.split(',')[0], 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+// Serialize HTML tables into canonical Markdown (default turndown drops tables).
+// Plain tables become portable GFM; tables with resized columns or merged cells
+// are emitted as raw HTML so the column widths / spans survive the round-trip —
+// the editor restores them from `data-colwidth` and the reader honors <colgroup>.
+turndown.addRule('gfmTable', {
+  filter: 'table',
+  replacement: (_content, node) => {
+    const table = node as HTMLTableElement;
+    const rows = Array.from(table.querySelectorAll('tr'));
+    if (!rows.length) return '';
+    const rowCells = rows.map((row) => Array.from(row.querySelectorAll('th,td')));
+    const colCount = Math.max(...rowCells.map((cells) => cells.length));
+
+    // Column widths from cell data-colwidth, falling back to a <colgroup>.
+    const colEls = Array.from(table.querySelectorAll('colgroup > col'));
+    const widths: (number | null)[] = [];
+    for (let c = 0; c < colCount; c++) {
+      let w: number | null = null;
+      for (const cells of rowCells) {
+        if (cells[c]) { w = cellWidth(cells[c]); if (w) break; }
+      }
+      if (!w && colEls[c]) {
+        const m = (colEls[c].getAttribute('style') || '').match(/width:\s*([\d.]+)px/);
+        if (m) w = Math.round(parseFloat(m[1]));
+      }
+      widths.push(w);
+    }
+    const hasWidths = widths.some(Boolean);
+    const hasMerges = rowCells.some((cells) =>
+      cells.some((cell) => Number(cell.getAttribute('colspan') || 1) > 1 || Number(cell.getAttribute('rowspan') || 1) > 1),
+    );
+
+    if (hasWidths || hasMerges) {
+      const colgroup = hasWidths
+        ? `<colgroup>${widths.map((w) => (w ? `<col style="width: ${w}px">` : '<col>')).join('')}</colgroup>`
+        : '';
+      const rowsHtml = rows.map((row) => {
+        const cells = Array.from(row.querySelectorAll('th,td'));
+        const cellsHtml = cells.map((cell) => {
+          const tag = cell.nodeName.toLowerCase();
+          const attrs: string[] = [];
+          const dc = cell.getAttribute('data-colwidth');
+          if (dc) attrs.push(`data-colwidth="${dc}"`);
+          const w = cellWidth(cell);
+          if (w) attrs.push(`style="width: ${w}px"`);
+          const cs = cell.getAttribute('colspan');
+          if (cs && cs !== '1') attrs.push(`colspan="${cs}"`);
+          const rs = cell.getAttribute('rowspan');
+          if (rs && rs !== '1') attrs.push(`rowspan="${rs}"`);
+          const text = escapeHtmlText((cell.textContent || '').replace(/\r?\n+/g, ' ').trim());
+          return `<${tag}${attrs.length ? ' ' + attrs.join(' ') : ''}>${text}</${tag}>`;
+        }).join('');
+        return `<tr>${cellsHtml}</tr>`;
+      }).join('');
+      return `\n\n<table>${colgroup}<tbody>${rowsHtml}</tbody></table>\n\n`;
+    }
+
+    const cellText = (cell: Element) =>
+      (cell.textContent || '').replace(/\r?\n+/g, ' ').replace(/\|/g, '\\|').trim();
+    const matrix = rowCells.map((cells) => cells.map(cellText));
+    const padded = matrix.map((row) => {
+      const copy = row.slice();
+      while (copy.length < colCount) copy.push('');
+      return copy;
+    });
+    const toLine = (cells: string[]) => `| ${cells.join(' | ')} |`;
+    const header = padded[0];
+    const separator = header.map(() => '---');
+    const body = padded.slice(1);
+    return `\n\n${[toLine(header), toLine(separator), ...body.map(toLine)].join('\n')}\n\n`;
+  },
+});
+
 marked.setOptions({ gfm: true, breaks: false });
 
 export function markdownToHtml(md: string): string {
@@ -159,7 +242,15 @@ function looksLikeHtml(value: string): boolean {
 function valueToHtml(value: string, format: ContentFormat): string {
   if (!value) return '';
   if (format === 'html') return value;
-  return looksLikeHtml(value) ? value : markdownToHtml(value);
+  // Markdown content always goes through the Markdown renderer. `marked` passes
+  // embedded raw HTML (e.g. resized/merged tables) through untouched, so we must
+  // not short-circuit when a tag is present — otherwise the surrounding Markdown
+  // (headings, lists, …) would render as literal text.
+  if (looksLikeHtml(value) && !/(^|\n)\s{0,3}(#{1,6}\s|[-*+]\s|\d+\.\s|>|\|)/.test(value)) {
+    // Legacy: the value is pure HTML with no Markdown block syntax — pass through.
+    return value;
+  }
+  return markdownToHtml(value);
 }
 
 function normalizeUrl(input: string): string {
@@ -179,6 +270,79 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+type TFn = (key: string, params?: Record<string, string | number>) => string;
+
+/**
+ * Unified table controls. A single trigger that inserts a table when the cursor
+ * is outside one, and otherwise exposes grouped row / column / cell actions —
+ * replacing the row of cramped, duplicated icon buttons.
+ */
+function TableMenu({ editor, t, disabled }: { editor: Editor; t: TFn; disabled?: boolean }) {
+  const inTable = editor.isActive('table');
+  const action = (run: () => void) => () => run();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          title={t('rteTable')}
+          disabled={disabled}
+          className={cn('h-8 w-8 p-0 text-slate-600 dark:text-slate-300', inTable && 'bg-primary/10 text-primary')}
+        >
+          <Table2 className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-60">
+        {!inTable ? (
+          <DropdownMenuItem onClick={action(() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())}>
+            <Table2 className="me-2 h-4 w-4" /> {t('docTableInsert')}
+          </DropdownMenuItem>
+        ) : (
+          <>
+            <DropdownMenuLabel className="text-xs text-muted-foreground">{t('docTableRows')}</DropdownMenuLabel>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().addRowBefore().run())}>
+              <ArrowUp className="me-2 h-4 w-4" /> {t('docTableInsertRowAbove')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().addRowAfter().run())}>
+              <ArrowDown className="me-2 h-4 w-4" /> {t('docTableInsertRowBelow')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().deleteRow().run())}>
+              <Trash2 className="me-2 h-4 w-4" /> {t('docTableDeleteRow')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs text-muted-foreground">{t('docTableColumns')}</DropdownMenuLabel>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().addColumnBefore().run())}>
+              <ArrowLeft className="me-2 h-4 w-4" /> {t('docTableInsertColLeft')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().addColumnAfter().run())}>
+              <ArrowRight className="me-2 h-4 w-4" /> {t('docTableInsertColRight')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().deleteColumn().run())}>
+              <Trash2 className="me-2 h-4 w-4" /> {t('docTableDeleteColumn')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().toggleHeaderRow().run())}>
+              <Heading className="me-2 h-4 w-4" /> {t('docTableToggleHeader')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().mergeOrSplit().run())}>
+              <Combine className="me-2 h-4 w-4" /> {t('docTableMergeSplit')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={action(() => editor.chain().focus().deleteSelection().run())}>
+              <Eraser className="me-2 h-4 w-4" /> {t('docTableClearCell')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-rose-600 focus:text-rose-600" onClick={action(() => editor.chain().focus().deleteTable().run())}>
+              <Trash2 className="me-2 h-4 w-4" /> {t('docTableDelete')}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function ContentEditor({
   value,
   onChange,
@@ -191,17 +355,21 @@ export function ContentEditor({
   showFullscreen = true,
   mentions = [],
 }: ContentEditorProps) {
-  void mentions;
   const { t, isRTL } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>('write');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dirMode, setDirMode] = useState<DirOption>(dir ?? 'auto');
   const lastEmittedRef = useRef<string>(value || '');
 
-  const resolvedDir = useMemo(
-    () => detectDirection(value || '', dirMode === 'auto' ? (isRTL ? 'rtl' : 'ltr') : dirMode),
-    [value, dirMode, isRTL]
-  );
+  const resolvedDir = useMemo<'ltr' | 'rtl' | 'auto'>(() => {
+    if (dirMode === 'ltr' || dirMode === 'rtl') return dirMode;
+    // Auto mode: let the browser pick the direction natively from the first strong
+    // character (same `dir="auto"` the reading view uses), instead of a brittle
+    // RTL-ratio heuristic that wrongly rendered mixed RTL/Latin docs as LTR. Fall
+    // back to the UI direction only when there is no content to judge from.
+    const stripped = (value || '').replace(/<[^>]+>/g, '').replace(/\s/g, '');
+    return stripped ? 'auto' : (isRTL ? 'rtl' : 'ltr');
+  }, [value, dirMode, isRTL]);
 
   const initialHtml = useMemo(() => valueToHtml(value || '', format), []);
 
@@ -210,7 +378,13 @@ export function ContentEditor({
       StarterKit.configure({ link: false, codeBlock: false }),
       Link.configure({ openOnClick: false, autolink: true, protocols: ['http', 'https', 'mailto'] }),
       Placeholder.configure({ placeholder: placeholder || '' }),
-      Table.configure({ resizable: true }),
+      Table.configure({
+        resizable: true,
+        handleWidth: 5,
+        cellMinWidth: 48,
+        lastColumnResizable: true,
+        allowTableNodeSelection: true,
+      }),
       TableRow,
       TableHeader,
       TableCell,
@@ -265,6 +439,13 @@ export function ContentEditor({
     lastEmittedRef.current = value || '';
     if (wasFocused) editor.commands.focus('end');
   }, [editor, value, format, viewMode]);
+
+  // Keep the internal direction mode in sync with the controlled `dir` prop so a
+  // saved direction loaded after mount — or changed by the parent at runtime —
+  // is reflected in the editor (not just at first render).
+  useEffect(() => {
+    setDirMode(dir ?? 'auto');
+  }, [dir]);
 
   // Reflect direction changes onto the ProseMirror element.
   useEffect(() => {
@@ -338,6 +519,22 @@ export function ContentEditor({
 
   const cycleDirection = () => {
     setDirMode((prev) => (prev === 'auto' ? 'ltr' : prev === 'ltr' ? 'rtl' : 'auto'));
+  };
+
+  const insertMention = (mention: MentionItem) => {
+    if (!editor) return;
+    const label = mention.label.replace(/[<>&]/g, '');
+    if (mention.href) {
+      // Insert a real link so the mention is navigable in the rendered view and
+      // survives the round-trip to Markdown as [@label](href).
+      const safeHref = normalizeUrl(mention.href);
+      editor.chain().focus()
+        .insertContent(`<a href="${safeHref}">@${label}</a>&nbsp;`)
+        .unsetMark('link')
+        .run();
+    } else {
+      editor.chain().focus().insertContent(`@${label} `).run();
+    }
   };
 
   const dirLabel =
@@ -580,11 +777,39 @@ export function ContentEditor({
             onClick={() => promptLink()}
           />
           <ToolbarBtn icon={ImageIcon} label={t('rteImageUpload')} onClick={pickImage} />
-          <ToolbarBtn
-            icon={Table2}
-            label={t('rteTable')}
-            onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
-          />
+          <TableMenu editor={editor} t={t} disabled={disabled} />
+          {mentions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-600 dark:text-slate-300" disabled={disabled} title={t('mentions')}>
+                  <AtSign className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-auto">
+                {(() => {
+                  const people = mentions.filter((m) => m.group === 'people');
+                  const links = mentions.filter((m) => m.group !== 'people');
+                  return (
+                    <>
+                      {people.length > 0 && <DropdownMenuLabel>{t('mentionPeople')}</DropdownMenuLabel>}
+                      {people.map((mention) => (
+                        <DropdownMenuItem key={mention.id} onClick={() => insertMention(mention)}>
+                          @{mention.label}
+                        </DropdownMenuItem>
+                      ))}
+                      {people.length > 0 && links.length > 0 && <DropdownMenuSeparator />}
+                      {links.length > 0 && people.length > 0 && <DropdownMenuLabel>{t('mentionLinks')}</DropdownMenuLabel>}
+                      {links.map((mention) => (
+                        <DropdownMenuItem key={mention.id} onClick={() => insertMention(mention)}>
+                          @{mention.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  );
+                })()}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <ToolbarBtn
             icon={Code2}
             label={t('contentEditorCodeBlock')}
@@ -674,7 +899,7 @@ export function ContentEditor({
 
         {viewMode === 'preview' && (
           <div
-            className="rich-text-preview prose prose-sm max-w-none px-4 py-3 dark:prose-invert"
+            className="rich-text-preview max-w-none px-4 py-3"
             dir={resolvedDir}
             dangerouslySetInnerHTML={{
               __html: sanitizeHtml(

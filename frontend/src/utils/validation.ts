@@ -28,6 +28,13 @@ export const sanitizeInput = (input: string): string => {
   return sanitized;
 };
 
+export const parsePositiveIntegerParam = (value: string | undefined): number | undefined => {
+  if (value == null || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return undefined;
+  return parsed;
+};
+
 // Check if project name already exists
 export const checkDuplicateName = (name: string, existingProjects: Array<{ name: string; id?: number }>, currentProjectId?: number): ValidationResult => {
   const sanitizedName = sanitizeInput(name).toLowerCase();
