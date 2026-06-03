@@ -10,6 +10,7 @@ requirements plus whether anything had to be dropped.
 
 import html
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -135,8 +136,11 @@ def retrieve_relevant_requirements(
 
 # --- Generic multi-type retrieval (requirements/defects/test plans/test cases)
 
-SOURCE_TYPES = ("requirements", "defects", "test_plans", "test_cases")
+SOURCE_TYPES = ("requirements", "defects", "test_plans", "test_cases", "docs")
 _PER_TYPE_HARD_CAP = 1500
+
+# Strip the heaviest Markdown punctuation so doc content ranks/packs as prose.
+_MD_STRIP_RE = re.compile(r"[#*_`>~\[\]\(\)!]|https?://\S+")
 
 
 @dataclass
@@ -223,11 +227,35 @@ def _load_test_case_docs(db, project_id: int) -> List[RetrievedDoc]:
     ]
 
 
+def _load_doc_hub_docs(db, project_id: int) -> List[RetrievedDoc]:
+    """Load Doc Hub documents that are in scope for a project's AI chat: the
+    project's own docs plus any global (project-less) docs."""
+    from ..models import Doc
+    from sqlalchemy import or_
+
+    rows = (
+        db.query(Doc)
+        .filter(or_(Doc.project_id == project_id, Doc.project_id.is_(None)))
+        .limit(_PER_TYPE_HARD_CAP)
+        .all()
+    )
+    docs = []
+    for d in rows:
+        body = _MD_STRIP_RE.sub(" ", d.content_markdown or "")
+        docs.append(RetrievedDoc(
+            type="doc", id=d.id, key=d.slug or f"DOC-{d.id}",
+            title=_clean(d.title),
+            content=_join(d.title, body, d.tags, d.classification),
+        ))
+    return docs
+
+
 _LOADERS = {
     "requirements": _load_requirement_docs,
     "defects": _load_defect_docs,
     "test_plans": _load_test_plan_docs,
     "test_cases": _load_test_case_docs,
+    "docs": _load_doc_hub_docs,
 }
 
 
@@ -287,7 +315,7 @@ def retrieve_relevant_docs(
         used += len(doc.content)
 
     selected_counts = {t: 0 for t in SOURCE_TYPES}
-    plural_type = {"requirement": "requirements", "defect": "defects", "test_plan": "test_plans", "test_case": "test_cases"}
+    plural_type = {"requirement": "requirements", "defect": "defects", "test_plan": "test_plans", "test_case": "test_cases", "doc": "docs"}
     for doc in selected:
         selected_counts[plural_type.get(doc.type, doc.type)] = selected_counts.get(plural_type.get(doc.type, doc.type), 0) + 1
 

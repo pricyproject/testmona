@@ -61,7 +61,7 @@ class AIProviderConfigPayload(BaseModel):
         return stripped or None
 
 
-SOURCE_TYPES = ("requirements", "defects", "test_plans", "test_cases")
+SOURCE_TYPES = ("requirements", "defects", "test_plans", "test_cases", "docs")
 ROUTING_TASKS = ("qa", "generation", "assistant")
 
 
