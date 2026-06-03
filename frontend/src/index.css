@@ -972,6 +972,43 @@ html[data-ui-density="compact"] {
   font-weight: 600;
 }
 
+/* ── Editable-table column resizing (TipTap) ─────────────────────────────── */
+/* Horizontal scroll for wide tables instead of overflowing the editor. */
+[data-rich-text-editor] .ProseMirror .tableWrapper {
+  overflow-x: auto;
+}
+
+/* Cells must be positioned so the resize handle can anchor to the edge. */
+[data-rich-text-editor] .ProseMirror th,
+[data-rich-text-editor] .ProseMirror td {
+  position: relative;
+}
+
+/* The drag handle TipTap injects at a column boundary. */
+[data-rich-text-editor] .ProseMirror .column-resize-handle {
+  position: absolute;
+  inset-inline-end: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: #6366f1;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* While hovering/dragging a column boundary, show the resize cursor. */
+[data-rich-text-editor] .ProseMirror.resize-cursor,
+[data-rich-text-editor] .ProseMirror.resize-cursor td,
+[data-rich-text-editor] .ProseMirror.resize-cursor th {
+  cursor: col-resize;
+}
+
+/* Honor persisted column widths (tables carrying an explicit <colgroup>). */
+[data-rich-text-editor] .ProseMirror table:has(col[style]),
+[data-rich-text-editor] .rich-text-preview table:has(col[style]) {
+  table-layout: fixed;
+}
+
 /* Rich text read-only preview typography (requirement description / criteria) */
 [data-rich-text-editor] .rich-text-preview > :first-child {
   margin-top: 0;
@@ -1197,4 +1234,35 @@ html[data-ui-density="compact"] {
 .dark [data-content-editor] .rich-text-preview code:not(pre code) {
   background: rgba(148, 163, 184, 0.2);
   color: #e2e8f0;
+}
+
+/* Syntax highlighting tokens for lowlight/marked output */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: #ff7b72;
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-title,
+.hljs-section {
+  color: #a5d6ff;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-symbol {
+  color: #79c0ff;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: #8b949e;
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-name {
+  color: #ffa657;
 }
