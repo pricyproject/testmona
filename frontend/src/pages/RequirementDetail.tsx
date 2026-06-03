@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
@@ -243,6 +243,7 @@ export function RequirementDetail() {
   const [showLinkHistory, setShowLinkHistory] = useState(false);
   const [visibleLinkedTestCasesCount, setVisibleLinkedTestCasesCount] = useState(10);
   const [selectedAvailableTestCaseIds, setSelectedAvailableTestCaseIds] = useState<number[]>([]);
+  const [testCaseSearchInput, setTestCaseSearchInput] = useState('');
   const [testCaseSearchQuery, setTestCaseSearchQuery] = useState('');
   const [linkedSearchQuery, setLinkedSearchQuery] = useState('');
   const [linkedStatusFilter, setLinkedStatusFilter] = useState('all');
@@ -486,6 +487,15 @@ export function RequirementDetail() {
     };
   }, [requirement?.id, linkedSearchQuery, linkedStatusFilter, linkedPriorityFilter, visibleLinkedTestCasesCount, refreshLinkedKey, t]);
 
+  // Debounce the raw search box into the committed query that drives the fetch,
+  // so typing doesn't fire one request per keystroke.
+  useEffect(() => {
+    const handle = window.setTimeout(() => setTestCaseSearchQuery(testCaseSearchInput), 300);
+    return () => window.clearTimeout(handle);
+  }, [testCaseSearchInput]);
+
+  const availableSearchRequestId = useRef(0);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -504,6 +514,8 @@ export function RequirementDetail() {
         return;
       }
 
+      // Guard against out-of-order responses overwriting newer results.
+      const requestId = ++availableSearchRequestId.current;
       setAvailableTestCasesLoading(true);
       try {
         const data = await requirementsAPI.searchTestCases(requirement.id, {
@@ -512,18 +524,18 @@ export function RequirementDetail() {
           skip: 0,
           limit: 10,
         });
-        if (!isMounted) return;
+        if (!isMounted || requestId !== availableSearchRequestId.current) return;
         setAvailableTestCases(data.items || []);
         setAvailableTestCasesTotal(data.total || 0);
         setSelectedAvailableTestCaseIds((current) => current.filter((id) => (data.items || []).some((testCase: RequirementLinkedTestCase) => testCase.id === id)));
       } catch (error) {
         console.error('Failed to load available test cases:', error);
-        if (isMounted) {
+        if (isMounted && requestId === availableSearchRequestId.current) {
           setAvailableTestCases([]);
           setAvailableTestCasesTotal(0);
         }
       } finally {
-        if (isMounted) setAvailableTestCasesLoading(false);
+        if (isMounted && requestId === availableSearchRequestId.current) setAvailableTestCasesLoading(false);
       }
     };
 
@@ -729,14 +741,17 @@ export function RequirementDetail() {
     }
   };
 
-  const handleBulkLink = async (testCaseIds: number[]) => {
-    if (!requirement || testCaseIds.length === 0) return;
+  const handleBulkLink = async (testCaseIds: number[]): Promise<boolean> => {
+    if (!requirement || testCaseIds.length === 0) return false;
     setBulkUpdating(true);
     try {
-      await requirementsAPI.bulkUpdateTestCases(requirement.id, { test_case_ids: testCaseIds, action: 'link' });
+      const result = await requirementsAPI.bulkUpdateTestCases(requirement.id, { test_case_ids: testCaseIds, action: 'link' });
       setSelectedAvailableTestCaseIds([]);
       refreshRequirementLinks();
-      toast({ title: t('success'), description: t('testCasesLinkedToRequirement', { count: testCaseIds.length }) });
+      // Report what actually got linked — some may have been skipped (already linked elsewhere).
+      const linkedCount = typeof result?.linked_count === 'number' ? result.linked_count : testCaseIds.length;
+      toast({ title: t('success'), description: t('testCasesLinkedToRequirement', { count: linkedCount }) });
+      return true;
     } catch (error: any) {
       console.error('Failed to link test cases:', error);
       toast({
@@ -744,6 +759,7 @@ export function RequirementDetail() {
         description: error.response?.data?.detail || t('failedToUpdateLinkedTestCase'),
         variant: 'destructive',
       });
+      return false;
     } finally {
       setBulkUpdating(false);
     }
@@ -1359,7 +1375,14 @@ export function RequirementDetail() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setLinkDialogOpen(true)}
+                      onClick={() => {
+                        // Open with a clean slate so a prior search/selection
+                        // doesn't carry over into a new linking session.
+                        setTestCaseSearchInput('');
+                        setTestCaseSearchQuery('');
+                        setSelectedAvailableTestCaseIds([]);
+                        setLinkDialogOpen(true);
+                      }}
                     >
                       <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                       {t('linkExistingTestCases')}
@@ -1957,28 +1980,35 @@ export function RequirementDetail() {
           </DialogContent>
         </Dialog>
 
-        <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <Dialog open={linkDialogOpen} onOpenChange={(open) => { if (!bulkUpdating) setLinkDialogOpen(open); }}>
           <DialogContent isRTL={isRTL} className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{t('linkExistingTestCases')}</DialogTitle>
               <DialogDescription>{t('searchTestCasesToLink')}</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
-              <Input
-                value={testCaseSearchQuery}
-                onChange={(event) => setTestCaseSearchQuery(event.target.value)}
-                placeholder={t('searchTestCasesToLink')}
-                disabled={availableTestCasesLoading}
-              />
-              {testCaseSearchQuery.trim().length < 2 ? (
+              <div className="relative">
+                <Input
+                  value={testCaseSearchInput}
+                  onChange={(event) => setTestCaseSearchInput(event.target.value)}
+                  placeholder={t('searchTestCasesToLink')}
+                  aria-label={t('searchTestCasesToLink')}
+                  maxLength={100}
+                  className={isRTL ? 'pl-9' : 'pr-9'}
+                />
+                {availableTestCasesLoading && (
+                  <Loader2 className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400 ${isRTL ? 'left-3' : 'right-3'}`} />
+                )}
+              </div>
+              {testCaseSearchInput.trim().length < 2 ? (
                 <EmptyState label={t('typeToSearchTestCases')} />
-              ) : availableTestCasesLoading ? (
+              ) : (availableTestCasesLoading || testCaseSearchInput.trim() !== testCaseSearchQuery.trim()) ? (
                 <div className="space-y-2">
                   <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                   <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                 </div>
               ) : availableTestCases.length === 0 ? (
-                <EmptyState label={testCaseSearchQuery.trim() ? t('noTestCasesMatchSearch') : t('noTestCasesAvailableToLink')} />
+                <EmptyState label={t('noTestCasesMatchSearch')} />
               ) : (
                 <div className="max-h-[360px] overflow-y-auto rounded-md border border-slate-200 dark:border-slate-800">
                   {availableTestCases.map((testCase) => (
@@ -2000,15 +2030,17 @@ export function RequirementDetail() {
               )}
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setLinkDialogOpen(false)}>{t('cancel')}</Button>
+              <Button type="button" variant="outline" onClick={() => setLinkDialogOpen(false)} disabled={bulkUpdating}>{t('cancel')}</Button>
               <Button
                 type="button"
                 onClick={async () => {
-                  await handleBulkLink(selectedAvailableTestCaseIds);
-                  setLinkDialogOpen(false);
+                  // Keep the dialog (and the user's selection) open if linking fails.
+                  const ok = await handleBulkLink(selectedAvailableTestCaseIds);
+                  if (ok) setLinkDialogOpen(false);
                 }}
                 disabled={selectedAvailableTestCaseIds.length === 0 || bulkUpdating}
               >
+                {bulkUpdating && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
                 {t('linkSelected', { count: selectedAvailableTestCaseIds.length })}
               </Button>
             </DialogFooter>
