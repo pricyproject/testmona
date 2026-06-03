@@ -49,7 +49,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Bug, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal, MoreHorizontal, Filter, ArrowUpDown, X, Activity, ShieldAlert } from 'lucide-react';
+import { Plus, Bug, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal, MoreHorizontal, Filter, ArrowUpDown, X, Activity, ShieldAlert, Flag } from 'lucide-react';
 
 const SEVERITY_STRIPE: Record<string, string> = {
   critical: 'bg-red-500',
@@ -1995,8 +1995,12 @@ export function Defects() {
                           {defect.defect_id}
                         </Link>
                         <Badge className={`${getStatusBadge(defect.status)} capitalize`}>{String(defect.status || '').replace('_', ' ')}</Badge>
-                        <Badge className={`${getSeverityBadge(defect.severity)} capitalize`}>{defect.severity}</Badge>
-                        <Badge className={`${getPriorityBadge(defect.priority)} capitalize`}>{defect.priority}</Badge>
+                        <Badge className={`${getSeverityBadge(defect.severity)} gap-1 capitalize`} title={`${t('defectSeverity')}: ${defect.severity}`}>
+                          <ShieldAlert className="h-3 w-3" />{defect.severity}
+                        </Badge>
+                        <Badge className={`${getPriorityBadge(defect.priority)} gap-1 capitalize`} title={`${t('defectPriority')}: ${defect.priority}`}>
+                          <Flag className="h-3 w-3" />{defect.priority}
+                        </Badge>
                         {syncStatus && syncStatus !== 'not_synced' && (
                           <Badge className={`${getSyncStatusBadge(syncStatus)} capitalize`}>
                             {getSyncStatusLabel(syncStatus)}
