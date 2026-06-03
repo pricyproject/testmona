@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -676,6 +676,25 @@ export const requirementsAPI = {
   },
 };
 
+// Requirement folders / categories
+export const requirementFoldersAPI = {
+  list: async (projectId: number): Promise<RequirementFolder[]> => {
+    const response = await api.get(`/requirements/folders?project_id=${projectId}`);
+    return response.data;
+  },
+  create: async (payload: { project_id: number; name: string; description?: string | null; parent_folder_id?: number | null }): Promise<RequirementFolder> => {
+    const response = await api.post('/requirements/folders', payload);
+    return response.data;
+  },
+  update: async (id: number, payload: { name?: string; description?: string | null; parent_folder_id?: number | null }): Promise<RequirementFolder> => {
+    const response = await api.put(`/requirements/folders/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/requirements/folders/${id}`);
+  },
+};
+
 // Project-wide requirement AI chat
 export const requirementChatAPI = {
   listConversations: async (projectId: number, archived = false) => {
@@ -694,7 +713,14 @@ export const requirementChatAPI = {
     const response = await api.post(`/projects/${projectId}/ai/conversations`);
     return response.data;
   },
-  updateConversation: async (projectId: number, conversationId: number, payload: { title?: string; archived?: boolean; share_scope?: 'private' | 'project' }) => {
+  updateConversation: async (projectId: number, conversationId: number, payload: {
+    title?: string;
+    archived?: boolean;
+    pinned?: boolean;
+    share_scope?: 'private' | 'project' | 'restricted';
+    share_expires_at?: string | null;
+    share_allowed_user_ids?: number[] | null;
+  }) => {
     const response = await api.patch(`/projects/${projectId}/ai/conversations/${conversationId}`, payload);
     return response.data;
   },
@@ -703,14 +729,14 @@ export const requirementChatAPI = {
     return response.data;
   },
   ask: async (projectId: number, payload: { question: string; conversation_id?: number; source_types?: AISourceType[] }, signal?: AbortSignal) => {
-    const response = await api.post(`/projects/${projectId}/ai/ask`, payload, { signal });
+    const response = await api.post(`/projects/${projectId}/ai/ask`, payload, { signal, timeout: 130000 });
     return response.data;
   },
   regenerate: async (projectId: number, conversationId: number, sourceTypes?: AISourceType[], signal?: AbortSignal) => {
     const response = await api.post(
       `/projects/${projectId}/ai/conversations/${conversationId}/regenerate`,
       { source_types: sourceTypes },
-      { signal },
+      { signal, timeout: 130000 },
     );
     return response.data;
   },

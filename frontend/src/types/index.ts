@@ -373,6 +373,7 @@ export interface Requirement {
   priority: 'low' | 'medium' | 'high' | 'critical';
   project_id: number;
   parent_requirement_id?: number;
+  folder_id?: number | null;
   created_by: number;
   assigned_to?: number;
   tags?: string;
@@ -382,6 +383,17 @@ export interface Requirement {
   updated_at?: string;
 }
 
+export interface RequirementFolder {
+  id: number;
+  name: string;
+  description?: string | null;
+  project_id: number;
+  parent_folder_id?: number | null;
+  requirement_count: number;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface RequirementCreate {
   title: string;
   description?: string;
@@ -389,6 +401,7 @@ export interface RequirementCreate {
   status?: 'draft' | 'reviewed' | 'approved' | 'implemented' | 'verified' | 'deprecated';
   priority?: 'low' | 'medium' | 'high' | 'critical';
   parent_requirement_id?: number;
+  folder_id?: number | null;
   assigned_to?: number;
   tags?: string;
   acceptance_criteria?: string;
@@ -403,6 +416,7 @@ export interface RequirementUpdate {
   status?: 'draft' | 'reviewed' | 'approved' | 'implemented' | 'verified' | 'deprecated';
   priority?: 'low' | 'medium' | 'high' | 'critical';
   parent_requirement_id?: number;
+  folder_id?: number | null;
   assigned_to?: number;
   tags?: string;
   acceptance_criteria?: string;
@@ -489,6 +503,7 @@ export interface RequirementChatSource {
   requirement_id?: number | null; // legacy rows
   key: string;
   title: string;
+  excerpt?: string | null;
 }
 
 export interface RequirementChatMessage {
@@ -500,7 +515,7 @@ export interface RequirementChatMessage {
   created_at: string;
 }
 
-export type RequirementChatShareScope = 'private' | 'project';
+export type RequirementChatShareScope = 'private' | 'project' | 'restricted';
 
 export interface RequirementChatConversation {
   id: number;
@@ -508,7 +523,10 @@ export interface RequirementChatConversation {
   project_id: number;
   title: string;
   archived: boolean;
+  pinned: boolean;
   share_scope: RequirementChatShareScope;
+  share_expires_at?: string | null;
+  share_allowed_user_ids: number[];
   created_at: string;
   updated_at?: string | null;
   messages: RequirementChatMessage[];
@@ -525,6 +543,13 @@ export interface RequirementChatAskResponse {
   retrieval_truncated: boolean;
   requirements_considered: number;
   requirements_used: number;
+  items_considered?: number;
+  items_used?: number;
+  source_counts?: Record<string, number>;
+  selected_source_counts?: Record<string, number>;
+  confidence?: 'none' | 'low' | 'medium' | 'high';
+  insufficient_context?: boolean;
+  coverage_note?: string | null;
 }
 
 export interface RequirementLinkedTestCase extends TestCase {

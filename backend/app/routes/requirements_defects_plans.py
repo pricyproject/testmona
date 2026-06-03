@@ -451,6 +451,10 @@ def register_requirements_defects_plans_routes(app):
             assignee = db.query(models.User).filter(models.User.id == requirement.assigned_to).first()
             if assignee is None:
                 raise HTTPException(status_code=400, detail="Assigned user not found")
+        if requirement.folder_id is not None:
+            folder = crud.get_requirement_folder(db, requirement.folder_id)
+            if folder is None or folder.project_id != requirement.project_id:
+                raise HTTPException(status_code=400, detail="Folder not found in this project")
 
         try:
             db_requirement = create_requirement(db=db, requirement=requirement)
@@ -502,6 +506,101 @@ def register_requirements_defects_plans_routes(app):
                 raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
 
         return get_requirements(db, project_id=project_id, skip=skip, limit=limit, milestone_id=milestone_id)
+
+    # ── Requirement folders / categories ────────────────────────────────────
+    # Registered before the dynamic ``/requirements/{requirement_id}`` routes so
+    # the literal ``/requirements/folders`` path is never parsed as an int id.
+    @app.get("/requirements/folders", response_model=List[schemas.RequirementFolder])
+    def list_requirement_folders(
+        project_id: int = Query(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return crud.get_requirement_folders(db, project_id)
+
+    @app.post("/requirements/folders", response_model=schemas.RequirementFolder)
+    def create_requirement_folder_endpoint(
+        folder: schemas.RequirementFolderCreate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        if not rbac.has_permission(current_user, "write", folder.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if db.query(models.Project).filter(models.Project.id == folder.project_id).first() is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if folder.parent_folder_id is not None:
+            parent = crud.get_requirement_folder(db, folder.parent_folder_id)
+            if parent is None or parent.project_id != folder.project_id:
+                raise HTTPException(status_code=400, detail="Parent folder not found in this project")
+        parent_filter = (
+            models.RequirementFolder.parent_folder_id.is_(None)
+            if folder.parent_folder_id is None
+            else models.RequirementFolder.parent_folder_id == folder.parent_folder_id
+        )
+        duplicate = db.query(models.RequirementFolder.id).filter(
+            models.RequirementFolder.project_id == folder.project_id,
+            parent_filter,
+            func.lower(models.RequirementFolder.name) == folder.name.strip().lower(),
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="A folder with this name already exists here.")
+        return crud.create_requirement_folder(db, folder)
+
+    @app.put("/requirements/folders/{folder_id}", response_model=schemas.RequirementFolder)
+    def update_requirement_folder_endpoint(
+        payload: schemas.RequirementFolderUpdate,
+        folder_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        db_folder = crud.get_requirement_folder(db, folder_id)
+        if db_folder is None:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if not rbac.has_permission(current_user, "write", db_folder.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if "parent_folder_id" in payload.model_fields_set and payload.parent_folder_id is not None:
+            parent = crud.get_requirement_folder(db, payload.parent_folder_id)
+            if parent is None or parent.project_id != db_folder.project_id:
+                raise HTTPException(status_code=400, detail="Parent folder not found in this project")
+            if payload.parent_folder_id in crud._requirement_folder_descendant_ids(db, folder_id):
+                raise HTTPException(status_code=400, detail="Cannot move a folder into itself or its own descendant.")
+        # Reject duplicate sibling names after applying the requested rename/move.
+        effective_name = (payload.name.strip() if payload.name else db_folder.name)
+        effective_parent = (
+            payload.parent_folder_id
+            if "parent_folder_id" in payload.model_fields_set
+            else db_folder.parent_folder_id
+        )
+        sibling_parent_filter = (
+            models.RequirementFolder.parent_folder_id.is_(None)
+            if effective_parent is None
+            else models.RequirementFolder.parent_folder_id == effective_parent
+        )
+        duplicate = db.query(models.RequirementFolder.id).filter(
+            models.RequirementFolder.project_id == db_folder.project_id,
+            models.RequirementFolder.id != folder_id,
+            sibling_parent_filter,
+            func.lower(models.RequirementFolder.name) == effective_name.lower(),
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=400, detail="A folder with this name already exists here.")
+        return crud.update_requirement_folder(db, folder_id, payload)
+
+    @app.delete("/requirements/folders/{folder_id}")
+    def delete_requirement_folder_endpoint(
+        folder_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        db_folder = crud.get_requirement_folder(db, folder_id)
+        if db_folder is None:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if not rbac.has_permission(current_user, "delete", db_folder.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        crud.delete_requirement_folder(db, folder_id)
+        return {"status": "deleted"}
 
     @app.post("/requirements/fetch-external-document", response_model=schemas.RequirementExternalDocumentResponse)
     def fetch_external_requirement_document(
@@ -1151,6 +1250,10 @@ def register_requirements_defects_plans_routes(app):
             assignee = db.query(models.User).filter(models.User.id == requirement.assigned_to).first()
             if assignee is None:
                 raise HTTPException(status_code=400, detail="Assigned user not found")
+        if "folder_id" in update_fields and requirement.folder_id is not None:
+            folder = crud.get_requirement_folder(db, requirement.folder_id)
+            if folder is None or folder.project_id != db_requirement.project_id:
+                raise HTTPException(status_code=400, detail="Folder not found in this project")
 
         try:
             db_requirement = update_requirement(db, requirement_id=requirement_id, requirement=requirement, actor_id=current_user.id)

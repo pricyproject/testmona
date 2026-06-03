@@ -30313,6 +30313,51 @@
             "type": "integer",
             "title": "Requirements Used",
             "default": 0
+          },
+          "items_considered": {
+            "type": "integer",
+            "title": "Items Considered",
+            "default": 0
+          },
+          "items_used": {
+            "type": "integer",
+            "title": "Items Used",
+            "default": 0
+          },
+          "source_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Source Counts"
+          },
+          "selected_source_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Selected Source Counts"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence",
+            "default": "low"
+          },
+          "insufficient_context": {
+            "type": "boolean",
+            "title": "Insufficient Context",
+            "default": false
+          },
+          "coverage_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Note"
           }
         },
         "type": "object",
@@ -30348,6 +30393,17 @@
             ],
             "title": "Archived"
           },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
+          },
           "share_scope": {
             "anyOf": [
               {
@@ -30358,6 +30414,32 @@
               }
             ],
             "title": "Share Scope"
+          },
+          "share_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Expires At"
+          },
+          "share_allowed_user_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Allowed User Ids"
           }
         },
         "type": "object",
@@ -30386,10 +30468,34 @@
             "title": "Archived",
             "default": false
           },
+          "pinned": {
+            "type": "boolean",
+            "title": "Pinned",
+            "default": false
+          },
           "share_scope": {
             "type": "string",
             "title": "Share Scope",
             "default": "private"
+          },
+          "share_expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Expires At"
+          },
+          "share_allowed_user_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Share Allowed User Ids"
           },
           "created_at": {
             "type": "string",
@@ -30579,6 +30685,17 @@
           "title": {
             "type": "string",
             "title": "Title"
+          },
+          "excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt"
           }
         },
         "type": "object",

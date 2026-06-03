@@ -7,11 +7,14 @@ table within the completion prompt budget, and returns a cited answer.
 Conversations and their turns are persisted.
 """
 
+import asyncio
 import logging
+from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas, rbac
@@ -69,6 +72,108 @@ _EMPTY_SCOPE_ANSWER = (
 )
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_aware(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _source_excerpt(content: str, max_length: int = 220) -> str:
+    cleaned = clean_ai_text(content, max_length + 80)
+    if len(cleaned) <= max_length:
+        return cleaned
+    return cleaned[:max_length].rsplit(" ", 1)[0].rstrip() + "..."
+
+
+# Source ``type`` is stored singular on the message; the retrieval loaders are
+# keyed by the plural scope name.
+_SOURCE_TYPE_TO_SCOPE = {
+    "requirement": "requirements",
+    "defect": "defects",
+    "test_plan": "test_plans",
+    "test_case": "test_cases",
+}
+
+
+def _backfill_source_excerpts(db, project_id: int, view):
+    """Fill ``excerpt`` for any cited source that was persisted before excerpts
+    existed (older conversations stored only type/id/key/title). Operates on the
+    validated Pydantic view so nothing is written back to the database. Loads
+    each needed source type's docs at most once."""
+    from ..services.requirement_retrieval import _LOADERS
+
+    needed_scopes: set[str] = set()
+    for message in view.messages:
+        for source in message.sources:
+            if not source.excerpt and source.id is not None:
+                scope = _SOURCE_TYPE_TO_SCOPE.get(source.type or "requirement")
+                if scope:
+                    needed_scopes.add(scope)
+    if not needed_scopes:
+        return view
+
+    content_by_ref: dict[tuple, str] = {}
+    for scope in needed_scopes:
+        loader = _LOADERS.get(scope)
+        if loader is None:
+            continue
+        try:
+            for doc in loader(db, project_id):
+                content_by_ref[(doc.type, doc.id)] = doc.content
+        except Exception:  # pragma: no cover - a missing source must not 500 the fetch
+            continue
+
+    for message in view.messages:
+        for source in message.sources:
+            if not source.excerpt and source.id is not None:
+                content = content_by_ref.get((source.type or "requirement", source.id))
+                if content:
+                    source.excerpt = _source_excerpt(content)
+    return view
+
+
+def _confidence(best_score: float, selected_count: int) -> str:
+    if selected_count <= 0:
+        return "none"
+    if best_score >= 0.5:
+        return "high"
+    if best_score >= 0.2:
+        return "medium"
+    return "low"
+
+
+def _coverage_note(retrieval) -> str:
+    if retrieval.considered == 0:
+        return "No items exist in the selected sources for this project."
+    if retrieval.best_score <= 0:
+        return "No strong lexical match was found; the answer used representative recent items from the selected sources."
+    if retrieval.truncated:
+        return "Some matching items were omitted to fit the AI context window."
+    return "Answer is grounded in the selected project sources."
+
+
+async def _cancel_on_disconnect(request: Request, work):
+    task = asyncio.create_task(work)
+    try:
+        while not task.done():
+            if await request.is_disconnected():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise HTTPException(status_code=499, detail="AI request was cancelled")
+            await asyncio.sleep(0.5)
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+
+
 def _effective_source_types(requested, enabled: list) -> list:
     """Intersect a user's requested scopes with the admin-enabled set so a
     request can only narrow the scope, never broaden it. Falls back to all
@@ -77,6 +182,23 @@ def _effective_source_types(requested, enabled: list) -> list:
         return enabled
     narrowed = [t for t in requested if t in enabled]
     return narrowed or enabled
+
+
+def _share_not_expired(conversation) -> bool:
+    expires_at = _as_aware(getattr(conversation, "share_expires_at", None))
+    return expires_at is None or expires_at > _utcnow()
+
+
+def _validate_share_update(db: Session, project_id: int, payload: schemas.RequirementChatConversationUpdate) -> None:
+    if payload.share_expires_at is not None and _as_aware(payload.share_expires_at) <= _utcnow():
+        raise HTTPException(status_code=400, detail="Share expiry must be in the future")
+    if payload.share_scope == "restricted" and not payload.share_allowed_user_ids:
+        raise HTTPException(status_code=400, detail="Restricted sharing requires at least one recipient")
+    if payload.share_allowed_user_ids:
+        for user_id in payload.share_allowed_user_ids:
+            user = crud.get_user(db, user_id)
+            if not user or not rbac.has_permission(user, "read", project_id, db):
+                raise HTTPException(status_code=400, detail="Share recipients must be project members")
 
 
 async def _produce_answer(db: Session, project_id: int, current_user, question: str,
@@ -141,7 +263,13 @@ async def _produce_answer(db: Session, project_id: int, current_user, question: 
         doc = by_key.get(key)
         if doc is not None and (doc.type, doc.id) not in seen:
             seen.add((doc.type, doc.id))
-            sources.append({"type": doc.type, "id": doc.id, "key": doc.key, "title": doc.title})
+            sources.append({
+                "type": doc.type,
+                "id": doc.id,
+                "key": doc.key,
+                "title": doc.title,
+                "excerpt": _source_excerpt(doc.content),
+            })
 
     return {"answer": answer, "sources": sources, "prompt_tokens": result.prompt_tokens,
             "retrieval": retrieval, "truncated": retrieval.truncated}
@@ -190,9 +318,17 @@ def register_requirement_chat_routes(app):
         if not conversation or conversation.project_id != project_id:
             raise HTTPException(status_code=404, detail="Conversation not found")
         is_owner = conversation.created_by == current_user.id
-        if not is_owner and conversation.share_scope != "project":
+        if not is_owner and (conversation.share_scope == "private" or not _share_not_expired(conversation)):
             raise HTTPException(status_code=404, detail="Conversation not found")
-        return schemas.RequirementChatSharedView(conversation=conversation, read_only=not is_owner)
+        if not is_owner and conversation.share_scope == "restricted":
+            allowed = set(conversation.share_allowed_user_ids or [])
+            if current_user.id not in allowed:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+        if not is_owner and conversation.share_scope not in {"project", "restricted"}:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        view = schemas.RequirementChatConversationView.model_validate(conversation)
+        _backfill_source_excerpts(db, project_id, view)
+        return schemas.RequirementChatSharedView(conversation=view, read_only=not is_owner)
 
     @app.get(
         "/projects/{project_id}/ai/conversations/{conversation_id}",
@@ -205,7 +341,9 @@ def register_requirement_chat_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         _require_project_read(current_user, project_id, db)
-        return _conversation_or_404(db, conversation_id, project_id, current_user)
+        conversation = _conversation_or_404(db, conversation_id, project_id, current_user)
+        view = schemas.RequirementChatConversationView.model_validate(conversation)
+        return _backfill_source_excerpts(db, project_id, view)
 
     @app.patch(
         "/projects/{project_id}/ai/conversations/{conversation_id}",
@@ -220,9 +358,19 @@ def register_requirement_chat_routes(app):
     ):
         _require_project_read(current_user, project_id, db)
         _conversation_or_404(db, conversation_id, project_id, current_user)
+        _validate_share_update(db, project_id, payload)
+        update_kwargs = {
+            "title": payload.title,
+            "archived": payload.archived,
+            "share_scope": payload.share_scope,
+            "pinned": payload.pinned,
+        }
+        if "share_expires_at" in payload.model_fields_set:
+            update_kwargs["share_expires_at"] = payload.share_expires_at
+        if "share_allowed_user_ids" in payload.model_fields_set:
+            update_kwargs["share_allowed_user_ids"] = payload.share_allowed_user_ids
         return crud.update_chat_conversation(
-            db, conversation_id, title=payload.title, archived=payload.archived,
-            share_scope=payload.share_scope,
+            db, conversation_id, **update_kwargs,
         )
 
     @app.delete("/projects/{project_id}/ai/conversations/{conversation_id}")
@@ -244,6 +392,7 @@ def register_requirement_chat_routes(app):
     async def ask_about_requirements(
         project_id: int,
         payload: schemas.RequirementChatAsk,
+        request: Request,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
@@ -266,9 +415,12 @@ def register_requirement_chat_routes(app):
             prior_messages = list(existing.messages)
 
         source_types = _effective_source_types(payload.source_types, chat_settings["source_types"])
-        produced = await _produce_answer(
-            db, project_id, current_user, payload.question, prior_messages, chat_settings,
-            source_types=source_types,
+        produced = await _cancel_on_disconnect(
+            request,
+            _produce_answer(
+                db, project_id, current_user, payload.question, prior_messages, chat_settings,
+                source_types=source_types,
+            ),
         )
 
         # Answer in hand — now persist the conversation (create lazily) and turns.
@@ -289,6 +441,13 @@ def register_requirement_chat_routes(app):
             retrieval_truncated=produced["truncated"],
             requirements_considered=produced["retrieval"].considered,
             requirements_used=len(produced["retrieval"].selected),
+            items_considered=produced["retrieval"].considered,
+            items_used=len(produced["retrieval"].selected),
+            source_counts=produced["retrieval"].source_counts,
+            selected_source_counts=produced["retrieval"].selected_counts,
+            confidence=_confidence(produced["retrieval"].best_score, len(produced["retrieval"].selected)),
+            insufficient_context=produced["retrieval"].considered == 0 or produced["retrieval"].best_score <= 0,
+            coverage_note=_coverage_note(produced["retrieval"]),
         )
 
     @app.post(
@@ -298,6 +457,7 @@ def register_requirement_chat_routes(app):
     async def regenerate_answer(
         project_id: int,
         conversation_id: int,
+        request: Request,
         payload: schemas.RequirementChatRegenerate = schemas.RequirementChatRegenerate(),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
@@ -319,9 +479,12 @@ def register_requirement_chat_routes(app):
 
         # Produce the new answer FIRST so a failure leaves the existing answer
         # intact; only then drop the stale assistant turn(s) and append the new.
-        produced = await _produce_answer(
-            db, project_id, current_user, question, prior_messages, chat_settings,
-            source_types=source_types,
+        produced = await _cancel_on_disconnect(
+            request,
+            _produce_answer(
+                db, project_id, current_user, question, prior_messages, chat_settings,
+                source_types=source_types,
+            ),
         )
         stale_ids = [m.id for m in messages[last_user_idx + 1:]]
         crud.delete_chat_messages(db, stale_ids)
@@ -338,6 +501,13 @@ def register_requirement_chat_routes(app):
             retrieval_truncated=produced["truncated"],
             requirements_considered=produced["retrieval"].considered,
             requirements_used=len(produced["retrieval"].selected),
+            items_considered=produced["retrieval"].considered,
+            items_used=len(produced["retrieval"].selected),
+            source_counts=produced["retrieval"].source_counts,
+            selected_source_counts=produced["retrieval"].selected_counts,
+            confidence=_confidence(produced["retrieval"].best_score, len(produced["retrieval"].selected)),
+            insufficient_context=produced["retrieval"].considered == 0 or produced["retrieval"].best_score <= 0,
+            coverage_note=_coverage_note(produced["retrieval"]),
         )
 
 

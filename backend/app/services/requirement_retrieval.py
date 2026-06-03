@@ -154,6 +154,9 @@ class DocRetrievalResult:
     selected: List["RetrievedDoc"]
     considered: int
     truncated: bool
+    source_counts: dict[str, int]
+    selected_counts: dict[str, int]
+    best_score: float = 0.0
 
 
 def _join(*parts: Any) -> str:
@@ -241,20 +244,31 @@ def retrieve_relevant_docs(
     query and greedily select within ``char_budget`` / ``max_docs``."""
     types = [t for t in (source_types or []) if t in _LOADERS] or ["requirements"]
     candidates: List[RetrievedDoc] = []
+    source_counts = {t: 0 for t in SOURCE_TYPES}
     for t in types:
         try:
-            candidates.extend(_LOADERS[t](db, project_id))
+            loaded = _LOADERS[t](db, project_id)
+            source_counts[t] = len(loaded)
+            candidates.extend(loaded)
         except Exception:  # a single type's loader must not break the whole answer
             logger.warning("Source loader for %r failed in project %s", t, project_id, exc_info=True)
             continue
 
     considered = len(candidates)
     if not candidates:
-        return DocRetrievalResult(selected=[], considered=0, truncated=False)
+        return DocRetrievalResult(
+            selected=[],
+            considered=0,
+            truncated=False,
+            source_counts=source_counts,
+            selected_counts={t: 0 for t in SOURCE_TYPES},
+            best_score=0.0,
+        )
 
     query_tokens = _tokens(f"{query} {extra_context or ''}")
     for doc in candidates:
         doc.score = _score(query_tokens, _tokens(doc.content))
+    best_score = max((doc.score for doc in candidates), default=0.0)
 
     if all(doc.score == 0.0 for doc in candidates):
         candidates.sort(key=lambda d: d.id, reverse=True)  # recency fallback
@@ -272,8 +286,16 @@ def retrieve_relevant_docs(
         selected.append(doc)
         used += len(doc.content)
 
+    selected_counts = {t: 0 for t in SOURCE_TYPES}
+    plural_type = {"requirement": "requirements", "defect": "defects", "test_plan": "test_plans", "test_case": "test_cases"}
+    for doc in selected:
+        selected_counts[plural_type.get(doc.type, doc.type)] = selected_counts.get(plural_type.get(doc.type, doc.type), 0) + 1
+
     return DocRetrievalResult(
         selected=selected,
         considered=considered,
         truncated=len(selected) < considered,
+        source_counts=source_counts,
+        selected_counts=selected_counts,
+        best_score=best_score,
     )

@@ -972,6 +972,26 @@ class JiraIssue(Base):
     test_result = relationship("TestResult")
 
 
+class RequirementFolder(Base):
+    """Hierarchical folder / category used to organise requirements within a
+    project (mirrors the test-suite section tree)."""
+    __tablename__ = "requirement_folders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    parent_folder_id = Column(Integer, ForeignKey("requirement_folders.id"))
+    order_index = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project")
+    parent_folder = relationship("RequirementFolder", remote_side=[id])
+    child_folders = relationship("RequirementFolder", back_populates="parent_folder")
+
+
 class Requirement(Base):
     __tablename__ = "requirements"
 
@@ -983,6 +1003,8 @@ class Requirement(Base):
     status = Column(Enum(RequirementStatus), default=RequirementStatus.DRAFT)
     priority = Column(Enum(Priority), default=Priority.MEDIUM)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    # Optional folder/category this requirement is filed under.
+    folder_id = Column(Integer, ForeignKey("requirement_folders.id"))
     parent_requirement_id = Column(Integer, ForeignKey("requirements.id"))
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     assigned_to = Column(Integer, ForeignKey("users.id"))
@@ -1087,8 +1109,11 @@ class RequirementChatConversation(Base):
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=False, default="New conversation")
     archived = Column(Boolean, default=False, nullable=False)
+    pinned = Column(Boolean, default=False, nullable=False)
     # 'private' = owner only; 'project' = any project member with read access.
     share_scope = Column(String(16), nullable=False, default="private")
+    share_expires_at = Column(DateTime(timezone=True), nullable=True)
+    share_allowed_user_ids = Column(JSON, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

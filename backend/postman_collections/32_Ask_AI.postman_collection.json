@@ -29,6 +29,16 @@
       "key": "conversationPublicId",
       "value": "00000000000000000000000000000000",
       "type": "string"
+    },
+    {
+      "key": "shareRecipientUserId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "shareExpiresAt",
+      "value": "2026-12-31T23:59:59Z",
+      "type": "string"
     }
   ],
   "auth": {
@@ -164,7 +174,94 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"share_scope\": \"project\"\n}"
+          "raw": "{\n  \"share_scope\": \"project\",\n  \"share_expires_at\": \"{{shareExpiresAt}}\",\n  \"share_allowed_user_ids\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{projectId}}/ai/conversations/{{conversationId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{projectId}}",
+            "ai",
+            "conversations",
+            "{{conversationId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Conversation Sharing - Restricted",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"share_scope\": \"restricted\",\n  \"share_expires_at\": \"{{shareExpiresAt}}\",\n  \"share_allowed_user_ids\": [{{shareRecipientUserId}}]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{projectId}}/ai/conversations/{{conversationId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{projectId}}",
+            "ai",
+            "conversations",
+            "{{conversationId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Revoke Conversation Sharing",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"share_scope\": \"private\",\n  \"share_expires_at\": null,\n  \"share_allowed_user_ids\": []\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/projects/{{projectId}}/ai/conversations/{{conversationId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "projects",
+            "{{projectId}}",
+            "ai",
+            "conversations",
+            "{{conversationId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Pin Conversation",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pinned\": true\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/projects/{{projectId}}/ai/conversations/{{conversationId}}",

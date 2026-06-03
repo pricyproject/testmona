@@ -18,7 +18,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage, RequirementFolder
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -1436,7 +1436,106 @@ def get_requirements(
     return query.offset(skip).limit(limit).all()
 
 
+# --- Requirement folders / categories --------------------------------------
+
+def _requirement_folder_counts(db: Session, project_id: int) -> dict:
+    """Number of requirements filed directly under each folder in a project."""
+    rows = (
+        db.query(Requirement.folder_id, func.count(Requirement.id))
+        .filter(Requirement.project_id == project_id, Requirement.folder_id.isnot(None))
+        .group_by(Requirement.folder_id)
+        .all()
+    )
+    return {folder_id: count for folder_id, count in rows}
+
+
+def get_requirement_folders(db: Session, project_id: int):
+    folders = (
+        db.query(RequirementFolder)
+        .filter(RequirementFolder.project_id == project_id)
+        .order_by(RequirementFolder.order_index.asc(), RequirementFolder.name.asc())
+        .all()
+    )
+    counts = _requirement_folder_counts(db, project_id)
+    for folder in folders:
+        # Transient attribute read by the Pydantic view (not persisted).
+        folder.requirement_count = counts.get(folder.id, 0)
+    return folders
+
+
+def get_requirement_folder(db: Session, folder_id: int):
+    return db.query(RequirementFolder).filter(RequirementFolder.id == folder_id).first()
+
+
+def _requirement_folder_descendant_ids(db: Session, folder_id: int) -> set:
+    """Ids of a folder plus all of its descendants (for cycle prevention)."""
+    ids = {folder_id}
+    frontier = [folder_id]
+    while frontier:
+        children = (
+            db.query(RequirementFolder.id)
+            .filter(RequirementFolder.parent_folder_id.in_(frontier))
+            .all()
+        )
+        next_frontier = [cid for (cid,) in children if cid not in ids]
+        ids.update(next_frontier)
+        frontier = next_frontier
+    return ids
+
+
+def create_requirement_folder(db: Session, folder: "schemas.RequirementFolderCreate"):
+    db_folder = RequirementFolder(
+        name=folder.name.strip(),
+        description=(folder.description or None),
+        project_id=folder.project_id,
+        parent_folder_id=folder.parent_folder_id,
+    )
+    db.add(db_folder)
+    safe_commit(db)
+    db.refresh(db_folder)
+    db_folder.requirement_count = 0
+    return db_folder
+
+
+def update_requirement_folder(db: Session, folder_id: int, folder: "schemas.RequirementFolderUpdate"):
+    db_folder = get_requirement_folder(db, folder_id)
+    if not db_folder:
+        return None
+    update_data = folder.model_dump(exclude_unset=True)
+    if "name" in update_data and update_data["name"]:
+        db_folder.name = update_data["name"].strip()
+    if "description" in update_data:
+        db_folder.description = update_data["description"] or None
+    if "parent_folder_id" in update_data:
+        db_folder.parent_folder_id = update_data["parent_folder_id"]
+    safe_commit(db)
+    db.refresh(db_folder)
+    counts = _requirement_folder_counts(db, db_folder.project_id)
+    db_folder.requirement_count = counts.get(db_folder.id, 0)
+    return db_folder
+
+
+def delete_requirement_folder(db: Session, folder_id: int):
+    """Delete a folder, moving its child folders and any filed requirements up
+    to the deleted folder's parent (so nothing becomes orphaned/invisible)."""
+    db_folder = get_requirement_folder(db, folder_id)
+    if not db_folder:
+        return False
+    new_parent = db_folder.parent_folder_id
+    db.query(RequirementFolder).filter(
+        RequirementFolder.parent_folder_id == folder_id
+    ).update({RequirementFolder.parent_folder_id: new_parent}, synchronize_session=False)
+    db.query(Requirement).filter(
+        Requirement.folder_id == folder_id
+    ).update({Requirement.folder_id: new_parent}, synchronize_session=False)
+    db.delete(db_folder)
+    safe_commit(db)
+    return True
+
+
 # --- Requirement project-wide AI chat --------------------------------------
+
+_UNSET = object()
 
 def create_chat_conversation(db: Session, project_id: int, created_by: int, title: str = "New conversation"):
     conversation = RequirementChatConversation(
@@ -1459,7 +1558,7 @@ def get_chat_conversations(db: Session, project_id: int, created_by: int,
             RequirementChatConversation.created_by == created_by,
             RequirementChatConversation.archived == archived,
         )
-        .order_by(RequirementChatConversation.updated_at.desc())
+        .order_by(RequirementChatConversation.pinned.desc(), RequirementChatConversation.updated_at.desc())
         .offset(skip)
         .limit(limit)
         .all()
@@ -1476,7 +1575,10 @@ def get_chat_conversation_by_public_id(db: Session, public_id: str):
 
 def update_chat_conversation(db: Session, conversation_id: int,
                              title: Optional[str] = None, archived: Optional[bool] = None,
-                             share_scope: Optional[str] = None):
+                             share_scope: Optional[str] = None,
+                             pinned: Optional[bool] = None,
+                             share_expires_at=_UNSET,
+                             share_allowed_user_ids=_UNSET):
     conversation = get_chat_conversation(db, conversation_id)
     if conversation is None:
         return None
@@ -1484,8 +1586,14 @@ def update_chat_conversation(db: Session, conversation_id: int,
         conversation.title = title[:255]
     if archived is not None:
         conversation.archived = archived
+    if pinned is not None:
+        conversation.pinned = pinned
     if share_scope is not None:
         conversation.share_scope = share_scope
+    if share_expires_at is not _UNSET or share_scope == "private":
+        conversation.share_expires_at = share_expires_at
+    if share_allowed_user_ids is not _UNSET or share_scope in {"private", "project"}:
+        conversation.share_allowed_user_ids = share_allowed_user_ids
     db.commit()
     db.refresh(conversation)
     return conversation
@@ -1555,6 +1663,8 @@ def create_requirement(db: Session, requirement: RequirementCreate):
     # Handle optional fields
     if requirement.parent_requirement_id:
         db_requirement.parent_requirement_id = requirement.parent_requirement_id
+    if requirement.folder_id:
+        db_requirement.folder_id = requirement.folder_id
     if requirement.assigned_to:
         db_requirement.assigned_to = requirement.assigned_to
     if requirement.tags:

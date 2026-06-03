@@ -1907,6 +1907,7 @@ class RequirementBase(BaseModel):
     status: RequirementStatus = RequirementStatus.DRAFT
     priority: Priority = Priority.MEDIUM
     parent_requirement_id: Optional[int] = None
+    folder_id: Optional[int] = None
     assigned_to: Optional[int] = None
     tags: Optional[str] = None
     acceptance_criteria: Optional[str] = None
@@ -1939,6 +1940,7 @@ class RequirementUpdate(BaseModel):
     status: Optional[RequirementStatus] = None
     priority: Optional[Priority] = None
     parent_requirement_id: Optional[int] = None
+    folder_id: Optional[int] = None
     assigned_to: Optional[int] = None
     tags: Optional[str] = None
     acceptance_criteria: Optional[str] = None
@@ -1963,6 +1965,55 @@ class Requirement(RequirementBase):
     id: int
     project_id: int
     created_by: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# --- Requirement folders / categories --------------------------------------
+
+class RequirementFolderBase(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = None
+    parent_folder_id: Optional[int] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        cleaned = (v or '').strip()
+        if not cleaned:
+            raise ValueError('Folder name cannot be empty')
+        if len(cleaned) > 255:
+            raise ValueError('Folder name cannot exceed 255 characters')
+        return cleaned
+
+
+class RequirementFolderCreate(RequirementFolderBase):
+    project_id: int
+
+
+class RequirementFolderUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = None
+    parent_folder_id: Optional[int] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if v is None:
+            return v
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError('Folder name cannot be empty')
+        return cleaned
+
+
+class RequirementFolder(RequirementFolderBase):
+    id: int
+    project_id: int
+    requirement_count: int = 0
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -2064,6 +2115,7 @@ class RequirementChatSource(BaseModel):
     requirement_id: Optional[int] = None  # legacy field (pre multi-source rows)
     key: str
     title: str
+    excerpt: Optional[str] = None
 
 
 class RequirementChatMessageView(BaseModel):
@@ -2085,7 +2137,7 @@ class RequirementChatMessageView(BaseModel):
         from_attributes = True
 
 
-CHAT_SHARE_SCOPES = {"private", "project"}
+CHAT_SHARE_SCOPES = {"private", "project", "restricted"}
 
 
 class RequirementChatConversationView(BaseModel):
@@ -2094,10 +2146,18 @@ class RequirementChatConversationView(BaseModel):
     project_id: int
     title: str
     archived: bool = False
+    pinned: bool = False
     share_scope: str = "private"
+    share_expires_at: Optional[datetime] = None
+    share_allowed_user_ids: List[int] = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime] = None
     messages: List[RequirementChatMessageView] = Field(default_factory=list)
+
+    @field_validator("share_allowed_user_ids", mode="before")
+    @classmethod
+    def coerce_share_allowed_user_ids(cls, value):
+        return value or []
 
     class Config:
         from_attributes = True
@@ -2113,7 +2173,10 @@ class RequirementChatSharedView(BaseModel):
 class RequirementChatConversationUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=255)
     archived: Optional[bool] = None
+    pinned: Optional[bool] = None
     share_scope: Optional[str] = None
+    share_expires_at: Optional[datetime] = None
+    share_allowed_user_ids: Optional[List[int]] = None
 
     @field_validator("title")
     @classmethod
@@ -2135,6 +2198,21 @@ class RequirementChatConversationUpdate(BaseModel):
             raise ValueError("Invalid share scope")
         return normalized
 
+    @field_validator("share_allowed_user_ids")
+    @classmethod
+    def validate_share_allowed_user_ids(cls, value: Optional[List[int]]) -> Optional[List[int]]:
+        if value is None:
+            return None
+        seen: List[int] = []
+        for user_id in value:
+            if user_id <= 0:
+                raise ValueError("Share recipients must be valid users")
+            if user_id not in seen:
+                seen.append(user_id)
+        if len(seen) > 100:
+            raise ValueError("Share recipients cannot exceed 100 users")
+        return seen
+
 
 _CHAT_SOURCE_TYPES = {"requirements", "defects", "test_plans", "test_cases"}
 
@@ -2142,6 +2220,9 @@ _CHAT_SOURCE_TYPES = {"requirements", "defects", "test_plans", "test_cases"}
 def _clean_source_types(value: Optional[List[str]]) -> Optional[List[str]]:
     if value is None:
         return None
+    invalid = [v for v in value if v not in _CHAT_SOURCE_TYPES]
+    if invalid:
+        raise ValueError(f"Invalid source type: {invalid[0]}")
     cleaned = [v for v in value if v in _CHAT_SOURCE_TYPES]
     # de-duplicate while preserving order
     seen: List[str] = []
@@ -2187,6 +2268,13 @@ class RequirementChatAskResponse(BaseModel):
     retrieval_truncated: bool = False
     requirements_considered: int = 0
     requirements_used: int = 0
+    items_considered: int = 0
+    items_used: int = 0
+    source_counts: Dict[str, int] = Field(default_factory=dict)
+    selected_source_counts: Dict[str, int] = Field(default_factory=dict)
+    confidence: str = "low"
+    insufficient_context: bool = False
+    coverage_note: Optional[str] = None
 
 
 # --- Coverage badges (batched per project) ---------------------------------

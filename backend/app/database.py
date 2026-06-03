@@ -1,4 +1,4 @@
-from sqlalchemy import DateTime, JSON, Column, create_engine, event, inspect, text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, create_engine, event, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
@@ -54,6 +54,32 @@ def _repair_known_schema_drift() -> None:
 
     if repaired_columns:
         print(f"✅ Missing database columns added: test_result_defect_links.{', '.join(repaired_columns)}")
+
+    chat_repaired_columns = []
+    for column in (
+        # Keep these nullable at the physical schema-repair layer so SQLite can
+        # add them to existing tables with rows. ORM defaults/backfills handle
+        # runtime values, and the Alembic migration remains the canonical schema.
+        Column("pinned", Boolean(), nullable=True),
+        Column("share_expires_at", DateTime(timezone=True), nullable=True),
+        Column("share_allowed_user_ids", JSON(), nullable=True),
+    ):
+        if _add_column_if_missing("requirement_chat_conversations", column):
+            chat_repaired_columns.append(column.name)
+
+    if chat_repaired_columns:
+        with engine.begin() as connection:
+            if "pinned" in chat_repaired_columns:
+                connection.execute(
+                    text("UPDATE requirement_chat_conversations SET pinned = 0 WHERE pinned IS NULL")
+                )
+        print(f"✅ Missing database columns added: requirement_chat_conversations.{', '.join(chat_repaired_columns)}")
+
+    # Requirement foldering: the requirement_folders table is created by
+    # create_all (it's a new table), but the folder_id FK on the existing
+    # requirements table needs an explicit ALTER for already-provisioned DBs.
+    if _add_column_if_missing("requirements", Column("folder_id", Integer(), nullable=True)):
+        print("✅ Missing database column added: requirements.folder_id")
 
 
 def get_db():
