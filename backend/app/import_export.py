@@ -1133,7 +1133,11 @@ async def import_test_cases(
         if missing_columns:
             raise HTTPException(status_code=400, detail=f"Missing required columns: {missing_columns}")
 
-        idempotency_record_key = get_idempotency_key(request, current_user.id, 'multipart-test-case-import')
+        # Dry runs make no changes, so they must not be cached as idempotent
+        # results nor take the import lock (otherwise a later real import reusing
+        # the same Idempotency-Key would return the dry-run result and import
+        # nothing, and a preview could block a real import).
+        idempotency_record_key = None if dry_run else get_idempotency_key(request, current_user.id, 'multipart-test-case-import')
         cached_response = begin_idempotent_request(db, idempotency_record_key, current_user.id, 'multipart-test-case-import')
         if cached_response is not None:
             return cached_response
@@ -1142,16 +1146,17 @@ async def import_test_cases(
         ensure_import_permission(current_user, test_suite.project_id, db)
         lock_owner = idempotency_record_key or f"request:{uuid.uuid4()}"
         lock_key = f"test-suite-import:{test_suite_id}"
-        acquire_import_lock(
-            db=db,
-            lock_key=lock_key,
-            owner=lock_owner,
-            user_id=current_user.id,
-            operation='multipart-test-case-import',
-            project_id=test_suite.project_id,
-            test_suite_id=test_suite_id,
-            filename=file.filename,
-        )
+        if not dry_run:
+            acquire_import_lock(
+                db=db,
+                lock_key=lock_key,
+                owner=lock_owner,
+                user_id=current_user.id,
+                operation='multipart-test-case-import',
+                project_id=test_suite.project_id,
+                test_suite_id=test_suite_id,
+                filename=file.filename,
+            )
         section_id = validate_section_for_suite(db, section_id, test_suite_id)
         project_id = test_suite.project_id
         custom_fields = []
@@ -1430,7 +1435,11 @@ async def import_previewed_test_cases(
     idempotency_key_header: Optional[str] = Header(None, alias='Idempotency-Key'),
 ):
     """Import mapped and previewed test cases from the frontend CSV workflow."""
-    idempotency_record_key = get_idempotency_key(request, current_user.id, 'previewed-test-case-import')
+    # Dry runs make no changes, so they must not be cached as idempotent results
+    # nor take the import lock. Caching a dry run would make a later *real* import
+    # that reuses the same Idempotency-Key return the dry-run result and import
+    # nothing, while taking the lock would let a preview block a real import.
+    idempotency_record_key = None if payload.dry_run else get_idempotency_key(request, current_user.id, 'previewed-test-case-import')
     cached_response = begin_idempotent_request(db, idempotency_record_key, current_user.id, 'previewed-test-case-import')
     if cached_response is not None:
         return cached_response
@@ -1440,16 +1449,17 @@ async def import_previewed_test_cases(
 
     lock_owner = idempotency_record_key or f"request:{uuid.uuid4()}"
     lock_key = f"test-suite-import:{payload.test_suite_id}"
-    acquire_import_lock(
-        db=db,
-        lock_key=lock_key,
-        owner=lock_owner,
-        user_id=current_user.id,
-        operation='previewed-test-case-import',
-        project_id=test_suite.project_id,
-        test_suite_id=payload.test_suite_id,
-        filename=payload.filename,
-    )
+    if not payload.dry_run:
+        acquire_import_lock(
+            db=db,
+            lock_key=lock_key,
+            owner=lock_owner,
+            user_id=current_user.id,
+            operation='previewed-test-case-import',
+            project_id=test_suite.project_id,
+            test_suite_id=payload.test_suite_id,
+            filename=payload.filename,
+        )
 
     try:
         custom_fields = get_custom_fields_for_project(db, test_suite.project_id)
@@ -1802,11 +1812,14 @@ def export_test_cases(
             'tags': test_case.tags or '',
             'test_suite_id': test_case.test_suite_id,
             'section_id': test_case.section_id or '',
-            'order_index': test_case.order_index or 0,
-            'is_multistep': getattr(test_case, 'is_multistep', False),
+            # Render numbers/booleans/dates explicitly: sanitize_csv_field() treats
+            # any falsy value as '', which would otherwise drop order_index 0 and
+            # is_multistep False and emit a capitalised "True"/"False".
+            'order_index': str(test_case.order_index if test_case.order_index is not None else 0),
+            'is_multistep': 'true' if getattr(test_case, 'is_multistep', False) else 'false',
             'multistep_data': multistep_data,
-            'created_at': test_case.created_at,
-            'updated_at': test_case.updated_at or ''
+            'created_at': test_case.created_at.isoformat() if test_case.created_at else '',
+            'updated_at': test_case.updated_at.isoformat() if test_case.updated_at else ''
         }
         row_data.update(custom_values)
         writer.writerow({key: sanitize_csv_field(value) for key, value in row_data.items()})
@@ -1882,6 +1895,17 @@ async def validate_import_file(
             raise HTTPException(status_code=400, detail="File is empty")
         if len(rows) > MAX_ROWS_PER_IMPORT:
             raise HTTPException(status_code=400, detail=f"CSV imports are limited to {MAX_ROWS_PER_IMPORT} rows")
+        if not csv_reader.fieldnames:
+            raise HTTPException(status_code=400, detail="CSV header row is required")
+
+        # Normalize headers/aliases exactly like the import endpoint so validation
+        # results match what an actual import would do (e.g. a "Name" or "Summary"
+        # column maps to title instead of being reported as a missing field).
+        rows = normalize_import_rows(rows, csv_reader.fieldnames)
+        normalized_fieldnames = [normalize_import_header(fieldname) for fieldname in csv_reader.fieldnames]
+        missing_columns = [col for col in ['title'] if col not in normalized_fieldnames]
+        if missing_columns:
+            raise HTTPException(status_code=400, detail=f"Missing required columns: {missing_columns}")
 
         test_suite = get_test_suite_or_404(db, test_suite_id)
         ensure_import_permission(current_user, test_suite.project_id, db)
@@ -2024,9 +2048,11 @@ def get_import_template(
         elif custom_field.field_type == CustomFieldType.BOOLEAN:
             sample_data[custom_field.name] = 'true'
         elif custom_field.field_type == CustomFieldType.SELECT:
-            sample_data[custom_field.name] = custom_field.options[0] if custom_field.options else ''
+            field_options = get_custom_field_options(custom_field)
+            sample_data[custom_field.name] = field_options[0] if field_options else ''
         elif custom_field.field_type == CustomFieldType.MULTISELECT:
-            sample_data[custom_field.name] = ', '.join(custom_field.options[:2]) if custom_field.options else ''
+            field_options = get_custom_field_options(custom_field)
+            sample_data[custom_field.name] = ', '.join(field_options[:2]) if field_options else ''
 
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fieldnames)
