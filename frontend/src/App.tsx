@@ -6,10 +6,10 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useAuthStore, initializeAuthFromLocalStorage } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAppName } from '@/hooks/useAppName';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 
-const lazyPage = (loader: () => Promise<any>, exportName: string) =>
-  lazy(() => loader().then((module) => ({ default: module[exportName] })));
+const lazyPage = <P extends object = {}>(loader: () => Promise<any>, exportName: string) =>
+  lazy<ComponentType<P>>(() => loader().then((module) => ({ default: module[exportName] as ComponentType<P> })));
 
 const Login = lazyPage(() => import('@/pages/Login'), 'Login');
 const Signup = lazyPage(() => import('@/pages/Signup'), 'Signup');
@@ -19,6 +19,10 @@ const Projects = lazyPage(() => import('@/pages/Projects'), 'Projects');
 const Requirements = lazyPage(() => import('@/pages/Requirements'), 'Requirements');
 const RequirementDetail = lazyPage(() => import('@/pages/RequirementDetail'), 'RequirementDetail');
 const AskProject = lazyPage(() => import('@/pages/AskProject'), 'AskProject');
+const DocHub = lazyPage(() => import('@/pages/DocHub'), 'DocHub');
+const DocDetail = lazyPage<{ initialTab?: 'document' | 'revisions' | 'links' | 'stats' }>(() => import('@/pages/DocDetail'), 'DocDetail');
+const DocEditor = lazyPage(() => import('@/pages/DocEditor'), 'DocEditor');
+const PublicDoc = lazyPage(() => import('@/pages/PublicDoc'), 'PublicDoc');
 const TestSuites = lazyPage(() => import('@/pages/TestSuites'), 'TestSuites');
 const TestSuiteDetail = lazyPage(() => import('@/pages/TestSuiteDetail'), 'TestSuiteDetail');
 const TestCases = lazyPage(() => import('@/pages/TestCases'), 'TestCases');
@@ -37,6 +41,7 @@ const TestRunDetail = lazyPage(() => import('@/pages/TestRunDetail'), 'TestRunDe
 const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunReport');
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
 const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetail');
+const AdvancedSearch = lazyPage(() => import('@/pages/AdvancedSearch'), 'AdvancedSearch');
 const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
 const SharedReportViewer = lazyPage(() => import('@/pages/SharedReportViewer'), 'SharedReportViewer');
 const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
@@ -129,12 +134,14 @@ function AppWithRouter() {
   if (
     typeof window !== 'undefined' &&
     (window.location.pathname.startsWith('/shared-reports/') ||
+      window.location.pathname.startsWith('/docs/public/') ||
       window.location.pathname.startsWith('/accept-invite/'))
   ) {
     return (
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route path="/shared-reports/:token" element={<SharedReportViewer />} />
+          <Route path="/docs/public/:publicId" element={<PublicDoc />} />
           <Route path="/accept-invite/:token" element={<AcceptInvite />} />
         </Routes>
       </Suspense>
@@ -251,6 +258,26 @@ function AppWithRouter() {
             <RequirementDetail />
           </ProjectGuard>
         } />
+        <Route path="/projects/:projectId/docs" element={
+          <ProjectGuard>
+            <DocHub />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/docs/:docId" element={
+          <ProjectGuard>
+            <DocDetail />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/docs/:docId/revisions" element={
+          <ProjectGuard>
+            <DocDetail initialTab="revisions" />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/docs/:docId/edit" element={
+          <ProjectGuard>
+            <DocEditor />
+          </ProjectGuard>
+        } />
         <Route path="/projects/:projectId/defects" element={
           <ProjectGuard>
             <Defects />
@@ -259,6 +286,11 @@ function AppWithRouter() {
         <Route path="/projects/:projectId/defects/:defectId" element={
           <ProjectGuard>
             <DefectDetail />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/advanced-search" element={
+          <ProjectGuard>
+            <AdvancedSearch />
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-plans" element={
@@ -318,6 +350,10 @@ function AppWithRouter() {
         } />
         
         {/* Global routes (not project-specific) */}
+        <Route path="/docs" element={<DocHub />} />
+        <Route path="/docs/:docId" element={<DocDetail />} />
+        <Route path="/docs/:docId/revisions" element={<DocDetail initialTab="revisions" />} />
+        <Route path="/docs/:docId/edit" element={<DocEditor />} />
         <Route path="/test-cases/:id" element={
           <ProjectGuard>
             <TestCaseDetail />

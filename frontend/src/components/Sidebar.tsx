@@ -24,6 +24,8 @@ import {
   Users,
   Webhook,
   KeyRound,
+  BookOpen,
+  ScanSearch,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
@@ -101,6 +103,7 @@ export function Sidebar({
           name: t('global'),
           items: [
             { name: t('projects'), href: '/projects', icon: FolderOpen },
+            { name: t('docHub'), href: '/docs', icon: BookOpen },
             { name: t('environments'), href: '/environments', icon: Settings },
             { name: t('activity'), href: '/activity-management', icon: BarChart3 },
           ]
@@ -129,6 +132,7 @@ export function Sidebar({
         name: t('testing'),
         items: [
           { name: t('requirements'), href: `/projects/${projectId}/requirements`, icon: FileCheck },
+          { name: t('docHub'), href: `/projects/${projectId}/docs`, icon: BookOpen },
           { name: t('testCases'), href: `/projects/${projectId}/test-cases`, icon: FileText },
           { name: t('testSuites'), href: `/projects/${projectId}/test-suites`, icon: TestTube },
           { name: t('testRuns'), href: `/projects/${projectId}/test-runs`, icon: PlayCircle },
@@ -145,6 +149,7 @@ export function Sidebar({
         name: t('management'),
         items: [
           { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug },
+          { name: t('advancedSearch'), href: `/projects/${projectId}/advanced-search`, icon: ScanSearch },
           { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3 },
         ]
       },
@@ -281,7 +286,7 @@ export function Sidebar({
                             `}
                             title={showCollapsed ? item.disabledReason || item.name : item.disabledReason}
                           >
-                            <Icon className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out shrink-0`} />
+                            <Icon className={`h-5 w-5 ${showCollapsed ? '' : (isRTL ? 'ml-3' : 'mr-3')} transition-all duration-300 ease-in-out shrink-0`} />
                             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${
                               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'
                             }`}>
@@ -301,7 +306,7 @@ export function Sidebar({
                             `}
                             title={showCollapsed ? item.name : undefined}
                           >
-                            <Icon className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out shrink-0`} />
+                            <Icon className={`h-5 w-5 ${showCollapsed ? '' : (isRTL ? 'ml-3' : 'mr-3')} transition-all duration-300 ease-in-out shrink-0`} />
                             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${
                               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'
                             }`}>
@@ -359,7 +364,7 @@ export function Sidebar({
             onClick={logout}
             title={showCollapsed ? t('logout') : undefined}
           >
-            <LogOut className={`${showCollapsed ? 'h-6 w-6' : (isRTL ? 'ml-3' : 'mr-3') + ' h-5 w-5'} transition-all duration-300 ease-in-out shrink-0`} />
+            <LogOut className={`h-5 w-5 ${showCollapsed ? '' : (isRTL ? 'ml-3' : 'mr-3')} transition-all duration-300 ease-in-out shrink-0`} />
             <span className={`transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden ${
               showCollapsed ? 'opacity-0 w-0' : 'opacity-100'
             }`}>

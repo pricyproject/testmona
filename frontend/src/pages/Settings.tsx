@@ -227,7 +227,7 @@ const defaultAIManagerSettings: AIManagerSettings = {
   providers: defaultAIProviders,
 };
 
-const AI_SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases'];
+const AI_SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases', 'docs'];
 const AI_ROUTING_TASKS: Array<keyof AIRoutingSettings> = ['qa', 'generation', 'assistant'];
 
 const aiProviderLabels: Record<AIProviderName, string> = {
