@@ -1897,6 +1897,205 @@ class WebhookDelivery(Base):
     subscription = relationship("WebhookSubscription")
 
 
+# ---------------------------------------------------------------------------
+# Doc Hub — Docs-as-Code documentation hub
+#
+# A DocSpace is a "repository" of docs; it is either global (project_id IS NULL)
+# or scoped to a project. Docs are stored as canonical Markdown, organised in an
+# optional folder tree, classified + tagged, versioned, and convertible into
+# requirements (provenance recorded via DocRequirementLink).
+# ---------------------------------------------------------------------------
+
+
+class DocStatus(enum.Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class DocSpace(Base):
+    """A repository of documents. Global when ``project_id`` is NULL, otherwise
+    scoped to a project (mirrors how requirements are project-scoped)."""
+    __tablename__ = "doc_spaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(255), nullable=False, index=True)
+    description = Column(Text)
+    # NULL => global space available across the whole instance.
+    project_id = Column(Integer, ForeignKey("projects.id"), index=True)
+    classification = Column(String(100))
+    icon = Column(String(50))
+    color = Column(String(20))
+    order_index = Column(Integer, default=0)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "slug", name="uq_doc_spaces_project_slug"),
+    )
+
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
+    folders = relationship("DocFolder", back_populates="space", cascade="all, delete-orphan")
+    docs = relationship("Doc", back_populates="space", cascade="all, delete-orphan")
+
+
+class DocFolder(Base):
+    """Hierarchical folder within a :class:`DocSpace` (mirrors RequirementFolder)."""
+    __tablename__ = "doc_folders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True)
+    name = Column(String(255), nullable=False)
+    space_id = Column(Integer, ForeignKey("doc_spaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_folder_id = Column(Integer, ForeignKey("doc_folders.id", ondelete="SET NULL"))
+    order_index = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    space = relationship("DocSpace", back_populates="folders")
+    parent_folder = relationship("DocFolder", remote_side=[id])
+    child_folders = relationship("DocFolder", back_populates="parent_folder")
+
+
+class Doc(Base):
+    """A document authored in canonical Markdown."""
+    __tablename__ = "docs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True)
+    title = Column(String(255), nullable=False)
+    slug = Column(String(255), nullable=False, index=True)
+    # Canonical Markdown source of truth.
+    content_markdown = Column(Text, default="")
+    space_id = Column(Integer, ForeignKey("doc_spaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    folder_id = Column(Integer, ForeignKey("doc_folders.id", ondelete="SET NULL"))
+    # Denormalised from the space so project-scoped queries/AI retrieval are cheap.
+    project_id = Column(Integer, ForeignKey("projects.id"), index=True)
+    classification = Column(String(100))
+    status = Column(Enum(DocStatus), default=DocStatus.DRAFT, nullable=False)
+    tags = Column(String(500))
+    # Text direction hint for rendering: ltr | rtl | auto.
+    dir = Column(String(10), default="auto")
+    language = Column(String(20))
+    current_version = Column(Integer, default=0)
+    # Public read-only sharing. ``public_id`` is the opaque link token; sharing is
+    # off until ``share_scope`` is "public" (and the optional expiry has not passed).
+    public_id = Column(String(64), unique=True, index=True)
+    share_scope = Column(String(20), default="private", nullable=False)  # private | public
+    share_expires_at = Column(DateTime(timezone=True))
+    view_count = Column(Integer, default=0)
+    last_viewed_at = Column(DateTime(timezone=True))
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    space = relationship("DocSpace", back_populates="docs")
+    folder = relationship("DocFolder")
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
+    editor = relationship("User", foreign_keys=[updated_by])
+    versions = relationship(
+        "DocVersion",
+        back_populates="doc",
+        cascade="all, delete-orphan",
+        order_by="DocVersion.version_number.desc()",
+    )
+    requirement_links = relationship(
+        "DocRequirementLink",
+        back_populates="doc",
+        cascade="all, delete-orphan",
+    )
+
+
+class DocVersion(Base):
+    """Immutable snapshot of a doc's content. Written on create, every save,
+    restore, and publish (mirrors :class:`RequirementVersion`)."""
+    __tablename__ = "doc_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    action = Column(String(20), nullable=False, default="updated")  # created, updated, restored, published
+    title = Column(String(255), nullable=False)
+    content_markdown = Column(Text)
+    status = Column(String(50))
+    classification = Column(String(100))
+    tags = Column(String(500))
+    change_note = Column(String(500))
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    doc = relationship("Doc", back_populates="versions")
+    author = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "version_number", name="uq_doc_version_number"),
+    )
+
+
+class DocRequirementLink(Base):
+    """Provenance: records that a requirement was generated from a doc by the
+    converter, so both pages can show the relationship."""
+    __tablename__ = "doc_requirement_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    doc = relationship("Doc", back_populates="requirement_links")
+    requirement = relationship("Requirement")
+    creator = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "requirement_id", name="uq_doc_requirement_link"),
+    )
+
+
+class DocVisit(Base):
+    """Per-user visit tracking for latest-visited sorting and admin statistics."""
+    __tablename__ = "doc_visits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    visit_count = Column(Integer, default=1, nullable=False)
+    first_visited_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_visited_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    doc = relationship("Doc")
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "user_id", name="uq_doc_visit_user"),
+    )
+
+
+class DocRelatedLink(Base):
+    """Directed related-doc edge, stored once per direction requested by users."""
+    __tablename__ = "doc_related_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    related_doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    doc = relationship("Doc", foreign_keys=[doc_id])
+    related_doc = relationship("Doc", foreign_keys=[related_doc_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "related_doc_id", name="uq_doc_related_link"),
+    )
+
+
 # Add relationships to versioning models (avoiding circular imports)
 TestCase.versions = relationship("TestCaseVersion", back_populates="test_case")
 TestCase.current_version = relationship(

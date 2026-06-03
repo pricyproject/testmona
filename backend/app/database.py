@@ -2,6 +2,7 @@ from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, create_engine, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
+import uuid
 
 engine = create_engine(settings.database_url)
 
@@ -80,6 +81,38 @@ def _repair_known_schema_drift() -> None:
     # requirements table needs an explicit ALTER for already-provisioned DBs.
     if _add_column_if_missing("requirements", Column("folder_id", Integer(), nullable=True)):
         print("✅ Missing database column added: requirements.folder_id")
+
+    # Doc Hub: these tables/columns may be present from older development
+    # builds, so repair additive columns without rebuilding the database.
+    from sqlalchemy import String as _String
+    for table_name in ("doc_spaces", "doc_folders", "docs"):
+        if _add_column_if_missing(table_name, Column("uuid", _String(36), nullable=True)):
+            with engine.begin() as connection:
+                rows = connection.execute(text(f"SELECT id FROM {table_name} WHERE uuid IS NULL")).fetchall()
+                for row in rows:
+                    connection.execute(
+                        text(f"UPDATE {table_name} SET uuid = :uuid WHERE id = :id"),
+                        {"uuid": str(uuid.uuid4()), "id": row.id},
+                    )
+            print(f"✅ Missing database column added: {table_name}.uuid")
+
+    doc_share_repaired = []
+    for column in (
+        Column("public_id", _String(64), nullable=True),
+        Column("share_scope", _String(20), nullable=True),
+        Column("share_expires_at", DateTime(timezone=True), nullable=True),
+        Column("view_count", Integer(), nullable=True),
+        Column("last_viewed_at", DateTime(timezone=True), nullable=True),
+    ):
+        if _add_column_if_missing("docs", column):
+            doc_share_repaired.append(column.name)
+    if doc_share_repaired:
+        with engine.begin() as connection:
+            if "share_scope" in doc_share_repaired:
+                connection.execute(text("UPDATE docs SET share_scope = 'private' WHERE share_scope IS NULL"))
+            if "view_count" in doc_share_repaired:
+                connection.execute(text("UPDATE docs SET view_count = 0 WHERE view_count IS NULL"))
+        print(f"✅ Missing database columns added: docs.{', '.join(doc_share_repaired)}")
 
 
 def get_db():
