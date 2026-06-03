@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,9 +31,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2, ArrowUpDown, ArrowUp, ArrowDown, Bookmark, BookmarkPlus, Star, X, ListChecks, ShieldCheck, ShieldAlert, ShieldX, Loader2, Tag, Sparkles, Copy, Check } from 'lucide-react';
+import { Plus, FileText, Search, ChevronLeft, ChevronRight, Edit, Trash2, Download, Eye, Users, Clock, CheckCircle, AlertCircle, XCircle, AlertTriangle, ExternalLink, Wand2, ArrowUpDown, ArrowUp, ArrowDown, Bookmark, BookmarkPlus, Star, X, ListChecks, ShieldCheck, ShieldAlert, ShieldX, Loader2, Tag, Sparkles, Copy, Check, LayoutGrid, Table2, MoreHorizontal, Folder, FolderPlus, FolderOpen, FolderInput, Inbox, Pencil } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
@@ -45,8 +46,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter } from '@/lib/api';
-import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus } from '@/types';
+import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter, requirementFoldersAPI } from '@/lib/api';
+import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus, RequirementFolder } from '@/types';
 import { RequirementChatPanel } from '@/components/requirements/RequirementChatPanel';
 import { useAuthStore } from '@/stores/authStore';
 import { canWriteResults } from '@/utils/roles';
@@ -89,6 +90,23 @@ export function Requirements() {
   const [requirementToDelete, setRequirementToDelete] = useState<Requirement | null>(null);
   const [deleteConfirmationName, setDeleteConfirmationName] = useState('');
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
+    try {
+      return localStorage.getItem('requirements-view-mode') === 'grid' ? 'grid' : 'table';
+    } catch {
+      return 'table';
+    }
+  });
+
+  // ── Folders / categories ────────────────────────────────────────────────
+  const [folders, setFolders] = useState<RequirementFolder[]>([]);
+  const [selectedFolder, setSelectedFolder] = useState<'all' | 'unfiled' | number>('all');
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [folderDialogMode, setFolderDialogMode] = useState<'create' | 'edit'>('create');
+  const [editingFolder, setEditingFolder] = useState<RequirementFolder | null>(null);
+  const [folderForm, setFolderForm] = useState<{ name: string; parent_folder_id: string }>({ name: '', parent_folder_id: 'root' });
+  const [folderSaving, setFolderSaving] = useState(false);
+  const [reqFolderId, setReqFolderId] = useState<string>('none');
 
   // Coverage badges
   const [coverageMap, setCoverageMap] = useState<Record<number, RequirementCoverageItem>>({});
@@ -335,6 +353,168 @@ export function Requirements() {
     Promise.resolve().then(loadRequirements);
   }, [loadRequirements]);
 
+  // ── Folders: load, tree helpers, CRUD ───────────────────────────────────
+  const loadFolders = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      setFolders(await requirementFoldersAPI.list(parseInt(projectId)));
+    } catch {
+      // Foldering is non-blocking; ignore load failures.
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadFolders();
+  }, [loadFolders]);
+
+  // If the active folder filter no longer exists (deleted elsewhere), fall back
+  // to "all" so the list never gets stuck showing an empty, unfilterable view.
+  useEffect(() => {
+    if (typeof selectedFolder === 'number' && folders.length > 0 && !folders.some((f) => f.id === selectedFolder)) {
+      setSelectedFolder('all');
+    }
+  }, [folders, selectedFolder]);
+
+  // Ids of a folder plus all its descendants — for scoping the list to a branch.
+  const folderDescendantIds = useCallback((rootId: number): Set<number> => {
+    const ids = new Set<number>([rootId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const f of folders) {
+        if (f.parent_folder_id != null && ids.has(f.parent_folder_id) && !ids.has(f.id)) {
+          ids.add(f.id);
+          added = true;
+        }
+      }
+    }
+    return ids;
+  }, [folders]);
+
+  // Flattened tree (depth-annotated) for indented rendering and select options.
+  const folderTree = useMemo(() => {
+    const byParent = new Map<number | null, RequirementFolder[]>();
+    for (const f of folders) {
+      const key = f.parent_folder_id ?? null;
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key)!.push(f);
+    }
+    const out: Array<{ folder: RequirementFolder; depth: number }> = [];
+    const walk = (parent: number | null, depth: number) => {
+      for (const f of (byParent.get(parent) || [])) {
+        out.push({ folder: f, depth });
+        walk(f.id, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return out;
+  }, [folders]);
+
+  // Recursive count (folder + descendants) for the rail badges.
+  const folderTotalCounts = useMemo(() => {
+    const direct: Record<number, number> = {};
+    for (const f of folders) direct[f.id] = f.requirement_count;
+    const childrenOf = new Map<number, number[]>();
+    for (const f of folders) {
+      if (f.parent_folder_id != null) {
+        if (!childrenOf.has(f.parent_folder_id)) childrenOf.set(f.parent_folder_id, []);
+        childrenOf.get(f.parent_folder_id)!.push(f.id);
+      }
+    }
+    const memo: Record<number, number> = {};
+    const compute = (id: number, visiting: Set<number>): number => {
+      if (memo[id] != null) return memo[id];
+      if (visiting.has(id)) return direct[id] || 0; // guard against malformed cycles
+      visiting.add(id);
+      let sum = direct[id] || 0;
+      for (const child of (childrenOf.get(id) || [])) sum += compute(child, visiting);
+      visiting.delete(id);
+      memo[id] = sum;
+      return sum;
+    };
+    for (const f of folders) compute(f.id, new Set());
+    return memo;
+  }, [folders]);
+
+  const unfiledCount = useMemo(() => requirements.filter((r) => r.folder_id == null).length, [requirements]);
+
+  // Parent-folder choices for the folder dialog. When editing, a folder cannot
+  // be moved under itself or one of its descendants (would create a cycle).
+  const folderParentOptions = useMemo(() => {
+    if (folderDialogMode !== 'edit' || !editingFolder) return folderTree;
+    const blocked = folderDescendantIds(editingFolder.id);
+    return folderTree.filter(({ folder }) => !blocked.has(folder.id));
+  }, [folderTree, folderDialogMode, editingFolder, folderDescendantIds]);
+
+  const openCreateFolder = (parent?: RequirementFolder | null) => {
+    setFolderDialogMode('create');
+    setEditingFolder(null);
+    setFolderForm({ name: '', parent_folder_id: parent ? String(parent.id) : 'root' });
+    setFolderDialogOpen(true);
+  };
+
+  const openEditFolder = (folder: RequirementFolder) => {
+    setFolderDialogMode('edit');
+    setEditingFolder(folder);
+    setFolderForm({ name: folder.name, parent_folder_id: folder.parent_folder_id ? String(folder.parent_folder_id) : 'root' });
+    setFolderDialogOpen(true);
+  };
+
+  const handleSaveFolder = async () => {
+    if (!projectId || !folderForm.name.trim()) return;
+    const parentId = folderForm.parent_folder_id === 'root' ? null : Number(folderForm.parent_folder_id);
+    try {
+      setFolderSaving(true);
+      if (folderDialogMode === 'edit' && editingFolder) {
+        await requirementFoldersAPI.update(editingFolder.id, { name: folderForm.name.trim(), parent_folder_id: parentId });
+      } else {
+        await requirementFoldersAPI.create({ project_id: parseInt(projectId), name: folderForm.name.trim(), parent_folder_id: parentId });
+      }
+      setFolderDialogOpen(false);
+      loadFolders();
+    } catch (error: any) {
+      toast({ title: t('error'), description: error.response?.data?.detail || t('folderSaveFailed'), variant: 'destructive' });
+    } finally {
+      setFolderSaving(false);
+    }
+  };
+
+  const handleDeleteFolder = async (folder: RequirementFolder) => {
+    if (!window.confirm(t('deleteFolderConfirm', { name: folder.name }))) return;
+    try {
+      await requirementFoldersAPI.remove(folder.id);
+      if (selectedFolder === folder.id) setSelectedFolder('all');
+      loadFolders();
+      loadRequirements();
+    } catch (error: any) {
+      toast({ title: t('error'), description: error.response?.data?.detail || t('folderDeleteFailed'), variant: 'destructive' });
+    }
+  };
+
+  const handleBulkMoveToFolder = async (folderId: number | null) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    // Settle individually so one bad id (e.g. concurrently deleted) doesn't
+    // abort the rest; report exactly what moved.
+    const results = await Promise.allSettled(ids.map((id) => requirementsAPI.update(id, { folder_id: folderId })));
+    const moved = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.length - moved;
+    setBulkBusy(false);
+    if (moved > 0) {
+      clearSelection();
+      loadRequirements();
+      loadFolders();
+    }
+    if (failed === 0) {
+      toast({ title: t('success'), description: t('bulkMovedToFolder', { count: moved }) });
+    } else if (moved === 0) {
+      toast({ title: t('error'), description: t('bulkUpdateFailed'), variant: 'destructive' });
+    } else {
+      toast({ title: t('error'), description: `${moved} moved, ${failed} failed.`, variant: 'destructive' });
+    }
+  };
+
   // Filtering logic
   const filteredRequirements = requirements.filter(req => {
     const matchesSearch = searchQuery === '' || 
@@ -345,8 +525,15 @@ export function Requirements() {
     
     const matchesStatus = statusFilter === 'all' || req.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
-    
-    return matchesSearch && matchesStatus && matchesPriority;
+
+    const matchesFolder =
+      selectedFolder === 'all'
+        ? true
+        : selectedFolder === 'unfiled'
+          ? req.folder_id == null
+          : req.folder_id != null && folderDescendantIds(selectedFolder).has(req.folder_id);
+
+    return matchesSearch && matchesStatus && matchesPriority && matchesFolder;
   });
 
   // Workflow / severity orderings so status & priority sort meaningfully
@@ -416,7 +603,7 @@ export function Requirements() {
   // Reset to the first page whenever the active filters or sort change.
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, sortBy, sortDir, itemsPerPage]);
+  }, [searchQuery, statusFilter, priorityFilter, sortBy, sortDir, itemsPerPage, selectedFolder]);
 
   // Drop selections that are no longer present (e.g. after delete/filter).
   useEffect(() => {
@@ -602,6 +789,7 @@ export function Requirements() {
         acceptance_criteria: useGherkinSyntax ? reqAcceptanceCriteria : markdownToHtml(reqAcceptanceCriteria),
         tags: reqTags,
         estimated_effort: estimatedEffort,
+        folder_id: reqFolderId === 'none' ? null : Number(reqFolderId),
         project_id: parseInt(projectId),
         created_by: currentUser.id || 1,
       };
@@ -648,6 +836,7 @@ export function Requirements() {
     setReqAcceptanceCriteria(acceptanceForEdit);
     setReqTags(requirement.tags || '');
     setReqEstimatedEffort(requirement.estimated_effort?.toString() || '');
+    setReqFolderId(requirement.folder_id != null ? String(requirement.folder_id) : 'none');
     setUseGherkinSyntax(shouldUseGherkinSyntax);
     setExternalDocumentUrl('');
     setShowExternalImport(false);
@@ -701,6 +890,7 @@ export function Requirements() {
         acceptance_criteria: useGherkinSyntax ? reqAcceptanceCriteria : markdownToHtml(reqAcceptanceCriteria),
         tags: reqTags,
         estimated_effort: estimatedEffort,
+        folder_id: reqFolderId === 'none' ? null : Number(reqFolderId),
       };
 
       await requirementsAPI.update(selectedRequirement.id, updateData);
@@ -817,6 +1007,7 @@ export function Requirements() {
     setReqAcceptanceCriteria('');
     setReqTags('');
     setReqEstimatedEffort('');
+    setReqFolderId('none');
     setUseGherkinSyntax(false);
     setExternalDocumentUrl('');
     setImportSource('atlassian');
@@ -1079,6 +1270,7 @@ export function Requirements() {
     }
     resetForm();
     setReqId(generateRequirementId());
+    setReqFolderId(typeof selectedFolder === 'number' ? String(selectedFolder) : 'none');
     setUseGherkinSyntax(false);
     setExternalDocumentUrl('');
     setShowExternalImport(false);
@@ -1494,6 +1686,26 @@ export function Requirements() {
         />
         <p className="text-xs text-gray-500">{t('tagsHelper')}</p>
       </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${mode}-reqFolder`} className="text-sm font-medium">
+          {t('folder')}
+        </Label>
+        <Select value={reqFolderId} onValueChange={setReqFolderId}>
+          <SelectTrigger id={`${mode}-reqFolder`} className="text-sm transition-all focus:ring-2 focus:ring-blue-500">
+            <SelectValue placeholder={t('unfiled')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">{t('unfiled')}</SelectItem>
+            {folderTree.map(({ folder, depth }) => (
+              <SelectItem key={folder.id} value={String(folder.id)}>
+                {`${'  '.repeat(depth)}${folder.name}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-gray-500">{t('folderHelper')}</p>
+      </div>
     </div>
   );
 
@@ -1572,31 +1784,103 @@ export function Requirements() {
     );
   };
 
+  const changeViewMode = (mode: 'table' | 'grid') => {
+    setViewMode(mode);
+    try { localStorage.setItem('requirements-view-mode', mode); } catch { /* ignore */ }
+  };
+
+  const hasActiveFilters = searchQuery.trim() !== '' || statusFilter !== 'all' || priorityFilter !== 'all';
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('all');
+    setPriorityFilter('all');
+    setActiveViewId(null);
+  };
+
+  // Portfolio summary for the header strip (derived from the loaded set).
+  const summary = useMemo(() => {
+    const total = requirements.length;
+    let open = 0;
+    let verified = 0;
+    let covered = 0;
+    let uncovered = 0;
+    for (const req of requirements) {
+      if (req.status === 'verified' || req.status === 'implemented') verified += 1;
+      else if (req.status !== 'deprecated') open += 1;
+      const status = coverageMap[req.id]?.status || 'uncovered';
+      if (status === 'covered' || status === 'partial') covered += 1;
+      else uncovered += 1;
+    }
+    const coveragePct = total > 0 ? Math.round((covered / total) * 100) : 0;
+    return { total, open, verified, covered, uncovered, coveragePct };
+  }, [requirements, coverageMap]);
+
+  // Click a column header to sort by it; clicking the active column flips direction.
+  const toggleSort = (column: typeof sortBy) => {
+    if (sortBy === column) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(column);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIndicator = ({ column }: { column: typeof sortBy }) =>
+    sortBy === column ? (
+      sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+    ) : (
+      <ArrowUpDown className="h-3 w-3 opacity-30" />
+    );
+
+  const statusFilterOptions = ['all', ...requirementStatusOptions];
+  const priorityFilterOptions = ['all', ...requirementPriorityOptions];
+  const activeViewName = activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name : undefined;
+
   return (
-    <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">{t('requirements')}</h1>
-          <p className="text-gray-600 dark:text-gray-400">{t('requirementsDescription')}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {canWriteResults(user) && requirements.length > 0 && (
-            <Button variant="outline" onClick={() => setIsChatOpen(true)}>
-              <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {t('reqChatButton')}
-            </Button>
-          )}
-          <Dialog open={isCreateDialogOpen} onOpenChange={(open) => !open && handleDialogClose('create')}>
-            <DialogTrigger asChild>
-              <Button onClick={handleOpenCreateDialog}>
-                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('addRequirement')}
+    <div className="space-y-5" dir={isRTL ? 'rtl' : 'ltr'}>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden rounded-3xl border border-border bg-card text-card-foreground shadow-sm">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.10),transparent_38%)]" />
+        <div className="relative flex flex-col gap-5 p-6 sm:p-7 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2.5">
+            <Badge className="w-fit gap-1.5 border border-primary/30 bg-primary/10 px-3 py-1 text-primary hover:bg-primary/15">
+              <ListChecks className="h-3.5 w-3.5" />
+              {t('requirements')}
+            </Badge>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{t('requirements')}</h1>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('requirementsDescription')}</p>
+            </div>
+            {/* Summary chips */}
+            {requirements.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <SummaryChip icon={FileText} label={t('total')} value={summary.total} />
+                <SummaryChip icon={CheckCircle} label={t('verified')} value={summary.verified} tone="emerald" />
+                <SummaryChip icon={ShieldCheck} label={t('coverage')} value={`${summary.coveragePct}%`} tone={summary.coveragePct >= 60 ? 'emerald' : summary.coveragePct > 0 ? 'amber' : 'muted'} />
+                {summary.uncovered > 0 && <SummaryChip icon={ShieldX} label={t('covUncovered')} value={summary.uncovered} tone="rose" />}
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {canWriteResults(user) && requirements.length > 0 && (
+              <Button variant="outline" className="gap-2" onClick={() => setIsChatOpen(true)}>
+                <Sparkles className="h-4 w-4" />
+                {t('reqChatButton')}
               </Button>
-            </DialogTrigger>
-            {renderRequirementDialogContent('create')}
-          </Dialog>
+            )}
+            <Dialog open={isCreateDialogOpen} onOpenChange={(open) => !open && handleDialogClose('create')}>
+              <DialogTrigger asChild>
+                <Button className="gap-2 shadow-sm" onClick={handleOpenCreateDialog}>
+                  <Plus className="h-4 w-4" />
+                  {t('addRequirement')}
+                </Button>
+              </DialogTrigger>
+              {renderRequirementDialogContent('create')}
+            </Dialog>
+          </div>
         </div>
-      </div>
+      </section>
       {projectId && (
         <RequirementChatPanel
           projectId={parseInt(projectId)}
@@ -1605,124 +1889,242 @@ export function Requirements() {
         />
       )}
 
-      {/* Enhanced Search and Filters */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-4">
-        <div className="flex gap-4 items-center">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
-            <Input
-              placeholder={t('searchRequirements')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
+        {/* ── Folder rail (desktop) ──────────────────────────────────────── */}
+        <aside className="hidden w-60 shrink-0 lg:block">
+          <div className="sticky top-4 rounded-2xl border border-border bg-card p-2">
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <span className="flex items-center gap-1.5 text-sm font-semibold">
+                <FolderOpen className="h-4 w-4 text-primary" />
+                {t('folders')}
+              </span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" title={t('newFolder')} aria-label={t('newFolder')} onClick={() => openCreateFolder()}>
+                <FolderPlus className="h-4 w-4" />
+              </Button>
+            </div>
+            <nav className="mt-1 max-h-[calc(100vh-12rem)] space-y-0.5 overflow-y-auto pe-0.5">
+              <FolderRailItem
+                active={selectedFolder === 'all'}
+                icon={ListChecks}
+                label={t('allRequirements')}
+                count={requirements.length}
+                onClick={() => setSelectedFolder('all')}
+              />
+              <FolderRailItem
+                active={selectedFolder === 'unfiled'}
+                icon={Inbox}
+                label={t('unfiled')}
+                count={unfiledCount}
+                onClick={() => setSelectedFolder('unfiled')}
+              />
+              {folderTree.length > 0 && <div className="my-1 h-px bg-border" />}
+              {folderTree.map(({ folder, depth }) => (
+                <div key={folder.id} className="group/folder relative flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFolder(folder.id)}
+                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pe-8 text-sm transition-colors ${
+                      selectedFolder === folder.id ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-muted'
+                    }`}
+                    style={{ paddingInlineStart: `${8 + depth * 14}px` }}
+                    title={folder.name}
+                  >
+                    <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                    <span className="min-w-0 flex-1 truncate text-start">{folder.name}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{folderTotalCounts[folder.id] ?? 0}</span>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={`absolute end-1 flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover/folder:opacity-100 focus:opacity-100`}
+                        aria-label={t('actions')}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onClick={() => openCreateFolder(folder)}><FolderPlus className="mr-2 h-3.5 w-3.5" />{t('newFolder')}</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openEditFolder(folder)}><Pencil className="mr-2 h-3.5 w-3.5" />{t('editFolder')}</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleDeleteFolder(folder)} className="text-rose-600 focus:text-rose-700 dark:text-rose-400"><Trash2 className="mr-2 h-3.5 w-3.5" />{t('delete')}</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))}
+              {folders.length === 0 && (
+                <p className="px-2 py-3 text-xs text-muted-foreground">{t('noFoldersYet')}</p>
+              )}
+            </nav>
           </div>
-          <div className="flex gap-2">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder={t('status')} />
-              </SelectTrigger>
+        </aside>
+
+        {/* ── Content column ─────────────────────────────────────────────── */}
+        <div className="min-w-0 flex-1 space-y-5">
+          {/* Folder filter (mobile) */}
+          <div className="flex items-center gap-2 lg:hidden">
+            <Select
+              value={selectedFolder === 'all' ? 'all' : selectedFolder === 'unfiled' ? 'unfiled' : String(selectedFolder)}
+              onValueChange={(v) => setSelectedFolder(v === 'all' ? 'all' : v === 'unfiled' ? 'unfiled' : Number(v))}
+            >
+              <SelectTrigger className="h-10 flex-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">{t('allStatus')}</SelectItem>
-                <SelectItem value="draft">{t('draft')}</SelectItem>
-                <SelectItem value="reviewed">{t('reviewed')}</SelectItem>
-                <SelectItem value="approved">{t('approved')}</SelectItem>
-                <SelectItem value="implemented">{t('implemented')}</SelectItem>
-                <SelectItem value="verified">{t('verified')}</SelectItem>
-                <SelectItem value="deprecated">{t('deprecated')}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder={t('priority')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('allPriority')}</SelectItem>
-                <SelectItem value="low">{t('low')}</SelectItem>
-                <SelectItem value="medium">{t('medium')}</SelectItem>
-                <SelectItem value="high">{t('high')}</SelectItem>
-                <SelectItem value="critical">{t('critical')}</SelectItem>
-              </SelectContent>
-            </Select>
-            {/* Sort */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <ArrowUpDown className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                  {sortOptions.find((o) => o.value === sortBy)?.label}
-                  {sortDir === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>{t('sortBy')}</DropdownMenuLabel>
-                {sortOptions.map((option) => (
-                  <DropdownMenuItem key={option.value} onClick={() => setSortBy(option.value)} className="flex items-center justify-between">
-                    {option.label}
-                    {sortBy === option.value && <CheckCircle className="h-3.5 w-3.5 text-blue-600" />}
-                  </DropdownMenuItem>
+                <SelectItem value="all">{t('allRequirements')}</SelectItem>
+                <SelectItem value="unfiled">{t('unfiled')}</SelectItem>
+                {folderTree.map(({ folder, depth }) => (
+                  <SelectItem key={folder.id} value={String(folder.id)}>{`${'  '.repeat(depth)}${folder.name}`}</SelectItem>
                 ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))} className="flex items-center justify-between">
-                  {sortDir === 'asc' ? t('ascending') : t('descending')}
-                  {sortDir === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Saved views */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant={activeViewId ? 'default' : 'outline'} size="sm">
-                  <Bookmark className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                  {activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name || t('views') : t('views')}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel>{t('savedViews')}</DropdownMenuLabel>
-                {savedViews.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noSavedViews')}</div>
-                ) : (
-                  savedViews.map((view) => (
-                    <DropdownMenuItem key={view.id} onClick={() => applyView(view)} className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-1.5 truncate">
-                        {view.is_default && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
-                        {view.is_shared && <Users className="h-3 w-3 text-muted-foreground" />}
-                        <span className="truncate">{view.name}</span>
-                      </span>
-                      {view.owned_by_current_user && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleDeleteView(view); }}
-                          className="text-muted-foreground hover:text-rose-600"
-                          aria-label={t('delete')}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </DropdownMenuItem>
-                  ))
-                )}
-                <DropdownMenuSeparator />
-                {activeViewId && (
-                  <DropdownMenuItem onClick={() => { setActiveViewId(null); setSearchQuery(''); setStatusFilter('all'); setPriorityFilter('all'); }}>
-                    <X className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                    {t('clearActiveView')}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={() => setIsSaveViewOpen(true)}>
-                  <BookmarkPlus className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                  {t('saveCurrentView')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <Button variant="outline" size="sm" onClick={handleExportRequirements}>
-              <Download className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-              {t('export')}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" title={t('newFolder')} aria-label={t('newFolder')} onClick={() => openCreateFolder()}>
+              <FolderPlus className="h-4 w-4" />
             </Button>
+          </div>
+
+      {/* ── Toolbar ────────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 lg:flex-row lg:flex-wrap lg:items-center">
+        {/* Search group — one focus-highlighted surface holding the icon, input and clear button.
+            min-w-0 + lg:w-auto let it shrink/share space so a narrower content area (expanded
+            sidebar) wraps gracefully instead of overflowing. */}
+        <div className="group/search flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-transparent bg-muted/50 px-3 transition-all duration-150 focus-within:border-primary/50 focus-within:bg-background focus-within:shadow-sm focus-within:ring-2 focus-within:ring-primary/20 lg:w-auto lg:min-w-[200px] lg:flex-1">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground transition-colors duration-150 group-focus-within/search:text-primary" />
+          <input
+            type="text"
+            placeholder={t('searchRequirements')}
+            aria-label={t('searchRequirements')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape' && searchQuery) { e.preventDefault(); setSearchQuery(''); } }}
+            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label={t('clearSearch')}
+              title={t('clearSearch')}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="h-10 sm:w-36"><SelectValue placeholder={t('status')} /></SelectTrigger>
+            <SelectContent>
+              {statusFilterOptions.map((s) => (
+                <SelectItem key={s} value={s}>{s === 'all' ? t('allStatus') : t(s as any)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+            <SelectTrigger className="h-10 sm:w-36"><SelectValue placeholder={t('priority')} /></SelectTrigger>
+            <SelectContent>
+              {priorityFilterOptions.map((p) => (
+                <SelectItem key={p} value={p}>{p === 'all' ? t('allPriority') : t(p as any)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Sort */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-10 gap-1.5">
+                <ArrowUpDown className="h-4 w-4" />
+                <span className="hidden sm:inline">{sortOptions.find((o) => o.value === sortBy)?.label}</span>
+                {sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel>{t('sortBy')}</DropdownMenuLabel>
+              {sortOptions.map((option) => (
+                <DropdownMenuItem key={option.value} onClick={() => setSortBy(option.value)} className="flex items-center justify-between">
+                  {option.label}
+                  {sortBy === option.value && <CheckCircle className="h-3.5 w-3.5 text-primary" />}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))} className="flex items-center justify-between">
+                {sortDir === 'asc' ? t('ascending') : t('descending')}
+                {sortDir === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Saved views */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant={activeViewId ? 'default' : 'outline'} className="h-10 gap-1.5">
+                <Bookmark className="h-4 w-4" />
+                <span className="hidden max-w-[120px] truncate sm:inline">{activeViewName || t('views')}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel>{t('savedViews')}</DropdownMenuLabel>
+              {savedViews.length === 0 ? (
+                <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('noSavedViews')}</div>
+              ) : (
+                savedViews.map((view) => (
+                  <DropdownMenuItem key={view.id} onClick={() => applyView(view)} className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 truncate">
+                      {view.is_default && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+                      {view.is_shared && <Users className="h-3 w-3 text-muted-foreground" />}
+                      <span className="truncate">{view.name}</span>
+                    </span>
+                    {view.owned_by_current_user && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteView(view); }}
+                        className="text-muted-foreground hover:text-rose-600"
+                        aria-label={t('delete')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </DropdownMenuItem>
+                ))
+              )}
+              <DropdownMenuSeparator />
+              {activeViewId && (
+                <DropdownMenuItem onClick={() => { setActiveViewId(null); setSearchQuery(''); setStatusFilter('all'); setPriorityFilter('all'); }}>
+                  <X className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('clearActiveView')}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setIsSaveViewOpen(true)}>
+                <BookmarkPlus className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('saveCurrentView')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button variant="outline" className="h-10 gap-1.5" onClick={handleExportRequirements}>
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('export')}</span>
+          </Button>
+
+          {/* View toggle */}
+          <div className="col-span-2 flex items-center gap-1 rounded-lg border border-border bg-muted/50 p-1 sm:col-span-1 sm:ml-auto">
+            <ViewToggleButton active={viewMode === 'table'} onClick={() => changeViewMode('table')} icon={Table2} label={t('tableView')} />
+            <ViewToggleButton active={viewMode === 'grid'} onClick={() => changeViewMode('grid')} icon={LayoutGrid} label={t('gridView')} />
           </div>
         </div>
       </div>
+
+      {/* Active filter chips */}
+      {(hasActiveFilters || activeViewName) && (
+        <div className="flex flex-wrap items-center gap-2 px-1 text-xs">
+          <span className="text-muted-foreground">{t('filters')}:</span>
+          {activeViewName && <FilterChip label={activeViewName} icon={Bookmark} onClear={() => setActiveViewId(null)} />}
+          {searchQuery.trim() && <FilterChip label={`"${searchQuery.trim()}"`} icon={Search} onClear={() => setSearchQuery('')} />}
+          {statusFilter !== 'all' && <FilterChip label={t(statusFilter as any)} onClear={() => setStatusFilter('all')} />}
+          {priorityFilter !== 'all' && <FilterChip label={t(priorityFilter as any)} onClear={() => setPriorityFilter('all')} />}
+          <button type="button" onClick={clearAllFilters} className="font-medium text-primary hover:underline">
+            {t('clearFilters')}
+          </button>
+        </div>
+      )}
 
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
@@ -1778,6 +2180,28 @@ export function Requirements() {
             </Button>
           )}
 
+          {/* Move to folder */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={bulkBusy}>
+                <FolderInput className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                {t('moveToFolder')}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="max-h-72 overflow-y-auto">
+              <DropdownMenuItem onClick={() => handleBulkMoveToFolder(null)}>
+                <Inbox className="mr-2 h-3.5 w-3.5" />{t('unfiled')}
+              </DropdownMenuItem>
+              {folderTree.length > 0 && <DropdownMenuSeparator />}
+              {folderTree.map(({ folder, depth }) => (
+                <DropdownMenuItem key={folder.id} onClick={() => handleBulkMoveToFolder(folder.id)}>
+                  <Folder className="mr-2 h-3.5 w-3.5 opacity-70" />
+                  <span className="truncate">{`${'  '.repeat(depth)}${folder.name}`}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={bulkBusy} onClick={() => setIsBulkDeleteOpen(true)}>
             <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
             {t('delete')}
@@ -1792,141 +2216,224 @@ export function Requirements() {
         </div>
       )}
 
-      {/* Select-all-on-page row */}
-      {paginatedRequirements.length > 0 && (
-        <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-          <Checkbox
-            checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
-            onCheckedChange={toggleSelectAllPage}
-            aria-label={t('selectAllOnPage')}
-          />
-          <span>{t('selectAllOnPage')}</span>
+      {/* ── Content ────────────────────────────────────────────────────── */}
+      {loading ? (
+        <RequirementsSkeleton viewMode={viewMode} />
+      ) : paginatedRequirements.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex min-h-[18rem] flex-col items-center justify-center gap-4 p-10 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+              <FileText className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold">
+                {hasActiveFilters ? t('noRequirementsFound') : t('noRequirements')}
+              </h3>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                {hasActiveFilters ? t('tryAdjustingSearch') : t('getStartedCreating')}
+              </p>
+            </div>
+            {hasActiveFilters ? (
+              <Button variant="outline" onClick={clearAllFilters}>{t('clearFilters')}</Button>
+            ) : (
+              <Button className="gap-2" onClick={handleOpenCreateDialog}>
+                <Plus className="h-4 w-4" />
+                {t('addRequirement')}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : viewMode === 'table' ? (
+        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
+                      onCheckedChange={toggleSelectAllPage}
+                      aria-label={t('selectAllOnPage')}
+                    />
+                  </TableHead>
+                  <SortableHead label={t('reqId')} column="requirement_id" sortBy={sortBy} onSort={toggleSort} SortIndicator={SortIndicator} className="w-32" />
+                  <SortableHead label={t('title')} column="title" sortBy={sortBy} onSort={toggleSort} SortIndicator={SortIndicator} />
+                  <SortableHead label={t('status')} column="status" sortBy={sortBy} onSort={toggleSort} SortIndicator={SortIndicator} />
+                  <SortableHead label={t('priority')} column="priority" sortBy={sortBy} onSort={toggleSort} SortIndicator={SortIndicator} />
+                  <SortableHead label={t('coverage')} column="coverage" sortBy={sortBy} onSort={toggleSort} SortIndicator={SortIndicator} />
+                  <SortableHead label={t('created')} column="created_at" sortBy={sortBy} onSort={toggleSort} SortIndicator={SortIndicator} />
+                  <TableHead className={isRTL ? 'text-left' : 'text-right'}>{t('actions')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedRequirements.map((requirement) => {
+                  const selected = selectedIds.has(requirement.id);
+                  return (
+                    <TableRow key={requirement.id} data-state={selected ? 'selected' : undefined} className="group">
+                      <TableCell>
+                        <Checkbox
+                          checked={selected}
+                          onCheckedChange={() => toggleSelect(requirement.id)}
+                          aria-label={t('selectRequirement', { id: requirement.requirement_id })}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="font-mono text-xs text-muted-foreground">{requirement.requirement_id}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyRequirementId(requirement)}
+                            className="text-muted-foreground/60 opacity-0 transition hover:text-foreground group-hover:opacity-100"
+                            aria-label={t('copyRequirementId')}
+                            title={copiedKeyId === requirement.id ? t('copied') : t('copyRequirementId')}
+                          >
+                            {copiedKeyId === requirement.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                          </button>
+                        </span>
+                      </TableCell>
+                      <TableCell className="max-w-[28rem]">
+                        <button
+                          type="button"
+                          onClick={() => handleViewRequirement(requirement)}
+                          className={`block max-w-full truncate font-medium transition hover:text-primary hover:underline ${isRTL ? 'text-right' : 'text-left'}`}
+                          title={requirement.title}
+                        >
+                          {requirement.title}
+                        </button>
+                        {requirement.tags && requirement.tags.trim() && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {requirement.tags.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 3).map((tag, i) => (
+                              <span key={i} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{tag}</span>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`gap-1 border-0 ${getStatusBadge(requirement.status)}`}>
+                          {getStatusIcon(requirement.status)}
+                          <span className="capitalize">{t(requirement.status as any)}</span>
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={`border-0 ${getPriorityBadge(requirement.priority)}`}>
+                          <span className="capitalize">{t(requirement.priority as any)}</span>
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{renderCoverageBadge(requirement)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                        {new Date(requirement.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className={isRTL ? 'text-left' : 'text-right'}>
+                        <div className={`flex items-center gap-0.5 ${isRTL ? 'justify-start' : 'justify-end'}`}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title={t('view')} aria-label={t('view')} onClick={() => handleViewRequirement(requirement)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" title={t('edit')} aria-label={t('edit')} onClick={() => handleEditRequirement(requirement)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/40" title={t('delete')} aria-label={t('delete')} onClick={() => openDeleteDialog(requirement)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         </div>
-      )}
-
-      {/* Requirements List */}
-      <div className="space-y-4">
-        {paginatedRequirements.length > 0 ? (
-          paginatedRequirements.map((requirement) => (
-            <Card
-              key={requirement.id}
-              className={`transition-shadow hover:shadow-md ${selectedIds.has(requirement.id) ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-gray-900' : ''}`}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-3">
-                  <Checkbox
-                    className="mt-1.5"
-                    checked={selectedIds.has(requirement.id)}
-                    onCheckedChange={() => toggleSelect(requirement.id)}
-                    aria-label={t('selectRequirement', { id: requirement.requirement_id })}
-                  />
-                  <div className="flex-1">
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+            <Checkbox
+              checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
+              onCheckedChange={toggleSelectAllPage}
+              aria-label={t('selectAllOnPage')}
+            />
+            <span>{t('selectAllOnPage')}</span>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+            {paginatedRequirements.map((requirement) => {
+              const selected = selectedIds.has(requirement.id);
+              return (
+                <article
+                  key={requirement.id}
+                  className={`group flex flex-col rounded-2xl border bg-card p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-foreground/15'}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Checkbox
+                        checked={selected}
+                        onCheckedChange={() => toggleSelect(requirement.id)}
+                        aria-label={t('selectRequirement', { id: requirement.requirement_id })}
+                      />
                       <span className="inline-flex items-center gap-1">
-                        <span className="font-mono text-sm text-gray-500 dark:text-gray-400">{requirement.requirement_id}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{requirement.requirement_id}</span>
                         <button
                           type="button"
                           onClick={() => handleCopyRequirementId(requirement)}
-                          className="text-gray-400 transition-colors hover:text-gray-700 dark:hover:text-gray-200"
+                          className="text-muted-foreground/60 transition hover:text-foreground"
                           aria-label={t('copyRequirementId')}
                           title={copiedKeyId === requirement.id ? t('copied') : t('copyRequirementId')}
                         >
-                          {copiedKeyId === requirement.id ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copiedKeyId === requirement.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                         </button>
                       </span>
-                      <Badge className={getStatusBadge(requirement.status)}>
-                        <div className="flex items-center gap-1">
-                          {getStatusIcon(requirement.status)}
-                          {requirement.status}
-                        </div>
-                      </Badge>
-                      <Badge className={getPriorityBadge(requirement.priority)}>
-                        {requirement.priority}
-                      </Badge>
-                      {renderCoverageBadge(requirement)}
                     </div>
-                    <CardTitle className="text-lg mb-1">
-                      <button
-                        type="button"
-                        onClick={() => handleViewRequirement(requirement)}
-                        className="text-start hover:text-primary hover:underline focus:outline-none focus-visible:underline"
-                      >
-                        {requirement.title}
-                      </button>
-                    </CardTitle>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
-                      {toDisplayText(requirement.description) || t('noDescriptionProvided')}
-                    </p>
-                    {requirement.tags && requirement.tags.trim() && (
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {requirement.tags.split(',').map((tag, index) => {
-                          const trimmedTag = tag.trim();
-                          return trimmedTag ? (
-                            <span key={index} className="text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 px-2 py-1 rounded">
-                              {trimmedTag}
-                            </span>
-                          ) : null;
-                        })}
-                      </div>
-                    )}
-                    {requirement.estimated_effort && (
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                        <Clock className="h-3 w-3" />
-                        {t('estimatedEffort', { effort: requirement.estimated_effort })}
-                      </div>
-                    )}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" aria-label={t('actions')}>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem onClick={() => handleViewRequirement(requirement)}><Eye className="mr-2 h-3.5 w-3.5" />{t('view')}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleEditRequirement(requirement)}><Edit className="mr-2 h-3.5 w-3.5" />{t('edit')}</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => openDeleteDialog(requirement)} className="text-rose-600 focus:text-rose-700 dark:text-rose-400"><Trash2 className="mr-2 h-3.5 w-3.5" />{t('delete')}</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                  <div className="text-right">
-                    <span className="text-xs text-gray-400 dark:text-gray-500">
-                      {new Date(requirement.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="flex justify-between items-center">
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditRequirement(requirement)}
-                    >
-                      <Edit className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                      {t('edit')}
-                    </Button>
-                  </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => openDeleteDialog(requirement)}
+
+                  <button
+                    type="button"
+                    onClick={() => handleViewRequirement(requirement)}
+                    className={`mt-2 block w-full truncate text-base font-semibold tracking-tight transition group-hover:text-primary ${isRTL ? 'text-right' : 'text-left'}`}
+                    title={requirement.title}
                   >
-                    <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                    {t('delete')}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <FileText className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
-                <h3 className="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
-                  {searchQuery ? t('noRequirementsFound') : t('noRequirements')}
-                </h3>
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  {searchQuery
-                    ? t('tryAdjustingSearch')
-                    : t('getStartedCreating')
-                  }
-                </p>
-              </div>
-            </div>
+                    {requirement.title}
+                  </button>
+                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    {toDisplayText(requirement.description) || t('noDescriptionProvided')}
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    <Badge className={`gap-1 border-0 ${getStatusBadge(requirement.status)}`}>
+                      {getStatusIcon(requirement.status)}
+                      <span className="capitalize">{t(requirement.status as any)}</span>
+                    </Badge>
+                    <Badge className={`border-0 ${getPriorityBadge(requirement.priority)}`}>
+                      <span className="capitalize">{t(requirement.priority as any)}</span>
+                    </Badge>
+                    {renderCoverageBadge(requirement)}
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {requirement.estimated_effort ? t('estimatedEffort', { effort: requirement.estimated_effort }) : new Date(requirement.created_at).toLocaleDateString()}
+                    </span>
+                    <button type="button" onClick={() => handleViewRequirement(requirement)} className="font-medium text-primary hover:underline">
+                      {t('view')}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Edit Requirement Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={(open) => !open && handleDialogClose('edit')}>
@@ -2087,8 +2594,8 @@ export function Requirements() {
 
       {/* Pagination */}
       {totalPages > 1 && filteredRequirements.length > 0 && (
-        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mt-4">
-          <div className="text-sm text-gray-600 dark:text-gray-400">
+        <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4 sm:flex-row">
+          <div className="text-sm text-muted-foreground">
             {t('showingRequirements', { start: startIndex + 1, end: Math.min(startIndex + itemsPerPage, filteredRequirements.length), total: filteredRequirements.length })}
           </div>
           <div className="flex items-center gap-2">
@@ -2126,6 +2633,194 @@ export function Requirements() {
           </div>
         </div>
       )}
+
+      {/* Folder create / edit dialog */}
+      <Dialog open={folderDialogOpen} onOpenChange={(open) => { if (!folderSaving) setFolderDialogOpen(open); }}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{folderDialogMode === 'edit' ? t('editFolder') : t('createFolder')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="folder-name">{t('folderName')}</Label>
+              <Input
+                id="folder-name"
+                value={folderForm.name}
+                maxLength={255}
+                autoFocus
+                placeholder={t('folderNamePlaceholder')}
+                onChange={(e) => setFolderForm((p) => ({ ...p, name: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter' && folderForm.name.trim()) { e.preventDefault(); handleSaveFolder(); } }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('parentFolder')}</Label>
+              <Select value={folderForm.parent_folder_id} onValueChange={(v) => setFolderForm((p) => ({ ...p, parent_folder_id: v }))}>
+                <SelectTrigger><SelectValue placeholder={t('rootLevel')} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="root">{t('rootLevel')}</SelectItem>
+                  {folderParentOptions.map(({ folder, depth }) => (
+                    <SelectItem key={folder.id} value={String(folder.id)}>{`${'  '.repeat(depth)}${folder.name}`}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFolderDialogOpen(false)} disabled={folderSaving}>{t('cancel')}</Button>
+            <Button onClick={handleSaveFolder} disabled={folderSaving || !folderForm.name.trim()} className="gap-2">
+              {folderSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {folderDialogMode === 'edit' ? t('save') : t('createFolder')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Presentational helpers ──────────────────────────────────────────────── */
+
+type IconType = typeof FileText;
+
+function SummaryChip({ icon: Icon, label, value, tone = 'muted' }: {
+  icon: IconType;
+  label: string;
+  value: string | number;
+  tone?: 'muted' | 'emerald' | 'amber' | 'rose';
+}) {
+  const toneCls: Record<string, string> = {
+    muted: 'text-muted-foreground',
+    emerald: 'text-emerald-600 dark:text-emerald-400',
+    amber: 'text-amber-600 dark:text-amber-400',
+    rose: 'text-rose-600 dark:text-rose-400',
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-2.5 py-1 text-xs">
+      <Icon className={`h-3.5 w-3.5 ${toneCls[tone]}`} />
+      <span className="font-semibold text-foreground">{value}</span>
+      <span className="text-muted-foreground">{label}</span>
+    </span>
+  );
+}
+
+function FolderRailItem({ active, icon: Icon, label, count, onClick }: {
+  active: boolean;
+  icon: IconType;
+  label: string;
+  count: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+        active ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-muted'
+      }`}
+    >
+      <Icon className="h-4 w-4 shrink-0 opacity-80" />
+      <span className="min-w-0 flex-1 truncate text-start">{label}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{count}</span>
+    </button>
+  );
+}
+
+function ViewToggleButton({ active, onClick, icon: Icon, label }: {
+  active: boolean;
+  onClick: () => void;
+  icon: IconType;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={label}
+      className={`flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition ${
+        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      <Icon className="h-4 w-4" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
+function FilterChip({ label, icon: Icon, onClear }: { label: string; icon?: IconType; onClear: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 py-1 pe-1 ps-2 text-xs">
+      {Icon && <Icon className="h-3 w-3 text-muted-foreground" />}
+      <span className="max-w-[160px] truncate">{label}</span>
+      <button type="button" onClick={onClear} className="flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
+function SortableHead({ label, column, sortBy, onSort, SortIndicator, className }: {
+  label: string;
+  column: any;
+  sortBy: any;
+  onSort: (c: any) => void;
+  SortIndicator: (props: { column: any }) => ReactNode;
+  className?: string;
+}) {
+  const active = sortBy === column;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`flex items-center gap-1 transition hover:text-foreground ${active ? 'text-foreground' : ''}`}
+      >
+        {label}
+        <SortIndicator column={column} />
+      </button>
+    </TableHead>
+  );
+}
+
+function RequirementsSkeleton({ viewMode }: { viewMode: 'table' | 'grid' }) {
+  if (viewMode === 'grid') {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="space-y-3 rounded-2xl border border-border bg-card p-4">
+            <div className="flex justify-between">
+              <div className="h-4 w-16 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-4 animate-pulse rounded bg-muted" />
+            </div>
+            <div className="h-5 w-2/3 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-full animate-pulse rounded bg-muted" />
+            <div className="flex gap-2 pt-1">
+              <div className="h-5 w-20 animate-pulse rounded-full bg-muted" />
+              <div className="h-5 w-16 animate-pulse rounded-full bg-muted" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-3">
+        <div className="h-5 w-40 animate-pulse rounded bg-muted" />
+      </div>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 border-b border-border p-3 last:border-b-0">
+          <div className="h-4 w-4 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-20 animate-pulse rounded bg-muted" />
+          <div className="h-4 flex-1 animate-pulse rounded bg-muted" />
+          <div className="h-5 w-20 animate-pulse rounded-full bg-muted" />
+          <div className="h-5 w-16 animate-pulse rounded-full bg-muted" />
+          <div className="h-4 w-16 animate-pulse rounded bg-muted" />
+        </div>
+      ))}
     </div>
   );
 }
