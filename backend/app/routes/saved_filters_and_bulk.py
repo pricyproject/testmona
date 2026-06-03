@@ -17,6 +17,10 @@ from ..database import get_db
 logger = logging.getLogger(__name__)
 
 
+# NB: "advanced_search" is intentionally NOT here — those saved filters are
+# created only via POST /advanced-search/saved, which validates the TQL and
+# stores a computed AST. Allowing them through this generic endpoint would let
+# a client persist an unvalidated definition.
 _ALLOWED_SCOPES = {"test_cases", "defects", "requirements"}
 _ALLOWED_TEST_CASE_STATUSES = {"active", "inactive", "archived", "draft"}
 _ALLOWED_TEST_CASE_TYPES = {"manual", "automated"}

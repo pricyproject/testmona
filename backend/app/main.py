@@ -12,7 +12,14 @@ from .openapi_config import get_openapi_config
 # Import middleware and utilities from separate modules
 from .middleware import RateLimitMiddleware, RequestMetadataMiddleware, SecurityHeadersMiddleware
 
-app = FastAPI(**get_openapi_config())
+# Swagger UI / ReDoc are relocated off the bare ``/docs`` path so the Doc Hub
+# API (``GET /docs`` and friends) can own it.
+app = FastAPI(
+    **get_openapi_config(),
+    docs_url="/api-docs",
+    redoc_url="/api-redoc",
+    swagger_ui_oauth2_redirect_url="/api-docs/oauth2-redirect",
+)
 
 # Capture request IP/user-agent for service-layer audit logging.
 app.add_middleware(RequestMetadataMiddleware)
@@ -32,6 +39,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Expose pagination total so the browser can read it cross-origin.
+    expose_headers=["X-Total-Count"],
 )
 
 app.include_router(import_export_router, prefix="/import-export", tags=["Import/Export"])
@@ -61,6 +70,8 @@ from .routes.datasets import register_dataset_routes
 from .routes.ai_manager import register_ai_manager_routes
 from .routes.ai_generation import register_ai_generation_routes
 from .routes.requirement_chat import register_requirement_chat_routes
+from .routes.docs import register_docs_routes
+from .routes.advanced_search import register_advanced_search_routes
 
 register_common_routes(app)
 register_auth_routes(app)
@@ -85,6 +96,8 @@ register_dataset_routes(app)
 register_ai_manager_routes(app)
 register_ai_generation_routes(app)
 register_requirement_chat_routes(app)
+register_docs_routes(app)
+register_advanced_search_routes(app)
 
 
 @app.on_event("startup")
