@@ -1971,7 +1971,7 @@ const createIdempotencyKey = () => (
 export const importExportAPI = {
   exportTestCases: async (testSuiteId?: number, format = 'csv') => {
     const params = testSuiteId ? `?test_suite_id=${testSuiteId}&format=${format}` : `?format=${format}`;
-    const response = await api.get(`/import-export/export/test-cases${params}`, {
+    const response = await api.get(`/import-export/export/test-cases/${params}`, {
       timeout: 300000,
     });
     return response.data as ExportTestCasesResult;
@@ -1982,7 +1982,7 @@ export const importExportAPI = {
     if (testSuiteId) formData.append('test_suite_id', testSuiteId.toString());
     if (sectionId) formData.append('section_id', sectionId.toString());
     
-    const response = await api.post('/import-export/import/test-cases', formData, {
+    const response = await api.post('/import-export/import/test-cases/', formData, {
       headers: { 'Content-Type': 'multipart/form-data', 'Idempotency-Key': idempotencyKey || createIdempotencyKey() },
       timeout: 300000,
     });
