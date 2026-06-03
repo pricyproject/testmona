@@ -311,7 +311,7 @@ export function TestSuiteDetail() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter]);
+  }, [searchQuery, statusFilter, priorityFilter, selectedSectionId, isUnsectionedSelected]);
 
   const loadTestSuite = useCallback(async () => {
     if (!numericSuiteId || !numericProjectId) {
@@ -337,7 +337,7 @@ export function TestSuiteDetail() {
       if (requestId !== loadRequestId.current) return;
       const status = err?.response?.status;
       if (status === 404) setError(t('testSuiteNotFound'));
-      else if (status === 403) setError(t('permissionDeniedViewTestPlans') || t('failedToLoadTestSuiteDetail'));
+      else if (status === 403) setError(t('permissionDeniedViewTestSuite'));
       else if (status === 401) setError(t('authenticationRequired') || t('failedToLoadTestSuiteDetail'));
       else setError(t('failedToLoadTestSuiteDetail'));
     } finally {
@@ -397,7 +397,7 @@ export function TestSuiteDetail() {
           path.push(...trail);
           return true;
         }
-        if (walk(node.subsections, [...trail, node.id])) return true;
+        if (walk(node.subsections || [], [...trail, node.id])) return true;
       }
       return false;
     };
@@ -473,6 +473,19 @@ export function TestSuiteDetail() {
     return ids;
   }, [sections]);
 
+  // Drop expanded ids for sections that no longer exist (e.g. after a delete or
+  // move). Stale ids would otherwise inflate expandedSections.size and wrongly
+  // disable "Expand all".
+  useEffect(() => {
+    setExpandedSections((prev) => {
+      if (prev.size === 0) return prev;
+      const valid = new Set(allSectionIds);
+      const next = new Set<number>();
+      prev.forEach((id) => valid.has(id) && next.add(id));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [allSectionIds]);
+
   const filteredTestCases = useMemo(() => {
     let filtered = testCases;
     if (isUnsectionedSelected) {
@@ -506,6 +519,20 @@ export function TestSuiteDetail() {
     selectedSectionScope,
     isUnsectionedSelected,
   ]);
+
+  // Keep the selection scoped to what's actually visible. Without this, cases
+  // selected in one section/filter stay selected after switching scope — the
+  // "selected" bar would count invisible cases and a bulk delete would remove
+  // them. Pagination doesn't change the filtered set, so page-to-page
+  // selections are preserved.
+  useEffect(() => {
+    setSelectedTestCases((prev) => {
+      if (prev.length === 0) return prev;
+      const visible = new Set(filteredTestCases.map((tc) => tc.id));
+      const next = prev.filter((id) => visible.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [filteredTestCases]);
 
   const parentSectionOptions = useMemo(() => {
     const flat = flattenSectionTree(sections);
@@ -898,6 +925,14 @@ export function TestSuiteDetail() {
     if (successIds.length > 0) {
       setTestCases((prev) => prev.filter((tc) => !successIds.includes(tc.id)));
       setSelectedTestCases((prev) => prev.filter((tcId) => !successIds.includes(tcId)));
+      // Keep the info-card total accurate (it prefers the suite's own count).
+      setTestSuite((prev) =>
+        prev && typeof prev.test_case_count === 'number'
+          ? { ...prev, test_case_count: Math.max(0, prev.test_case_count - successIds.length) }
+          : prev,
+      );
+      // Refresh the section tree so per-section counts reflect the deletions.
+      void loadSections();
     }
 
     if (failureCount === 0) {
