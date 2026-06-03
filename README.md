@@ -1,13 +1,42 @@
 # TestMona | AI Test Management System
 
-TestMona is a full-stack test management system for organizing QA work across projects. It includes project workspaces, requirements, test cases, suites, runs, defects, reports, reusable test assets, audit trails, and a React frontend backed by a FastAPI API.
+TestMona is an AI-powered, full-stack test management platform for organizing QA
+across projects — requirements, test cases, suites, runs, defects, milestones, and
+reports — with a built-in Doc Hub, an advanced query language, and AI assistance.
+Built with a React frontend and a FastAPI API.
 
 ![TestMona dashboard](Docs/Screenshot-2.png)
+
+## Features
+
+- **AI-Assisted Testing** — Pluggable multi-provider AI manager with a project
+  requirement assistant, action-specific test-case generation, and built-in
+  similarity/duplicate detection so generated cases stay unique.
+- **Doc Hub (Docs-as-Code)** — Versioned spaces and documents with a rich editor,
+  @mentions, public doc sharing, and one-click document→requirement conversion.
+- **Advanced Search & TQL** — A JQL-style Test Query Language for precise filtering
+  across defects, requirements, and test cases from a dedicated search workspace.
+- **Requirements & Traceability** — Requirement folders, review comments and history,
+  external tracker import, and end-to-end traceability linking requirements,
+  test cases, and defects.
+- **Test Execution** — Step-level outcomes with execution timers, bulk run creation,
+  per-environment filtering, assignees with live progress, and defect logging from runs.
+- **Reports & Analytics** — A consolidated analytics workspace, printable run reports,
+  and public, shareable report links for stakeholders.
+- **Milestones & Test Plans** — Portfolio views with automatic status rollups and
+  managed plan/test links.
+- **Data-Driven Testing** — Reusable datasets and global parameters resolved directly
+  inside test-case flows.
+- **Reusable Assets & Custom Fields** — Shared steps, tags, and project-level custom
+  fields across entities.
+- **Audit & Collaboration** — Project audit trails (with purge), an RTL-aware
+  notification system, and full internationalization (multi-language + RTL).
 
 ## Tech Stack
 
 - Frontend: React 19, TypeScript, Vite, Tailwind CSS
 - Backend: FastAPI, SQLAlchemy, Alembic, Pydantic, JWT auth
+- AI: Pluggable provider manager for assistant and generation workflows
 - Tooling: Docker Compose, ESLint, Postman collections
 
 ## Quick Start
