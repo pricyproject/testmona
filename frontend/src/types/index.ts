@@ -710,3 +710,264 @@ export interface MilestoneStats {
   openDefects: number;
   averageExecutionProgress: number;
 }
+
+// ─── Doc Hub ────────────────────────────────────────────────────────────────
+
+export type DocStatus = 'draft' | 'published' | 'archived';
+export type DocDir = 'ltr' | 'rtl' | 'auto';
+
+export interface DocSpace {
+  id: number;
+  uuid?: string | null;
+  name: string;
+  slug: string;
+  description?: string | null;
+  classification?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  project_id?: number | null;
+  order_index: number;
+  doc_count: number;
+  created_by: number;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface DocSpaceCreate {
+  name: string;
+  description?: string | null;
+  classification?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  project_id?: number | null;
+}
+
+export interface DocFolder {
+  id: number;
+  uuid?: string | null;
+  name: string;
+  space_id: number;
+  parent_folder_id?: number | null;
+  order_index: number;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface DocFacetValue {
+  value: string;
+  count: number;
+}
+
+export interface DocFacets {
+  tags: DocFacetValue[];
+  classifications: DocFacetValue[];
+}
+
+export interface DocListPage {
+  items: DocListItem[];
+  total: number;
+}
+
+export interface DocListItem {
+  id: number;
+  uuid?: string | null;
+  title: string;
+  slug: string;
+  space_id: number;
+  folder_id?: number | null;
+  project_id?: number | null;
+  classification?: string | null;
+  status: DocStatus;
+  tags?: string | null;
+  dir?: DocDir | null;
+  language?: string | null;
+  excerpt?: string | null;
+  current_version: number;
+  share_scope: 'private' | 'public';
+  view_count?: number | null;
+  last_viewed_at?: string | null;
+  my_last_visited_at?: string | null;
+  created_by: number;
+  updated_by?: number | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface Doc {
+  id: number;
+  uuid?: string | null;
+  title: string;
+  slug: string;
+  content_markdown: string;
+  space_id: number;
+  folder_id?: number | null;
+  project_id?: number | null;
+  classification?: string | null;
+  status: DocStatus;
+  tags?: string | null;
+  dir?: DocDir | null;
+  language?: string | null;
+  current_version: number;
+  public_id?: string | null;
+  share_scope: 'private' | 'public';
+  share_expires_at?: string | null;
+  view_count?: number | null;
+  last_viewed_at?: string | null;
+  my_last_visited_at?: string | null;
+  created_by: number;
+  updated_by?: number | null;
+  created_at: string;
+  updated_at?: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+  can_share: boolean;
+  can_view_stats: boolean;
+}
+
+export interface DocShareInfo {
+  share_scope: 'private' | 'public';
+  public_id?: string | null;
+  share_expires_at?: string | null;
+  share_url?: string | null;
+}
+
+export interface DocPublicView {
+  id: number;
+  uuid?: string | null;
+  title: string;
+  slug: string;
+  content_markdown: string;
+  classification?: string | null;
+  tags?: string | null;
+  dir?: DocDir | null;
+  status: DocStatus;
+  current_version: number;
+  updated_at?: string | null;
+}
+
+export interface DocStats {
+  doc_id: number;
+  view_count: number;
+  unique_visitors: number;
+  last_viewed_at?: string | null;
+  latest_visits: Array<{ user_id: number; name: string; visit_count: number; last_visited_at?: string | null }>;
+}
+
+export interface DocStatsMostViewed {
+  id: number;
+  title: string;
+  space_id: number;
+  project_id?: number | null;
+  status: DocStatus;
+  view_count: number;
+  last_viewed_at?: string | null;
+}
+
+export interface DocStatsOverview {
+  total_docs: number;
+  total_views: number;
+  unique_visitors: number;
+  by_status: Record<string, number>;
+  most_viewed: DocStatsMostViewed[];
+}
+
+export interface DocRelatedLink {
+  id: number;
+  doc_id: number;
+  related_doc_id: number;
+  related_doc_title?: string | null;
+  related_doc_project_id?: number | null;
+  created_at: string;
+}
+
+export interface DocSuggestion {
+  id: number;
+  uuid?: string | null;
+  title: string;
+  slug: string;
+  space_id: number;
+  project_id?: number | null;
+  classification?: string | null;
+  status: DocStatus;
+  tags?: string | null;
+  excerpt?: string | null;
+  current_version: number;
+  score: number;
+  matched_tags: string[];
+}
+
+export interface DocCreate {
+  title: string;
+  content_markdown?: string;
+  space_id: number;
+  folder_id?: number | null;
+  classification?: string | null;
+  status?: DocStatus;
+  tags?: string | null;
+  dir?: DocDir;
+  language?: string | null;
+}
+
+export interface DocUpdate {
+  title?: string;
+  content_markdown?: string;
+  classification?: string | null;
+  status?: DocStatus;
+  tags?: string | null;
+  dir?: DocDir;
+  language?: string | null;
+  folder_id?: number | null;
+  space_id?: number;
+  change_note?: string | null;
+}
+
+export interface DocVersion {
+  id: number;
+  doc_id: number;
+  version_number: number;
+  action: 'created' | 'updated' | 'restored' | 'published' | string;
+  title: string;
+  content_markdown?: string | null;
+  status?: string | null;
+  classification?: string | null;
+  tags?: string | null;
+  change_note?: string | null;
+  created_at: string;
+  author?: RequirementVersionAuthor | null;
+}
+
+export interface DocRequirementLink {
+  id: number;
+  doc_id: number;
+  requirement_id: number;
+  requirement_key?: string | null;
+  requirement_title?: string | null;
+  created_at: string;
+}
+
+export interface DocConvertRequest {
+  mode: 'single' | 'split';
+  heading_level?: number;
+  target_project_id?: number | null;
+  folder_id?: number | null;
+  default_status?: Requirement['status'];
+  default_priority?: Requirement['priority'];
+  items?: { index: number; title: string; include: boolean }[];
+}
+
+export interface DocConvertPreviewItem {
+  index: number;
+  title: string;
+  description_html: string;
+  is_acceptance_criteria: boolean;
+}
+
+export interface DocConvertPreview {
+  mode: string;
+  items: DocConvertPreviewItem[];
+}
+
+export interface DocConvertResult {
+  created: Requirement[];
+  links: DocRequirementLink[];
+}

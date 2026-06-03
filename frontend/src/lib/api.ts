@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -57,7 +57,7 @@ export interface AIProviderConfig {
   api_key_required?: boolean;
 }
 
-export type AISourceType = "requirements" | "defects" | "test_plans" | "test_cases";
+export type AISourceType = "requirements" | "defects" | "test_plans" | "test_cases" | "docs";
 
 export interface RequirementChatSettings {
   enabled: boolean;
@@ -692,6 +692,213 @@ export const requirementFoldersAPI = {
   },
   remove: async (id: number): Promise<void> => {
     await api.delete(`/requirements/folders/${id}`);
+  },
+};
+
+// Doc Hub — Docs-as-Code documentation
+const triggerBlobDownload = (data: BlobPart, filename: string, type: string) => {
+  const blob = new Blob([data], { type });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+export interface DocListParams {
+  spaceId?: number;
+  projectId?: number;
+  folderId?: number;
+  classification?: string;
+  status?: string;
+  tag?: string;
+  q?: string;
+  includeGlobal?: boolean;
+  sort?: 'latest_edited' | 'latest_visited' | 'created' | 'title';
+  skip?: number;
+  limit?: number;
+}
+
+const docListQuery = (params: DocListParams) => ({
+  space_id: params.spaceId,
+  project_id: params.projectId,
+  folder_id: params.folderId,
+  classification: params.classification,
+  status: params.status,
+  tag: params.tag,
+  q: params.q,
+  include_global: params.includeGlobal,
+  sort: params.sort,
+  skip: params.skip,
+  limit: params.limit,
+});
+
+export const docsAPI = {
+  // Spaces
+  listSpaces: async (params: { projectId?: number; includeGlobal?: boolean } = {}): Promise<DocSpace[]> => {
+    const response = await api.get('/docs/spaces', {
+      params: {
+        project_id: params.projectId,
+        include_global: params.includeGlobal ?? true,
+      },
+    });
+    return response.data;
+  },
+  getSpace: async (id: number): Promise<DocSpace> => {
+    const response = await api.get(`/docs/spaces/${id}`);
+    return response.data;
+  },
+  createSpace: async (payload: DocSpaceCreate): Promise<DocSpace> => {
+    const response = await api.post('/docs/spaces', payload);
+    return response.data;
+  },
+  updateSpace: async (id: number, payload: Partial<DocSpaceCreate> & { order_index?: number }): Promise<DocSpace> => {
+    const response = await api.put(`/docs/spaces/${id}`, payload);
+    return response.data;
+  },
+  deleteSpace: async (id: number): Promise<void> => {
+    await api.delete(`/docs/spaces/${id}`);
+  },
+
+  // Folders
+  listFolders: async (spaceId: number): Promise<DocFolder[]> => {
+    const response = await api.get('/docs/folders', { params: { space_id: spaceId } });
+    return response.data;
+  },
+  createFolder: async (payload: { space_id: number; name: string; parent_folder_id?: number | null }): Promise<DocFolder> => {
+    const response = await api.post('/docs/folders', payload);
+    return response.data;
+  },
+  updateFolder: async (id: number, payload: { name?: string; parent_folder_id?: number | null; order_index?: number }): Promise<DocFolder> => {
+    const response = await api.put(`/docs/folders/${id}`, payload);
+    return response.data;
+  },
+  deleteFolder: async (id: number): Promise<void> => {
+    await api.delete(`/docs/folders/${id}`);
+  },
+
+  // Docs
+  list: async (params: DocListParams = {}): Promise<DocListItem[]> => {
+    const response = await api.get('/docs', { params: docListQuery(params) });
+    return response.data;
+  },
+  listPaged: async (params: DocListParams = {}): Promise<DocListPage> => {
+    const response = await api.get('/docs', { params: docListQuery(params) });
+    const total = Number(response.headers['x-total-count'] ?? response.data.length);
+    return { items: response.data, total: Number.isFinite(total) ? total : response.data.length };
+  },
+  getFacets: async (params: { spaceId?: number; projectId?: number; includeGlobal?: boolean } = {}): Promise<DocFacets> => {
+    const response = await api.get('/docs/facets', {
+      params: { space_id: params.spaceId, project_id: params.projectId, include_global: params.includeGlobal },
+    });
+    return response.data;
+  },
+  get: async (id: number): Promise<Doc> => {
+    const response = await api.get(`/docs/${id}`);
+    return response.data;
+  },
+  create: async (payload: DocCreate): Promise<Doc> => {
+    const response = await api.post('/docs', payload);
+    return response.data;
+  },
+  update: async (id: number, payload: DocUpdate): Promise<Doc> => {
+    const response = await api.put(`/docs/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id: number): Promise<void> => {
+    await api.delete(`/docs/${id}`);
+  },
+  getPublic: async (publicId: string): Promise<DocPublicView> => {
+    const response = await api.get(`/docs/public/${publicId}`);
+    return response.data;
+  },
+  getMarkdown: async (id: number): Promise<{ id: number; title: string; markdown: string; status: string; tags?: string | null; classification?: string | null }> => {
+    const response = await api.get(`/docs/${id}/markdown`);
+    return response.data;
+  },
+
+  // Versions
+  listVersions: async (id: number): Promise<DocVersion[]> => {
+    const response = await api.get(`/docs/${id}/versions`);
+    return response.data;
+  },
+  restoreVersion: async (id: number, versionId: number, changeNote?: string): Promise<Doc> => {
+    const response = await api.post(`/docs/${id}/versions/${versionId}/restore`, { change_note: changeNote ?? null });
+    return response.data;
+  },
+  clearVersions: async (id: number): Promise<Doc> => {
+    const response = await api.delete(`/docs/${id}/versions`);
+    return response.data;
+  },
+  getShare: async (id: number): Promise<DocShareInfo> => {
+    const response = await api.get(`/docs/${id}/share`);
+    return response.data;
+  },
+  updateShare: async (id: number, payload: { share_scope: 'private' | 'public'; share_expires_at?: string | null }): Promise<DocShareInfo> => {
+    const response = await api.put(`/docs/${id}/share`, payload);
+    return response.data;
+  },
+  getStats: async (id: number): Promise<DocStats> => {
+    const response = await api.get(`/docs/${id}/stats`);
+    return response.data;
+  },
+  getStatsOverview: async (params: { spaceId?: number; projectId?: number; includeGlobal?: boolean } = {}): Promise<DocStatsOverview> => {
+    const response = await api.get('/docs/stats/overview', {
+      params: { space_id: params.spaceId, project_id: params.projectId, include_global: params.includeGlobal },
+    });
+    return response.data;
+  },
+  listRelated: async (id: number): Promise<DocRelatedLink[]> => {
+    const response = await api.get(`/docs/${id}/related`);
+    return response.data;
+  },
+  addRelated: async (id: number, relatedDocId: number): Promise<DocRelatedLink> => {
+    const response = await api.post(`/docs/${id}/related`, { related_doc_id: relatedDocId });
+    return response.data;
+  },
+  removeRelated: async (id: number, relatedDocId: number): Promise<void> => {
+    await api.delete(`/docs/${id}/related/${relatedDocId}`);
+  },
+  suggestions: async (id: number, limit = 6): Promise<DocSuggestion[]> => {
+    const response = await api.get(`/docs/${id}/suggestions`, { params: { limit } });
+    return response.data;
+  },
+
+  // Requirement links + converter
+  listRequirementLinks: async (id: number): Promise<DocRequirementLink[]> => {
+    const response = await api.get(`/docs/${id}/requirement-links`);
+    return response.data;
+  },
+  previewConvert: async (id: number, payload: DocConvertRequest): Promise<DocConvertPreview> => {
+    const response = await api.post(`/docs/${id}/convert-to-requirements/preview`, payload);
+    return response.data;
+  },
+  convert: async (id: number, payload: DocConvertRequest): Promise<DocConvertResult> => {
+    const response = await api.post(`/docs/${id}/convert-to-requirements`, payload);
+    return response.data;
+  },
+
+  // Import / export
+  importFile: async (spaceId: number, file: File, folderId?: number | null): Promise<DocListItem[]> => {
+    const formData = new FormData();
+    formData.append('space_id', String(spaceId));
+    if (folderId != null) formData.append('folder_id', String(folderId));
+    formData.append('file', file);
+    const response = await api.post('/docs/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+  exportDoc: async (id: number, filename: string): Promise<void> => {
+    const response = await api.get(`/docs/${id}/export`, { responseType: 'blob' });
+    triggerBlobDownload(response.data, filename, 'text/markdown');
+  },
+  exportSpace: async (id: number, filename: string): Promise<void> => {
+    const response = await api.get(`/docs/spaces/${id}/export`, { responseType: 'blob' });
+    triggerBlobDownload(response.data, filename, 'application/zip');
   },
 };
 
@@ -2079,6 +2286,120 @@ export const testPlansAPI = {
   ) => {
     const response = await api.post(`/test-plans/${id}/requirements/bulk`, payload);
     return response.data;
+  },
+};
+
+// --- Advanced Search (TQL across entities) ---------------------------------
+
+export interface AdvancedSearchField {
+  name: string;
+  kind: 'text' | 'enum' | 'keyword' | 'user' | 'date' | 'number';
+  operators: string[];
+  sortable: boolean;
+  choices: string[];
+  suggest: boolean;
+  multivalue: boolean;
+}
+
+export interface AdvancedSearchEntity {
+  key: string;
+  label: string;
+  fields: AdvancedSearchField[];
+}
+
+export interface AdvancedSearchResult {
+  entity: string;
+  label: string;
+  total: number;
+  count: number;
+  offset: number;
+  limit: number;
+  results: Array<Record<string, any>>;
+}
+
+export interface SavedSearch {
+  id: number;
+  name: string;
+  entity: string;
+  tql: string;
+  is_shared: boolean;
+  is_owner: boolean;
+}
+
+export const advancedSearchAPI = {
+  getEntities: async (): Promise<{ entities: AdvancedSearchEntity[] }> => {
+    const response = await api.get('/advanced-search/entities');
+    return response.data;
+  },
+  search: async (
+    projectId: number,
+    entity: string,
+    tql: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<AdvancedSearchResult> => {
+    const params = new URLSearchParams({
+      project_id: projectId.toString(),
+      entity,
+      limit: limit.toString(),
+      offset: offset.toString(),
+    });
+    if (tql.trim()) params.append('tql', tql.trim());
+    const response = await api.get(`/advanced-search?${params}`);
+    return response.data;
+  },
+  // Distinct existing values of a field, for value autocomplete (e.g. tags).
+  fieldValues: async (
+    projectId: number,
+    entity: string,
+    field: string,
+    q: string,
+  ): Promise<string[]> => {
+    const params = new URLSearchParams({
+      project_id: projectId.toString(),
+      entity,
+      field,
+      q,
+    });
+    const response = await api.get(`/advanced-search/values?${params}`);
+    return response.data.values ?? [];
+  },
+  listSaved: async (projectId: number): Promise<SavedSearch[]> => {
+    const response = await api.get('/advanced-search/saved', { params: { project_id: projectId } });
+    return response.data.saved ?? [];
+  },
+  saveSearch: async (
+    projectId: number,
+    name: string,
+    entity: string,
+    tql: string,
+    isShared = false,
+  ): Promise<SavedSearch> => {
+    const response = await api.post('/advanced-search/saved', {
+      project_id: projectId,
+      name,
+      entity,
+      tql,
+      is_shared: isShared,
+    });
+    return response.data;
+  },
+  deleteSaved: async (id: number): Promise<void> => {
+    await api.delete(`/advanced-search/saved/${id}`);
+  },
+  // Triggers a CSV download of all matching rows (capped server-side).
+  exportCsv: async (projectId: number, entity: string, tql: string): Promise<void> => {
+    const params = new URLSearchParams({ project_id: projectId.toString(), entity });
+    if (tql.trim()) params.append('tql', tql.trim());
+    const response = await api.get(`/advanced-search/export?${params}`, { responseType: 'blob' });
+    const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${entity}-search.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   },
 };
 
