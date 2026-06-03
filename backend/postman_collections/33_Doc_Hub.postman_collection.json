@@ -1,0 +1,658 @@
+{
+  "info": {
+    "name": "Doc Hub",
+    "description": "Doc Hub spaces, folders, Markdown docs, version history, sharing, import/export, and requirement conversion endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "projectId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "docSpaceId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "docFolderId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "docId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "docVersionId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "relatedDocId",
+      "value": "2",
+      "type": "string"
+    },
+    {
+      "key": "docPublicId",
+      "value": "00000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "shareExpiresAt",
+      "value": "2026-12-31T23:59:59Z",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Login - Setup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username_or_email\": \"demo@testmona.com\",\n  \"password\": \"12345678\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/token",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "token"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Spaces",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/spaces?project_id={{projectId}}&include_global=true",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "spaces"
+          ],
+          "query": [
+            {
+              "key": "project_id",
+              "value": "{{projectId}}"
+            },
+            {
+              "key": "include_global",
+              "value": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create Space",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Product Docs\",\n  \"description\": \"Project documentation\",\n  \"classification\": \"internal\",\n  \"project_id\": {{projectId}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/spaces",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "spaces"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Space",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/spaces/{{docSpaceId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "spaces",
+            "{{docSpaceId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Export Space",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/spaces/{{docSpaceId}}/export",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "spaces",
+            "{{docSpaceId}}",
+            "export"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Folders",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/folders?space_id={{docSpaceId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "folders"
+          ],
+          "query": [
+            {
+              "key": "space_id",
+              "value": "{{docSpaceId}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create Folder",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Guides\",\n  \"space_id\": {{docSpaceId}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/folders",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "folders"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Docs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs?space_id={{docSpaceId}}&status=draft&sort=latest_edited&limit=200",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs"
+          ],
+          "query": [
+            {
+              "key": "space_id",
+              "value": "{{docSpaceId}}"
+            },
+            {
+              "key": "status",
+              "value": "draft"
+            },
+            {
+              "key": "sort",
+              "value": "latest_edited"
+            },
+            {
+              "key": "limit",
+              "value": "200"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Create Doc",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Getting Started\",\n  \"content_markdown\": \"# Getting Started\\n\\nWrite project documentation here.\",\n  \"space_id\": {{docSpaceId}},\n  \"status\": \"draft\",\n  \"dir\": \"auto\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Doc",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Doc",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Getting Started\",\n  \"content_markdown\": \"# Getting Started\\n\\nUpdated documentation.\",\n  \"status\": \"published\",\n  \"change_note\": \"Publish first version\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Doc Markdown",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/markdown",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "markdown"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Export Doc",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/export",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "export"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Versions",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/versions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "versions"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Restore Version",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"change_note\": \"Restore previous content\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/versions/{{docVersionId}}/restore",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "versions",
+            "{{docVersionId}}",
+            "restore"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Share",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/share",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "share"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Update Share",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"share_scope\": \"public\",\n  \"share_expires_at\": \"{{shareExpiresAt}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/share",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "share"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Public Doc",
+      "auth": {
+        "type": "noauth"
+      },
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/public/{{docPublicId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "public",
+            "{{docPublicId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Doc Stats",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/stats",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "stats"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Related Docs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/related",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "related"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Add Related Doc",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"related_doc_id\": {{relatedDocId}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/related",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "related"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Remove Related Doc",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/related/{{relatedDocId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "related",
+            "{{relatedDocId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Requirement Links",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/requirement-links",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "requirement-links"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Preview Convert To Requirements",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"split\",\n  \"heading_level\": 2,\n  \"target_project_id\": {{projectId}},\n  \"default_status\": \"draft\",\n  \"default_priority\": \"medium\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/convert-to-requirements/preview",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "convert-to-requirements",
+            "preview"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Convert To Requirements",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"single\",\n  \"target_project_id\": {{projectId}},\n  \"default_status\": \"draft\",\n  \"default_priority\": \"medium\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/convert-to-requirements",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "convert-to-requirements"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Delete Doc",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}"
+          ]
+        }
+      }
+    }
+  ]
+}
