@@ -260,7 +260,7 @@ export function AdvancedSearch() {
           variant: 'destructive',
         });
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   const currentEntity = useMemo(
@@ -357,7 +357,7 @@ export function AdvancedSearch() {
     if (searchParams.get('entity') || searchParams.get('tql')) {
       void doSearch(searchParams.get('entity') || 'defects', searchParams.get('tql') || '', 0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   const goToPage = (offset: number) => {
