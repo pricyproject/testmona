@@ -69,7 +69,7 @@ from .routes.saved_filters_and_bulk import register_saved_filters_and_bulk_route
 from .routes.datasets import register_dataset_routes
 from .routes.ai_manager import register_ai_manager_routes
 from .routes.ai_generation import register_ai_generation_routes
-from .routes.requirement_chat import register_requirement_chat_routes
+from .routes.project_ai_chat import register_project_ai_chat_routes
 from .routes.docs import register_docs_routes
 from .routes.advanced_search import register_advanced_search_routes
 
@@ -95,7 +95,7 @@ register_saved_filters_and_bulk_routes(app)
 register_dataset_routes(app)
 register_ai_manager_routes(app)
 register_ai_generation_routes(app)
-register_requirement_chat_routes(app)
+register_project_ai_chat_routes(app)
 register_docs_routes(app)
 register_advanced_search_routes(app)
 

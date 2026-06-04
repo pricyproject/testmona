@@ -1,10 +1,10 @@
 """
-Project-wide AI chat over a project's requirements.
+Project-wide AI chat over a project's enabled source types.
 
-Lets users ask questions across all requirements in a project. Each question
-lexically retrieves the most relevant requirements, packs them into a TOON
-table within the completion prompt budget, and returns a cited answer.
-Conversations and their turns are persisted.
+Lets users ask questions across requirements, defects, test plans, test cases,
+and docs that are enabled for a project. Each question lexically retrieves the
+most relevant items, packs them into a TOON table within the completion prompt
+budget, and returns a cited answer. Conversations and their turns are persisted.
 """
 
 import asyncio
@@ -241,7 +241,7 @@ async def _produce_answer(db: Session, project_id: int, current_user, question: 
     except HTTPException:
         raise
     except Exception as exc:  # network, timeout, provider SDK errors, etc.
-        logger.warning("AI completion failed for requirement QA: %s", exc)
+        logger.warning("AI completion failed for project AI chat: %s", exc)
         raise HTTPException(status_code=502, detail="AI request failed. Please try again.") from exc
 
     try:
@@ -251,7 +251,7 @@ async def _produce_answer(db: Session, project_id: int, current_user, question: 
         if not isinstance(raw_sources, list):
             raw_sources = []
     except Exception as exc:
-        logger.warning("Failed to parse requirement QA response: %s", exc)
+        logger.warning("Failed to parse project AI chat response: %s", exc)
         answer = clean_ai_text(result.content, 8000) or ""
         raw_sources = []
 
@@ -281,7 +281,7 @@ async def _produce_answer(db: Session, project_id: int, current_user, question: 
             "retrieval": retrieval, "truncated": retrieval.truncated}
 
 
-def register_requirement_chat_routes(app):
+def register_project_ai_chat_routes(app):
     @app.get(
         "/projects/{project_id}/ai/conversations",
         response_model=list[schemas.RequirementChatConversationView],
@@ -398,7 +398,7 @@ def register_requirement_chat_routes(app):
         response_model=schemas.RequirementChatAskResponse,
         dependencies=[Depends(require_project_feature("ask_ai"))],
     )
-    async def ask_about_requirements(
+    async def ask_about_project_sources(
         project_id: int,
         payload: schemas.RequirementChatAsk,
         request: Request,
@@ -411,7 +411,7 @@ def register_requirement_chat_routes(app):
 
         chat_settings = get_requirement_chat_settings(db)
         if not chat_settings["enabled"]:
-            raise HTTPException(status_code=403, detail="The requirement AI assistant is disabled.")
+            raise HTTPException(status_code=403, detail="The project AI assistant is disabled.")
 
         # Resolve the conversation up front (so a bad id 404s), but DON'T
         # persist anything yet: we only commit the user + assistant turns once
@@ -474,7 +474,7 @@ def register_requirement_chat_routes(app):
         _require_project_permission(current_user, project_id, db, "write")
         chat_settings = get_requirement_chat_settings(db)
         if not chat_settings["enabled"]:
-            raise HTTPException(status_code=403, detail="The requirement AI assistant is disabled.")
+            raise HTTPException(status_code=403, detail="The project AI assistant is disabled.")
 
         conversation = _conversation_or_404(db, conversation_id, project_id, current_user)
         messages = list(conversation.messages)
@@ -533,8 +533,8 @@ def _audit(db: Session, current_user, project_id: int) -> None:
                 entity_type=EntityType.REQUIREMENT.value if hasattr(EntityType, "REQUIREMENT") else "project",
                 entity_id=project_id,
                 project_id=project_id,
-                description="Asked AI a question across project requirements",
+                description="Asked AI a question across project sources",
             )
         )
     except Exception as exc:  # pragma: no cover - audit must never break the request
-        logger.exception("Failed to audit requirement QA event: %s", exc)
+        logger.exception("Failed to audit project AI chat event: %s", exc)

@@ -20745,8 +20745,8 @@
     },
     "/projects/{project_id}/ai/ask": {
       "post": {
-        "summary": "Ask About Requirements",
-        "operationId": "ask_about_requirements_projects__project_id__ai_ask_post",
+        "summary": "Ask About Project Sources",
+        "operationId": "ask_about_project_sources_projects__project_id__ai_ask_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
