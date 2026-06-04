@@ -767,6 +767,8 @@ export const en = {
   failedToDeleteInvitation: 'Failed to delete invitation',
   copied: 'Copied',
   copyFailed: 'Failed to copy',
+  copyDefectId: 'Copy defect ID',
+  defectStatusUpdated: 'Defect status updated',
   copyRequirementId: 'Copy requirement ID',
   email: 'Email',
   password: 'Password',

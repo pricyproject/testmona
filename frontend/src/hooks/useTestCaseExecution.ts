@@ -103,6 +103,7 @@ export function useTestCaseExecution() {
   const [selectedDefectId, setSelectedDefectId] = useState('');
   const [linkType, setLinkType] = useState<DefectLinkType>('found');
   const [isLinkingDefect, setIsLinkingDefect] = useState(false);
+  const [updatingDefectStatusId, setUpdatingDefectStatusId] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isDefectDialogOpen, setIsDefectDialogOpen] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
@@ -973,6 +974,20 @@ export function useTestCaseExecution() {
     }
   };
 
+  const handleUpdateLinkedDefectStatus = async (defectId: number, status: string) => {
+    try {
+      setUpdatingDefectStatusId(defectId);
+      await defectsAPI.update(defectId, { status });
+      if (testResultId) await loadResultDefectLinks(testResultId);
+      toast({ title: t('success'), description: t('defectStatusUpdated') });
+    } catch (error) {
+      console.error('Failed to update defect status:', error);
+      toast({ title: t('error'), description: getApiErrorMessage(error, t('failedToUpdateDefect')), variant: 'destructive' });
+    } finally {
+      setUpdatingDefectStatusId(null);
+    }
+  };
+
   const handleCorrectLinkSnapshot = async (linkId: number) => {
     if (!testResultId) return;
     if (!requireFailureStepSelection()) return;
@@ -1273,6 +1288,7 @@ export function useTestCaseExecution() {
     defectTitleInputRef, newDefect, setNewDefect, hasUnsavedChanges,
     openDefectDialog, handleLinkExistingDefect, linkTypeLabel,
     handleUnlinkDefect, handleCorrectLinkSnapshot, handleCreateDefect,
+    updatingDefectStatusId, handleUpdateLinkedDefectStatus,
     handleDialogClose, handleUnsavedConfirm, handleDefectDialogKeyDown,
   };
 }
