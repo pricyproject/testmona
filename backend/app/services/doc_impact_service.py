@@ -19,9 +19,11 @@ deterministic graph plus heuristic risk signals that are always available.
 from __future__ import annotations
 
 import html
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -32,16 +34,87 @@ from ..routes._analytics_shared import (
     get_linked_requirement_test_case_ids,
 )
 from .ai_prompt_service import strip_html
-from .requirement_retrieval import _score, _tokens
+from .similarity_service import normalize_text
 
 # Strip the heaviest Markdown punctuation so doc content scores as prose
 # (mirrors ``requirement_retrieval._load_doc_hub_docs``).
 _MD_STRIP_RE = re.compile(r"[#*_`>~\[\]\(\)!]|https?://\S+")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
-# A requirement is admitted as "similar" only above this token-overlap score, so
+# A requirement is admitted as "similar" only above this TF-IDF cosine score, so
 # a doc edit doesn't drag in every loosely-worded requirement in the project.
-_SIMILARITY_THRESHOLD = 0.12
+# Tuned for the IDF-weighted cosine below (distinctive shared terms, not raw
+# token overlap), so it can be lower than the old overlap-coefficient threshold.
+_SIMILARITY_THRESHOLD = 0.08
+
+# Function words / ubiquitous tokens that carry no topical signal. IDF already
+# down-weights project-wide terms, but dropping these keeps vectors clean and
+# stops them inflating the cosine norm. Kept deliberately small + English-only
+# (``normalize_text`` folds Arabic/Persian, which the IDF term-rarity handles).
+_STOPWORDS = frozenset("""
+a an the this that these those and or but if then else for to of in on at by with
+from as is are was were be been being it has have had will would shall should can
+could may might must not no nor so than too very just also into over under again
+about above below up down out off only own such each more most other some any all
+both one two three do does did done they them their our your you we he she his her
+""".split())
+
+
+def _meaningful_tokens(text: str) -> List[str]:
+    """Normalised, stopword-filtered tokens (NFKC + case/RTL folding via
+    ``normalize_text``), dropping single chars and bare numbers."""
+    out: List[str] = []
+    for tok in normalize_text(text).split():
+        if len(tok) < 2 or tok.isdigit() or tok in _STOPWORDS:
+            continue
+        out.append(tok)
+    return out
+
+
+def _terms(text: str) -> List[str]:
+    """Unigrams + adjacent bigrams, so phrase-level matches ('oauth login') score
+    higher than two requirements that merely share the same words in isolation."""
+    toks = _meaningful_tokens(text)
+    terms: List[str] = list(toks)
+    terms.extend(f"{a}~{b}" for a, b in zip(toks, toks[1:]))
+    return terms
+
+
+class _TfidfModel:
+    """Tiny dependency-free TF-IDF vectoriser. IDF is learned from the project's
+    requirement corpus, so terms that appear in *every* requirement (e.g. 'req',
+    'login' in an auth-heavy project) are weighted down and genuinely distinctive
+    terms ('tiktok') dominate the match."""
+
+    def __init__(self, corpus: List[List[str]]):
+        n = max(1, len(corpus))
+        df: Counter = Counter()
+        for terms in corpus:
+            df.update(set(terms))
+        self._idf: Dict[str, float] = {
+            term: math.log((n + 1) / (freq + 1)) + 1.0 for term, freq in df.items()
+        }
+        # A term unseen in the corpus is maximally rare.
+        self._unseen_idf = math.log(n + 1) + 1.0
+
+    def vector(self, terms: List[str]) -> Dict[str, float]:
+        if not terms:
+            return {}
+        counts = Counter(terms)
+        return {term: count * self._idf.get(term, self._unseen_idf) for term, count in counts.items()}
+
+
+def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
+    if not a or not b:
+        return 0.0
+    if len(a) > len(b):
+        a, b = b, a
+    dot = sum(weight * b.get(term, 0.0) for term, weight in a.items())
+    if dot <= 0.0:
+        return 0.0
+    norm_a = math.sqrt(sum(w * w for w in a.values()))
+    norm_b = math.sqrt(sum(w * w for w in b.values()))
+    return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 _OPEN_DEFECT_STATUSES = (
     models.DefectStatus.OPEN,
@@ -206,7 +279,6 @@ def analyze_doc_impact(
 
     project_id = doc.project_id
     body = candidate_markdown if candidate_markdown is not None else doc.content_markdown
-    query_tokens = _tokens(f"{doc.title or ''} {_doc_blob(body)}")
 
     linked_ids = {
         rid for (rid,) in db.query(models.DocRequirementLink.requirement_id)
@@ -216,12 +288,24 @@ def analyze_doc_impact(
     all_requirements = _load_project_requirements(db, project_id)
     req_by_id = {r.id: r for r in all_requirements}
 
+    # TF-IDF cosine similarity over the project's requirement corpus, so matches
+    # are driven by distinctive shared vocabulary (and phrases) rather than the
+    # raw token overlap that previously dragged in any requirement sharing a
+    # common word like "project" or "login".
+    req_terms = {req.id: _terms(_req_blob(req)) for req in all_requirements}
+    model = _TfidfModel(list(req_terms.values()))
+    doc_vec = model.vector(_terms(f"{doc.title or ''} {_doc_blob(body)}"))
+    req_vecs = {rid: model.vector(terms) for rid, terms in req_terms.items()}
+
+    def _similarity(rid: int) -> float:
+        return _cosine(doc_vec, req_vecs.get(rid, {}))
+
     # Score every requirement; linked ones are kept regardless of score.
     scored: List[tuple[models.Requirement, float]] = []
     for req in all_requirements:
         if req.id in linked_ids:
             continue
-        score = _score(query_tokens, _tokens(_req_blob(req)))
+        score = _similarity(req.id)
         if score >= _SIMILARITY_THRESHOLD:
             scored.append((req, score))
     scored.sort(key=lambda item: item[1], reverse=True)
@@ -235,7 +319,7 @@ def analyze_doc_impact(
             type="requirement", id=req.id,
             key=req.requirement_id or f"REQ-{req.id}",
             title=_req_clean(req.title), reason="linked",
-            score=round(_score(query_tokens, _tokens(_req_blob(req))), 4),
+            score=round(_similarity(req.id), 4),
         ))
     remaining = max(0, max_requirements - len(impacted_requirements))
     for req, score in scored[:remaining]:
