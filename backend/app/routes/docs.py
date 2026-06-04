@@ -129,6 +129,44 @@ def _notify_doc_mentions(
         logger.exception("Failed to create doc mention notifications for doc %s", doc.id)
 
 
+def _notify_doc_feedback(
+    db: Session,
+    doc: models.Doc,
+    actor: models.User,
+    feedback_type: str,
+    comment: Optional[str],
+) -> None:
+    """Notify the doc's responsible editors about actionable reader feedback."""
+    if feedback_type == "helpful":
+        return
+    try:
+        recipients = {uid for uid in (doc.created_by, doc.updated_by) if uid and uid != actor.id}
+        if not recipients:
+            return
+        actor_name = actor.full_name or actor.username or actor.email
+        labels = {
+            "not_helpful": "not helpful",
+            "clarification": "needs clarification",
+            "outdated": "may be outdated",
+        }
+        feedback_label = labels.get(feedback_type, feedback_type.replace("_", " "))
+        detail = f": {comment[:180]}" if comment else ""
+        for uid in recipients:
+            crud.create_notification(
+                db,
+                schemas.NotificationCreate(
+                    user_id=uid,
+                    title="Document feedback",
+                    message=f'{actor_name} marked "{doc.title}" as {feedback_label}{detail}',
+                    type=models.NotificationType.INFO,
+                    related_entity_type="doc",
+                    related_entity_id=doc.id,
+                ),
+            )
+    except Exception:
+        logger.exception("Failed to create doc feedback notifications for doc %s", doc.id)
+
+
 def _get_space_or_404(db: Session, space_id: int) -> models.DocSpace:
     space = crud_docs.get_space(db, space_id)
     if space is None:
@@ -172,6 +210,64 @@ def _doc_out(doc: models.Doc, user: models.User, db: Session) -> schemas.Doc:
         out.view_count = None
         out.last_viewed_at = None
     return out
+
+
+def _feedback_view(feedback: models.DocFeedback) -> schemas.DocFeedbackView:
+    user = getattr(feedback, "user", None)
+    return schemas.DocFeedbackView(
+        id=feedback.id,
+        doc_id=feedback.doc_id,
+        user_id=feedback.user_id,
+        feedback_type=feedback.feedback_type,
+        comment=feedback.comment,
+        section_text=feedback.section_text,
+        resolved=bool(feedback.resolved),
+        created_at=feedback.created_at,
+        updated_at=feedback.updated_at,
+        user=schemas.DocFeedbackUser.model_validate(user) if user is not None else None,
+    )
+
+
+def _feedback_summary(db: Session, doc_id: int, user_id: int) -> schemas.DocFeedbackSummary:
+    rows = (
+        db.query(models.DocFeedback.feedback_type, func.count(models.DocFeedback.id))
+        .filter(models.DocFeedback.doc_id == doc_id)
+        .group_by(models.DocFeedback.feedback_type)
+        .all()
+    )
+    counts = {key: int(value or 0) for key, value in rows}
+    unresolved = (
+        db.query(func.count(models.DocFeedback.id))
+        .filter(
+            models.DocFeedback.doc_id == doc_id,
+            models.DocFeedback.resolved.is_(False),
+            models.DocFeedback.feedback_type.in_(["not_helpful", "clarification", "outdated"]),
+        )
+        .scalar()
+        or 0
+    )
+    mine = (
+        db.query(models.DocFeedback)
+        .options(joinedload(models.DocFeedback.user))
+        .filter(models.DocFeedback.doc_id == doc_id, models.DocFeedback.user_id == user_id)
+        .first()
+    )
+    return schemas.DocFeedbackSummary(
+        doc_id=doc_id,
+        helpful=counts.get("helpful", 0),
+        not_helpful=counts.get("not_helpful", 0),
+        clarification=counts.get("clarification", 0),
+        outdated=counts.get("outdated", 0),
+        unresolved=unresolved,
+        my_feedback=_feedback_view(mine) if mine else None,
+    )
+
+
+def _apply_feedback_payload(feedback: models.DocFeedback, payload: schemas.DocFeedbackCreate) -> None:
+    feedback.feedback_type = payload.feedback_type
+    feedback.comment = payload.comment
+    feedback.section_text = payload.section_text
+    feedback.resolved = False
 
 
 def _record_visit(db: Session, doc: models.Doc, user: models.User) -> None:
@@ -952,6 +1048,154 @@ def register_docs_routes(app) -> None:
                 for visit, user in latest
             ],
         )
+
+    @app.get("/docs/{doc_id}/feedback", response_model=schemas.DocFeedbackSummary, tags=["Docs"])
+    def get_doc_feedback_summary(
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        return _feedback_summary(db, doc.id, current_user.id)
+
+    @app.get("/docs/{doc_id}/feedback/items", response_model=List[schemas.DocFeedbackView], tags=["Docs"])
+    def list_doc_feedback(
+        doc_id: int = Path(..., ge=1),
+        include_resolved: bool = Query(False),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+        query = (
+            db.query(models.DocFeedback)
+            .options(joinedload(models.DocFeedback.user))
+            .filter(models.DocFeedback.doc_id == doc.id)
+            .filter(models.DocFeedback.feedback_type.in_(["not_helpful", "clarification", "outdated"]))
+        )
+        if not include_resolved:
+            query = query.filter(models.DocFeedback.resolved.is_(False))
+        items = query.order_by(models.DocFeedback.updated_at.desc().nullslast(), models.DocFeedback.created_at.desc()).all()
+        return [_feedback_view(item) for item in items]
+
+    @app.put("/docs/{doc_id}/feedback", response_model=schemas.DocFeedbackSummary, tags=["Docs"])
+    def submit_doc_feedback(
+        payload: schemas.DocFeedbackCreate,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        feedback = (
+            db.query(models.DocFeedback)
+            .filter(models.DocFeedback.doc_id == doc.id, models.DocFeedback.user_id == current_user.id)
+            .first()
+        )
+        should_notify = payload.feedback_type != "helpful"
+        if feedback is None:
+            feedback = models.DocFeedback(
+                doc_id=doc.id,
+                user_id=current_user.id,
+            )
+            _apply_feedback_payload(feedback, payload)
+            db.add(feedback)
+        else:
+            should_notify = should_notify and (
+                feedback.feedback_type != payload.feedback_type
+                or (feedback.comment or "") != (payload.comment or "")
+                or (feedback.section_text or "") != (payload.section_text or "")
+                or bool(feedback.resolved)
+            )
+            _apply_feedback_payload(feedback, payload)
+        try:
+            crud.safe_commit(db)
+            db.refresh(feedback)
+        except IntegrityError as exc:
+            db.rollback()
+            feedback = (
+                db.query(models.DocFeedback)
+                .filter(models.DocFeedback.doc_id == doc.id, models.DocFeedback.user_id == current_user.id)
+                .first()
+            )
+            if feedback is None:
+                logger.exception("Could not resolve duplicate doc feedback for doc %s/user %s", doc.id, current_user.id)
+                raise HTTPException(status_code=500, detail="Could not save document feedback") from exc
+            should_notify = should_notify and (
+                feedback.feedback_type != payload.feedback_type
+                or (feedback.comment or "") != (payload.comment or "")
+                or (feedback.section_text or "") != (payload.section_text or "")
+                or bool(feedback.resolved)
+            )
+            _apply_feedback_payload(feedback, payload)
+            try:
+                crud.safe_commit(db)
+                db.refresh(feedback)
+            except Exception as retry_exc:
+                db.rollback()
+                logger.exception("Could not save duplicate doc feedback for doc %s/user %s", doc.id, current_user.id)
+                raise HTTPException(status_code=500, detail="Could not save document feedback") from retry_exc
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Could not save doc feedback for doc %s/user %s", doc.id, current_user.id)
+            raise HTTPException(status_code=500, detail="Could not save document feedback") from exc
+        if should_notify:
+            _notify_doc_feedback(db, doc, current_user, feedback.feedback_type, feedback.comment)
+        return _feedback_summary(db, doc.id, current_user.id)
+
+    @app.delete("/docs/{doc_id}/feedback", response_model=schemas.DocFeedbackSummary, tags=["Docs"])
+    def delete_my_doc_feedback(
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        feedback = (
+            db.query(models.DocFeedback)
+            .filter(models.DocFeedback.doc_id == doc.id, models.DocFeedback.user_id == current_user.id)
+            .first()
+        )
+        if feedback is not None:
+            try:
+                db.delete(feedback)
+                crud.safe_commit(db)
+            except Exception as exc:
+                db.rollback()
+                logger.exception("Could not delete doc feedback for doc %s/user %s", doc.id, current_user.id)
+                raise HTTPException(status_code=500, detail="Could not delete document feedback") from exc
+        return _feedback_summary(db, doc.id, current_user.id)
+
+    @app.put("/docs/{doc_id}/feedback/{feedback_id}", response_model=schemas.DocFeedbackView, tags=["Docs"])
+    def resolve_doc_feedback(
+        payload: schemas.DocFeedbackResolve,
+        doc_id: int = Path(..., ge=1),
+        feedback_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+        feedback = (
+            db.query(models.DocFeedback)
+            .options(joinedload(models.DocFeedback.user))
+            .filter(models.DocFeedback.id == feedback_id, models.DocFeedback.doc_id == doc.id)
+            .first()
+        )
+        if feedback is None:
+            raise HTTPException(status_code=404, detail="Document feedback not found")
+        if feedback.feedback_type == "helpful":
+            raise HTTPException(status_code=400, detail="Helpful votes do not require resolution")
+        feedback.resolved = payload.resolved
+        try:
+            crud.safe_commit(db)
+            db.refresh(feedback)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Could not update doc feedback %s", feedback.id)
+            raise HTTPException(status_code=500, detail="Could not update document feedback") from exc
+        return _feedback_view(feedback)
 
     @app.get("/docs/{doc_id}/related", response_model=List[schemas.DocRelatedLinkView], tags=["Docs"])
     def list_related_docs(

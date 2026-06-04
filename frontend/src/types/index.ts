@@ -873,6 +873,38 @@ export interface DocStatsOverview {
   most_viewed: DocStatsMostViewed[];
 }
 
+export type DocFeedbackType = 'helpful' | 'not_helpful' | 'clarification' | 'outdated';
+
+export interface DocFeedbackUser {
+  id: number;
+  username: string;
+  full_name?: string | null;
+  email?: string | null;
+}
+
+export interface DocFeedback {
+  id: number;
+  doc_id: number;
+  user_id: number;
+  feedback_type: DocFeedbackType;
+  comment?: string | null;
+  section_text?: string | null;
+  resolved: boolean;
+  created_at: string;
+  updated_at?: string | null;
+  user?: DocFeedbackUser | null;
+}
+
+export interface DocFeedbackSummary {
+  doc_id: number;
+  helpful: number;
+  not_helpful: number;
+  clarification: number;
+  outdated: number;
+  unresolved: number;
+  my_feedback?: DocFeedback | null;
+}
+
 export interface DocRelatedLink {
   id: number;
   doc_id: number;

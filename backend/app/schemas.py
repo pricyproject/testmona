@@ -4700,6 +4700,77 @@ class DocRelatedLinkView(BaseModel):
     created_at: datetime
 
 
+DOC_FEEDBACK_TYPES = {"helpful", "not_helpful", "clarification", "outdated"}
+
+
+class DocFeedbackCreate(BaseModel):
+    feedback_type: str
+    comment: Optional[str] = Field(default=None, max_length=2000)
+    section_text: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("feedback_type", mode="before")
+    @classmethod
+    def _validate_feedback_type(cls, v: str) -> str:
+        normalized = str(v or "").strip().lower()
+        if normalized not in DOC_FEEDBACK_TYPES:
+            raise ValueError("feedback_type must be helpful, not_helpful, clarification, or outdated")
+        return normalized
+
+    @field_validator("comment", "section_text")
+    @classmethod
+    def _strip_optional_feedback_text(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def _require_actionable_comment(self):
+        if self.feedback_type in {"clarification", "outdated"} and not self.comment:
+            raise ValueError("A comment is required for clarification and outdated feedback")
+        return self
+
+
+class DocFeedbackResolve(BaseModel):
+    resolved: bool = False
+
+
+class DocFeedbackUser(BaseModel):
+    id: int
+    username: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocFeedbackView(BaseModel):
+    id: int
+    doc_id: int
+    user_id: int
+    feedback_type: str
+    comment: Optional[str] = None
+    section_text: Optional[str] = None
+    resolved: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    user: Optional[DocFeedbackUser] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocFeedbackSummary(BaseModel):
+    doc_id: int
+    helpful: int = 0
+    not_helpful: int = 0
+    clarification: int = 0
+    outdated: int = 0
+    unresolved: int = 0
+    my_feedback: Optional[DocFeedbackView] = None
+
+
 class DocStats(BaseModel):
     doc_id: int
     view_count: int = 0

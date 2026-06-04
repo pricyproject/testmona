@@ -5482,6 +5482,102 @@
         }
       }
     },
+    "/projects/{project_id}/features": {
+      "get": {
+        "summary": "Read Project Features",
+        "description": "Return the project's normalized feature map plus the full catalog.\n\nAny project member who can read the project can see which features are\non; only managers/owners/admins may change them.",
+        "operationId": "read_project_features_projects__project_id__features_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update Project Features",
+        "description": "Enable/disable feature modules for a project.\n\nRestricted to admins, the project owner, and (project) managers via the\n``manage_projects`` permission. Unknown keys are ignored; the stored\nvalue is always a complete, normalized map.",
+        "operationId": "update_project_features_projects__project_id__features_put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectFeaturesUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/projects/{project_id}/delete": {
       "post": {
         "summary": "Delete Project With Verification",
@@ -21486,6 +21582,89 @@
         }
       }
     },
+    "/docs/stats/overview": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Get Doc Stats Overview",
+        "description": "Aggregate read statistics for the current scope. Admin-only, matching\nthe per-doc statistics gate.",
+        "operationId": "get_doc_stats_overview_docs_stats_overview_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Space Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "include_global",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Global"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocStatsOverview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/docs": {
       "get": {
         "tags": [
@@ -21622,6 +21801,26 @@
               "type": "boolean",
               "default": false,
               "title": "Include Global"
+            }
+          },
+          {
+            "name": "pinned_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Pinned Only"
+            }
+          },
+          {
+            "name": "visited_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Visited Only"
             }
           },
           {
@@ -21907,6 +22106,64 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/{doc_id}/pin": {
+      "put": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Set Doc Pin",
+        "operationId": "set_doc_pin_docs__doc_id__pin_put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocPinUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocListItem"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -22333,6 +22590,286 @@
         }
       }
     },
+    "/docs/{doc_id}/feedback": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Get Doc Feedback Summary",
+        "operationId": "get_doc_feedback_summary_docs__doc_id__feedback_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocFeedbackSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Submit Doc Feedback",
+        "operationId": "submit_doc_feedback_docs__doc_id__feedback_put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocFeedbackCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocFeedbackSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Delete My Doc Feedback",
+        "operationId": "delete_my_doc_feedback_docs__doc_id__feedback_delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Doc Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocFeedbackSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/{doc_id}/feedback/items": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "List Doc Feedback",
+        "operationId": "list_doc_feedback_docs__doc_id__feedback_items_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Doc Id"
+            }
+          },
+          {
+            "name": "include_resolved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Resolved"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DocFeedbackView"
+                  },
+                  "title": "Response List Doc Feedback Docs  Doc Id  Feedback Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/{doc_id}/feedback/{feedback_id}": {
+      "put": {
+        "tags": [
+          "Docs"
+        ],
+        "summary": "Resolve Doc Feedback",
+        "operationId": "resolve_doc_feedback_docs__doc_id__feedback__feedback_id__put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Doc Id"
+            }
+          },
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Feedback Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocFeedbackResolve"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocFeedbackView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/docs/{doc_id}/related": {
       "get": {
         "tags": [
@@ -22731,8 +23268,24 @@
           "Advanced Search"
         ],
         "summary": "Get Advanced Search Entities",
-        "description": "List searchable entities and their queryable fields (for the UI).",
+        "description": "List searchable entities (excluding modules disabled for this project).",
         "operationId": "get_advanced_search_entities_advanced_search_entities_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Project Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -22741,13 +23294,18 @@
                 "schema": {}
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
+        }
       }
     },
     "/advanced-search/values": {
@@ -28788,6 +29346,23 @@
             ],
             "title": "Last Viewed At"
           },
+          "my_last_visited_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Last Visited At"
+          },
+          "is_pinned": {
+            "type": "boolean",
+            "title": "Is Pinned",
+            "default": false
+          },
           "created_by": {
             "type": "integer",
             "title": "Created By"
@@ -29145,6 +29720,225 @@
         "type": "object",
         "title": "DocFacets"
       },
+      "DocFeedbackCreate": {
+        "properties": {
+          "feedback_type": {
+            "type": "string",
+            "title": "Feedback Type"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "section_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feedback_type"
+        ],
+        "title": "DocFeedbackCreate"
+      },
+      "DocFeedbackResolve": {
+        "properties": {
+          "resolved": {
+            "type": "boolean",
+            "title": "Resolved",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "DocFeedbackResolve"
+      },
+      "DocFeedbackSummary": {
+        "properties": {
+          "doc_id": {
+            "type": "integer",
+            "title": "Doc Id"
+          },
+          "helpful": {
+            "type": "integer",
+            "title": "Helpful",
+            "default": 0
+          },
+          "not_helpful": {
+            "type": "integer",
+            "title": "Not Helpful",
+            "default": 0
+          },
+          "clarification": {
+            "type": "integer",
+            "title": "Clarification",
+            "default": 0
+          },
+          "outdated": {
+            "type": "integer",
+            "title": "Outdated",
+            "default": 0
+          },
+          "unresolved": {
+            "type": "integer",
+            "title": "Unresolved",
+            "default": 0
+          },
+          "my_feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocFeedbackView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "doc_id"
+        ],
+        "title": "DocFeedbackSummary"
+      },
+      "DocFeedbackUser": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "DocFeedbackUser"
+      },
+      "DocFeedbackView": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "doc_id": {
+            "type": "integer",
+            "title": "Doc Id"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "feedback_type": {
+            "type": "string",
+            "title": "Feedback Type"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "section_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Text"
+          },
+          "resolved": {
+            "type": "boolean",
+            "title": "Resolved",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocFeedbackUser"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "doc_id",
+          "user_id",
+          "feedback_type",
+          "created_at"
+        ],
+        "title": "DocFeedbackView"
+      },
       "DocFolder": {
         "properties": {
           "name": {
@@ -29441,6 +30235,11 @@
             ],
             "title": "My Last Visited At"
           },
+          "is_pinned": {
+            "type": "boolean",
+            "title": "Is Pinned",
+            "default": false
+          },
           "created_by": {
             "type": "integer",
             "title": "Created By"
@@ -29486,6 +30285,17 @@
         ],
         "title": "DocListItem",
         "description": "Lightweight doc row for the hub list (excludes full content)."
+      },
+      "DocPinUpdate": {
+        "properties": {
+          "pinned": {
+            "type": "boolean",
+            "title": "Pinned",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "DocPinUpdate"
       },
       "DocPublicView": {
         "properties": {
@@ -30086,6 +30896,97 @@
           "doc_id"
         ],
         "title": "DocStats"
+      },
+      "DocStatsMostViewed": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "space_id": {
+            "type": "integer",
+            "title": "Space Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "view_count": {
+            "type": "integer",
+            "title": "View Count",
+            "default": 0
+          },
+          "last_viewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Viewed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "space_id",
+          "status"
+        ],
+        "title": "DocStatsMostViewed"
+      },
+      "DocStatsOverview": {
+        "properties": {
+          "total_docs": {
+            "type": "integer",
+            "title": "Total Docs",
+            "default": 0
+          },
+          "total_views": {
+            "type": "integer",
+            "title": "Total Views",
+            "default": 0
+          },
+          "unique_visitors": {
+            "type": "integer",
+            "title": "Unique Visitors",
+            "default": 0
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Status"
+          },
+          "most_viewed": {
+            "items": {
+              "$ref": "#/components/schemas/DocStatsMostViewed"
+            },
+            "type": "array",
+            "title": "Most Viewed"
+          }
+        },
+        "type": "object",
+        "title": "DocStatsOverview"
       },
       "DocStatus": {
         "type": "string",
@@ -34122,6 +35023,20 @@
             ],
             "title": "Owner Id"
           },
+          "features": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Features"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -34341,6 +35256,23 @@
           "name"
         ],
         "title": "ProjectCreate"
+      },
+      "ProjectFeaturesUpdate": {
+        "properties": {
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Features"
+          }
+        },
+        "type": "object",
+        "required": [
+          "features"
+        ],
+        "title": "ProjectFeaturesUpdate",
+        "description": "Partial update of a project's feature toggles; only listed keys change."
       },
       "ProjectMember": {
         "properties": {

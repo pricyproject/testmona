@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -865,6 +865,26 @@ export const docsAPI = {
     const response = await api.get('/docs/stats/overview', {
       params: { space_id: params.spaceId, project_id: params.projectId, include_global: params.includeGlobal },
     });
+    return response.data;
+  },
+  getFeedback: async (id: number): Promise<DocFeedbackSummary> => {
+    const response = await api.get(`/docs/${id}/feedback`);
+    return response.data;
+  },
+  submitFeedback: async (id: number, payload: { feedback_type: DocFeedbackType; comment?: string | null; section_text?: string | null }): Promise<DocFeedbackSummary> => {
+    const response = await api.put(`/docs/${id}/feedback`, payload);
+    return response.data;
+  },
+  deleteFeedback: async (id: number): Promise<DocFeedbackSummary> => {
+    const response = await api.delete(`/docs/${id}/feedback`);
+    return response.data;
+  },
+  listFeedback: async (id: number, includeResolved = false): Promise<DocFeedback[]> => {
+    const response = await api.get(`/docs/${id}/feedback/items`, { params: { include_resolved: includeResolved } });
+    return response.data;
+  },
+  resolveFeedback: async (id: number, feedbackId: number, resolved: boolean): Promise<DocFeedback> => {
+    const response = await api.put(`/docs/${id}/feedback/${feedbackId}`, { resolved });
     return response.data;
   },
   listRelated: async (id: number): Promise<DocRelatedLink[]> => {

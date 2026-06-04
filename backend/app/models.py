@@ -2117,6 +2117,28 @@ class DocRelatedLink(Base):
     )
 
 
+class DocFeedback(Base):
+    """Per-user reader feedback for a document."""
+    __tablename__ = "doc_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    feedback_type = Column(String(30), nullable=False)  # helpful | not_helpful | clarification | outdated
+    comment = Column(Text)
+    section_text = Column(Text)
+    resolved = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    doc = relationship("Doc")
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "user_id", name="uq_doc_feedback_user"),
+    )
+
+
 # Add relationships to versioning models (avoiding circular imports)
 TestCase.versions = relationship("TestCaseVersion", back_populates="test_case")
 TestCase.current_version = relationship(

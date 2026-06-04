@@ -5,23 +5,30 @@ import {
   ArrowRightLeft,
   BarChart3,
   Check,
+  CheckCircle2,
   Copy,
   Download,
   Eye,
   FileText,
+  Flag,
   Globe,
   History,
   Link2,
   Loader2,
   Lock,
+  MessageCircleQuestion,
   Pencil,
+  RotateCcw,
   Share2,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -45,7 +52,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI } from '@/lib/api';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { formatServerDateTime } from '@/utils/datetime';
-import type { Doc, DocRequirementLink, DocShareInfo, DocSpace, DocStats } from '@/types';
+import type { Doc, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocRequirementLink, DocShareInfo, DocSpace, DocStats } from '@/types';
 
 const statusTone: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
@@ -70,6 +77,8 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [space, setSpace] = useState<DocSpace | null>(null);
   const [links, setLinks] = useState<DocRequirementLink[]>([]);
   const [stats, setStats] = useState<DocStats | null>(null);
+  const [feedback, setFeedback] = useState<DocFeedbackSummary | null>(null);
+  const [feedbackItems, setFeedbackItems] = useState<DocFeedback[]>([]);
   const [loading, setLoading] = useState(true);
   // `/…/revisions` deep-links the revisions tab; other tabs ride a `?tab=` param
   // so navigating between them (which remounts this route) keeps the selection.
@@ -87,6 +96,12 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [titleDraft, setTitleDraft] = useState('');
   const [savingTitle, setSavingTitle] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackDialogType, setFeedbackDialogType] = useState<DocFeedbackType | null>(null);
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [feedbackSection, setFeedbackSection] = useState('');
+  const [feedbackIncludeResolved, setFeedbackIncludeResolved] = useState(false);
+  const [feedbackListLoading, setFeedbackListLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!parsedDocId) {
@@ -98,14 +113,19 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       setLoading(true);
       const data = await docsAPI.get(parsedDocId);
       setDoc(data);
-      const [sp, lk, st] = await Promise.all([
+      setFeedbackIncludeResolved(false);
+      const [sp, lk, st, fb, fbItems] = await Promise.all([
         docsAPI.getSpace(data.space_id).catch(() => null),
         docsAPI.listRequirementLinks(data.id).catch(() => []),
         data.can_view_stats ? docsAPI.getStats(data.id).catch(() => null) : Promise.resolve(null),
+        docsAPI.getFeedback(data.id).catch(() => null),
+        data.can_edit ? docsAPI.listFeedback(data.id, false).catch(() => []) : Promise.resolve([]),
       ]);
       setSpace(sp);
       setLinks(lk);
       setStats(st);
+      setFeedback(fb);
+      setFeedbackItems(fbItems as DocFeedback[]);
     } catch {
       toast({ title: t('error'), description: t('docLoadFailed'), variant: 'destructive' });
     } finally {
@@ -124,6 +144,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     () => (doc?.tags ? doc.tags.split(',').map((s) => s.trim()).filter(Boolean) : []),
     [doc],
   );
+  const hasDocContent = Boolean(doc?.content_markdown?.trim());
 
   const handleExport = async () => {
     if (!doc) return;
@@ -217,6 +238,97 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       setDeleting(false);
     }
   };
+
+  const refreshFeedback = async (includeResolved = feedbackIncludeResolved): Promise<boolean> => {
+    if (!doc) return false;
+    try {
+      setFeedbackListLoading(true);
+      const [summary, items] = await Promise.all([
+        docsAPI.getFeedback(doc.id),
+        doc.can_edit ? docsAPI.listFeedback(doc.id, includeResolved) : Promise.resolve([]),
+      ]);
+      setFeedback(summary);
+      setFeedbackItems(items as DocFeedback[]);
+      return true;
+    } catch {
+      toast({ title: t('error'), description: t('docFeedbackLoadFailed'), variant: 'destructive' });
+      return false;
+    } finally {
+      setFeedbackListLoading(false);
+    }
+  };
+
+  const toggleResolvedFeedback = async () => {
+    if (feedbackListLoading) return;
+    const next = !feedbackIncludeResolved;
+    setFeedbackIncludeResolved(next);
+    const ok = await refreshFeedback(next);
+    if (!ok) setFeedbackIncludeResolved(!next);
+  };
+
+  const submitFeedback = async (feedbackType: DocFeedbackType, comment?: string, sectionText?: string): Promise<boolean> => {
+    if (!doc || feedbackSaving) return false;
+    try {
+      setFeedbackSaving(true);
+      const summary = await docsAPI.submitFeedback(doc.id, {
+        feedback_type: feedbackType,
+        comment: comment?.trim() || null,
+        section_text: sectionText?.trim() || null,
+      });
+      setFeedback(summary);
+      if (doc.can_edit) await refreshFeedback();
+      toast({ title: t('success'), description: t('docFeedbackSaved') });
+      return true;
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.response?.data?.detail || t('docFeedbackFailed'), variant: 'destructive' });
+      return false;
+    } finally {
+      setFeedbackSaving(false);
+    }
+  };
+
+  const clearMyFeedback = async () => {
+    if (!doc || feedbackSaving) return;
+    try {
+      setFeedbackSaving(true);
+      const summary = await docsAPI.deleteFeedback(doc.id);
+      setFeedback(summary);
+      if (doc.can_edit) await refreshFeedback();
+    } catch {
+      toast({ title: t('error'), description: t('docFeedbackFailed'), variant: 'destructive' });
+    } finally {
+      setFeedbackSaving(false);
+    }
+  };
+
+  const openFeedbackDialog = (feedbackType: DocFeedbackType) => {
+    setFeedbackDialogType(feedbackType);
+    setFeedbackComment('');
+    setFeedbackSection('');
+  };
+
+  const submitFeedbackDialog = async () => {
+    if (!feedbackDialogType || !feedbackComment.trim()) return;
+    const ok = await submitFeedback(feedbackDialogType, feedbackComment, feedbackSection);
+    if (ok) setFeedbackDialogType(null);
+  };
+
+  const resolveFeedback = async (item: DocFeedback, resolved: boolean) => {
+    if (!doc || feedbackListLoading) return;
+    try {
+      setFeedbackListLoading(true);
+      await docsAPI.resolveFeedback(doc.id, item.id, resolved);
+      await refreshFeedback();
+    } catch {
+      toast({ title: t('error'), description: t('docFeedbackResolveFailed'), variant: 'destructive' });
+    } finally {
+      setFeedbackListLoading(false);
+    }
+  };
+
+  const feedbackLabel = (type: DocFeedbackType) => t(`docFeedback_${type}` as any);
+  const activeFeedback = feedback?.my_feedback?.feedback_type;
+  const feedbackDialogTitle = feedbackDialogType ? feedbackLabel(feedbackDialogType) : '';
 
   if (loading) {
     return (
@@ -336,7 +448,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         </TabsList>
 
         <TabsContent value="document" className="mt-4">
-          {doc.content_markdown?.trim() ? (
+          {hasDocContent ? (
             <div data-rich-text-editor className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
               <article
                 className="rich-text-preview max-w-none"
@@ -349,6 +461,114 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center text-muted-foreground dark:border-slate-700">
               {t('docEmpty')}
             </div>
+          )}
+
+          {hasDocContent && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">{t('docFeedbackTitle')}</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t('docFeedbackDesc')}</p>
+              </div>
+              {feedback?.my_feedback && (
+                <Button type="button" variant="ghost" size="sm" onClick={clearMyFeedback} disabled={feedbackSaving}>
+                  <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('docFeedbackClear')}
+                </Button>
+              )}
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-4">
+              <Button
+                type="button"
+                variant={activeFeedback === 'helpful' ? 'default' : 'outline'}
+                onClick={() => submitFeedback('helpful')}
+                disabled={feedbackSaving}
+                className="justify-start"
+              >
+                <ThumbsUp className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('docFeedbackHelpful')}
+                <Badge variant="secondary" className="ms-auto">{feedback?.helpful ?? 0}</Badge>
+              </Button>
+              <Button
+                type="button"
+                variant={activeFeedback === 'not_helpful' ? 'default' : 'outline'}
+                onClick={() => submitFeedback('not_helpful')}
+                disabled={feedbackSaving}
+                className="justify-start"
+              >
+                <ThumbsDown className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('docFeedbackNotHelpful')}
+                <Badge variant="secondary" className="ms-auto">{feedback?.not_helpful ?? 0}</Badge>
+              </Button>
+              <Button
+                type="button"
+                variant={activeFeedback === 'clarification' ? 'default' : 'outline'}
+                onClick={() => openFeedbackDialog('clarification')}
+                disabled={feedbackSaving}
+                className="justify-start"
+              >
+                <MessageCircleQuestion className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('docFeedbackClarification')}
+                <Badge variant="secondary" className="ms-auto">{feedback?.clarification ?? 0}</Badge>
+              </Button>
+              <Button
+                type="button"
+                variant={activeFeedback === 'outdated' ? 'default' : 'outline'}
+                onClick={() => openFeedbackDialog('outdated')}
+                disabled={feedbackSaving}
+                className="justify-start"
+              >
+                <Flag className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('docFeedbackOutdated')}
+                <Badge variant="secondary" className="ms-auto">{feedback?.outdated ?? 0}</Badge>
+              </Button>
+            </div>
+            {doc.can_edit && (
+              <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    {t('docFeedbackUnresolved', { n: feedback?.unresolved ?? 0 })}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={feedbackListLoading}
+                    onClick={toggleResolvedFeedback}
+                  >
+                    {feedbackIncludeResolved ? t('docFeedbackHideResolved') : t('docFeedbackShowResolved')}
+                  </Button>
+                </div>
+                {feedbackItems.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t('docFeedbackNoItems')}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {feedbackItems.map((item) => (
+                      <div key={item.id} className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={item.resolved ? 'secondary' : 'outline'}>{feedbackLabel(item.feedback_type)}</Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {item.user?.full_name || item.user?.username || item.user?.email || `#${item.user_id}`}
+                          </span>
+                          <span className="ms-auto" />
+                          <Button type="button" variant="ghost" size="sm" disabled={feedbackListLoading} onClick={() => resolveFeedback(item, !item.resolved)}>
+                            <CheckCircle2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                            {item.resolved ? t('docFeedbackReopen') : t('docFeedbackResolve')}
+                          </Button>
+                        </div>
+                        {item.comment && <p className="mt-2 whitespace-pre-wrap text-slate-700 dark:text-slate-200">{item.comment}</p>}
+                        {item.section_text && (
+                          <blockquote className="mt-2 border-s-2 border-primary/40 ps-3 text-xs text-muted-foreground">
+                            {item.section_text}
+                          </blockquote>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           )}
         </TabsContent>
 
@@ -489,6 +709,44 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
                 {t('docShareEnable')}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!feedbackDialogType} onOpenChange={(open) => { if (!open) setFeedbackDialogType(null); }}>
+        <DialogContent dir={isRTL ? 'rtl' : 'ltr'}>
+          <DialogHeader>
+            <DialogTitle>{feedbackDialogTitle}</DialogTitle>
+            <DialogDescription>{t('docFeedbackDialogDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('docFeedbackComment')}</label>
+              <Textarea
+                value={feedbackComment}
+                onChange={(e) => setFeedbackComment(e.target.value)}
+                maxLength={2000}
+                rows={4}
+                placeholder={t('docFeedbackCommentPlaceholder')}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('docFeedbackSection')}</label>
+              <Textarea
+                value={feedbackSection}
+                onChange={(e) => setFeedbackSection(e.target.value)}
+                maxLength={1000}
+                rows={2}
+                placeholder={t('docFeedbackSectionPlaceholder')}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setFeedbackDialogType(null)} disabled={feedbackSaving}>{t('cancel')}</Button>
+            <Button type="button" onClick={submitFeedbackDialog} disabled={feedbackSaving || !feedbackComment.trim()}>
+              {feedbackSaving && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('submit')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
