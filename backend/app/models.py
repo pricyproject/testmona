@@ -2139,6 +2139,50 @@ class DocFeedback(Base):
     )
 
 
+class DocReleaseNoteStatus(enum.Enum):
+    DRAFT = "draft"
+    PUBLISHED = "published"
+
+
+class DocReleaseNote(Base):
+    """Living release notes generated from doc changes, linked requirements,
+    defects, and test coverage over a time window. Authored as an editable draft,
+    reviewed/approved, then published (mirrors the Doc draft→published lifecycle).
+
+    Project-scoped: release notes draw on a project's requirements/defects/tests,
+    so unlike :class:`Doc` there is no global variant."""
+    __tablename__ = "doc_release_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    # Optional human version/tag, e.g. "v1.4.0".
+    version = Column(String(50))
+    status = Column(Enum(DocReleaseNoteStatus), default=DocReleaseNoteStatus.DRAFT, nullable=False)
+    # Canonical editable Markdown body (rendered for readers; users edit before publishing).
+    content_markdown = Column(Text, default="")
+    # Optional AI-written summary blurb shown above the body.
+    summary = Column(Text)
+    # The window the notes were generated from (used to recompute / show coverage).
+    range_start = Column(DateTime(timezone=True))
+    range_end = Column(DateTime(timezone=True))
+    # Structured snapshot of the generated source data (changed docs, requirements,
+    # defects, coverage) so the draft can show provenance and be regenerated.
+    source_data = Column(JSON)
+    published_at = Column(DateTime(timezone=True))
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+    published_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
+    editor = relationship("User", foreign_keys=[updated_by])
+    publisher = relationship("User", foreign_keys=[published_by])
+
+
 # Add relationships to versioning models (avoiding circular imports)
 TestCase.versions = relationship("TestCaseVersion", back_populates="test_case")
 TestCase.current_version = relationship(

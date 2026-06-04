@@ -24,6 +24,7 @@ import {
   SlidersHorizontal,
   Table as TableIcon,
   Upload,
+  Rocket,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -726,6 +727,13 @@ export function DocHub() {
                 <Button variant={insightsOpen ? 'default' : 'outline'} size="sm" onClick={() => setInsightsOpen((v) => !v)}>
                   <BarChart3 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   {t('docInsights')}
+                </Button>
+              )}
+
+              {projectId && (
+                <Button variant="outline" size="sm" onClick={() => navigate(`${basePath}/release-notes`)}>
+                  <Rocket className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('releaseNotes')}
                 </Button>
               )}
 

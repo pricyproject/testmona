@@ -1077,3 +1077,120 @@ export interface DocImpactAnalysis {
   provider?: string | null;
   model?: string | null;
 }
+
+// ── Living release notes ─────────────────────────────────────────────────
+export type ReleaseNoteStatus = 'draft' | 'published';
+
+export interface ReleaseNotesGenerateRequest {
+  project_id: number;
+  since?: string | null;
+  until?: string | null;
+  include_ai?: boolean;
+}
+
+export interface ReleaseNotesChangedDoc {
+  doc_id: number;
+  title: string;
+  actions: string[];
+  versions: number;
+  headings_added: string[];
+  last_changed_at?: string | null;
+}
+
+export interface ReleaseNotesEntry {
+  type: 'requirement' | 'defect';
+  id: number;
+  key: string;
+  title: string;
+  status?: string | null;
+  severity?: string | null;
+  via_docs: string[];
+}
+
+export interface ReleaseNotesCoverage {
+  requirements_total: number;
+  requirements_covered: number;
+  requirements_uncovered: number;
+  test_cases: number;
+  coverage_pct: number;
+}
+
+export interface ReleaseNotesSource {
+  range_start?: string | null;
+  range_end?: string | null;
+  changed_docs: ReleaseNotesChangedDoc[];
+  requirements: ReleaseNotesEntry[];
+  resolved_defects: ReleaseNotesEntry[];
+  open_defects: ReleaseNotesEntry[];
+  coverage: ReleaseNotesCoverage;
+}
+
+export interface ReleaseNotesPreview {
+  project_id: number;
+  title: string;
+  content_markdown: string;
+  summary?: string | null;
+  source: ReleaseNotesSource;
+  ai_available: boolean;
+  ai_skipped_reason?: string | null;
+  provider?: string | null;
+  model?: string | null;
+}
+
+export interface ReleaseNoteUser {
+  id: number;
+  username: string;
+  full_name?: string | null;
+}
+
+export interface ReleaseNote {
+  id: number;
+  uuid?: string | null;
+  project_id: number;
+  title: string;
+  version?: string | null;
+  status: ReleaseNoteStatus;
+  content_markdown: string;
+  summary?: string | null;
+  range_start?: string | null;
+  range_end?: string | null;
+  source_data?: ReleaseNotesSource | null;
+  published_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  creator?: ReleaseNoteUser | null;
+  editor?: ReleaseNoteUser | null;
+  publisher?: ReleaseNoteUser | null;
+}
+
+export interface ReleaseNoteListItem {
+  id: number;
+  project_id: number;
+  title: string;
+  version?: string | null;
+  status: ReleaseNoteStatus;
+  summary?: string | null;
+  range_start?: string | null;
+  range_end?: string | null;
+  published_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ReleaseNoteCreate {
+  project_id: number;
+  title: string;
+  version?: string | null;
+  content_markdown?: string;
+  summary?: string | null;
+  range_start?: string | null;
+  range_end?: string | null;
+  source_data?: ReleaseNotesSource | null;
+}
+
+export interface ReleaseNoteUpdate {
+  title?: string;
+  version?: string | null;
+  content_markdown?: string;
+  summary?: string | null;
+}

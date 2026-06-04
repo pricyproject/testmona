@@ -954,3 +954,94 @@ def update_doc(db: Session, doc: models.Doc, payload: schemas.DocUpdate, actor_i
 def delete_doc(db: Session, doc: models.Doc) -> None:
     db.delete(doc)
     safe_commit(db)
+
+
+# --------------------------------------------------------------------------- #
+# Living release notes                                                         #
+# --------------------------------------------------------------------------- #
+
+def get_release_note(db: Session, note_id: int) -> Optional[models.DocReleaseNote]:
+    return db.query(models.DocReleaseNote).filter(models.DocReleaseNote.id == note_id).first()
+
+
+def list_release_notes(
+    db: Session,
+    project_id: int,
+    status: Optional[str] = None,
+    limit: int = 100,
+) -> List[models.DocReleaseNote]:
+    query = db.query(models.DocReleaseNote).filter(models.DocReleaseNote.project_id == project_id)
+    if status:
+        query = query.filter(models.DocReleaseNote.status == models.DocReleaseNoteStatus(status))
+    return query.order_by(desc(models.DocReleaseNote.created_at)).limit(limit).all()
+
+
+def create_release_note(
+    db: Session, payload: schemas.ReleaseNoteCreate, actor_id: int
+) -> models.DocReleaseNote:
+    note = models.DocReleaseNote(
+        uuid=str(uuid.uuid4()),
+        project_id=payload.project_id,
+        title=payload.title.strip()[:255],
+        version=(payload.version.strip()[:50] if payload.version else None),
+        status=models.DocReleaseNoteStatus.DRAFT,
+        content_markdown=payload.content_markdown or "",
+        summary=payload.summary,
+        range_start=payload.range_start,
+        range_end=payload.range_end,
+        source_data=payload.source_data,
+        created_by=actor_id,
+        updated_by=actor_id,
+    )
+    db.add(note)
+    safe_commit(db)
+    db.refresh(note)
+    return note
+
+
+def update_release_note(
+    db: Session, note: models.DocReleaseNote, payload: schemas.ReleaseNoteUpdate, actor_id: int
+) -> models.DocReleaseNote:
+    # Title/version are already trimmed (and blanks normalised) by the schema
+    # validators; only fields the client actually sent are applied.
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(note, field, value)
+    note.updated_by = actor_id
+    safe_commit(db)
+    db.refresh(note)
+    return note
+
+
+def publish_release_note(
+    db: Session, note: models.DocReleaseNote, actor_id: int
+) -> models.DocReleaseNote:
+    from datetime import datetime, timezone
+
+    note.status = models.DocReleaseNoteStatus.PUBLISHED
+    # Preserve the original publish timestamp/author if it was already published
+    # (re-publishing after an edit shouldn't rewrite history).
+    if note.published_at is None:
+        note.published_at = datetime.now(timezone.utc)
+        note.published_by = actor_id
+    note.updated_by = actor_id
+    safe_commit(db)
+    db.refresh(note)
+    return note
+
+
+def unpublish_release_note(
+    db: Session, note: models.DocReleaseNote, actor_id: int
+) -> models.DocReleaseNote:
+    note.status = models.DocReleaseNoteStatus.DRAFT
+    note.published_at = None
+    note.published_by = None
+    note.updated_by = actor_id
+    safe_commit(db)
+    db.refresh(note)
+    return note
+
+
+def delete_release_note(db: Session, note: models.DocReleaseNote) -> None:
+    db.delete(note)
+    safe_commit(db)

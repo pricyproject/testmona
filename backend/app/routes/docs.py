@@ -33,9 +33,15 @@ from ..auth import get_current_active_user
 from ..database import get_db
 from ..services import doc_conversion_service as conv
 from ..services import doc_impact_service
+from ..services import doc_release_notes_service as release_notes
 from .project_ai_chat import _cancel_on_disconnect
 from ..services.ai_manager import AICompletionRequest, generate_ai_completion, get_ai_manager_status
-from ..services.ai_prompt_service import build_doc_impact_prompt, clean_ai_text, extract_json_object
+from ..services.ai_prompt_service import (
+    build_doc_impact_prompt,
+    build_release_notes_prompt,
+    clean_ai_text,
+    extract_json_object,
+)
 from ..services.mentions import project_member_users, resolve_mentions
 
 logger = logging.getLogger(__name__)
@@ -538,6 +544,43 @@ def _audit_doc_impact(db: Session, actor: models.User, doc: models.Doc) -> None:
         logger.exception("Failed to audit doc impact analysis for doc %s", doc.id)
 
 
+def _release_entry(entry: release_notes.ReleaseEntry) -> schemas.ReleaseNotesEntry:
+    return schemas.ReleaseNotesEntry(
+        type=entry.type, id=entry.id, key=entry.key, title=entry.title,
+        status=entry.status, severity=entry.severity, via_docs=entry.via_docs,
+    )
+
+
+def _release_source_schema(source: release_notes.ReleaseSource) -> schemas.ReleaseNotesSource:
+    return schemas.ReleaseNotesSource(
+        range_start=source.range_start,
+        range_end=source.range_end,
+        changed_docs=[
+            schemas.ReleaseNotesChangedDoc(
+                doc_id=d.doc_id, title=d.title, actions=d.actions, versions=d.versions,
+                headings_added=d.headings_added, last_changed_at=d.last_changed_at,
+            )
+            for d in source.changed_docs
+        ],
+        requirements=[_release_entry(e) for e in source.requirements],
+        resolved_defects=[_release_entry(e) for e in source.resolved_defects],
+        open_defects=[_release_entry(e) for e in source.open_defects],
+        coverage=schemas.ReleaseNotesCoverage(
+            requirements_total=source.coverage.requirements_total,
+            requirements_covered=source.coverage.requirements_covered,
+            requirements_uncovered=source.coverage.requirements_uncovered,
+            test_cases=source.coverage.test_cases,
+            coverage_pct=source.coverage.coverage_pct,
+        ),
+    )
+
+
+def _parse_release_summary(content: str) -> str:
+    """Parse the AI summary JSON, clamped; raises on unparseable content."""
+    parsed = extract_json_object(content)
+    return clean_ai_text(parsed.get("summary"), 4000)
+
+
 # --------------------------------------------------------------------------- #
 # Routes                                                                       #
 # --------------------------------------------------------------------------- #
@@ -874,6 +917,177 @@ def register_docs_routes(app) -> None:
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{crud_docs.slugify(space.name)}.zip"'},
         )
+
+    # ── Living release notes ─────────────────────────────────────────────────
+    # Registered before the dynamic ``/docs/{doc_id}`` routes so the literal
+    # ``/docs/release-notes`` path is never parsed as a doc id.
+
+    @app.post("/docs/release-notes/generate", response_model=schemas.ReleaseNotesPreview, tags=["Docs"])
+    async def generate_release_notes(
+        payload: schemas.ReleaseNotesGenerateRequest,
+        request: Request,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Generate a release-notes *preview* (not persisted) from what changed in
+        a project over a window: changed docs, linked requirements, resolved/known
+        defects, and test coverage. The editable Markdown draft is always returned;
+        the AI summary blurb is best-effort and degrades gracefully."""
+        project = crud.get_project(db, payload.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        _require(current_user, payload.project_id, "write", db)
+        if not is_feature_enabled(project, "doc_hub"):
+            raise HTTPException(status_code=403, detail="The 'doc_hub' feature is disabled for this project")
+
+        source = release_notes.gather_release_data(
+            db, payload.project_id, since=payload.since, until=payload.until,
+        )
+        title = release_notes.default_title(source)
+        content_markdown = release_notes.render_markdown(source, title)
+
+        result = schemas.ReleaseNotesPreview(
+            project_id=payload.project_id,
+            title=title,
+            content_markdown=content_markdown,
+            source=_release_source_schema(source),
+        )
+
+        has_content = bool(
+            source.changed_docs or source.requirements
+            or source.resolved_defects or source.open_defects
+        )
+        if not payload.include_ai:
+            result.ai_skipped_reason = "disabled_by_request"
+        elif not has_content:
+            result.ai_skipped_reason = "no_changes"
+        elif not is_feature_enabled(project, "ask_ai"):
+            result.ai_skipped_reason = "ask_ai_disabled"
+        elif not get_ai_manager_status(db).get("available"):
+            result.ai_skipped_reason = "ai_unavailable"
+        else:
+            try:
+                completion = await _cancel_on_disconnect(
+                    request,
+                    generate_ai_completion(
+                        db,
+                        AICompletionRequest(
+                            prompt=build_release_notes_prompt(title, release_notes.ai_payload(source)),
+                            max_tokens=900, temperature=0.3, timeout_seconds=120,
+                        ),
+                        operation="doc_release_notes",
+                        project_id=payload.project_id, user_id=current_user.id,
+                    ),
+                )
+                summary = _parse_release_summary(completion.content)
+                if summary:
+                    result.summary = summary
+                    result.content_markdown = release_notes.render_markdown(
+                        source, title, summary=summary,
+                    )
+                    result.ai_available = True
+                    result.provider = completion.provider
+                    result.model = completion.model
+                else:
+                    result.ai_skipped_reason = "ai_error"
+            except HTTPException as exc:
+                logger.warning("Release notes AI summary failed for project %s: %s", payload.project_id, exc.detail)
+                result.ai_skipped_reason = "ai_error"
+            except Exception as exc:
+                logger.warning("Release notes AI summary errored for project %s: %s", payload.project_id, exc)
+                result.ai_skipped_reason = "ai_error"
+
+        return result
+
+    @app.get("/docs/release-notes", response_model=List[schemas.ReleaseNoteListItem], tags=["Docs"])
+    def list_release_notes(
+        project_id: int = Query(..., ge=1),
+        status: Optional[str] = Query(None),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _require(current_user, project_id, "read", db)
+        if status is not None and status not in ("draft", "published"):
+            raise HTTPException(status_code=400, detail="status must be draft or published")
+        notes = crud_docs.list_release_notes(db, project_id, status=status)
+        return [schemas.ReleaseNoteListItem.model_validate(n) for n in notes]
+
+    @app.post("/docs/release-notes", response_model=schemas.ReleaseNote, status_code=201, tags=["Docs"])
+    def create_release_note(
+        payload: schemas.ReleaseNoteCreate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Save a (reviewed/edited) release-notes draft."""
+        project = crud.get_project(db, payload.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        _require(current_user, payload.project_id, "write", db)
+        if not is_feature_enabled(project, "doc_hub"):
+            raise HTTPException(status_code=403, detail="The 'doc_hub' feature is disabled for this project")
+        note = crud_docs.create_release_note(db, payload, actor_id=current_user.id)
+        return schemas.ReleaseNote.model_validate(note)
+
+    def _get_release_note_or_404(note_id: int, db: Session) -> models.DocReleaseNote:
+        note = crud_docs.get_release_note(db, note_id)
+        if note is None:
+            raise HTTPException(status_code=404, detail="Release note not found")
+        return note
+
+    @app.get("/docs/release-notes/{note_id}", response_model=schemas.ReleaseNote, tags=["Docs"])
+    def get_release_note(
+        note_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        note = _get_release_note_or_404(note_id, db)
+        _require(current_user, note.project_id, "read", db)
+        return schemas.ReleaseNote.model_validate(note)
+
+    @app.put("/docs/release-notes/{note_id}", response_model=schemas.ReleaseNote, tags=["Docs"])
+    def update_release_note(
+        payload: schemas.ReleaseNoteUpdate,
+        note_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        note = _get_release_note_or_404(note_id, db)
+        _require(current_user, note.project_id, "write", db)
+        note = crud_docs.update_release_note(db, note, payload, actor_id=current_user.id)
+        return schemas.ReleaseNote.model_validate(note)
+
+    @app.post("/docs/release-notes/{note_id}/publish", response_model=schemas.ReleaseNote, tags=["Docs"])
+    def publish_release_note(
+        note_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        note = _get_release_note_or_404(note_id, db)
+        _require(current_user, note.project_id, "write", db)
+        note = crud_docs.publish_release_note(db, note, actor_id=current_user.id)
+        return schemas.ReleaseNote.model_validate(note)
+
+    @app.post("/docs/release-notes/{note_id}/unpublish", response_model=schemas.ReleaseNote, tags=["Docs"])
+    def unpublish_release_note(
+        note_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        note = _get_release_note_or_404(note_id, db)
+        _require(current_user, note.project_id, "write", db)
+        note = crud_docs.unpublish_release_note(db, note, actor_id=current_user.id)
+        return schemas.ReleaseNote.model_validate(note)
+
+    @app.delete("/docs/release-notes/{note_id}", status_code=204, tags=["Docs"])
+    def delete_release_note(
+        note_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        note = _get_release_note_or_404(note_id, db)
+        _require(current_user, note.project_id, "write", db)
+        crud_docs.delete_release_note(db, note)
+        return Response(status_code=204)
 
     # ── Single doc ──────────────────────────────────────────────────────────
     @app.get("/docs/{doc_id}", response_model=schemas.Doc, tags=["Docs"])

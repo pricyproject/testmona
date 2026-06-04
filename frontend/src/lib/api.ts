@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -951,6 +951,39 @@ export const docsAPI = {
   exportSpace: async (id: number, filename: string): Promise<void> => {
     const response = await api.get(`/docs/spaces/${id}/export`, { responseType: 'blob' });
     triggerBlobDownload(response.data, filename, 'application/zip');
+  },
+
+  // Living release notes
+  generateReleaseNotes: async (payload: ReleaseNotesGenerateRequest, signal?: AbortSignal): Promise<ReleaseNotesPreview> => {
+    const response = await api.post('/docs/release-notes/generate', payload, { timeout: 130000, signal });
+    return response.data;
+  },
+  listReleaseNotes: async (projectId: number, status?: ReleaseNoteStatus): Promise<ReleaseNoteListItem[]> => {
+    const response = await api.get('/docs/release-notes', { params: { project_id: projectId, status } });
+    return response.data;
+  },
+  getReleaseNote: async (id: number): Promise<ReleaseNote> => {
+    const response = await api.get(`/docs/release-notes/${id}`);
+    return response.data;
+  },
+  createReleaseNote: async (payload: ReleaseNoteCreate): Promise<ReleaseNote> => {
+    const response = await api.post('/docs/release-notes', payload);
+    return response.data;
+  },
+  updateReleaseNote: async (id: number, payload: ReleaseNoteUpdate): Promise<ReleaseNote> => {
+    const response = await api.put(`/docs/release-notes/${id}`, payload);
+    return response.data;
+  },
+  publishReleaseNote: async (id: number): Promise<ReleaseNote> => {
+    const response = await api.post(`/docs/release-notes/${id}/publish`);
+    return response.data;
+  },
+  unpublishReleaseNote: async (id: number): Promise<ReleaseNote> => {
+    const response = await api.post(`/docs/release-notes/${id}/unpublish`);
+    return response.data;
+  },
+  deleteReleaseNote: async (id: number): Promise<void> => {
+    await api.delete(`/docs/release-notes/${id}`);
   },
 };
 

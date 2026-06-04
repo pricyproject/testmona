@@ -468,6 +468,32 @@ def build_doc_impact_prompt(
     return prompt
 
 
+_RELEASE_NOTES_INSTRUCTIONS = (
+    "You are a release manager writing the summary blurb for a software release. "
+    "Below is the structured data (TOON format) for what changed in this release: "
+    "updated documentation pages, requirements, fixed defects, still-open known "
+    "issues, and test coverage. Write a concise, reader-facing summary that "
+    "highlights the most important user-visible changes and notable fixes. Group "
+    "thematically where natural. Do not invent items that are not listed; do not "
+    "repeat the raw lists verbatim.\n"
+    'Return JSON only: {"summary": "string (2-5 sentences, plain prose, no markdown headings)"}'
+)
+
+
+def build_release_notes_prompt(title: str, payload: dict[str, Any]) -> str:
+    """Prompt for the AI-written release-notes summary blurb.
+
+    ``payload`` is the compact dict from ``doc_release_notes_service.ai_payload``
+    (changed docs, requirements, fixed/known defects, coverage). It is TOON-encoded
+    and clamped to :data:`QA_PROMPT_CHAR_CEILING`."""
+    header = f"Release: {clean_ai_text(title, 200)}\nPeriod: {payload.get('range_start')} to {payload.get('range_end')}"
+    table = encode_toon(payload)
+    prompt = f"{_RELEASE_NOTES_INSTRUCTIONS}\n\n{header}\n\n{table}".strip()
+    if len(prompt) > QA_PROMPT_CHAR_CEILING:
+        prompt = prompt[:QA_PROMPT_CHAR_CEILING]
+    return prompt
+
+
 def build_test_case_context(test_case: Any, steps: list[Any]) -> str:
     step_text = "\n".join(
         f"{step.step_number}. {step.action} => {step.expected_result}"

@@ -23,6 +23,7 @@ const AskProject = lazyPage(() => import('@/pages/AskProject'), 'AskProject');
 const DocHub = lazyPage(() => import('@/pages/DocHub'), 'DocHub');
 const DocDetail = lazyPage<{ initialTab?: 'document' | 'revisions' | 'links' | 'stats' }>(() => import('@/pages/DocDetail'), 'DocDetail');
 const DocEditor = lazyPage(() => import('@/pages/DocEditor'), 'DocEditor');
+const ReleaseNotes = lazyPage(() => import('@/pages/ReleaseNotes'), 'ReleaseNotes');
 const PublicDoc = lazyPage(() => import('@/pages/PublicDoc'), 'PublicDoc');
 const TestSuites = lazyPage(() => import('@/pages/TestSuites'), 'TestSuites');
 const TestSuiteDetail = lazyPage(() => import('@/pages/TestSuiteDetail'), 'TestSuiteDetail');
@@ -274,6 +275,13 @@ function AppWithRouter() {
           <ProjectGuard>
             <FeatureGuard feature="doc_hub">
               <DocHub />
+            </FeatureGuard>
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/docs/release-notes" element={
+          <ProjectGuard>
+            <FeatureGuard feature="doc_hub">
+              <ReleaseNotes />
             </FeatureGuard>
           </ProjectGuard>
         } />
