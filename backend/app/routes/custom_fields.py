@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from .. import crud, models, schemas, auth, rbac
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 
@@ -51,7 +52,8 @@ def _ensure_value_payload_matches(payload: schemas.CustomFieldValueCreate, entit
 def register_custom_fields_routes(app):
     """Register custom fields routes with the FastAPI app."""
     
-    @app.get("/custom-fields/definitions")
+    @app.get("/custom-fields/definitions",
+             dependencies=[Depends(require_project_feature("custom_fields"))])
     def get_custom_fields_definitions(
         project_id: int,
         skip: int = 0,
@@ -77,7 +79,8 @@ def register_custom_fields_routes(app):
             rows = [row for row in rows if crud.field_definition_applies_to(row, entity_type)]
         return rows
 
-    @app.post("/custom-fields/definitions", response_model=schemas.CustomFieldDefinition)
+    @app.post("/custom-fields/definitions", response_model=schemas.CustomFieldDefinition,
+              dependencies=[Depends(require_project_feature("custom_fields"))])
     def create_custom_fields_definition(
         field: schemas.CustomFieldDefinitionCreate,
         db: Session = Depends(get_db),

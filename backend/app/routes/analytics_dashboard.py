@@ -12,6 +12,7 @@ import json
 import re
 
 from .. import crud, schemas, auth, rbac, models
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 from ..crud import (
@@ -1246,7 +1247,8 @@ def register_analytics_dashboard_routes(app):
         
         return db_report
 
-    @app.get("/analytics/shareable-reports/{project_id}", response_model=List[schemas.ShareableReport])
+    @app.get("/analytics/shareable-reports/{project_id}", response_model=List[schemas.ShareableReport],
+             dependencies=[Depends(require_project_feature("reports"))])
     def get_shareable_reports_endpoint(
         project_id: int,
         created_by: int = None,

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from .. import crud, schemas, rbac
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 
@@ -153,7 +154,8 @@ def register_remaining_routes(app):
         return {"message": "Environment deleted successfully"}
 
     # Environments Endpoints (for frontend compatibility)
-    @app.get("/environments", response_model=List[schemas.ExecutionEnvironment])
+    @app.get("/environments", response_model=List[schemas.ExecutionEnvironment],
+             dependencies=[Depends(require_project_feature("environments"))])
     def get_environments(
         project_id: int = None,
         skip: int = 0,
@@ -184,7 +186,8 @@ def register_remaining_routes(app):
         
         return environment
 
-    @app.post("/environments", response_model=schemas.ExecutionEnvironment)
+    @app.post("/environments", response_model=schemas.ExecutionEnvironment,
+              dependencies=[Depends(require_project_feature("environments"))])
     def create_environment(
         environment: schemas.ExecutionEnvironmentCreate,
         db: Session = Depends(get_db),

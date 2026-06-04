@@ -18,6 +18,8 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas, rbac
+from ..feature_guard import require_project_feature
+from ..features import is_feature_enabled
 from ..auth import get_current_active_user
 from ..database import get_db
 from ..models import EntityType
@@ -27,7 +29,11 @@ from ..services.ai_manager import (
     get_requirement_chat_settings,
 )
 from ..services.ai_prompt_service import build_doc_qa_prompt, clean_ai_text, extract_json_object
-from ..services.requirement_retrieval import retrieve_relevant_docs
+from ..services.requirement_retrieval import (
+    DocRetrievalResult,
+    SOURCE_TYPES,
+    retrieve_relevant_docs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +285,7 @@ def register_requirement_chat_routes(app):
     @app.get(
         "/projects/{project_id}/ai/conversations",
         response_model=list[schemas.RequirementChatConversationView],
+        dependencies=[Depends(require_project_feature("ask_ai"))],
     )
     def list_conversations(
         project_id: int,
@@ -292,6 +299,7 @@ def register_requirement_chat_routes(app):
     @app.post(
         "/projects/{project_id}/ai/conversations",
         response_model=schemas.RequirementChatConversationView,
+        dependencies=[Depends(require_project_feature("ask_ai"))],
     )
     def create_conversation(
         project_id: int,
@@ -388,6 +396,7 @@ def register_requirement_chat_routes(app):
     @app.post(
         "/projects/{project_id}/ai/ask",
         response_model=schemas.RequirementChatAskResponse,
+        dependencies=[Depends(require_project_feature("ask_ai"))],
     )
     async def ask_about_requirements(
         project_id: int,

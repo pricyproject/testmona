@@ -11,6 +11,7 @@ import re
 from urllib.parse import urlparse
 
 from .. import crud, schemas, auth, rbac
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user, check_password_change_required
 from ..models import EntityType
@@ -653,7 +654,8 @@ def register_system_settings_routes(app):
             return {"history": [], "total": 0, "skip": skip, "limit": limit}
 
     # Global Parameters Endpoints
-    @app.post("/global-parameters/", response_model=schemas.GlobalParameter)
+    @app.post("/global-parameters/", response_model=schemas.GlobalParameter,
+              dependencies=[Depends(require_project_feature("global_parameters"))])
     def create_global_parameter(
         parameter: schemas.GlobalParameterCreate,
         db: Session = Depends(get_db),
@@ -699,7 +701,8 @@ def register_system_settings_routes(app):
         
         return db_parameter
 
-    @app.get("/global-parameters", response_model=List[schemas.GlobalParameter])
+    @app.get("/global-parameters", response_model=List[schemas.GlobalParameter],
+             dependencies=[Depends(require_project_feature("global_parameters"))])
     def read_global_parameters(
         project_id: int = None,
         skip: int = 0,

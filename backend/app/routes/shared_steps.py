@@ -8,6 +8,7 @@ from typing import List, Optional
 import logging
 
 from .. import crud, schemas, auth, rbac
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 
@@ -25,7 +26,8 @@ def register_shared_steps_routes(app):
         return project
     
     # Shared Steps Endpoints
-    @app.post("/shared-steps/", response_model=schemas.SharedStep)
+    @app.post("/shared-steps/", response_model=schemas.SharedStep,
+              dependencies=[Depends(require_project_feature("shared_steps"))])
     def create_shared_step(
         step: schemas.SharedStepCreate,
         db: Session = Depends(get_db),
@@ -61,7 +63,8 @@ def register_shared_steps_routes(app):
         
         return db_step
 
-    @app.get("/shared-steps/", response_model=List[schemas.SharedStep])
+    @app.get("/shared-steps/", response_model=List[schemas.SharedStep],
+             dependencies=[Depends(require_project_feature("shared_steps"))])
     def read_shared_steps(
         project_id: Optional[int] = Query(None, ge=1),
         skip: int = Query(0, ge=0),

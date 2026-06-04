@@ -11,6 +11,7 @@ import logging
 import re
 
 from .. import crud, schemas, auth, rbac, models
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user, get_current_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus
@@ -724,7 +725,8 @@ def register_test_management_routes(app):
         return {"message": "Test case section deleted successfully"}
 
     # Test Case Endpoints
-    @app.post("/test-cases", response_model=schemas.TestCaseWithRelations)
+    @app.post("/test-cases", response_model=schemas.TestCaseWithRelations,
+              dependencies=[Depends(require_project_feature("test_cases"))])
     def create_test_case(
         test_case: schemas.TestCaseCreate, 
         db: Session = Depends(get_db),
@@ -797,7 +799,8 @@ def register_test_management_routes(app):
         
         return db_test_case
 
-    @app.get("/test-cases", response_model=List[schemas.TestCaseWithRelations])
+    @app.get("/test-cases", response_model=List[schemas.TestCaseWithRelations],
+             dependencies=[Depends(require_project_feature("test_cases"))])
     def read_test_cases(
         project_id: Optional[int] = Query(None, ge=1),
         test_suite_id: Optional[int] = Query(None, ge=1),
@@ -1233,7 +1236,8 @@ def register_test_management_routes(app):
         return updated_test_case
 
     # Test Run Endpoints
-    @app.post("/test-runs", response_model=schemas.TestRun)
+    @app.post("/test-runs", response_model=schemas.TestRun,
+              dependencies=[Depends(require_project_feature("test_runs"))])
     def create_test_run(
         test_run: schemas.TestRunCreate, 
         db: Session = Depends(get_db),
@@ -1276,7 +1280,8 @@ def register_test_management_routes(app):
         
         return db_test_run
 
-    @app.get("/test-runs", response_model=List[schemas.TestRun])
+    @app.get("/test-runs", response_model=List[schemas.TestRun],
+             dependencies=[Depends(require_project_feature("test_runs"))])
     def read_test_runs(
         project_id: Optional[int] = None,
         skip: int = Query(0, ge=0),

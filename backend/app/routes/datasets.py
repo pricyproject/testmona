@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
 from .. import crud, models, rbac, schemas
+from ..feature_guard import require_project_feature
 from ..auth import get_current_active_user
 from ..database import get_db
 
@@ -22,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 def register_dataset_routes(app) -> None:
 
-    @app.get("/test-datasets", response_model=List[schemas.TestDataset])
+    @app.get("/test-datasets", response_model=List[schemas.TestDataset],
+             dependencies=[Depends(require_project_feature("test_data"))])
     def list_test_datasets(
         project_id: int = Query(..., ge=1),
         db: Session = Depends(get_db),
@@ -45,7 +47,8 @@ def register_dataset_routes(app) -> None:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return dataset
 
-    @app.post("/test-datasets", response_model=schemas.TestDataset, status_code=201)
+    @app.post("/test-datasets", response_model=schemas.TestDataset, status_code=201,
+              dependencies=[Depends(require_project_feature("test_data"))])
     def create_test_dataset(
         payload: schemas.TestDatasetCreate,
         db: Session = Depends(get_db),

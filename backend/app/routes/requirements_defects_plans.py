@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 
 from .. import crud, schemas, auth, rbac, models
+from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 from ..services.milestone_service import enrich_milestone, enrich_milestones, get_project_milestone_stats
@@ -413,7 +414,8 @@ def register_requirements_defects_plans_routes(app):
     """Register requirements, defects, test plans, and milestones routes with the FastAPI app."""
     
     # Requirements Endpoints
-    @app.post("/requirements", response_model=schemas.Requirement)
+    @app.post("/requirements", response_model=schemas.Requirement,
+              dependencies=[Depends(require_project_feature("requirements"))])
     def create_requirement_endpoint(
         requirement: schemas.RequirementCreate,
         db: Session = Depends(get_db),
@@ -486,7 +488,8 @@ def register_requirements_defects_plans_routes(app):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    @app.get("/requirements", response_model=List[schemas.Requirement])
+    @app.get("/requirements", response_model=List[schemas.Requirement],
+             dependencies=[Depends(require_project_feature("requirements"))])
     def read_requirements(
         project_id: int,
         skip: int = 0,
@@ -1321,7 +1324,8 @@ def register_requirements_defects_plans_routes(app):
         return {"message": "Requirement deleted successfully"}
 
     # Defects Endpoints
-    @app.post("/defects", response_model=schemas.Defect)
+    @app.post("/defects", response_model=schemas.Defect,
+              dependencies=[Depends(require_project_feature("defects"))])
     def create_defect_endpoint(
         defect: schemas.DefectCreate,
         db: Session = Depends(get_db),
@@ -1373,7 +1377,8 @@ def register_requirements_defects_plans_routes(app):
         
         return db_defect
 
-    @app.get("/defects", response_model=List[schemas.Defect])
+    @app.get("/defects", response_model=List[schemas.Defect],
+             dependencies=[Depends(require_project_feature("defects"))])
     def read_defects(
         project_id: int,
         skip: int = 0,
@@ -1985,7 +1990,8 @@ def register_requirements_defects_plans_routes(app):
         return crud.get_test_run_flakiness(db, test_run_id)
 
     # Test Plans Endpoints
-    @app.post("/test-plans", response_model=schemas.TestPlan)
+    @app.post("/test-plans", response_model=schemas.TestPlan,
+              dependencies=[Depends(require_project_feature("test_plans"))])
     def create_test_plan_endpoint(
         test_plan: schemas.TestPlanCreate,
         db: Session = Depends(get_db),
@@ -2027,7 +2033,7 @@ def register_requirements_defects_plans_routes(app):
         
         return db_test_plan
 
-    @app.get("/test-plans")
+    @app.get("/test-plans", dependencies=[Depends(require_project_feature("test_plans"))])
     def read_test_plans(
         project_id: int = Query(..., ge=1, description="Project to list test plans for"),
         milestone_id: Optional[int] = Query(None, ge=1),
@@ -2372,7 +2378,8 @@ def register_requirements_defects_plans_routes(app):
         )
 
     # Milestones Endpoints
-    @app.post("/milestones", response_model=schemas.Milestone)
+    @app.post("/milestones", response_model=schemas.Milestone,
+              dependencies=[Depends(require_project_feature("milestones"))])
     def create_milestone_endpoint(
         milestone: schemas.MilestoneCreate,
         db: Session = Depends(get_db),
@@ -2416,7 +2423,8 @@ def register_requirements_defects_plans_routes(app):
 
         return enrich_milestone(db, db_milestone)
 
-    @app.get("/milestones", response_model=List[schemas.Milestone])
+    @app.get("/milestones", response_model=List[schemas.Milestone],
+             dependencies=[Depends(require_project_feature("milestones"))])
     def read_milestones(
         project_id: int = Query(..., ge=1),
         skip: int = Query(0, ge=0),

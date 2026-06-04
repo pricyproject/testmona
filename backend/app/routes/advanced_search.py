@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import models, rbac, schemas
+from ..feature_guard import require_project_feature
+from ..features import is_feature_enabled
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
@@ -36,6 +38,24 @@ from ..services.tql import (
 )
 
 SAVED_SEARCH_SCOPE = "advanced_search"
+
+# Advanced-search entity keys -> the project feature toggle that gates them.
+# When that feature is disabled for a project the entity is hidden from the
+# picker and any query/value/export request for it is rejected, so disabled
+# modules stay fully inaccessible through search.
+ENTITY_FEATURE = {
+    "defects": "defects",
+    "requirements": "requirements",
+    "test_cases": "test_cases",
+    "test_plans": "test_plans",
+    "test_executions": "test_runs",
+    "docs": "doc_hub",
+}
+
+
+def _entity_disabled(project, entity: str) -> bool:
+    feature = ENTITY_FEATURE.get(entity)
+    return feature is not None and not is_feature_enabled(project, feature)
 
 # Leading characters a spreadsheet may interpret as a formula. Neutralized on
 # CSV export so a stored value like ``=cmd|...`` can't execute on open.
@@ -73,18 +93,31 @@ logger = logging.getLogger(__name__)
 
 def register_advanced_search_routes(app) -> None:
 
-    def _require_project_access(current_user, project_id: int, db: Session) -> None:
+    def _require_project_access(current_user, project_id: int, db: Session):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        if db.query(models.Project).filter(models.Project.id == project_id).first() is None:
+        project = db.query(models.Project).filter(models.Project.id == project_id).first()
+        if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        return project
+
+    def _require_entity_enabled(project, entity: str) -> None:
+        if _entity_disabled(project, entity):
+            raise HTTPException(
+                status_code=403,
+                detail=f"The '{entity}' entity is disabled for this project",
+            )
 
     @app.get("/advanced-search/entities", tags=["Advanced Search"])
     def get_advanced_search_entities(
+        project_id: int,
+        db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
-        """List searchable entities and their queryable fields (for the UI)."""
-        return {"entities": entity_catalog()}
+        """List searchable entities (excluding modules disabled for this project)."""
+        project = _require_project_access(current_user, project_id, db)
+        entities = [e for e in entity_catalog() if not _entity_disabled(project, e["key"])]
+        return {"entities": entities}
 
     @app.get("/advanced-search/values", tags=["Advanced Search"])
     def get_advanced_search_values(
@@ -97,13 +130,15 @@ def register_advanced_search_routes(app) -> None:
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         """Distinct existing values of a field (for value autocomplete)."""
-        _require_project_access(current_user, project_id, db)
+        project = _require_project_access(current_user, project_id, db)
+        _require_entity_enabled(project, entity)
         try:
             return {"values": value_suggestions(db, entity, field, project_id, q, limit)}
         except TQLError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @app.get("/advanced-search", tags=["Advanced Search"])
+    @app.get("/advanced-search", tags=["Advanced Search"],
+             dependencies=[Depends(require_project_feature("advanced_search"))])
     def run_advanced_search(
         project_id: int,
         entity: str = Query(..., description="Entity to search: defects | requirements | test_cases"),
@@ -118,7 +153,8 @@ def register_advanced_search_routes(app) -> None:
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         """Run a paginated TQL query for one entity within one project."""
-        _require_project_access(current_user, project_id, db)
+        project = _require_project_access(current_user, project_id, db)
+        _require_entity_enabled(project, entity)
         try:
             return execute_search(
                 db=db,
@@ -141,7 +177,8 @@ def register_advanced_search_routes(app) -> None:
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         """Export all matching rows (capped) for the query as a CSV download."""
-        _require_project_access(current_user, project_id, db)
+        project = _require_project_access(current_user, project_id, db)
+        _require_entity_enabled(project, entity)
         try:
             entity_key, rows = export_search(
                 db=db,

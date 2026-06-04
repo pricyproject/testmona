@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
 from .. import models, rbac, schemas
+from ..feature_guard import require_project_feature
 from ..auth import get_current_active_user
 from ..database import get_db
 from ..services import api_token_service, webhook_service
@@ -98,7 +99,8 @@ def register_tokens_and_webhooks_routes(app) -> None:
     ):
         return sorted(webhook_service.SUPPORTED_EVENTS)
 
-    @app.get("/projects/{project_id}/webhooks", response_model=List[schemas.WebhookSubscriptionView])
+    @app.get("/projects/{project_id}/webhooks", response_model=List[schemas.WebhookSubscriptionView],
+             dependencies=[Depends(require_project_feature("webhooks"))])
     def list_webhooks(
         project_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
