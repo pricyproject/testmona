@@ -9,7 +9,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useAppName } from '@/hooks/useAppName';
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 
-const lazyPage = <P extends object = {}>(loader: () => Promise<any>, exportName: string) =>
+const lazyPage = <P extends object = object>(loader: () => Promise<any>, exportName: string) =>
   lazy<ComponentType<P>>(() => loader().then((module) => ({ default: module[exportName] as ComponentType<P> })));
 
 const Login = lazyPage(() => import('@/pages/Login'), 'Login');
