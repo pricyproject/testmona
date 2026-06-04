@@ -4699,6 +4699,10 @@ class DocVersionRestore(BaseModel):
     change_note: Optional[str] = Field(default=None, max_length=500)
 
 
+class DocRequirementLinkCreate(BaseModel):
+    requirement_id: int = Field(ge=1)
+
+
 class DocRequirementLinkView(BaseModel):
     id: int
     doc_id: int

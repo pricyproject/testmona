@@ -1673,6 +1673,75 @@ def register_docs_routes(app) -> None:
             for l in links
         ]
 
+    @app.post("/docs/{doc_id}/requirement-links", response_model=schemas.DocRequirementLinkView,
+              status_code=201, tags=["Docs"])
+    def create_doc_requirement_link(
+        payload: schemas.DocRequirementLinkCreate,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Manually link an existing project requirement to this document.
+
+        Idempotent: re-linking an already-linked requirement returns the existing
+        link rather than erroring."""
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+        if doc.project_id is None:
+            raise HTTPException(status_code=400, detail="Global documents cannot be linked to requirements")
+        requirement = (
+            db.query(models.Requirement)
+            .filter(models.Requirement.id == payload.requirement_id)
+            .first()
+        )
+        if requirement is None:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        if requirement.project_id != doc.project_id:
+            raise HTTPException(status_code=400, detail="Requirement belongs to a different project")
+        link = (
+            db.query(models.DocRequirementLink)
+            .filter(
+                models.DocRequirementLink.doc_id == doc.id,
+                models.DocRequirementLink.requirement_id == requirement.id,
+            )
+            .first()
+        )
+        if link is None:
+            link = models.DocRequirementLink(
+                doc_id=doc.id, requirement_id=requirement.id, created_by=current_user.id,
+            )
+            db.add(link)
+            crud.safe_commit(db)
+            db.refresh(link)
+        return schemas.DocRequirementLinkView(
+            id=link.id, doc_id=link.doc_id, requirement_id=link.requirement_id,
+            requirement_key=requirement.requirement_id, requirement_title=requirement.title,
+            created_at=link.created_at,
+        )
+
+    @app.delete("/docs/{doc_id}/requirement-links/{requirement_id}", status_code=204, tags=["Docs"])
+    def delete_doc_requirement_link(
+        doc_id: int = Path(..., ge=1),
+        requirement_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+        link = (
+            db.query(models.DocRequirementLink)
+            .filter(
+                models.DocRequirementLink.doc_id == doc.id,
+                models.DocRequirementLink.requirement_id == requirement_id,
+            )
+            .first()
+        )
+        if link is None:
+            raise HTTPException(status_code=404, detail="Requirement link not found")
+        db.delete(link)
+        crud.safe_commit(db)
+        return Response(status_code=204)
+
     # ── Converter: doc → requirements ───────────────────────────────────────
     @app.post("/docs/{doc_id}/convert-to-requirements/preview", response_model=schemas.DocConvertPreview, tags=["Docs"])
     def preview_convert(
