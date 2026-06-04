@@ -645,7 +645,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         )}
       </Tabs>
 
-      <DocRelatedSection docId={doc.id} canEdit={doc.can_edit} />
+      <DocRelatedSection docId={doc.id} canEdit={doc.can_edit} onMerged={load} />
 
       {convertOpen && (
         <ConvertDocDialog

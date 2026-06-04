@@ -930,6 +930,17 @@ export interface DocSuggestion {
   matched_tags: string[];
 }
 
+export interface DocDuplicateCandidate extends DocSuggestion {
+  reasons: string[];
+}
+
+export interface DocMergeResult {
+  target_doc: Doc;
+  archived_source_doc: Doc;
+  transferred: Record<string, number>;
+  preserved_reference_count: number;
+}
+
 export interface DocCreate {
   title: string;
   content_markdown?: string;

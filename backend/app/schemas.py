@@ -4529,6 +4529,23 @@ class DocSuggestion(BaseModel):
     matched_tags: List[str] = Field(default_factory=list)
 
 
+class DocDuplicateCandidate(DocSuggestion):
+    reasons: List[str] = Field(default_factory=list)
+
+
+class DocMergeRequest(BaseModel):
+    source_doc_id: int = Field(ge=1)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _strip_note(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
 class DocFacetValue(BaseModel):
     value: str
     count: int
@@ -4595,6 +4612,13 @@ class Doc(DocBase):
 
     class Config:
         from_attributes = True
+
+
+class DocMergeResult(BaseModel):
+    target_doc: Doc
+    archived_source_doc: Doc
+    transferred: Dict[str, int] = Field(default_factory=dict)
+    preserved_reference_count: int = 0
 
 
 class DocShareUpdate(BaseModel):

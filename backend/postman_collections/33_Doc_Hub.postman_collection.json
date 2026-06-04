@@ -46,6 +46,11 @@
       "type": "string"
     },
     {
+      "key": "duplicateDocId",
+      "value": "2",
+      "type": "string"
+    },
+    {
       "key": "docFeedbackId",
       "value": "1",
       "type": "string"
@@ -781,6 +786,59 @@
             "docs",
             "{{docId}}",
             "feedback"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Detect Duplicate Docs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "description": "Detect same-topic documents with different titles. Archived docs, the current doc, and already-related docs are excluded.",
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/duplicates?limit=5",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "duplicates"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "5"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Merge Duplicate Doc",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"source_doc_id\": {{duplicateDocId}},\n  \"note\": \"Merged after duplicate review.\"\n}"
+        },
+        "description": "Merge a duplicate source into the target document, append content, preserve unique references, skip duplicate references, and archive the source. The response includes preserved_reference_count.",
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/merge",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "merge"
           ]
         }
       }

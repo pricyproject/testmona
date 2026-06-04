@@ -1329,6 +1329,60 @@ def register_docs_routes(app) -> None:
             for score, r, matched in scored
         ]
 
+    @app.get("/docs/{doc_id}/duplicates", response_model=List[schemas.DocDuplicateCandidate], tags=["Docs"])
+    def list_doc_duplicates(
+        doc_id: int = Path(..., ge=1),
+        limit: int = Query(5, ge=1, le=10),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Likely duplicate docs: stricter same-topic matches with different
+        titles, excluding already-related docs."""
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        scored = crud_docs.find_duplicate_docs(db, doc, limit=limit)
+        return [
+            schemas.DocDuplicateCandidate(
+                id=r.id, uuid=r.uuid, title=r.title, slug=r.slug, space_id=r.space_id,
+                project_id=r.project_id, classification=r.classification, status=r.status,
+                tags=r.tags, excerpt=_excerpt(r.content), current_version=r.current_version or 0,
+                score=round(float(score), 4), matched_tags=matched, reasons=reasons,
+            )
+            for score, r, matched, reasons in scored
+            if _can_access(current_user, r.project_id, "read", db)
+        ]
+
+    @app.post("/docs/{doc_id}/merge", response_model=schemas.DocMergeResult, tags=["Docs"])
+    def merge_duplicate_doc(
+        payload: schemas.DocMergeRequest,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        target = _get_doc_or_404(db, doc_id)
+        source = _get_doc_or_404(db, payload.source_doc_id)
+        _require(current_user, target.project_id, "write", db)
+        _require(current_user, source.project_id, "write", db)
+        if target.id == source.id:
+            raise HTTPException(status_code=400, detail="A document cannot be merged into itself")
+        try:
+            result = crud_docs.merge_duplicate_doc(
+                db, target=target, source=source, actor_id=current_user.id, note=payload.note,
+            )
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Could not merge because a preserved reference already exists") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Could not merge duplicate doc %s into %s", source.id, target.id)
+            raise HTTPException(status_code=500, detail="Could not merge duplicate document") from exc
+        return schemas.DocMergeResult(
+            target_doc=_doc_out(result["target"], current_user, db),
+            archived_source_doc=_doc_out(result["source"], current_user, db),
+            transferred=result["transferred"],
+            preserved_reference_count=result["preserved_reference_count"],
+        )
+
     @app.post("/docs/{doc_id}/related", response_model=schemas.DocRelatedLinkView, status_code=201, tags=["Docs"])
     def add_related_doc(
         payload: schemas.DocRelatedLinkCreate,

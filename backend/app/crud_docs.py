@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import desc, distinct, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import models, schemas
@@ -446,6 +447,33 @@ def _doc_tag_set(value: Optional[str]) -> set:
     return {t.strip().lower() for t in (value or "").split(",") if t.strip()}
 
 
+_DOC_TOPIC_STOPWORDS: set[str] = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "for", "from",
+    "how", "in", "into", "is", "it", "of", "on", "or", "that", "the", "this",
+    "to", "with", "when", "where", "will",
+}
+
+
+def _doc_topic_tokens(value: Optional[str]) -> set[str]:
+    from .services.similarity_service import normalize_text, _tokens
+
+    return {
+        token for token in _tokens(normalize_text(value or ""))
+        if len(token) > 2 and token not in _DOC_TOPIC_STOPWORDS
+    }
+
+
+def _doc_topic_score(source_tokens: set[str], candidate_tokens: set[str]) -> float:
+    if not source_tokens or not candidate_tokens:
+        return 0.0
+    overlap = source_tokens & candidate_tokens
+    if not overlap:
+        return 0.0
+    coverage = len(overlap) / min(len(source_tokens), len(candidate_tokens))
+    jaccard = len(overlap) / len(source_tokens | candidate_tokens)
+    return max(jaccard, coverage * 0.72)
+
+
 def suggest_docs(
     db: Session,
     doc: models.Doc,
@@ -476,6 +504,7 @@ def suggest_docs(
             func.substr(func.coalesce(D.content_markdown, ""), 1, 2000).label("content"),
         )
         .filter(scope, D.id != doc.id)
+        .filter(D.status != models.DocStatus.ARCHIVED)
         .limit(candidate_cap)
         .all()
     )
@@ -498,6 +527,276 @@ def suggest_docs(
 
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored[:limit]
+
+
+def find_duplicate_docs(
+    db: Session,
+    doc: models.Doc,
+    limit: int = 5,
+    min_score: float = 0.42,
+) -> List[tuple]:
+    """Find likely duplicate docs covering the same topic under different
+    titles. Uses the same cheap similarity inputs as related suggestions, but
+    applies a stricter threshold and hides already-related docs."""
+    from .services.similarity_service import normalize_text, _jaccard
+
+    if doc.status == models.DocStatus.ARCHIVED:
+        return []
+    related_ids = {
+        row.related_doc_id
+        for row in db.query(models.DocRelatedLink.related_doc_id)
+        .filter(models.DocRelatedLink.doc_id == doc.id)
+        .all()
+    }
+    related_ids.update(
+        row.doc_id
+        for row in db.query(models.DocRelatedLink.doc_id)
+        .filter(models.DocRelatedLink.related_doc_id == doc.id)
+        .all()
+    )
+    normalized_title = normalize_text(doc.title)
+    source_title_tokens = _doc_topic_tokens(doc.title)
+    source_body_tokens = _doc_topic_tokens((doc.content_markdown or "")[:6000])
+    source_topic_tokens = source_title_tokens | source_body_tokens | _doc_tag_set(doc.tags)
+    candidates = suggest_docs(db, doc, exclude_ids=list(related_ids), limit=250)
+    result: List[tuple] = []
+    for score, row, matched_tags in candidates:
+        if normalize_text(row.title) == normalized_title:
+            continue
+        candidate_title_tokens = _doc_topic_tokens(row.title)
+        candidate_body_tokens = _doc_topic_tokens(row.content or "")
+        topic_score = _doc_topic_score(
+            source_topic_tokens,
+            candidate_title_tokens | candidate_body_tokens | _doc_tag_set(row.tags),
+        )
+        body_score = _jaccard(source_body_tokens, candidate_body_tokens) if (source_body_tokens or candidate_body_tokens) else 0.0
+        title_score = _jaccard(source_title_tokens, candidate_title_tokens) if (source_title_tokens or candidate_title_tokens) else 0.0
+        final_score = max(score, (0.58 * topic_score) + (0.28 * body_score) + (0.14 * title_score))
+        if final_score < min_score:
+            continue
+        reasons = []
+        if matched_tags:
+            reasons.append("shared_tags")
+        if topic_score >= 0.5 or body_score >= 0.45:
+            reasons.append("same_topic")
+        if title_score < 0.2:
+            reasons.append("different_title")
+        if final_score >= 0.65:
+            reasons.append("high_similarity")
+        elif final_score >= 0.5:
+            reasons.append("similar_topic")
+        else:
+            reasons.append("possible_overlap")
+        result.append((final_score, row, matched_tags, reasons))
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _split_tags(value: Optional[str]) -> List[str]:
+    seen = set()
+    tags = []
+    for tag in (value or "").split(","):
+        cleaned = tag.strip()
+        key = cleaned.lower()
+        if cleaned and key not in seen:
+            seen.add(key)
+            tags.append(cleaned)
+    return tags
+
+
+def _merge_tags(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    tags = _split_tags(a)
+    seen = {tag.lower() for tag in tags}
+    for tag in _split_tags(b):
+        if tag.lower() not in seen:
+            seen.add(tag.lower())
+            tags.append(tag)
+    return ", ".join(tags) if tags else None
+
+
+def _append_merged_content(target: models.Doc, source: models.Doc, note: Optional[str]) -> str:
+    parts = [(target.content_markdown or "").rstrip()]
+    source_body = (source.content_markdown or "").strip()
+    safe_source_title = (source.title or f"Document #{source.id}").strip()
+    if source_body:
+        heading = f"## Merged from {safe_source_title}"
+        block = f"{heading}\n\n{source_body}"
+        if note:
+            block = f"{heading}\n\n> Merge note: {note.strip()}\n\n{source_body}"
+        parts.append(block)
+    elif note:
+        parts.append(f"## Merged from {safe_source_title}\n\n> Merge note: {note.strip()}")
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _archive_source_content(source: models.Doc, target: models.Doc, note: Optional[str]) -> str:
+    lines = [
+        f"> This document was merged into [{target.title}](../{target.id}).",
+    ]
+    if note:
+        lines.append(f"> Merge note: {note.strip()}")
+    previous = (source.content_markdown or "").strip()
+    if previous:
+        lines.extend(["", "## Previous content", "", previous])
+    return "\n".join(lines).strip()
+
+
+def _transfer_unique_link(
+    db: Session,
+    model: Any,
+    source_doc_id: int,
+    target_doc_id: int,
+    source_field: str,
+    target_field: str,
+) -> dict[str, int]:
+    moved = 0
+    skipped = 0
+    rows = db.query(model).filter(getattr(model, source_field) == source_doc_id).all()
+    for row in rows:
+        other_id = getattr(row, target_field)
+        if other_id == target_doc_id:
+            db.delete(row)
+            skipped += 1
+            continue
+        exists = (
+            db.query(model.id)
+            .filter(getattr(model, source_field) == target_doc_id, getattr(model, target_field) == other_id)
+            .first()
+        )
+        if exists:
+            db.delete(row)
+            skipped += 1
+            continue
+        setattr(row, source_field, target_doc_id)
+        moved += 1
+    return {"moved": moved, "skipped": skipped}
+
+
+def _preserved_reference_count(transferred: dict[str, int]) -> int:
+    return sum(value for key, value in transferred.items() if key != "skipped_duplicates")
+
+
+def merge_duplicate_doc(
+    db: Session,
+    target: models.Doc,
+    source: models.Doc,
+    actor_id: int,
+    note: Optional[str] = None,
+) -> dict:
+    """Merge ``source`` into ``target`` and archive the source while preserving
+    references as much as possible. Caller owns permission checks."""
+    if target.id == source.id:
+        raise ValueError("Cannot merge a document into itself")
+    if target.status == models.DocStatus.ARCHIVED:
+        raise ValueError("Cannot merge into an archived document")
+    if source.status == models.DocStatus.ARCHIVED:
+        raise ValueError("Cannot merge an already archived document")
+
+    transferred = {
+        "requirement_links": 0,
+        "related_links": 0,
+        "pins": 0,
+        "visits": 0,
+        "feedback": 0,
+        "skipped_duplicates": 0,
+    }
+
+    target.content_markdown = _append_merged_content(target, source, note)
+    target.tags = _merge_tags(target.tags, source.tags)
+    if not target.classification and source.classification:
+        target.classification = source.classification
+    target.updated_by = actor_id
+
+    for link in db.query(models.DocRequirementLink).filter(models.DocRequirementLink.doc_id == source.id).all():
+        exists = (
+            db.query(models.DocRequirementLink.id)
+            .filter(
+                models.DocRequirementLink.doc_id == target.id,
+                models.DocRequirementLink.requirement_id == link.requirement_id,
+            )
+            .first()
+        )
+        if exists:
+            db.delete(link)
+            transferred["skipped_duplicates"] += 1
+            continue
+        link.doc_id = target.id
+        transferred["requirement_links"] += 1
+
+    related_outgoing = _transfer_unique_link(
+        db, models.DocRelatedLink, source.id, target.id, "doc_id", "related_doc_id",
+    )
+    related_incoming = _transfer_unique_link(
+        db, models.DocRelatedLink, source.id, target.id, "related_doc_id", "doc_id",
+    )
+    transferred["related_links"] += related_outgoing["moved"] + related_incoming["moved"]
+    transferred["skipped_duplicates"] += related_outgoing["skipped"] + related_incoming["skipped"]
+
+    for pin in db.query(models.DocPin).filter(models.DocPin.doc_id == source.id).all():
+        existing = (
+            db.query(models.DocPin)
+            .filter(models.DocPin.doc_id == target.id, models.DocPin.user_id == pin.user_id)
+            .first()
+        )
+        if existing:
+            db.delete(pin)
+            transferred["skipped_duplicates"] += 1
+            continue
+        pin.doc_id = target.id
+        transferred["pins"] += 1
+
+    for visit in db.query(models.DocVisit).filter(models.DocVisit.doc_id == source.id).all():
+        existing = (
+            db.query(models.DocVisit)
+            .filter(models.DocVisit.doc_id == target.id, models.DocVisit.user_id == visit.user_id)
+            .first()
+        )
+        if existing:
+            existing.visit_count = (existing.visit_count or 0) + (visit.visit_count or 0)
+            if visit.first_visited_at and (not existing.first_visited_at or visit.first_visited_at < existing.first_visited_at):
+                existing.first_visited_at = visit.first_visited_at
+            if visit.last_visited_at and (not existing.last_visited_at or visit.last_visited_at > existing.last_visited_at):
+                existing.last_visited_at = visit.last_visited_at
+            db.delete(visit)
+            transferred["visits"] += 1
+            continue
+        visit.doc_id = target.id
+        transferred["visits"] += 1
+
+    for feedback in db.query(models.DocFeedback).filter(models.DocFeedback.doc_id == source.id).all():
+        existing = (
+            db.query(models.DocFeedback)
+            .filter(models.DocFeedback.doc_id == target.id, models.DocFeedback.user_id == feedback.user_id)
+            .first()
+        )
+        if existing:
+            db.delete(feedback)
+            transferred["skipped_duplicates"] += 1
+            continue
+        feedback.doc_id = target.id
+        transferred["feedback"] += 1
+
+    source.status = models.DocStatus.ARCHIVED
+    source.content_markdown = _archive_source_content(source, target, note)
+    source.updated_by = actor_id
+
+    record_doc_version(db, target, action="updated", actor_id=actor_id, change_note=f"Merged duplicate doc #{source.id}", commit=False)
+    record_doc_version(db, source, action="updated", actor_id=actor_id, change_note=f"Merged into doc #{target.id}", commit=False)
+
+    try:
+        safe_commit(db)
+    except IntegrityError:
+        db.rollback()
+        raise
+    db.refresh(target)
+    db.refresh(source)
+    return {
+        "target": target,
+        "source": source,
+        "transferred": transferred,
+        "preserved_reference_count": _preserved_reference_count(transferred),
+    }
 
 
 def doc_facets(
