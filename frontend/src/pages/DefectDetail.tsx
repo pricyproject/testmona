@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Bug,
   Calendar,
+  Check,
   Edit,
   ExternalLink,
   FileText,
@@ -34,7 +35,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { defectsAPI, getApiErrorMessage, requirementsAPI, testResultsAPI } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage, projectAssignmentsAPI, requirementsAPI, testResultsAPI } from '@/lib/api';
 import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 
 type DefectDetailResponse = {
@@ -127,6 +128,7 @@ export function DefectDetail() {
   const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<DefectEditForm>(() => buildEditForm(null));
   const [requirements, setRequirements] = useState<any[]>([]);
+  const [members, setMembers] = useState<{ id: number; name: string }[]>([]);
 
   const numericDefectId = Number(defectId);
 
@@ -185,6 +187,16 @@ export function DefectDetail() {
           variant: 'destructive',
         });
       });
+
+    projectAssignmentsAPI.listMembers(numericProjectId)
+      .then((rows) => {
+        if (!isMounted) return;
+        setMembers((Array.isArray(rows) ? rows : []).map((m: any) => ({
+          id: m.user_id,
+          name: m.full_name || m.username || m.email || `User ${m.user_id}`,
+        })));
+      })
+      .catch(() => { if (isMounted) setMembers([]); });
 
     return () => {
       isMounted = false;
@@ -278,6 +290,24 @@ export function DefectDetail() {
     }
   };
 
+  // Quick inline edit: patch a single field (or few) without the full edit form.
+  const patchDefect = async (partial: Record<string, unknown>): Promise<boolean> => {
+    try {
+      await defectsAPI.update(numericDefectId, partial);
+      await loadDetail(undefined, false);
+      toast({ title: t('success'), description: t('defectUpdatedSuccessfully') });
+      return true;
+    } catch (err) {
+      console.error('Failed to quick-edit defect:', err);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(err, t('failedToUpdateDefect')),
+        variant: 'destructive',
+      });
+      return false;
+    }
+  };
+
   const updateSnapshot = async (link: any, clearFailingStep = false) => {
     if (!link?.id || !link?.test_result_id) return;
 
@@ -339,7 +369,16 @@ export function DefectDetail() {
             <Badge className={severityClass(defect.severity)}>{t(defect.severity || 'medium')}</Badge>
             <Badge variant="outline" className={statusClass(defect.status)}>{t(defect.status || 'open')}</Badge>
           </div>
-          <h1 className="mt-3 max-w-5xl text-2xl font-bold text-slate-950 dark:text-slate-50">{defect.title}</h1>
+          <div className="mt-3 max-w-5xl">
+            <InlineEditable
+              value={defect.title}
+              onSave={(v) => (v.trim() ? patchDefect({ title: v.trim() }) : Promise.resolve(false))}
+              placeholder={t('title')}
+              maxLength={200}
+              editLabel={t('edit')}
+              displayClass="text-2xl font-bold text-slate-950 dark:text-slate-50"
+            />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {isSafeExternalUrl(defect.external_issue_url) && (
@@ -517,9 +556,18 @@ export function DefectDetail() {
       )}
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Metric label={t('status')} value={t(defect.status || 'open')} icon={<ShieldAlert className="h-4 w-4" />} />
-        <Metric label={t('severity')} value={t(defect.severity || 'medium')} icon={<Bug className="h-4 w-4" />} />
-        <Metric label={t('priority')} value={t(defect.priority || 'medium')} icon={<AlertTriangle className="h-4 w-4" />} />
+        <MetricSelect
+          label={t('status')} value={defect.status || 'open'} icon={<ShieldAlert className="h-4 w-4" />}
+          options={statusOptions(t)} onSave={(v) => patchDefect({ status: v })}
+        />
+        <MetricSelect
+          label={t('severity')} value={defect.severity || 'medium'} icon={<Bug className="h-4 w-4" />}
+          options={severityOptions(t)} onSave={(v) => patchDefect({ severity: v })}
+        />
+        <MetricSelect
+          label={t('priority')} value={defect.priority || 'medium'} icon={<AlertTriangle className="h-4 w-4" />}
+          options={priorityOptions(t)} onSave={(v) => patchDefect({ priority: v })}
+        />
         <Metric label={t('linkedExecutions')} value={String(detail.result_links.length)} icon={<TestTube2 className="h-4 w-4" />} />
       </div>
 
@@ -533,11 +581,23 @@ export function DefectDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
-              <TextBlock label={t('description')} value={defect.description} empty={t('noDescriptionProvided')} />
-              <TextBlock label={t('stepsToReproduce')} value={defect.steps_to_reproduce} empty={t('noStepsProvided')} />
+              <EditableTextBlock
+                label={t('description')} value={defect.description} empty={t('noDescriptionProvided')}
+                onSave={(v) => patchDefect({ description: v })} rows={4} maxLength={1000} editLabel={t('edit')}
+              />
+              <EditableTextBlock
+                label={t('stepsToReproduce')} value={defect.steps_to_reproduce} empty={t('noStepsProvided')}
+                onSave={(v) => patchDefect({ steps_to_reproduce: v })} rows={5} maxLength={2000} editLabel={t('edit')}
+              />
               <div className="grid gap-4 md:grid-cols-2">
-                <TextBlock label={t('expectedResult')} value={defect.expected_result} empty="-" />
-                <TextBlock label={t('actualResultLabel')} value={defect.actual_result} empty="-" />
+                <EditableTextBlock
+                  label={t('expectedResult')} value={defect.expected_result} empty="-"
+                  onSave={(v) => patchDefect({ expected_result: v })} rows={3} maxLength={1000} editLabel={t('edit')}
+                />
+                <EditableTextBlock
+                  label={t('actualResultLabel')} value={defect.actual_result} empty="-"
+                  onSave={(v) => patchDefect({ actual_result: v })} rows={3} maxLength={1000} editLabel={t('edit')}
+                />
               </div>
             </CardContent>
           </Card>
@@ -609,9 +669,21 @@ export function DefectDetail() {
             </CardHeader>
             <CardContent className="space-y-4">
               <Person label={t('reportedBy')} person={detail.reporter} />
-              <Person label={t('assignedTo')} person={detail.assignee} />
-              <Meta label={t('environment')} value={defect.environment} />
-              <Meta label={t('browserInfo')} value={defect.browser_info} />
+              <EditableAssignee
+                label={t('assignedTo')}
+                value={defect.assigned_to ?? null}
+                members={members}
+                unassignedLabel={t('unassigned')}
+                onSave={(v) => patchDefect({ assigned_to: v })}
+              />
+              <EditableMeta
+                label={t('environment')} value={defect.environment} maxLength={255}
+                onSave={(v) => patchDefect({ environment: v })} editLabel={t('edit')}
+              />
+              <EditableMeta
+                label={t('browserInfo')} value={defect.browser_info} maxLength={255}
+                onSave={(v) => patchDefect({ browser_info: v })} editLabel={t('edit')}
+              />
             </CardContent>
           </Card>
 
@@ -671,17 +743,6 @@ function Metric({ label, value, icon }: { label: string; value: string; icon: Re
   );
 }
 
-function TextBlock({ label, value, empty }: { label: string; value?: string | null; empty: string }) {
-  return (
-    <section>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</h3>
-      <p className="mt-2 whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
-        {value?.trim() || empty}
-      </p>
-    </section>
-  );
-}
-
 function Relationship({ label, value, code, to }: { label: string; value?: string | null; code?: string | null; to?: string }) {
   const body = (
     <>
@@ -717,6 +778,218 @@ function Meta({ label, value }: { label: string; value?: string | null }) {
     <div>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
       <div className="mt-1 text-sm text-slate-800 dark:text-slate-200">{value || '-'}</div>
+    </div>
+  );
+}
+
+type Option = { value: string; label: string };
+type SaveFn = (value: string) => Promise<boolean>;
+
+const statusOptions = (t: (k: string) => string): Option[] => [
+  { value: 'open', label: t('open') },
+  { value: 'in_progress', label: t('inProgress') },
+  { value: 'fixed', label: t('fixed') },
+  { value: 'reopened', label: t('reopened') },
+  { value: 'closed', label: t('closed') },
+  { value: 'rejected', label: t('rejected') },
+];
+const severityOptions = (t: (k: string) => string): Option[] => [
+  { value: 'low', label: t('low') },
+  { value: 'medium', label: t('medium') },
+  { value: 'high', label: t('high') },
+  { value: 'critical', label: t('critical') },
+];
+const priorityOptions = (t: (k: string) => string): Option[] => [
+  { value: 'low', label: t('low') },
+  { value: 'medium', label: t('medium') },
+  { value: 'high', label: t('high') },
+  { value: 'urgent', label: t('urgent') },
+];
+
+// Editable metric card: label + icon with an inline select that saves on change.
+function MetricSelect({
+  label, value, icon, options, onSave,
+}: { label: string; value: string; icon: React.ReactNode; options: Option[]; onSave: SaveFn }) {
+  const [saving, setSaving] = useState(false);
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+        {icon}
+        {label}
+      </div>
+      <Select
+        value={value}
+        disabled={saving}
+        onValueChange={async (next) => {
+          if (next === value) return;
+          setSaving(true);
+          await onSave(next);
+          setSaving(false);
+        }}
+      >
+        <SelectTrigger className="mt-2 h-9 capitalize">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <SelectValue />}
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// Click-to-edit text / textarea field with save (Enter) + cancel (Esc).
+function InlineEditable({
+  value, onSave, placeholder, multiline = false, rows = 4, maxLength, displayClass = '', editLabel,
+}: {
+  value?: string | null;
+  onSave: SaveFn;
+  placeholder: string;
+  multiline?: boolean;
+  rows?: number;
+  maxLength?: number;
+  displayClass?: string;
+  editLabel: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || '');
+  const [saving, setSaving] = useState(false);
+
+  const begin = () => { setDraft(value || ''); setEditing(true); };
+  const commit = async () => {
+    setSaving(true);
+    const ok = await onSave(draft.trim());
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="space-y-2">
+        {multiline ? (
+          <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={rows} maxLength={maxLength} autoFocus />
+        ) : (
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={maxLength}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); void commit(); }
+              if (e.key === 'Escape') setEditing(false);
+            }}
+          />
+        )}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={commit} disabled={saving}>
+            {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1 h-3.5 w-3.5" />}
+            {/* reuse a generic save label via icon; text kept minimal */}
+            <span className="text-xs">{editLabel}</span>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={begin}
+      className="group flex w-full items-start gap-2 rounded-md text-start hover:bg-slate-50 dark:hover:bg-slate-800/40"
+      title={editLabel}
+    >
+      <span className={`min-w-0 flex-1 ${displayClass} ${!value?.trim() ? 'text-slate-400' : ''}`}>
+        {value?.trim() || placeholder}
+      </span>
+      <Edit className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100" />
+    </button>
+  );
+}
+
+// Read-only-styled block (description / steps / …) made click-to-edit.
+function EditableTextBlock({
+  label, value, empty, onSave, rows = 4, maxLength, editLabel,
+}: { label: string; value?: string | null; empty: string; onSave: SaveFn; rows?: number; maxLength?: number; editLabel: string }) {
+  return (
+    <section>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</h3>
+      <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+        <InlineEditable
+          value={value}
+          onSave={onSave}
+          placeholder={empty}
+          multiline
+          rows={rows}
+          maxLength={maxLength}
+          editLabel={editLabel}
+          displayClass="block whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-300"
+        />
+      </div>
+    </section>
+  );
+}
+
+// Sidebar assignee picker that saves on change (project members + unassigned).
+function EditableAssignee({
+  label, value, members, unassignedLabel, onSave,
+}: {
+  label: string;
+  value: number | null;
+  members: { id: number; name: string }[];
+  unassignedLabel: string;
+  onSave: (value: number | null) => Promise<boolean>;
+}) {
+  const [saving, setSaving] = useState(false);
+  // Keep the current assignee visible even if they're no longer in the member list.
+  const options = value != null && !members.some((m) => m.id === value)
+    ? [{ id: value, name: `User ${value}` }, ...members]
+    : members;
+  return (
+    <div>
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <Select
+        value={value != null ? String(value) : 'none'}
+        disabled={saving}
+        onValueChange={async (next) => {
+          const id = next === 'none' ? null : Number(next);
+          if (id === value) return;
+          setSaving(true);
+          await onSave(id);
+          setSaving(false);
+        }}
+      >
+        <SelectTrigger className="mt-1 h-9">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <SelectValue />}
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">{unassignedLabel}</SelectItem>
+          {options.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// Sidebar meta value that is click-to-edit.
+function EditableMeta({
+  label, value, onSave, maxLength, editLabel,
+}: { label: string; value?: string | null; onSave: SaveFn; maxLength?: number; editLabel: string }) {
+  return (
+    <div>
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1">
+        <InlineEditable
+          value={value}
+          onSave={onSave}
+          placeholder="-"
+          maxLength={maxLength}
+          editLabel={editLabel}
+          displayClass="text-sm text-slate-800 dark:text-slate-200"
+        />
+      </div>
     </div>
   );
 }
