@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from .. import crud, schemas, auth, rbac, models, crud_rbac
+from .. import features as project_features
 from ..database import get_db
 from ..auth import get_current_active_user, check_password_change_required
 from ..models import Project, TestSuite, TestCase, TestRun, User, AuditAction
@@ -139,6 +140,7 @@ def register_project_routes(app):
                     "status": project.status.value if hasattr(project.status, "value") else project.status,
                     "owner_id": project.owner_id,
                     "owner_name": owner_names.get(project.owner_id),
+                    "features": project_features.normalize_features(project.features),
                     "created_at": project.created_at,
                     "updated_at": project.updated_at,
                     "test_suites_count": suite_counts.get(project.id, 0),
@@ -180,6 +182,63 @@ def register_project_routes(app):
         _record_project_audit(
             db, current_user, AuditAction.UPDATE.value, db_project.id,
             f"Project '{db_project.name}' updated"
+        )
+        return db_project
+
+    @app.get("/projects/{project_id}/features")
+    def read_project_features(
+        project_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Return the project's normalized feature map plus the full catalog.
+
+        Any project member who can read the project can see which features are
+        on; only managers/owners/admins may change them.
+        """
+        if not rbac.has_permission(current_user, "read", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        db_project = crud.get_project(db, project_id=project_id)
+        if db_project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        return {
+            "features": project_features.normalize_features(db_project.features),
+            "catalog": list(project_features.PROJECT_FEATURES),
+        }
+
+    @app.put("/projects/{project_id}/features", response_model=schemas.Project)
+    def update_project_features(
+        project_id: int,
+        payload: schemas.ProjectFeaturesUpdate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Enable/disable feature modules for a project.
+
+        Restricted to admins, the project owner, and (project) managers via the
+        ``manage_projects`` permission. Unknown keys are ignored; the stored
+        value is always a complete, normalized map.
+        """
+        if not rbac.can_manage_project(current_user, project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        db_project = crud.get_project(db, project_id=project_id)
+        if db_project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        merged = project_features.normalize_features(db_project.features)
+        for key, value in payload.features.items():
+            if key in project_features.PROJECT_FEATURE_SET:
+                merged[key] = bool(value)
+
+        db_project.features = merged
+        crud.safe_commit(db)
+        db.refresh(db_project)
+        _record_project_audit(
+            db, current_user, AuditAction.UPDATE.value, db_project.id,
+            f"Project '{db_project.name}' feature toggles updated"
         )
         return db_project
 
@@ -279,6 +338,13 @@ def register_project_routes(app):
             status=source_status,
             owner_id=owner_id,
         ))
+
+        # Carry the source project's feature toggles onto the clone so a cloned
+        # project behaves like its origin instead of silently re-enabling modules.
+        if isinstance(source.features, dict) and source.features:
+            new_project.features = project_features.normalize_features(source.features)
+            crud.safe_commit(db)
+            db.refresh(new_project)
 
         def _enum_value(value, default):
             if value is None:
