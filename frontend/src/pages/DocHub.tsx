@@ -57,11 +57,22 @@ const PAGE_SIZE = 30;
 type ViewMode = 'grid' | 'table' | 'list';
 const VIEW_MODE_KEY = 'dochub.viewMode';
 const SIDEBAR_KEY = 'dochub.sidebarCollapsed';
+const HIGHLIGHTS_KEY = 'dochub.hiddenHighlights';
 
 const readStoredViewMode = (): ViewMode => {
   if (typeof window === 'undefined') return 'grid';
   const v = window.localStorage.getItem(VIEW_MODE_KEY);
   return v === 'table' || v === 'list' ? v : 'grid';
+};
+
+const readStoredHiddenHighlights = () => {
+  if (typeof window === 'undefined') return { pinned: false, recent: false };
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(HIGHLIGHTS_KEY) || '{}');
+    return { pinned: parsed.pinned === true, recent: parsed.recent === true };
+  } catch {
+    return { pinned: false, recent: false };
+  }
 };
 
 const statusTone: Record<string, string> = {
@@ -156,8 +167,10 @@ export function DocHub() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
     () => typeof window !== 'undefined' && window.localStorage.getItem(SIDEBAR_KEY) === 'true',
   );
+  const [hiddenHighlights, setHiddenHighlights] = useState(readStoredHiddenHighlights);
   useEffect(() => { window.localStorage.setItem(VIEW_MODE_KEY, viewMode); }, [viewMode]);
   useEffect(() => { window.localStorage.setItem(SIDEBAR_KEY, String(sidebarCollapsed)); }, [sidebarCollapsed]);
+  useEffect(() => { window.localStorage.setItem(HIGHLIGHTS_KEY, JSON.stringify(hiddenHighlights)); }, [hiddenHighlights]);
 
   // Admin-only read-statistics dashboard for the current scope.
   const [insightsOpen, setInsightsOpen] = useState(false);
@@ -171,8 +184,8 @@ export function DocHub() {
   const hasMore = docs.length < total;
   const highlightParams = useMemo<DocListParams>(() => (
     projectId
-      ? { projectId, includeGlobal: true, limit: 8 }
-      : { includeGlobal: false, limit: 8 }
+      ? { projectId, includeGlobal: true }
+      : { includeGlobal: false }
   ), [projectId]);
 
   const clearAllFilters = () => {
@@ -289,11 +302,11 @@ export function DocHub() {
   const loadDocHighlights = useCallback(async () => {
     try {
       const [pinned, recent] = await Promise.all([
-        docsAPI.list({ ...highlightParams, pinnedOnly: true, sort: 'latest_edited' }),
-        docsAPI.list({ ...highlightParams, visitedOnly: true, sort: 'latest_visited' }),
+        docsAPI.list({ ...highlightParams, pinnedOnly: true, sort: 'latest_edited', limit: 8 }),
+        docsAPI.list({ ...highlightParams, visitedOnly: true, sort: 'latest_visited', limit: 10 }),
       ]);
       setPinnedDocs(pinned);
-      setRecentDocs(recent);
+      setRecentDocs(recent.slice(0, 10));
     } catch {
       setPinnedDocs([]);
       setRecentDocs([]);
@@ -497,6 +510,10 @@ export function DocHub() {
     }
   };
 
+  const setHighlightHidden = (key: 'pinned' | 'recent', hidden: boolean) => {
+    setHiddenHighlights((current) => ({ ...current, [key]: hidden }));
+  };
+
   const renderDocPinButton = (doc: DocListItem, className = '') => (
     <Button
       type="button"
@@ -512,29 +529,35 @@ export function DocHub() {
     </Button>
   );
 
-  const renderQuickDocs = (items: DocListItem[], emptyLabel: string) => (
-    items.length > 0 ? (
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {items.map((doc) => (
+  const renderQuickDocs = (items: DocListItem[]) => (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {items.map((doc) => (
+        <div
+          key={doc.id}
+          className="min-w-[220px] max-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 transition-colors hover:border-primary/40 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70"
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(`${basePath}/${doc.id}`)}
+              className="min-w-0 flex-1 truncate text-start text-sm font-medium hover:text-primary"
+              dir="auto"
+              title={doc.title}
+            >
+              {doc.title}
+            </button>
+            {renderDocPinButton(doc, 'h-6 w-6')}
+          </div>
           <button
-            key={doc.id}
             type="button"
             onClick={() => navigate(`${basePath}/${doc.id}`)}
-            className="min-w-[220px] max-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-start transition-colors hover:border-primary/40 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70"
+            className="block w-full truncate text-start text-xs text-muted-foreground hover:text-primary"
           >
-            <span className="mb-1 flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium" dir="auto">{doc.title}</span>
-              {doc.is_pinned && <Pin className="h-3.5 w-3.5 shrink-0 fill-current text-primary" />}
-            </span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {doc.my_last_visited_at ? t('docVisitedTime', { time: formatRelativeTime(doc.my_last_visited_at) }) : t(`docStatus_${doc.status}` as any)}
-            </span>
+            {doc.my_last_visited_at ? t('docVisitedTime', { time: formatRelativeTime(doc.my_last_visited_at) }) : t(`docStatus_${doc.status}` as any)}
           </button>
-        ))}
-      </div>
-    ) : (
-      <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-sm text-muted-foreground dark:border-slate-800">{emptyLabel}</p>
-    )
+        </div>
+      ))}
+    </div>
   );
 
   return (
@@ -818,20 +841,49 @@ export function DocHub() {
             </div>
           </div>
 
-          {!loadingDocs && (
+          {!loadingDocs && (pinnedDocs.length > 0 || recentDocs.length > 0) && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {pinnedDocs.length > 0 && hiddenHighlights.pinned && (
+                <Button type="button" variant="outline" size="sm" onClick={() => setHighlightHidden('pinned', false)}>
+                  <Pin className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('docShowPinnedDocs')}
+                </Button>
+              )}
+              {recentDocs.length > 0 && hiddenHighlights.recent && (
+                <Button type="button" variant="outline" size="sm" onClick={() => setHighlightHidden('recent', false)}>
+                  <Clock className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('docShowRecentDocs')}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {!loadingDocs && ((pinnedDocs.length > 0 && !hiddenHighlights.pinned) || (recentDocs.length > 0 && !hiddenHighlights.recent)) && (
             <div className="mb-4 grid gap-3 xl:grid-cols-2">
+              {pinnedDocs.length > 0 && !hiddenHighlights.pinned && (
               <div className="min-w-0">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <Pin className="h-3.5 w-3.5 text-primary" />{t('docPinnedDocs')}
+                  <Pin className="h-3.5 w-3.5 text-primary" />
+                  <span className="min-w-0 flex-1">{t('docPinnedDocs')}</span>
+                  <button type="button" onClick={() => setHighlightHidden('pinned', true)} className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-foreground dark:hover:bg-slate-800" title={t('docHidePinnedDocs')} aria-label={t('docHidePinnedDocs')}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-                {renderQuickDocs(pinnedDocs, t('docNoPinnedDocs'))}
+                {renderQuickDocs(pinnedDocs)}
               </div>
+              )}
+              {recentDocs.length > 0 && !hiddenHighlights.recent && (
               <div className="min-w-0">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <Clock className="h-3.5 w-3.5 text-primary" />{t('docRecentlyViewed')}
+                  <Clock className="h-3.5 w-3.5 text-primary" />
+                  <span className="min-w-0 flex-1">{t('docRecentlyViewed')}</span>
+                  <button type="button" onClick={() => setHighlightHidden('recent', true)} className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-foreground dark:hover:bg-slate-800" title={t('docHideRecentDocs')} aria-label={t('docHideRecentDocs')}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-                {renderQuickDocs(recentDocs, t('docNoRecentDocs'))}
+                {renderQuickDocs(recentDocs)}
               </div>
+              )}
             </div>
           )}
 
