@@ -916,6 +916,13 @@ export const docsAPI = {
     const response = await api.get(`/docs/${id}/requirement-links`);
     return response.data;
   },
+  addRequirementLink: async (id: number, requirementId: number): Promise<DocRequirementLink> => {
+    const response = await api.post(`/docs/${id}/requirement-links`, { requirement_id: requirementId });
+    return response.data;
+  },
+  removeRequirementLink: async (id: number, requirementId: number): Promise<void> => {
+    await api.delete(`/docs/${id}/requirement-links/${requirementId}`);
+  },
   previewConvert: async (id: number, payload: DocConvertRequest): Promise<DocConvertPreview> => {
     const response = await api.post(`/docs/${id}/convert-to-requirements/preview`, payload);
     return response.data;
