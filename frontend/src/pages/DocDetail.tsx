@@ -47,6 +47,7 @@ import { markdownToHtml } from '@/components/ui/content-editor';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { DocVersionHistory } from '@/components/docs/DocVersionHistory';
 import { DocRelatedSection } from '@/components/docs/DocRelatedSection';
+import { DocRequirementLinksSection } from '@/components/docs/DocRequirementLinksSection';
 import { ConvertDocDialog } from '@/components/docs/ConvertDocDialog';
 import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
@@ -586,29 +587,13 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         </TabsContent>
 
         <TabsContent value="links" className="mt-4">
-          {links.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center text-muted-foreground dark:border-slate-700">
-              {t('docNoLinkedRequirements')}
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {links.map((link) => {
-                const inner = (
-                  <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 transition-colors hover:border-primary/40 dark:border-slate-800">
-                    <Badge variant="outline" className="shrink-0">{link.requirement_key || `#${link.requirement_id}`}</Badge>
-                    <span className="truncate text-sm" dir="auto">{link.requirement_title}</span>
-                  </div>
-                );
-                return (
-                  <li key={link.id}>
-                    {doc.project_id ? (
-                      <Link to={`/projects/${doc.project_id}/requirements/${link.requirement_id}`}>{inner}</Link>
-                    ) : inner}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <DocRequirementLinksSection
+            docId={doc.id}
+            projectId={doc.project_id}
+            canEdit={doc.can_edit}
+            links={links}
+            onChanged={load}
+          />
         </TabsContent>
 
         {doc.can_view_stats && (
