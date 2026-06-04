@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ScanSearch,
   Play,
@@ -214,11 +214,13 @@ function computeSuggestions(
 
 export function AdvancedSearch() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation();
   const { toast } = useToast();
 
   const [entities, setEntities] = useState<AdvancedSearchEntity[]>([]);
+  const [entitiesLoaded, setEntitiesLoaded] = useState(false);
   const [entityKey, setEntityKey] = useState<string>(searchParams.get('entity') || 'defects');
   const [query, setQuery] = useState(searchParams.get('tql') || '');
   const [result, setResult] = useState<AdvancedSearchResult | null>(null);
@@ -245,10 +247,13 @@ export function AdvancedSearch() {
   const valueFetchSeq = useRef(0); // guards against out-of-order async responses
 
   useEffect(() => {
+    if (!projectId) return;
     advancedSearchAPI
-      .getEntities()
+      .getEntities(parseInt(projectId))
       .then((data) => {
         setEntities(data.entities);
+        // If the selected entity (e.g. from a deep-link) is disabled/hidden for
+        // this project, fall back to the first enabled one.
         if (data.entities.length && !data.entities.some((e) => e.key === entityKey)) {
           setEntityKey(data.entities[0].key);
         }
@@ -259,9 +264,10 @@ export function AdvancedSearch() {
           description: getApiErrorMessage(err, t('advancedSearchLoadEntitiesError')),
           variant: 'destructive',
         });
-      });
-     
-  }, []);
+      })
+      .finally(() => setEntitiesLoaded(true));
+
+  }, [projectId]);
 
   const currentEntity = useMemo(
     () => entities.find((e) => e.key === entityKey),
@@ -352,13 +358,20 @@ export function AdvancedSearch() {
 
   const runSearch = () => doSearch(entityKey, query, 0);
 
-  // Auto-run once on mount if the URL carried a shared query.
+  // Auto-run once if the URL carried a shared query — but only after the
+  // (feature-filtered) entity list has loaded, and only if the requested entity
+  // is enabled for this project. A deep-link to a disabled entity is ignored.
+  const autoRanRef = useRef(false);
   useEffect(() => {
-    if (searchParams.get('entity') || searchParams.get('tql')) {
-      void doSearch(searchParams.get('entity') || 'defects', searchParams.get('tql') || '', 0);
-    }
-     
-  }, []);
+    if (autoRanRef.current || !entities.length) return;
+    const urlEntity = searchParams.get('entity');
+    const urlTql = searchParams.get('tql');
+    if (!urlEntity && !urlTql) return;
+    autoRanRef.current = true;
+    const ent = urlEntity && entities.some((e) => e.key === urlEntity) ? urlEntity : null;
+    if (ent) void doSearch(ent, urlTql || '', 0);
+
+  }, [entities]);
 
   const goToPage = (offset: number) => {
     if (active) void doSearch(active.entity, active.tql, Math.max(0, offset));
@@ -515,6 +528,37 @@ export function AdvancedSearch() {
   // The accent stripe reflects the strongest available signal on the row.
   const accentTone = (row: Record<string, any>): keyof typeof TONE =>
     toneFor(row.severity ?? row.priority ?? row.status ?? row.type);
+
+  // Advanced Search is enabled but every searchable entity is disabled for this
+  // project — there's nothing to query, so show guidance instead of an empty,
+  // 403-on-submit form.
+  if (entitiesLoaded && entities.length === 0) {
+    return (
+      <div className="space-y-6 p-6">
+        <div className="flex items-center gap-3">
+          <ScanSearch className="h-6 w-6 text-primary" />
+          <div>
+            <h1 className="text-2xl font-semibold">{t('advancedSearch')}</h1>
+            <p className="text-sm text-muted-foreground">{t('advancedSearchSubtitle')}</p>
+          </div>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <ScanSearch className="h-10 w-10 text-muted-foreground/40" />
+            <h2 className="text-lg font-medium">{t('advancedSearchNoEntitiesTitle')}</h2>
+            <p className="max-w-md text-sm text-muted-foreground">
+              {t('advancedSearchNoEntitiesDesc')}
+            </p>
+            {projectId && (
+              <Button variant="outline" onClick={() => navigate(`/projects/${projectId}/settings`)}>
+                {t('projectSettings')}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">

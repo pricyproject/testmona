@@ -8,6 +8,8 @@ export interface Project {
   status: string;
   owner_id?: number;
   owner_name?: string;
+  /** Per-project feature toggles; missing keys default to enabled. */
+  features?: Record<string, boolean> | null;
   created_at: string;
   updated_at?: string;
   test_suites_count?: number;

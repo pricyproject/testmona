@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useSearchP
 import { resolveSafeRedirect } from '@/utils/safeRedirect';
 import { Layout } from '@/components/Layout';
 import { ProjectGuard } from '@/components/ProjectGuard';
+import { FeatureGuard } from '@/components/FeatureGuard';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useAuthStore, initializeAuthFromLocalStorage } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -54,6 +55,7 @@ const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 
 const Settings = lazyPage(() => import('@/pages/Settings'), 'Settings');
 const Profile = lazyPage(() => import('@/pages/Profile'), 'Profile');
 const ProjectMembers = lazyPage(() => import('@/pages/ProjectMembers'), 'ProjectMembers');
+const ProjectSettings = lazyPage(() => import('@/pages/ProjectSettings'), 'ProjectSettings');
 const ApiTokens = lazyPage(() => import('@/pages/ApiTokens'), 'ApiTokens');
 const Webhooks = lazyPage(() => import('@/pages/Webhooks'), 'Webhooks');
 
@@ -174,7 +176,9 @@ function AppWithRouter() {
         {/* Project-scoped routes */}
         <Route path="/projects/:projectId/test-suites" element={
           <ProjectGuard>
-            <TestSuites />
+            <FeatureGuard feature="test_suites">
+              <TestSuites />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-suites/:id" element={
@@ -184,7 +188,9 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/test-cases" element={
           <ProjectGuard>
-            <TestCases />
+            <FeatureGuard feature="test_cases">
+              <TestCases />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-cases/:id" element={
@@ -214,7 +220,9 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/test-runs" element={
           <ProjectGuard>
-            <TestRuns />
+            <FeatureGuard feature="test_runs">
+              <TestRuns />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-runs/:id" element={
@@ -245,12 +253,16 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/requirements" element={
           <ProjectGuard>
-            <Requirements />
+            <FeatureGuard feature="requirements">
+              <Requirements />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/ask" element={
           <ProjectGuard>
-            <AskProject />
+            <FeatureGuard feature="ask_ai">
+              <AskProject />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/requirements/:requirementId" element={
@@ -260,7 +272,9 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/docs" element={
           <ProjectGuard>
-            <DocHub />
+            <FeatureGuard feature="doc_hub">
+              <DocHub />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/docs/:docId" element={
@@ -280,7 +294,9 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/defects" element={
           <ProjectGuard>
-            <Defects />
+            <FeatureGuard feature="defects">
+              <Defects />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/defects/:defectId" element={
@@ -290,12 +306,16 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/advanced-search" element={
           <ProjectGuard>
-            <AdvancedSearch />
+            <FeatureGuard feature="advanced_search">
+              <AdvancedSearch />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-plans" element={
           <ProjectGuard>
-            <TestPlans />
+            <FeatureGuard feature="test_plans">
+              <TestPlans />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-plans/:testPlanId" element={
@@ -305,12 +325,16 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/reports" element={
           <ProjectGuard>
-            <Reports />
+            <FeatureGuard feature="reports">
+              <Reports />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/milestones" element={
           <ProjectGuard>
-            <Milestones />
+            <FeatureGuard feature="milestones">
+              <Milestones />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/milestones/:milestoneId" element={
@@ -323,29 +347,44 @@ function AppWithRouter() {
             <ProjectMembers />
           </ProjectGuard>
         } />
+        <Route path="/projects/:projectId/settings" element={
+          <ProjectGuard>
+            <ProjectSettings />
+          </ProjectGuard>
+        } />
         <Route path="/projects/:projectId/custom-fields" element={
           <ProjectGuard>
-            <CustomFields />
+            <FeatureGuard feature="custom_fields">
+              <CustomFields />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/shared-steps" element={
           <ProjectGuard>
-            <SharedSteps />
+            <FeatureGuard feature="shared_steps">
+              <SharedSteps />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/global-parameters" element={
           <ProjectGuard>
-            <GlobalParameters />
+            <FeatureGuard feature="global_parameters">
+              <GlobalParameters />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-data" element={
           <ProjectGuard>
-            <TestData />
+            <FeatureGuard feature="test_data">
+              <TestData />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/environments" element={
           <ProjectGuard>
-            <Environments />
+            <FeatureGuard feature="environments">
+              <Environments />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         
@@ -389,7 +428,9 @@ function AppWithRouter() {
         <Route path="/api-tokens" element={<ApiTokens />} />
         <Route path="/projects/:projectId/webhooks" element={
           <ProjectGuard>
-            <Webhooks />
+            <FeatureGuard feature="webhooks">
+              <Webhooks />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="*" element={<Navigate to="/projects" replace />} />

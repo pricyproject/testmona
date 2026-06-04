@@ -32,6 +32,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { getAppInitials, useAppName } from '@/hooks/useAppName';
+import { isFeatureEnabled, type ProjectFeatureKey } from '@/lib/projectFeatures';
 
 interface NavigationItem {
   name: string;
@@ -40,6 +41,8 @@ interface NavigationItem {
   group?: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** When set, the item is hidden if this feature is disabled for the project. */
+  feature?: ProjectFeatureKey;
 }
 
 interface NavigationGroup {
@@ -125,49 +128,50 @@ export function Sidebar({
         items: [
           { name: t('projects'), href: '/projects', icon: FolderOpen },
           { name: t('overview'), href: '/dashboard', icon: LayoutDashboard },
-          { name: t('navAskAi'), href: `/projects/${projectId}/ask`, icon: Sparkles },
+          { name: t('navAskAi'), href: `/projects/${projectId}/ask`, icon: Sparkles, feature: 'ask_ai' },
         ]
       },
       {
         name: t('testing'),
         items: [
-          { name: t('requirements'), href: `/projects/${projectId}/requirements`, icon: FileCheck },
-          { name: t('docHub'), href: `/projects/${projectId}/docs`, icon: BookOpen },
-          { name: t('testCases'), href: `/projects/${projectId}/test-cases`, icon: FileText },
-          { name: t('testSuites'), href: `/projects/${projectId}/test-suites`, icon: TestTube },
-          { name: t('testRuns'), href: `/projects/${projectId}/test-runs`, icon: PlayCircle },
+          { name: t('requirements'), href: `/projects/${projectId}/requirements`, icon: FileCheck, feature: 'requirements' },
+          { name: t('docHub'), href: `/projects/${projectId}/docs`, icon: BookOpen, feature: 'doc_hub' },
+          { name: t('testCases'), href: `/projects/${projectId}/test-cases`, icon: FileText, feature: 'test_cases' },
+          { name: t('testSuites'), href: `/projects/${projectId}/test-suites`, icon: TestTube, feature: 'test_suites' },
+          { name: t('testRuns'), href: `/projects/${projectId}/test-runs`, icon: PlayCircle, feature: 'test_runs' },
         ]
       },
       {
         name: t('planning'),
         items: [
-          { name: t('milestones'), href: `/projects/${projectId}/milestones`, icon: Flag },
-          { name: t('testPlans'), href: `/projects/${projectId}/test-plans`, icon: ClipboardList },
+          { name: t('milestones'), href: `/projects/${projectId}/milestones`, icon: Flag, feature: 'milestones' },
+          { name: t('testPlans'), href: `/projects/${projectId}/test-plans`, icon: ClipboardList, feature: 'test_plans' },
         ]
       },
       {
         name: t('management'),
         items: [
-          { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug },
-          { name: t('advancedSearch'), href: `/projects/${projectId}/advanced-search`, icon: ScanSearch },
-          { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3 },
+          { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug, feature: 'defects' },
+          { name: t('advancedSearch'), href: `/projects/${projectId}/advanced-search`, icon: ScanSearch, feature: 'advanced_search' },
+          { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3, feature: 'reports' },
         ]
       },
       {
         name: t('configuration'),
         items: [
           { name: t('projectMembers'), href: `/projects/${projectId}/members`, icon: Users },
-          { name: t('customFields'), href: `/projects/${projectId}/custom-fields`, icon: Database },
-          { name: t('sharedSteps'), href: `/projects/${projectId}/shared-steps`, icon: Layers },
-          { name: t('globalParameters'), href: `/projects/${projectId}/global-parameters`, icon: Wrench },
-          { name: t('testData'), href: `/projects/${projectId}/test-data`, icon: Table2 },
-          { name: t('webhooks'), href: `/projects/${projectId}/webhooks`, icon: Webhook },
+          { name: t('projectSettings'), href: `/projects/${projectId}/settings`, icon: Settings2 },
+          { name: t('customFields'), href: `/projects/${projectId}/custom-fields`, icon: Database, feature: 'custom_fields' },
+          { name: t('sharedSteps'), href: `/projects/${projectId}/shared-steps`, icon: Layers, feature: 'shared_steps' },
+          { name: t('globalParameters'), href: `/projects/${projectId}/global-parameters`, icon: Wrench, feature: 'global_parameters' },
+          { name: t('testData'), href: `/projects/${projectId}/test-data`, icon: Table2, feature: 'test_data' },
+          { name: t('webhooks'), href: `/projects/${projectId}/webhooks`, icon: Webhook, feature: 'webhooks' },
         ]
       },
       {
         name: t('global'),
         items: [
-          { name: t('environments'), href: `/projects/${projectId}/environments`, icon: Settings },
+          { name: t('environments'), href: `/projects/${projectId}/environments`, icon: Settings, feature: 'environments' },
         ]
       },
       {
@@ -181,7 +185,15 @@ export function Sidebar({
     ];
   };
 
-  const navigation = buildNavigation();
+  // Hide nav items whose feature module is disabled for the selected project,
+  // then drop any group left empty. Items without a `feature` are always shown.
+  const projectFeatures = selectedProject?.features;
+  const navigation = buildNavigation()
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.feature || isFeatureEnabled(projectFeatures, item.feature)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const isActive = (href: string) => {
     if (location.pathname === href) return true;
