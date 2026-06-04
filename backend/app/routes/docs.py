@@ -21,16 +21,21 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import yaml
-from fastapi import Depends, File, Form, HTTPException, Path, Query, Response, UploadFile
+from fastapi import Depends, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from .. import crud, crud_docs, models, rbac, schemas
 from ..feature_guard import require_project_feature
+from ..features import is_feature_enabled
 from ..auth import get_current_active_user
 from ..database import get_db
 from ..services import doc_conversion_service as conv
+from ..services import doc_impact_service
+from .project_ai_chat import _cancel_on_disconnect
+from ..services.ai_manager import AICompletionRequest, generate_ai_completion, get_ai_manager_status
+from ..services.ai_prompt_service import build_doc_impact_prompt, clean_ai_text, extract_json_object
 from ..services.mentions import project_member_users, resolve_mentions
 
 logger = logging.getLogger(__name__)
@@ -460,6 +465,77 @@ def _safe_zip_member_name(filename: str) -> str:
     if not parts or any(part in {".", ".."} for part in parts):
         raise HTTPException(status_code=400, detail="Zip contains an unsafe file path")
     return "/".join(parts)
+
+
+# --------------------------------------------------------------------------- #
+# Change impact analysis helpers                                              #
+# --------------------------------------------------------------------------- #
+
+_IMPACT_AREAS = {"requirements", "tests", "defects", "general"}
+_IMPACT_SEVERITIES = {"low", "medium", "high"}
+_IMPACT_RECOMMENDATIONS = {"publish", "review", "hold"}
+
+
+def _impact_item(item: doc_impact_service.ImpactItem) -> schemas.DocImpactItem:
+    return schemas.DocImpactItem(
+        type=item.type, id=item.id, key=item.key, title=item.title,
+        reason=item.reason, score=item.score, status=item.status,
+        severity=item.severity, is_open=item.is_open,
+    )
+
+
+def _parse_impact_ai(content: str) -> tuple[str, str, List[schemas.DocImpactRisk]]:
+    """Parse + clamp the AI risk JSON. Raises on unparseable content so the
+    caller can record the failure and fall back to the deterministic graph."""
+    parsed = extract_json_object(content)
+    summary = clean_ai_text(parsed.get("summary"), 1000)
+    recommendation = str(parsed.get("recommendation") or "review").strip().lower()
+    if recommendation not in _IMPACT_RECOMMENDATIONS:
+        recommendation = "review"
+    risks: List[schemas.DocImpactRisk] = []
+    for raw in (parsed.get("risks") or [])[:20]:
+        if not isinstance(raw, dict):
+            continue
+        title = clean_ai_text(raw.get("title"), 200)
+        if not title:
+            continue
+        area = str(raw.get("area") or "general").strip().lower()
+        severity = str(raw.get("severity") or "medium").strip().lower()
+        risks.append(schemas.DocImpactRisk(
+            area=area if area in _IMPACT_AREAS else "general",
+            severity=severity if severity in _IMPACT_SEVERITIES else "medium",
+            title=title,
+            detail=clean_ai_text(raw.get("detail"), 1000),
+            mitigation=clean_ai_text(raw.get("mitigation"), 1000),
+        ))
+    return summary, recommendation, risks
+
+
+def _audit_doc_impact(db: Session, actor: models.User, doc: models.Doc) -> None:
+    """Best-effort audit row for a change-impact analysis run.
+
+    ``EntityType`` has no ``doc`` member, so the event is attributed to the
+    project (mirroring the project AI chat audit), with the doc identified in
+    the description. Global docs have no project to attribute to, so are skipped."""
+    if doc.project_id is None:
+        return
+    try:
+        from ..models import AuditAction, EntityType
+        from ..schemas_audit import AuditTrailCreate
+        from ..services.audit_service import get_audit_service
+
+        get_audit_service(db).create_audit_trail(
+            AuditTrailCreate(
+                user_id=actor.id,
+                action=AuditAction.EXECUTE.value,
+                entity_type=EntityType.PROJECT.value,
+                entity_id=doc.project_id,
+                project_id=doc.project_id,
+                description=f'Ran change impact analysis on doc {doc.id} "{doc.title}"',
+            )
+        )
+    except Exception:  # pragma: no cover - audit must never break the request
+        logger.exception("Failed to audit doc impact analysis for doc %s", doc.id)
 
 
 # --------------------------------------------------------------------------- #
@@ -1436,6 +1512,125 @@ def register_docs_routes(app) -> None:
             for i, l in enumerate(links)
         ]
         return schemas.DocConvertResult(created=created, links=link_views)
+
+    # ── Change impact analysis ──────────────────────────────────────────────
+    @app.post("/docs/{doc_id}/impact-analysis", response_model=schemas.DocImpactAnalysis, tags=["Docs"],
+              dependencies=[Depends(require_project_feature("doc_hub"))])
+    async def analyze_doc_impact(
+        payload: schemas.DocImpactRequest,
+        request: Request,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Show the requirements, test cases, and defects a doc change impacts,
+        plus an AI risk assessment — so authors can review before publishing.
+
+        The deterministic impact graph is always returned; the AI risk block is
+        best-effort and degrades gracefully when AI is off/unavailable."""
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+
+        # The ``require_project_feature`` dependency can't resolve a project from
+        # this route (no project_id in the path/body), so enforce the Doc Hub
+        # toggle explicitly for project docs. Global docs have no project toggle.
+        project = crud.get_project(db, doc.project_id) if doc.project_id is not None else None
+        if project is not None and not is_feature_enabled(project, "doc_hub"):
+            raise HTTPException(status_code=403, detail="The 'doc_hub' feature is disabled for this project")
+
+        graph = doc_impact_service.analyze_doc_impact(
+            db, doc, candidate_markdown=payload.candidate_markdown,
+        )
+        result = schemas.DocImpactAnalysis(
+            doc_id=doc.id,
+            project_id=doc.project_id,
+            change_summary=schemas.DocImpactChangeSummary(
+                changed=graph.change_summary.changed,
+                headings_added=graph.change_summary.headings_added,
+                headings_removed=graph.change_summary.headings_removed,
+                char_delta=graph.change_summary.char_delta,
+                note=graph.change_summary.note,
+            ),
+            requirements=[_impact_item(i) for i in graph.requirements],
+            test_cases=[_impact_item(i) for i in graph.test_cases],
+            defects=[_impact_item(i) for i in graph.defects],
+            risk_signals=schemas.DocImpactRiskSignals(
+                impacted_requirements=graph.risk_signals.impacted_requirements,
+                impacted_test_cases=graph.risk_signals.impacted_test_cases,
+                impacted_defects=graph.risk_signals.impacted_defects,
+                open_defects=graph.risk_signals.open_defects,
+                high_severity_defects=graph.risk_signals.high_severity_defects,
+                uncovered_requirements=graph.risk_signals.uncovered_requirements,
+            ),
+        )
+
+        # The deterministic graph above always runs. The (paid) AI risk
+        # assessment only fires when there is something worth spending tokens on:
+        # an actual change to assess, a project with artifacts, the project's
+        # ask_ai feature on, a configured provider, and at least one impacted
+        # item. When the editor re-analyzes an unchanged draft, ``candidate_markdown``
+        # equals the stored content (``changed`` is False) — so no AI request is sent.
+        total_items = len(graph.requirements) + len(graph.test_cases) + len(graph.defects)
+        if not payload.include_ai:
+            result.ai_skipped_reason = "disabled_by_request"
+        elif doc.project_id is None:
+            result.ai_skipped_reason = "global_doc"
+        elif payload.candidate_markdown is not None and not graph.change_summary.changed:
+            result.ai_skipped_reason = "no_changes"
+        elif total_items == 0:
+            result.ai_skipped_reason = "no_impacted_items"
+        else:
+            if project is not None and not is_feature_enabled(project, "ask_ai"):
+                result.ai_skipped_reason = "ask_ai_disabled"
+            elif not get_ai_manager_status(db).get("available"):
+                result.ai_skipped_reason = "ai_unavailable"
+            else:
+                result.ai_available = True
+                impacted_items = [
+                    {"type": i.type, "key": i.key, "title": i.title, "reason": i.reason,
+                     "severity": i.severity, "status": i.status}
+                    for i in (graph.requirements + graph.test_cases + graph.defects)
+                ]
+                change_summary = {
+                    "changed": graph.change_summary.changed,
+                    "note": graph.change_summary.note,
+                    "headings_added": graph.change_summary.headings_added,
+                    "headings_removed": graph.change_summary.headings_removed,
+                    "char_delta": graph.change_summary.char_delta,
+                }
+                try:
+                    # Cancel the (paid) AI call if the client disconnects — e.g.
+                    # the user closes the dialog — so it doesn't keep running.
+                    completion = await _cancel_on_disconnect(
+                        request,
+                        generate_ai_completion(
+                            db,
+                            AICompletionRequest(
+                                prompt=build_doc_impact_prompt(doc.title, change_summary, impacted_items),
+                                max_tokens=1200, temperature=0.2, timeout_seconds=120,
+                            ),
+                            operation="doc_change_impact",
+                            project_id=doc.project_id, user_id=current_user.id,
+                            entity_type="doc", entity_id=doc.id,
+                        ),
+                    )
+                    summary, recommendation, risks = _parse_impact_ai(completion.content)
+                    result.ai_summary = summary
+                    result.recommendation = recommendation
+                    result.risks = risks
+                    result.provider = completion.provider
+                    result.model = completion.model
+                except HTTPException as exc:
+                    logger.warning("Doc impact AI assessment failed for doc %s: %s", doc.id, exc.detail)
+                    result.ai_available = False
+                    result.ai_skipped_reason = "ai_error"
+                except Exception as exc:  # parsing or unexpected provider error
+                    logger.warning("Doc impact AI assessment errored for doc %s: %s", doc.id, exc)
+                    result.ai_available = False
+                    result.ai_skipped_reason = "ai_error"
+
+        _audit_doc_impact(db, current_user, doc)
+        return result
 
     # --- internal helpers bound to the request scope -----------------------
 

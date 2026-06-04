@@ -4850,3 +4850,67 @@ class DocConvertResult(BaseModel):
 
 DocConvertRequest.model_rebuild()
 DocConvertResult.model_rebuild()
+
+
+# --- Change impact analysis ------------------------------------------------- #
+
+class DocImpactRequest(BaseModel):
+    # The unsaved editor draft, so the editor can analyze *before* saving. When
+    # omitted, the doc's currently-stored content is analyzed.
+    candidate_markdown: Optional[str] = Field(default=None, max_length=200_000)
+    include_ai: bool = True
+
+
+class DocImpactItem(BaseModel):
+    type: str                       # requirement | test_case | defect
+    id: int
+    key: str
+    title: str
+    reason: str                     # linked | similar
+    score: float = 0.0
+    status: Optional[str] = None
+    severity: Optional[str] = None
+    is_open: Optional[bool] = None
+
+
+class DocImpactChangeSummary(BaseModel):
+    changed: bool = False
+    headings_added: List[str] = Field(default_factory=list)
+    headings_removed: List[str] = Field(default_factory=list)
+    char_delta: int = 0
+    note: str = ""
+
+
+class DocImpactRiskSignals(BaseModel):
+    impacted_requirements: int = 0
+    impacted_test_cases: int = 0
+    impacted_defects: int = 0
+    open_defects: int = 0
+    high_severity_defects: int = 0
+    uncovered_requirements: int = 0
+
+
+class DocImpactRisk(BaseModel):
+    area: str = "general"           # requirements | tests | defects | general
+    severity: str = "medium"        # low | medium | high
+    title: str
+    detail: str = ""
+    mitigation: str = ""
+
+
+class DocImpactAnalysis(BaseModel):
+    doc_id: int
+    project_id: Optional[int] = None
+    change_summary: DocImpactChangeSummary
+    requirements: List[DocImpactItem] = Field(default_factory=list)
+    test_cases: List[DocImpactItem] = Field(default_factory=list)
+    defects: List[DocImpactItem] = Field(default_factory=list)
+    risk_signals: DocImpactRiskSignals
+    # AI risk assessment (best-effort; absent when AI is off/unavailable).
+    ai_available: bool = False
+    ai_skipped_reason: Optional[str] = None
+    ai_summary: Optional[str] = None
+    recommendation: Optional[str] = None  # publish | review | hold
+    risks: List[DocImpactRisk] = Field(default_factory=list)
+    provider: Optional[str] = None
+    model: Optional[str] = None

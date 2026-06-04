@@ -404,6 +404,70 @@ def build_doc_qa_prompt(
     return prompt
 
 
+_DOC_IMPACT_INSTRUCTIONS = (
+    "You are a senior QA risk analyst. A documentation page is about to change. "
+    "Using the change summary and the impacted project items below (TOON format: the "
+    "header `items[N]{cols}:` names the columns, each following line is one item; "
+    "`type` is requirement/test_case/defect, `reason` is linked or similar), assess the "
+    "risk of publishing this change. Focus on requirements that may now be inaccurate, "
+    "test cases that may need re-validation, and defects that the change could affect. "
+    "Be specific and concise; do not invent items that are not listed.\n"
+    'Return JSON only: {"summary": "string (1-3 sentences)", '
+    '"recommendation": "publish|review|hold", '
+    '"risks": [{"area": "requirements|tests|defects|general", '
+    '"severity": "low|medium|high", "title": "string", "detail": "string", '
+    '"mitigation": "string"}]}'
+)
+
+
+def build_doc_impact_prompt(
+    doc_title: str,
+    change_summary: dict[str, Any],
+    impacted_items: list[dict[str, Any]],
+) -> str:
+    """Prompt for assessing the risk of publishing a doc change.
+
+    ``impacted_items`` are the deterministically-derived rows (requirements, test
+    cases, defects), each a flat dict with ``type``/``key``/``title``/``reason``
+    (plus ``severity``/``status`` for defects). They are packed into one TOON
+    table within :data:`QA_PROMPT_CHAR_CEILING`; least-important rows (callers
+    pass them ordered) are dropped from the end until the prompt fits."""
+    title = clean_ai_text(doc_title, 200)
+    summary_lines = [f"Document: {title}", f"Change: {clean_ai_text(change_summary.get('note'), 300)}"]
+    if change_summary.get("changed"):
+        added = ", ".join(str(h) for h in (change_summary.get("headings_added") or [])[:15])
+        removed = ", ".join(str(h) for h in (change_summary.get("headings_removed") or [])[:15])
+        if added:
+            summary_lines.append(f"Sections added: {added}")
+        if removed:
+            summary_lines.append(f"Sections removed: {removed}")
+        summary_lines.append(f"Character delta: {int(change_summary.get('char_delta') or 0)}")
+    summary_block = "\n".join(summary_lines)
+
+    def _row(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "type": item.get("type") or "",
+            "key": clean_ai_text(item.get("key"), 50),
+            "title": clean_ai_text(item.get("title"), 200),
+            "reason": item.get("reason") or "",
+            "severity": item.get("severity") or "",
+            "status": item.get("status") or "",
+        }
+
+    def assemble(rows: list[dict[str, Any]]) -> str:
+        table = encode_toon({"items": rows}) if rows else "items[0]:"
+        return f"{_DOC_IMPACT_INSTRUCTIONS}\n\n{summary_block}\n\n{table}".strip()
+
+    rows = [_row(item) for item in impacted_items]
+    prompt = assemble(rows)
+    while len(prompt) > QA_PROMPT_CHAR_CEILING and len(rows) > 1:
+        rows = rows[:-1]
+        prompt = assemble(rows)
+    if len(prompt) > QA_PROMPT_CHAR_CEILING:
+        prompt = prompt[:QA_PROMPT_CHAR_CEILING]
+    return prompt
+
+
 def build_test_case_context(test_case: Any, steps: list[Any]) -> str:
     step_text = "\n".join(
         f"{step.step_number}. {step.action} => {step.expected_result}"
