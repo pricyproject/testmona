@@ -4895,6 +4895,8 @@ class DocImpactItem(BaseModel):
     status: Optional[str] = None
     severity: Optional[str] = None
     is_open: Optional[bool] = None
+    # Requirement key(s) a test case / defect was reached through.
+    via: List[str] = Field(default_factory=list)
 
 
 class DocImpactChangeSummary(BaseModel):

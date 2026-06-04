@@ -486,7 +486,7 @@ def _impact_item(item: doc_impact_service.ImpactItem) -> schemas.DocImpactItem:
     return schemas.DocImpactItem(
         type=item.type, id=item.id, key=item.key, title=item.title,
         reason=item.reason, score=item.score, status=item.status,
-        severity=item.severity, is_open=item.is_open,
+        severity=item.severity, is_open=item.is_open, via=item.via,
     )
 
 
@@ -1856,7 +1856,8 @@ def register_docs_routes(app) -> None:
                 result.ai_available = True
                 impacted_items = [
                     {"type": i.type, "key": i.key, "title": i.title, "reason": i.reason,
-                     "severity": i.severity, "status": i.status}
+                     "severity": i.severity, "status": i.status,
+                     "via": ", ".join(i.via) if i.via else ""}
                     for i in (graph.requirements + graph.test_cases + graph.defects)
                 ]
                 change_summary = {

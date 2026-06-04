@@ -61,6 +61,9 @@ class ImpactItem:
     status: Optional[str] = None
     severity: Optional[str] = None
     is_open: Optional[bool] = None
+    # For test cases / defects: the requirement key(s) this item was pulled in
+    # through, so the reader can see *why* it is here (e.g. ["REQ-001"]).
+    via: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -243,6 +246,10 @@ def analyze_doc_impact(
         ))
 
     impacted_req_ids = [item.id for item in impacted_requirements]
+    # How each impacted requirement reached the doc, so we can propagate that
+    # confidence down to its tests/defects rather than calling everything "linked".
+    req_reason_by_id = {item.id: item.reason for item in impacted_requirements}
+    req_key_by_id = {item.id: item.key for item in impacted_requirements}
 
     # Requirements → test cases (traceability matrix + association + legacy refs).
     test_cases = _project_test_cases(db, project_id)
@@ -253,19 +260,33 @@ def analyze_doc_impact(
     add_legacy_reference_links(linked_tc_map, impacted_reqs, test_cases)
     covered_req_ids = {rid for rid, ids in linked_tc_map.items() if ids}
 
-    impacted_tc_ids: set[int] = set()
-    for ids in linked_tc_map.values():
-        impacted_tc_ids.update(ids)
+    # Invert requirement→test-case to find each test case's parent requirement(s).
+    tc_parent_reqs: dict[int, set[int]] = {}
+    for rid, tc_ids in linked_tc_map.items():
+        for tc_id in tc_ids:
+            tc_parent_reqs.setdefault(tc_id, set()).add(rid)
+    impacted_tc_ids = set(tc_parent_reqs.keys())
+
+    def _provenance(req_ids: set[int]) -> tuple[str, List[str]]:
+        """Derive a (reason, via-keys) pair from the parent requirements: a child
+        is only as strong as its strongest parent — ``linked`` if any parent is
+        directly linked to the doc, otherwise ``similar``."""
+        reason = "linked" if any(req_reason_by_id.get(r) == "linked" for r in req_ids) else "similar"
+        via = sorted(req_key_by_id[r] for r in req_ids if r in req_key_by_id)
+        return reason, via
 
     impacted_test_cases: List[ImpactItem] = []
     for tc_id in sorted(impacted_tc_ids):
         tc = tc_by_id.get(tc_id)
         if tc is None:
             continue
+        reason, via = _provenance(tc_parent_reqs.get(tc_id, set()))
         impacted_test_cases.append(ImpactItem(
             type="test_case", id=tc.id,
-            key=tc.reference or f"TC-{tc.id}",
-            title=tc.title or "", reason="linked",
+            # The test case's own identifier — NOT ``tc.reference``, which in this
+            # schema is a free-text field that often holds the requirement code.
+            key=f"TC-{tc.id}",
+            title=tc.title or "", reason=reason, via=via,
         ))
 
     # Requirements / test cases → defects.
@@ -291,10 +312,17 @@ def analyze_doc_impact(
                 open_defects += 1
             if severity in ("high", "critical") and is_open:
                 high_severity_defects += 1
+            # A defect traces to the doc through its requirement and/or its test
+            # case's requirement(s); inherit the strongest of those.
+            parent_reqs: set[int] = set()
+            if d.requirement_id in req_reason_by_id:
+                parent_reqs.add(d.requirement_id)
+            parent_reqs.update(tc_parent_reqs.get(d.test_case_id, set()))
+            reason, via = _provenance(parent_reqs)
             impacted_defects.append(ImpactItem(
                 type="defect", id=d.id, key=d.defect_id or f"DEF-{d.id}",
-                title=d.title or "", reason="linked",
-                status=status, severity=severity, is_open=is_open,
+                title=d.title or "", reason=reason,
+                status=status, severity=severity, is_open=is_open, via=via,
             ))
         # Open + high-severity first, so the most actionable defects lead.
         impacted_defects.sort(key=lambda i: (not i.is_open, i.severity != "critical", i.severity != "high"))

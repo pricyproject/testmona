@@ -408,9 +408,12 @@ _DOC_IMPACT_INSTRUCTIONS = (
     "You are a senior QA risk analyst. A documentation page is about to change. "
     "Using the change summary and the impacted project items below (TOON format: the "
     "header `items[N]{cols}:` names the columns, each following line is one item; "
-    "`type` is requirement/test_case/defect, `reason` is linked or similar), assess the "
+    "`type` is requirement/test_case/defect, `reason` is linked or similar, and `via` "
+    "names the requirement(s) a test/defect was reached through), assess the "
     "risk of publishing this change. Focus on requirements that may now be inaccurate, "
     "test cases that may need re-validation, and defects that the change could affect. "
+    "Items with reason `similar` (or reached only `via` a similar requirement) are "
+    "weaker, more speculative matches — weight them lower than directly `linked` items. "
     "Be specific and concise; do not invent items that are not listed.\n"
     'Return JSON only: {"summary": "string (1-3 sentences)", '
     '"recommendation": "publish|review|hold", '
@@ -450,6 +453,7 @@ def build_doc_impact_prompt(
             "key": clean_ai_text(item.get("key"), 50),
             "title": clean_ai_text(item.get("title"), 200),
             "reason": item.get("reason") or "",
+            "via": clean_ai_text(item.get("via"), 100),
             "severity": item.get("severity") or "",
             "status": item.get("status") or "",
         }

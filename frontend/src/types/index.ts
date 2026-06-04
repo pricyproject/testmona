@@ -1034,6 +1034,7 @@ export interface DocImpactItem {
   status?: string | null;
   severity?: string | null;
   is_open?: boolean | null;
+  via?: string[];
 }
 
 export interface DocImpactChangeSummary {
