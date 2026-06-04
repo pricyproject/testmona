@@ -34,6 +34,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { aiManagerAPI, AIManagerStatus, AISourceType, projectAssignmentsAPI, requirementChatAPI } from '@/lib/api';
 import { RequirementChatAskResponse, RequirementChatConversation, RequirementChatMessage } from '@/types';
+import { useProjectStore } from '@/stores/projectStore';
+import { isFeatureEnabled } from '@/lib/projectFeatures';
 
 export type ChatScopeMode = 'requirements' | 'all';
 
@@ -49,6 +51,17 @@ interface RequirementChatProps {
 
 const STARTER_KEYS = ['reqChatStarter1', 'reqChatStarter2', 'reqChatStarter3'] as const;
 const SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases'];
+
+// Ask AI source type -> the project feature toggle that gates it. A source whose
+// entity module is disabled for the project is hidden from the scope selector
+// (the backend also refuses to retrieve from it). Mirrors Advanced Search.
+const SOURCE_FEATURE: Record<string, string> = {
+  requirements: 'requirements',
+  defects: 'defects',
+  test_plans: 'test_plans',
+  test_cases: 'test_cases',
+  docs: 'doc_hub',
+};
 
 interface ProjectMemberOption {
   user_id: number;
@@ -103,7 +116,19 @@ export function RequirementChat({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const deepLinkRef = useRef<string | null>(initialPublicId ?? null);
 
-  const adminEnabled = aiStatus?.requirement_chat_source_types ?? [];
+  // Restrict the admin-enabled sources to entity modules that are enabled for
+  // this project, so disabled features never appear as a selectable scope.
+  const projects = useProjectStore((s) => s.projects);
+  const projectFeatures = useMemo(
+    () => projects.find((p) => p.id === projectId)?.features,
+    [projects, projectId],
+  );
+  const adminEnabled = useMemo(
+    () => (aiStatus?.requirement_chat_source_types ?? []).filter(
+      (s) => isFeatureEnabled(projectFeatures, SOURCE_FEATURE[s] ?? s),
+    ),
+    [aiStatus, projectFeatures],
+  );
   // In requirements-only mode the assistant is locked to requirements regardless
   // of what the admin enabled project-wide.
   const enabledSources: AISourceType[] = scopeMode === 'requirements' ? ['requirements'] : adminEnabled;

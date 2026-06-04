@@ -190,6 +190,29 @@ def _effective_source_types(requested, enabled: list) -> list:
     return narrowed or enabled
 
 
+# Ask AI retrieval source types -> the project feature toggle that gates them.
+# A source whose entity module is disabled for the project is dropped, so the
+# assistant can't pull context from a disabled feature (mirrors Advanced Search).
+_SOURCE_TYPE_FEATURE = {
+    "requirements": "requirements",
+    "defects": "defects",
+    "test_plans": "test_plans",
+    "test_cases": "test_cases",
+    "docs": "doc_hub",
+}
+
+
+def _enabled_source_types(project, source_types) -> list:
+    """Drop sources whose feature is disabled for ``project``."""
+    if project is None:
+        return list(source_types or [])
+    return [
+        t for t in (source_types or [])
+        if _SOURCE_TYPE_FEATURE.get(t) is None
+        or is_feature_enabled(project, _SOURCE_TYPE_FEATURE[t])
+    ]
+
+
 def _share_not_expired(conversation) -> bool:
     expires_at = _as_aware(getattr(conversation, "share_expires_at", None))
     return expires_at is None or expires_at > _utcnow()
@@ -214,9 +237,27 @@ async def _produce_answer(db: Session, project_id: int, current_user, question: 
     turns. Returns answer text, typed sources, prompt tokens, and retrieval
     stats. Shared by the ask and regenerate endpoints. Persists nothing."""
     last_user_turn = next((m.content for m in reversed(prior_messages) if m.role == "user"), None)
+
+    # Restrict retrieval to entity modules enabled for this project so the
+    # assistant can't surface data from a disabled feature.
+    requested_sources = source_types if source_types is not None else chat_settings["source_types"]
+    effective_sources = _enabled_source_types(crud.get_project(db, project_id), requested_sources)
+
+    if not effective_sources:
+        # Every usable source is disabled for this project — answer with the
+        # empty-scope message rather than the retriever's default-to-requirements
+        # fallback, and without spending AI tokens.
+        empty = DocRetrievalResult(
+            selected=[], considered=0, truncated=False,
+            source_counts={t: 0 for t in SOURCE_TYPES},
+            selected_counts={t: 0 for t in SOURCE_TYPES}, best_score=0.0,
+        )
+        return {"answer": _EMPTY_SCOPE_ANSWER, "sources": [], "prompt_tokens": 0,
+                "retrieval": empty, "truncated": False}
+
     retrieval = retrieve_relevant_docs(
         db, project_id, question,
-        source_types=source_types or chat_settings["source_types"],
+        source_types=effective_sources,
         extra_context=last_user_turn,
         max_docs=chat_settings["max_context_requirements"],
     )
