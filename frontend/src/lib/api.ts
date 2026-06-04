@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocShareInfo, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocImpactRequest, DocImpactAnalysis } from "@/types";
 import { useAuthStore } from "@/stores/authStore";
 
 // System Settings API
@@ -914,6 +914,14 @@ export const docsAPI = {
   },
   convert: async (id: number, payload: DocConvertRequest): Promise<DocConvertResult> => {
     const response = await api.post(`/docs/${id}/convert-to-requirements`, payload);
+    return response.data;
+  },
+
+  // Change impact analysis (AI risk assessment can take a while — longer timeout).
+  // Accepts an AbortSignal so the caller can cancel the (paid) AI request when
+  // the user closes the dialog before it finishes.
+  analyzeImpact: async (id: number, payload: DocImpactRequest = {}, signal?: AbortSignal): Promise<DocImpactAnalysis> => {
+    const response = await api.post(`/docs/${id}/impact-analysis`, payload, { timeout: 130000, signal });
     return response.data;
   },
 

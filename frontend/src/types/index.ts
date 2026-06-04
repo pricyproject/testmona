@@ -1005,3 +1005,64 @@ export interface DocConvertResult {
   created: Requirement[];
   links: DocRequirementLink[];
 }
+
+// --- Change impact analysis ---
+
+export interface DocImpactRequest {
+  candidate_markdown?: string | null;
+  include_ai?: boolean;
+}
+
+export interface DocImpactItem {
+  type: 'requirement' | 'test_case' | 'defect';
+  id: number;
+  key: string;
+  title: string;
+  reason: 'linked' | 'similar';
+  score: number;
+  status?: string | null;
+  severity?: string | null;
+  is_open?: boolean | null;
+}
+
+export interface DocImpactChangeSummary {
+  changed: boolean;
+  headings_added: string[];
+  headings_removed: string[];
+  char_delta: number;
+  note: string;
+}
+
+export interface DocImpactRiskSignals {
+  impacted_requirements: number;
+  impacted_test_cases: number;
+  impacted_defects: number;
+  open_defects: number;
+  high_severity_defects: number;
+  uncovered_requirements: number;
+}
+
+export interface DocImpactRisk {
+  area: 'requirements' | 'tests' | 'defects' | 'general';
+  severity: 'low' | 'medium' | 'high';
+  title: string;
+  detail: string;
+  mitigation: string;
+}
+
+export interface DocImpactAnalysis {
+  doc_id: number;
+  project_id?: number | null;
+  change_summary: DocImpactChangeSummary;
+  requirements: DocImpactItem[];
+  test_cases: DocImpactItem[];
+  defects: DocImpactItem[];
+  risk_signals: DocImpactRiskSignals;
+  ai_available: boolean;
+  ai_skipped_reason?: string | null;
+  ai_summary?: string | null;
+  recommendation?: 'publish' | 'review' | 'hold' | null;
+  risks: DocImpactRisk[];
+  provider?: string | null;
+  model?: string | null;
+}

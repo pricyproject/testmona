@@ -10,6 +10,7 @@ import {
   PanelRightOpen,
   Save,
   Settings2,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ContentEditor } from '@/components/ui/content-editor';
+import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI, projectAssignmentsAPI } from '@/lib/api';
@@ -53,6 +55,10 @@ export function DocEditor() {
   const [members, setMembers] = useState<Array<{ user_id: number; username: string; full_name?: string | null }>>([]);
   const [showMeta, setShowMeta] = useState(true);
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [impactOpen, setImpactOpen] = useState(false);
+  // Impact analysis is only meaningful once the doc has linked requirements to
+  // trace through; hide the entry point otherwise.
+  const [hasLinkedRequirements, setHasLinkedRequirements] = useState(false);
 
   // Editable fields
   const [title, setTitle] = useState('');
@@ -105,15 +111,17 @@ export function DocEditor() {
           dir: (data.dir as DocDir) || 'auto',
           folderId: data.folder_id ?? null,
         });
-        const [sp, fl, docs] = await Promise.all([
+        const [sp, fl, docs, reqLinks] = await Promise.all([
           docsAPI.getSpace(data.space_id).catch(() => null),
           docsAPI.listFolders(data.space_id).catch(() => []),
           docsAPI.list({ spaceId: data.space_id, sort: 'title', limit: 100 }).catch(() => []),
+          docsAPI.listRequirementLinks(data.id).catch(() => []),
         ]);
         if (cancelled) return;
         setSpace(sp);
         setFolders(fl);
         setSpaceDocs(docs.filter((item) => item.id !== data.id));
+        setHasLinkedRequirements(reqLinks.length > 0);
       } catch {
         toast({ title: t('error'), description: t('docLoadFailed'), variant: 'destructive' });
       } finally {
@@ -238,6 +246,12 @@ export function DocEditor() {
           <Eye className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('docReadingView')}
         </Button>
+        {hasLinkedRequirements && (
+          <Button variant="outline" size="sm" onClick={() => setImpactOpen(true)} title={t('docImpactBeforePublish')}>
+            <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+            {t('docImpactAnalyze')}
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={() => void save()} disabled={saveState === 'saving' || currentSnapshot === savedRef.current || !title.trim()}>
           <Save className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('save')}
@@ -335,6 +349,10 @@ export function DocEditor() {
           </aside>
         )}
       </div>
+
+      {impactOpen && (
+        <DocImpactDialog doc={doc} open={impactOpen} onOpenChange={setImpactOpen} candidateMarkdown={content} />
+      )}
     </div>
   );
 }

@@ -20,6 +20,7 @@ import {
   Pencil,
   RotateCcw,
   Share2,
+  Sparkles,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -47,6 +48,7 @@ import { sanitizeHtml } from '@/lib/sanitize';
 import { DocVersionHistory } from '@/components/docs/DocVersionHistory';
 import { DocRelatedSection } from '@/components/docs/DocRelatedSection';
 import { ConvertDocDialog } from '@/components/docs/ConvertDocDialog';
+import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI } from '@/lib/api';
@@ -87,6 +89,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     DOC_TABS.includes(queryTab as DocTab) ? (queryTab as DocTab) : initialTab,
   );
   const [convertOpen, setConvertOpen] = useState(false);
+  const [impactOpen, setImpactOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareInfo, setShareInfo] = useState<DocShareInfo | null>(null);
   const [shareSaving, setShareSaving] = useState(false);
@@ -357,6 +360,12 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           <Button variant="outline" size="sm" onClick={openShare}>
             <Share2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             {t('share')}
+          </Button>
+        )}
+        {links.length > 0 && (
+          <Button variant="outline" size="sm" onClick={() => setImpactOpen(true)}>
+            <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+            {t('docImpactAnalyze')}
           </Button>
         )}
         <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
@@ -645,6 +654,10 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           onOpenChange={setConvertOpen}
           onConverted={() => { setTab('links'); load(); }}
         />
+      )}
+
+      {impactOpen && (
+        <DocImpactDialog doc={doc} open={impactOpen} onOpenChange={setImpactOpen} />
       )}
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
