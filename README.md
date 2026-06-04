@@ -1,5 +1,7 @@
 # TestMona | AI Test Management System
 
+[![Product Hunt](https://img.shields.io/badge/Product_Hunt-TestMona-FF5521?style=for-the-badge&logo=producthunt)](https://www.producthunt.com/products/testmona?utm_source=other&utm_medium=social)
+
 TestMona is an AI-powered, full-stack test management platform for organizing QA
 across projects — requirements, test cases, suites, runs, defects, milestones, and
 reports — with a built-in Doc Hub, an advanced query language, and AI assistance.
