@@ -308,6 +308,33 @@
       }
     },
     {
+      "name": "Pin Doc",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pinned\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/docs/{{docId}}/pin",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "docs",
+            "{{docId}}",
+            "pin"
+          ]
+        }
+      }
+    },
+    {
       "name": "Update Doc",
       "request": {
         "method": "PUT",

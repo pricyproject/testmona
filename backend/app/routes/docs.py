@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from .. import crud, crud_docs, models, rbac, schemas
+from ..feature_guard import require_project_feature
 from ..auth import get_current_active_user
 from ..database import get_db
 from ..services import doc_conversion_service as conv
@@ -151,6 +152,18 @@ def _author(user: Optional[models.User]) -> Optional[schemas.DocVersionAuthor]:
 def _doc_out(doc: models.Doc, user: models.User, db: Session) -> schemas.Doc:
     """Serialize a doc with the current user's capability flags."""
     out = schemas.Doc.model_validate(doc)
+    visit = (
+        db.query(models.DocVisit)
+        .filter(models.DocVisit.doc_id == doc.id, models.DocVisit.user_id == user.id)
+        .first()
+    )
+    out.my_last_visited_at = visit.last_visited_at if visit else None
+    out.is_pinned = (
+        db.query(models.DocPin.id)
+        .filter(models.DocPin.doc_id == doc.id, models.DocPin.user_id == user.id)
+        .first()
+        is not None
+    )
     out.can_edit = _can_access(user, doc.project_id, "write", db)
     out.can_delete = _can_access(user, doc.project_id, "delete", db)
     out.can_share = out.can_edit
@@ -276,6 +289,7 @@ def _list_item(doc: models.Doc) -> schemas.DocListItem:
         share_scope=doc.share_scope or "private",
         view_count=None,
         last_viewed_at=None,
+        is_pinned=False,
         created_by=doc.created_by,
         updated_by=doc.updated_by,
         created_at=doc.created_at,
@@ -572,7 +586,8 @@ def register_docs_routes(app) -> None:
         )
 
     # ── Docs list/create (literal /docs) ────────────────────────────────────
-    @app.get("/docs", response_model=List[schemas.DocListItem], tags=["Docs"])
+    @app.get("/docs", response_model=List[schemas.DocListItem], tags=["Docs"],
+             dependencies=[Depends(require_project_feature("doc_hub"))])
     def list_docs(
         response: Response,
         space_id: Optional[int] = Query(None, ge=1),
@@ -583,6 +598,8 @@ def register_docs_routes(app) -> None:
         tag: Optional[str] = Query(None),
         q: Optional[str] = Query(None),
         include_global: bool = Query(False),
+        pinned_only: bool = Query(False),
+        visited_only: bool = Query(False),
         sort: str = Query("latest_edited", pattern="^(latest_edited|latest_visited|created|title)$"),
         skip: int = Query(0, ge=0),
         limit: int = Query(50, ge=1, le=200),
@@ -619,12 +636,15 @@ def register_docs_routes(app) -> None:
             q=normalized_q,
             include_global=include_global,
             global_only=global_only,
+            pinned_only=pinned_only,
+            visited_only=visited_only,
+            user_id=current_user.id,
         )
         # Total for pagination — exposed as a header so the body stays a plain list.
         total = crud_docs.count_docs(db, **filter_kwargs)
         response.headers["X-Total-Count"] = str(total)
         docs = crud_docs.list_docs(
-            db, **filter_kwargs, sort=sort, user_id=current_user.id, skip=skip, limit=limit,
+            db, **filter_kwargs, sort=sort, skip=skip, limit=limit,
         )
         visit_rows = (
             db.query(models.DocVisit)
@@ -632,17 +652,25 @@ def register_docs_routes(app) -> None:
             .all()
         )
         visits = {visit.doc_id: visit.last_visited_at for visit in visit_rows}
+        pin_rows = (
+            db.query(models.DocPin.doc_id)
+            .filter(models.DocPin.user_id == current_user.id, models.DocPin.doc_id.in_([d.id for d in docs] or [0]))
+            .all()
+        )
+        pinned_ids = {row.doc_id for row in pin_rows}
         items = []
         for d in docs:
             item = _list_item(d)
             item.my_last_visited_at = visits.get(d.id)
+            item.is_pinned = d.id in pinned_ids
             if _is_admin(current_user):
                 item.view_count = d.view_count or 0
                 item.last_viewed_at = d.last_viewed_at
             items.append(item)
         return items
 
-    @app.post("/docs", response_model=schemas.Doc, status_code=201, tags=["Docs"])
+    @app.post("/docs", response_model=schemas.Doc, status_code=201, tags=["Docs"],
+              dependencies=[Depends(require_project_feature("doc_hub"))])
     def create_doc(
         payload: schemas.DocCreate,
         db: Session = Depends(get_db),
@@ -686,6 +714,35 @@ def register_docs_routes(app) -> None:
         _require(current_user, doc.project_id, "read", db)
         _record_visit(db, doc, current_user)
         return _doc_out(doc, current_user, db)
+
+    @app.put("/docs/{doc_id}/pin", response_model=schemas.DocListItem, tags=["Docs"])
+    def set_doc_pin(
+        payload: schemas.DocPinUpdate,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        try:
+            crud_docs.set_doc_pin(db, doc.id, current_user.id, payload.pinned)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Could not update doc pin for doc %s/user %s", doc.id, current_user.id)
+            raise HTTPException(status_code=500, detail="Could not update document pin") from exc
+
+        item = _list_item(doc)
+        item.is_pinned = payload.pinned
+        visit = (
+            db.query(models.DocVisit)
+            .filter(models.DocVisit.doc_id == doc.id, models.DocVisit.user_id == current_user.id)
+            .first()
+        )
+        item.my_last_visited_at = visit.last_visited_at if visit else None
+        if _is_admin(current_user):
+            item.view_count = doc.view_count or 0
+            item.last_viewed_at = doc.last_viewed_at
+        return item
 
     @app.put("/docs/{doc_id}", response_model=schemas.Doc, tags=["Docs"])
     def update_doc(

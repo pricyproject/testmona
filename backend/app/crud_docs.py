@@ -360,6 +360,8 @@ def list_docs(
     q: Optional[str] = None,
     include_global: bool = False,
     global_only: bool = False,
+    pinned_only: bool = False,
+    visited_only: bool = False,
     sort: str = "latest_edited",
     user_id: Optional[int] = None,
     skip: int = 0,
@@ -371,11 +373,20 @@ def list_docs(
         space_id, project_id, folder_id, classification, status, tag, q, include_global, global_only,
     )
     query = db.query(*_list_columns()).filter(*conds)
-    if sort == "latest_visited" and user_id is not None:
+    if user_id is not None and (sort == "latest_visited" or visited_only):
         query = query.outerjoin(
             models.DocVisit,
             (models.DocVisit.doc_id == D.id) & (models.DocVisit.user_id == user_id),
-        ).order_by(desc(models.DocVisit.last_visited_at).nullslast(), D.updated_at.desc().nullslast(), D.id.desc())
+        )
+        if visited_only:
+            query = query.filter(models.DocVisit.id.isnot(None))
+    if user_id is not None and pinned_only:
+        query = query.join(
+            models.DocPin,
+            (models.DocPin.doc_id == D.id) & (models.DocPin.user_id == user_id),
+        )
+    if sort == "latest_visited" and user_id is not None:
+        query = query.order_by(desc(models.DocVisit.last_visited_at).nullslast(), D.updated_at.desc().nullslast(), D.id.desc())
     elif sort == "title":
         query = query.order_by(D.title.asc(), D.id.desc())
     elif sort == "created":
@@ -396,11 +407,39 @@ def count_docs(
     q: Optional[str] = None,
     include_global: bool = False,
     global_only: bool = False,
+    pinned_only: bool = False,
+    visited_only: bool = False,
+    user_id: Optional[int] = None,
 ) -> int:
     conds = _doc_filter_conditions(
         space_id, project_id, folder_id, classification, status, tag, q, include_global, global_only,
     )
-    return db.query(func.count(models.Doc.id)).filter(*conds).scalar() or 0
+    query = db.query(func.count(models.Doc.id)).filter(*conds)
+    if user_id is not None and pinned_only:
+        query = query.join(
+            models.DocPin,
+            (models.DocPin.doc_id == models.Doc.id) & (models.DocPin.user_id == user_id),
+        )
+    if user_id is not None and visited_only:
+        query = query.join(
+            models.DocVisit,
+            (models.DocVisit.doc_id == models.Doc.id) & (models.DocVisit.user_id == user_id),
+        )
+    return query.scalar() or 0
+
+
+def set_doc_pin(db: Session, doc_id: int, user_id: int, pinned: bool) -> bool:
+    pin = (
+        db.query(models.DocPin)
+        .filter(models.DocPin.doc_id == doc_id, models.DocPin.user_id == user_id)
+        .first()
+    )
+    if pinned and pin is None:
+        db.add(models.DocPin(doc_id=doc_id, user_id=user_id))
+    elif not pinned and pin is not None:
+        db.delete(pin)
+    safe_commit(db)
+    return pinned
 
 
 def _doc_tag_set(value: Optional[str]) -> set:

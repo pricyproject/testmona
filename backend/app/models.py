@@ -565,6 +565,10 @@ class Project(Base):
     description = Column(Text)
     owner_id = Column(Integer, ForeignKey("users.id"))
     status = Column(Enum(Status), default=Status.ACTIVE)
+    # Per-project feature toggles: {feature_key: bool}. NULL/missing keys mean
+    # enabled (see app.features). Lets admins/owners hide modules a project
+    # doesn't use (Doc Hub, Ask AI, Reports, ...).
+    features = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -2074,6 +2078,23 @@ class DocVisit(Base):
 
     __table_args__ = (
         UniqueConstraint("doc_id", "user_id", name="uq_doc_visit_user"),
+    )
+
+
+class DocPin(Base):
+    """Per-user pinned docs for quick access in the Doc Hub."""
+    __tablename__ = "doc_pins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    doc = relationship("Doc")
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("doc_id", "user_id", name="uq_doc_pin_user"),
     )
 
 

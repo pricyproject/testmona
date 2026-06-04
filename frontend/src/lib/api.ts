@@ -444,6 +444,14 @@ export const projectsAPI = {
     const response = await api.post(`/projects/${id}/clone`, payload);
     return response.data;
   },
+  getFeatures: async (id: number): Promise<{ features: Record<string, boolean>; catalog: string[] }> => {
+    const response = await api.get(`/projects/${id}/features`);
+    return response.data;
+  },
+  updateFeatures: async (id: number, features: Record<string, boolean>) => {
+    const response = await api.put(`/projects/${id}/features`, { features });
+    return response.data;
+  },
 };
 
 // Test Suites API
@@ -717,6 +725,8 @@ export interface DocListParams {
   tag?: string;
   q?: string;
   includeGlobal?: boolean;
+  pinnedOnly?: boolean;
+  visitedOnly?: boolean;
   sort?: 'latest_edited' | 'latest_visited' | 'created' | 'title';
   skip?: number;
   limit?: number;
@@ -731,6 +741,8 @@ const docListQuery = (params: DocListParams) => ({
   tag: params.tag,
   q: params.q,
   include_global: params.includeGlobal,
+  pinned_only: params.pinnedOnly,
+  visited_only: params.visitedOnly,
   sort: params.sort,
   skip: params.skip,
   limit: params.limit,
@@ -798,6 +810,10 @@ export const docsAPI = {
   },
   get: async (id: number): Promise<Doc> => {
     const response = await api.get(`/docs/${id}`);
+    return response.data;
+  },
+  setPinned: async (id: number, pinned: boolean): Promise<DocListItem> => {
+    const response = await api.put(`/docs/${id}/pin`, { pinned });
     return response.data;
   },
   create: async (payload: DocCreate): Promise<Doc> => {
@@ -2327,8 +2343,8 @@ export interface SavedSearch {
 }
 
 export const advancedSearchAPI = {
-  getEntities: async (): Promise<{ entities: AdvancedSearchEntity[] }> => {
-    const response = await api.get('/advanced-search/entities');
+  getEntities: async (projectId: number): Promise<{ entities: AdvancedSearchEntity[] }> => {
+    const response = await api.get(`/advanced-search/entities?project_id=${projectId}`);
     return response.data;
   },
   search: async (

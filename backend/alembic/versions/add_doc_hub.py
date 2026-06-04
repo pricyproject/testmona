@@ -180,6 +180,21 @@ def upgrade() -> None:
         op.create_index("ix_doc_visits_doc_id", "doc_visits", ["doc_id"])
         op.create_index("ix_doc_visits_user_id", "doc_visits", ["user_id"])
 
+    if not table_exists(connection, "doc_pins"):
+        op.create_table(
+            "doc_pins",
+            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("doc_id", sa.Integer(), nullable=False),
+            sa.Column("user_id", sa.Integer(), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+            sa.ForeignKeyConstraint(["doc_id"], ["docs.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("doc_id", "user_id", name="uq_doc_pin_user"),
+        )
+        op.create_index("ix_doc_pins_doc_id", "doc_pins", ["doc_id"])
+        op.create_index("ix_doc_pins_user_id", "doc_pins", ["user_id"])
+
     if not table_exists(connection, "doc_related_links"):
         op.create_table(
             "doc_related_links",
@@ -210,6 +225,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     connection = op.get_bind()
 
-    for table in ("doc_related_links", "doc_visits", "doc_requirement_links", "doc_versions", "docs", "doc_folders", "doc_spaces"):
+    for table in ("doc_related_links", "doc_pins", "doc_visits", "doc_requirement_links", "doc_versions", "docs", "doc_folders", "doc_spaces"):
         if table_exists(connection, table):
             op.drop_table(table)

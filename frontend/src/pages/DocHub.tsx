@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   BarChart3,
@@ -18,6 +18,7 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
   Plus,
   Search,
   SlidersHorizontal,
@@ -129,6 +130,8 @@ export function DocHub() {
   const [activeSpaceId, setActiveSpaceId] = useState<number | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<number | null>(null);
   const [docs, setDocs] = useState<DocListItem[]>([]);
+  const [pinnedDocs, setPinnedDocs] = useState<DocListItem[]>([]);
+  const [recentDocs, setRecentDocs] = useState<DocListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingSpaces, setLoadingSpaces] = useState(true);
   const [loadingDocs, setLoadingDocs] = useState(false);
@@ -166,6 +169,11 @@ export function DocHub() {
     (statusFilter !== 'all' ? 1 : 0) + (tagFilter.trim() ? 1 : 0) + (classificationFilter.trim() ? 1 : 0);
   const hasAnyFilter = activeFilterCount > 0 || !!search.trim() || scopeAll;
   const hasMore = docs.length < total;
+  const highlightParams = useMemo<DocListParams>(() => (
+    projectId
+      ? { projectId, includeGlobal: true, limit: 8 }
+      : { includeGlobal: false, limit: 8 }
+  ), [projectId]);
 
   const clearAllFilters = () => {
     setSearch('');
@@ -277,6 +285,22 @@ export function DocHub() {
   }, [scopeAll, activeSpaceId, queryParams, t, toast]);
 
   useEffect(() => { reloadDocs(); }, [reloadDocs]);
+
+  const loadDocHighlights = useCallback(async () => {
+    try {
+      const [pinned, recent] = await Promise.all([
+        docsAPI.list({ ...highlightParams, pinnedOnly: true, sort: 'latest_edited' }),
+        docsAPI.list({ ...highlightParams, visitedOnly: true, sort: 'latest_visited' }),
+      ]);
+      setPinnedDocs(pinned);
+      setRecentDocs(recent);
+    } catch {
+      setPinnedDocs([]);
+      setRecentDocs([]);
+    }
+  }, [highlightParams]);
+
+  useEffect(() => { loadDocHighlights(); }, [loadDocHighlights]);
 
   // Append the next page (infinite scroll / "Load more").
   const loadMore = useCallback(async () => {
@@ -451,6 +475,67 @@ export function DocHub() {
       toast({ title: t('error'), description: t('docExportFailed'), variant: 'destructive' });
     }
   };
+
+  const applyPinState = (docId: number, pinned: boolean) => {
+    const update = (item: DocListItem) => (item.id === docId ? { ...item, is_pinned: pinned } : item);
+    setDocs((prev) => prev.map(update));
+    setRecentDocs((prev) => prev.map(update));
+    setPinnedDocs((prev) => pinned ? prev.map(update) : prev.filter((item) => item.id !== docId));
+  };
+
+  const handleTogglePin = async (doc: DocListItem, event?: MouseEvent) => {
+    event?.stopPropagation();
+    const nextPinned = !doc.is_pinned;
+    applyPinState(doc.id, nextPinned);
+    try {
+      const updated = await docsAPI.setPinned(doc.id, nextPinned);
+      applyPinState(doc.id, updated.is_pinned);
+      await loadDocHighlights();
+    } catch {
+      applyPinState(doc.id, doc.is_pinned);
+      toast({ title: t('error'), description: t('docPinUpdateFailed'), variant: 'destructive' });
+    }
+  };
+
+  const renderDocPinButton = (doc: DocListItem, className = '') => (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className={`h-7 w-7 shrink-0 ${doc.is_pinned ? 'text-primary' : 'text-muted-foreground'} ${className}`}
+      title={doc.is_pinned ? t('docUnpin') : t('docPin')}
+      aria-label={doc.is_pinned ? t('docUnpin') : t('docPin')}
+      aria-pressed={doc.is_pinned}
+      onClick={(event) => handleTogglePin(doc, event)}
+    >
+      <Pin className={`h-4 w-4 ${doc.is_pinned ? 'fill-current' : ''}`} />
+    </Button>
+  );
+
+  const renderQuickDocs = (items: DocListItem[], emptyLabel: string) => (
+    items.length > 0 ? (
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {items.map((doc) => (
+          <button
+            key={doc.id}
+            type="button"
+            onClick={() => navigate(`${basePath}/${doc.id}`)}
+            className="min-w-[220px] max-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-start transition-colors hover:border-primary/40 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70"
+          >
+            <span className="mb-1 flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium" dir="auto">{doc.title}</span>
+              {doc.is_pinned && <Pin className="h-3.5 w-3.5 shrink-0 fill-current text-primary" />}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {doc.my_last_visited_at ? t('docVisitedTime', { time: formatRelativeTime(doc.my_last_visited_at) }) : t(`docStatus_${doc.status}` as any)}
+            </span>
+          </button>
+        ))}
+      </div>
+    ) : (
+      <p className="rounded-lg border border-dashed border-slate-200 px-3 py-2 text-sm text-muted-foreground dark:border-slate-800">{emptyLabel}</p>
+    )
+  );
 
   return (
     <div className="px-4 py-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -733,6 +818,23 @@ export function DocHub() {
             </div>
           </div>
 
+          {!loadingDocs && (
+            <div className="mb-4 grid gap-3 xl:grid-cols-2">
+              <div className="min-w-0">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Pin className="h-3.5 w-3.5 text-primary" />{t('docPinnedDocs')}
+                </div>
+                {renderQuickDocs(pinnedDocs, t('docNoPinnedDocs'))}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5 text-primary" />{t('docRecentlyViewed')}
+                </div>
+                {renderQuickDocs(recentDocs, t('docNoRecentDocs'))}
+              </div>
+            </div>
+          )}
+
           {/* Admin insights */}
           {isAdmin && insightsOpen && (
             <div className="mb-4 rounded-lg border border-slate-200 p-4 dark:border-slate-800">
@@ -817,6 +919,7 @@ export function DocHub() {
                     <th className="px-3 py-2 text-start font-medium">{t('status')}</th>
                     <th className="hidden px-3 py-2 text-start font-medium md:table-cell">{t('tags')}</th>
                     <th className="px-3 py-2 text-end font-medium">v</th>
+                    <th className="px-3 py-2 text-end font-medium">{t('docPinned')}</th>
                     <th className="hidden px-3 py-2 text-end font-medium sm:table-cell">
                       <button type="button" onClick={() => setSort('latest_edited')} className="inline-flex items-center gap-1 hover:text-foreground">
                         {t('docColUpdated')}
@@ -855,6 +958,7 @@ export function DocHub() {
                         </div>
                       </td>
                       <td className="px-3 py-2 text-end text-muted-foreground">{d.current_version}</td>
+                      <td className="px-3 py-2 text-end" onClick={(event) => event.stopPropagation()}>{renderDocPinButton(d)}</td>
                       <td className="hidden px-3 py-2 text-end text-xs text-muted-foreground sm:table-cell">{d.updated_at ? formatServerDateTime(d.updated_at) : '-'}</td>
                       {isAdmin && <td className="px-3 py-2 text-end text-muted-foreground"><span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{d.view_count ?? 0}</span></td>}
                     </tr>
@@ -865,11 +969,11 @@ export function DocHub() {
           ) : viewMode === 'list' ? (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
               {docs.map((d) => (
-                <li key={d.id}>
+                <li key={d.id} className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <button
                     type="button"
                     onClick={() => navigate(`${basePath}/${d.id}`)}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-start transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    className="flex min-w-0 flex-1 items-center gap-3 text-start"
                   >
                     <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate font-medium" dir="auto"><Highlight text={d.title} query={debouncedSearch} /></span>
@@ -882,6 +986,7 @@ export function DocHub() {
                     {d.updated_at && <span className="hidden shrink-0 text-xs text-muted-foreground md:inline" title={formatServerDateTime(d.updated_at)}>{formatRelativeTime(d.updated_at)}</span>}
                     <span className="shrink-0 text-xs text-muted-foreground">v{d.current_version}</span>
                   </button>
+                  {renderDocPinButton(d)}
                 </li>
               ))}
             </ul>
@@ -889,16 +994,26 @@ export function DocHub() {
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {docs.map((d) => (
                 <li key={d.id}>
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => navigate(`${basePath}/${d.id}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        navigate(`${basePath}/${d.id}`);
+                      }
+                    }}
                     className="flex h-full w-full flex-col rounded-lg border border-slate-200 bg-white p-4 text-start transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
                   >
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <h3 className="line-clamp-2 font-semibold leading-snug" dir="auto">
                         <Highlight text={d.title} query={debouncedSearch} />
                       </h3>
-                      <Badge className={`shrink-0 border-0 ${statusTone[d.status] || statusTone.draft}`}>{t(`docStatus_${d.status}` as any)}</Badge>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {renderDocPinButton(d, '-mt-1')}
+                        <Badge className={`border-0 ${statusTone[d.status] || statusTone.draft}`}>{t(`docStatus_${d.status}` as any)}</Badge>
+                      </div>
                     </div>
                     {d.excerpt && (
                       <p className="line-clamp-3 flex-1 text-sm text-muted-foreground" dir="auto">
@@ -939,7 +1054,7 @@ export function DocHub() {
                       )}
                       <span>v{d.current_version}</span>
                     </div>
-                  </button>
+                  </div>
                 </li>
               ))}
             </ul>

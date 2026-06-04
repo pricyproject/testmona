@@ -96,12 +96,18 @@ class ProjectClone(BaseModel):
 class Project(ProjectBase):
     id: int
     owner_id: Optional[int] = None
+    features: Optional[Dict[str, bool]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
         use_enum_values = True
+
+
+class ProjectFeaturesUpdate(BaseModel):
+    """Partial update of a project's feature toggles; only listed keys change."""
+    features: Dict[str, bool]
 
 
 class TestSuiteBase(BaseModel):
@@ -4218,7 +4224,7 @@ class WebhookDeliveryView(BaseModel):
 
 # Add to exports for OpenAPI
 __all__ = [
-    "ProjectBase", "ProjectCreate", "ProjectUpdate", "Project",
+    "ProjectBase", "ProjectCreate", "ProjectUpdate", "Project", "ProjectFeaturesUpdate",
     "TestSuiteBase", "TestSuiteCreate", "TestSuiteUpdate", "TestSuite", 
     "TestCaseBase", "TestCaseCreate", "TestCaseUpdate", "TestCase", "TestCaseLinkedRequirement",
     "TestRunBase", "TestRunCreate", "TestRunUpdate", "TestRunAssign", "TestRun", "TestSuiteRunCreate", "TestSuiteRun",
@@ -4553,6 +4559,7 @@ class DocListItem(BaseModel):
     view_count: Optional[int] = None
     last_viewed_at: Optional[datetime] = None
     my_last_visited_at: Optional[datetime] = None
+    is_pinned: bool = False
     created_by: int
     updated_by: Optional[int] = None
     created_at: datetime
@@ -4574,6 +4581,8 @@ class Doc(DocBase):
     share_expires_at: Optional[datetime] = None
     view_count: Optional[int] = None
     last_viewed_at: Optional[datetime] = None
+    my_last_visited_at: Optional[datetime] = None
+    is_pinned: bool = False
     created_by: int
     updated_by: Optional[int] = None
     created_at: datetime
@@ -4599,6 +4608,10 @@ class DocShareUpdate(BaseModel):
         if normalized not in {"private", "public"}:
             raise ValueError("share_scope must be 'private' or 'public'")
         return normalized
+
+
+class DocPinUpdate(BaseModel):
+    pinned: bool = False
 
 
 class DocShareInfo(BaseModel):

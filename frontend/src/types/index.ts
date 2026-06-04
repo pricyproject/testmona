@@ -787,6 +787,7 @@ export interface DocListItem {
   view_count?: number | null;
   last_viewed_at?: string | null;
   my_last_visited_at?: string | null;
+  is_pinned: boolean;
   created_by: number;
   updated_by?: number | null;
   created_at: string;
@@ -814,6 +815,7 @@ export interface Doc {
   view_count?: number | null;
   last_viewed_at?: string | null;
   my_last_visited_at?: string | null;
+  is_pinned: boolean;
   created_by: number;
   updated_by?: number | null;
   created_at: string;
