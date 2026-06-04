@@ -96,7 +96,13 @@ export function ReleaseNotes() {
   // user kicks off another one, and never set state after unmount.
   const genControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; genControllerRef.current?.abort(); }, []);
+  useEffect(() => {
+    // Reset on (re)mount — React 18 StrictMode mounts, unmounts (running the
+    // cleanup below), then remounts in dev, so without restoring this here the
+    // ref would stay false and every post-await guard would no-op.
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; genControllerRef.current?.abort(); };
+  }, []);
 
   const loadNotes = useCallback(async () => {
     if (!projectId) return;
