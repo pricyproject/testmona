@@ -361,6 +361,7 @@ export function Settings() {
   const [organizationName, setOrganizationName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [defaultTimezone, setDefaultTimezone] = useState('UTC');
+  const [defaultLanguage, setDefaultLanguage] = useState<'en' | 'fa' | 'ar'>('en');
   const [saving, setSaving] = useState(false);
   
   // Audit trail configuration state
@@ -442,7 +443,14 @@ export function Settings() {
       } else {
         await systemSettingsAPI.createSetting(DEFAULT_TIMEZONE_SETTING_KEY, 'UTC', 'Default timezone');
       }
-      
+
+      const languageSetting = settings.find(s => s.key === 'default_language');
+      if (languageSetting && ['en', 'fa', 'ar'].includes(languageSetting.value)) {
+        setDefaultLanguage(languageSetting.value as 'en' | 'fa' | 'ar');
+      } else if (!languageSetting) {
+        await systemSettingsAPI.createSetting('default_language', 'en', 'Default application language (en, fa, ar)');
+      }
+
       // Load each setting or create with default if it doesn't exist
       const maintenanceSetting = settings.find(s => s.key === 'maintenance_mode');
       if (maintenanceSetting) {
@@ -1744,7 +1752,11 @@ export function Settings() {
         systemSettingsAPI.updateSetting('debug_logging', debugLogging.toString(), 'Enable detailed logging for troubleshooting'),
         systemSettingsAPI.updateSetting('session_timeout', sessionTimeout.toString(), 'Session timeout in minutes'),
         systemSettingsAPI.updateSetting('password_complexity', passwordComplexity, 'Password complexity requirement (low, medium, high)'),
+        systemSettingsAPI.updateSetting('default_language', defaultLanguage, 'Default application language (en, fa, ar)'),
       ]);
+
+      // Apply the new default language to the current session immediately.
+      setLanguage(defaultLanguage);
 
       // Check for any failed updates
       const failedUpdates = results.filter(r => r.status === 'rejected');
@@ -2536,6 +2548,21 @@ export function Settings() {
                       disabled={saving}
                     />
                     <p className="text-xs text-gray-500 dark:text-gray-400">{t('defaultTimezoneDescription')}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="default-language">{t('defaultLanguageLabel')}</Label>
+                    <Select value={defaultLanguage} onValueChange={(value) => setDefaultLanguage(value as 'en' | 'fa' | 'ar')} disabled={saving}>
+                      <SelectTrigger id="default-language">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="en">🇬🇧&nbsp;&nbsp;English</SelectItem>
+                        <SelectItem value="fa">🇮🇷&nbsp;&nbsp;فارسی</SelectItem>
+                        <SelectItem value="ar">🇸🇦&nbsp;&nbsp;العربية</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{t('defaultLanguageDescription')}</p>
                   </div>
                 </div>
               </div>
