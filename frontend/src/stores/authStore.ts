@@ -83,6 +83,7 @@ interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
   language: 'en' | 'fa' | 'ar';
+  languageExplicitlySet: boolean;
   compactMode: boolean;
   appName: string;
   appLogoUrl: string;
@@ -90,6 +91,9 @@ interface AuthState {
   logout: () => void;
   setUser: (user: User) => void;
   setLanguage: (language: 'en' | 'fa' | 'ar') => void;
+  // Applies a backend/system default language without marking it as the
+  // user's explicit choice (so a real preference is never overwritten).
+  applyDefaultLanguage: (language: 'en' | 'fa' | 'ar') => void;
   setCompactMode: (compactMode: boolean) => void;
   setAppName: (appName: string) => void;
   setAppLogoUrl: (appLogoUrl: string) => void;
@@ -115,6 +119,7 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       isAuthenticated: false,
       language: 'en',
+      languageExplicitlySet: false,
       compactMode: false,
       appName: 'TestMona',
       appLogoUrl: '',
@@ -195,7 +200,15 @@ export const useAuthStore = create<AuthState>()(
       },
 
       setLanguage: (language: 'en' | 'fa' | 'ar') => {
-        set({ language });
+        // An explicit user/admin choice — remember it so the system default
+        // never overrides it later.
+        set({ language, languageExplicitlySet: true });
+      },
+
+      applyDefaultLanguage: (language: 'en' | 'fa' | 'ar') => {
+        if (!get().languageExplicitlySet) {
+          set({ language });
+        }
       },
 
       setCompactMode: (compactMode: boolean) => {
@@ -279,6 +292,7 @@ export const useAuthStore = create<AuthState>()(
         refreshToken: state.refreshToken,
         user: state.user,
         language: state.language,
+        languageExplicitlySet: state.languageExplicitlySet,
         compactMode: state.compactMode,
         appName: state.appName,
         appLogoUrl: state.appLogoUrl,

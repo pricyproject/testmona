@@ -14,6 +14,7 @@ const lazyPage = <P extends object = object>(loader: () => Promise<any>, exportN
 
 const Login = lazyPage(() => import('@/pages/Login'), 'Login');
 const Signup = lazyPage(() => import('@/pages/Signup'), 'Signup');
+const Setup = lazyPage(() => import('@/pages/Setup'), 'Setup');
 const AcceptInvite = lazyPage(() => import('@/pages/AcceptInvite'), 'AcceptInvite');
 const Dashboard = lazyPage(() => import('@/pages/Dashboard'), 'Dashboard');
 const Projects = lazyPage(() => import('@/pages/Projects'), 'Projects');
@@ -83,18 +84,89 @@ function PageFallback() {
   );
 }
 
+// Unauthenticated entry point. On a brand-new instance (no accounts yet) it
+// forces the visitor through the web-based setup wizard; once an account
+// exists it falls back to the normal login/signup screens. The wizard is never
+// reachable again after the first account is created.
+function UnauthenticatedApp() {
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    fetch(`${apiUrl}/system/setup-status`)
+      .then((res) => (res.ok ? res.json() : { needs_setup: false }))
+      .then((data) => {
+        if (!cancelled) setNeedsSetup(Boolean(data?.needs_setup));
+      })
+      .catch(() => {
+        // Network/transient error: don't trap the user in setup — show login.
+        if (!cancelled) setNeedsSetup(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (needsSetup === null) {
+    return <PageFallback />;
+  }
+
+  if (needsSetup) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/setup" element={<Setup />} />
+          <Route path="*" element={<Navigate to="/setup" replace />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/accept-invite/:token" element={<AcceptInvite />} />
+        {/* Setup already completed — never expose the wizard again. */}
+        <Route path="/setup" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
 function AppWithRouter() {
-  const { isAuthenticated, initializeDevAuth, compactMode } = useAuthStore();
+  const { isAuthenticated, initializeDevAuth, compactMode, applyDefaultLanguage } = useAuthStore();
   const { isRTL, language } = useTranslation();
   const { appName, appLogoUrl } = useAppName();
   const [isInitialized, setIsInitialized] = useState(false);
-  
+
   // Initialize localStorage sync immediately on component mount
   useEffect(() => {
     initializeAuthFromLocalStorage().then(() => {
       setIsInitialized(true);
     });
   }, []);
+
+  // Adopt the backend's default language for anyone who hasn't picked one yet
+  // (e.g. a first-time visitor on the sign-in / setup screen). A real user
+  // choice is never overwritten — applyDefaultLanguage respects that.
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    fetch(`${apiUrl}/system/settings/public/default_language`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((setting) => {
+        const value = setting?.value;
+        if (value === 'en' || value === 'fa' || value === 'ar') {
+          applyDefaultLanguage(value);
+        }
+      })
+      .catch(() => {
+        /* offline / not ready — keep the current language */
+      });
+  }, [applyDefaultLanguage]);
   
   useEffect(() => {
     document.documentElement.dir = isRTL ? 'rtl' : 'ltr';
@@ -152,16 +224,7 @@ function AppWithRouter() {
   }
 
   if (!isAuthenticated) {
-    return (
-      <Suspense fallback={<PageFallback />}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/accept-invite/:token" element={<AcceptInvite />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Suspense>
-    );
+    return <UnauthenticatedApp />;
   }
   
   return (

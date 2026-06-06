@@ -119,6 +119,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Local secrets (never commit)
+.secret_key
+.setup_token
+
 # Environments
 .env
 .venv

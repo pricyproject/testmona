@@ -24,6 +24,23 @@ def get_password_hash(password):
     return pwd_context.hash(password)
 
 
+MIN_PASSWORD_LENGTH = 8
+
+
+def validate_password_strength(password: str) -> None:
+    """Enforce a baseline password policy. Raises ValueError when too weak.
+
+    Modern (NIST-aligned) baseline: favor length, reject the obviously weak.
+    Callers translate the ValueError into an HTTP 400.
+    """
+    if password is None or len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if password.isdigit() or password.isalpha():
+        raise ValueError("Password must include both letters and numbers")
+    if password.lower() in {"password", "12345678", "password1", "qwerty123"}:
+        raise ValueError("Password is too common; choose a stronger one")
+
+
 def get_user(db: Session, username: str):
     return db.query(User).filter(User.username == username.strip()).first()
 

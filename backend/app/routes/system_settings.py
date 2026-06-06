@@ -43,7 +43,13 @@ DEFAULT_PUBLIC_SETTINGS = {
         "value": "true",
         "description": "Whether demo credentials are shown on login page",
     },
+    "default_language": {
+        "value": "en",
+        "description": "Default application language (en, fa, ar)",
+    },
 }
+
+ALLOWED_LANGUAGES = {"en", "fa", "ar"}
 
 APP_NAME_MAX_LENGTH = 80
 APP_LOGO_URL_MAX_LENGTH = 500
@@ -124,48 +130,39 @@ def validate_system_setting_value(key: str, value: str | None) -> str | None:
             raise HTTPException(status_code=400, detail="Default timezone is required and must be 80 characters or fewer")
         return normalized_value
 
+    if key == "default_language":
+        if normalized_value not in ALLOWED_LANGUAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Default language must be one of: {', '.join(sorted(ALLOWED_LANGUAGES))}",
+            )
+        return normalized_value
+
     return value
 
 
 def register_system_settings_routes(app):
     """Register system settings routes with the FastAPI app."""
     
-    # Demo credentials status endpoint (must be before generic {key} route)
-    @app.get("/system/settings/public/demo-credentials-status")
-    def get_demo_credentials_status(db: Session = Depends(get_db)):
-        """Check if demo credentials should be shown on login page.
-        
-        Returns false if any admin user has changed their default password (force_password_change = false),
-        indicating that the system has been configured and demo credentials should be hidden.
-        Returns true if all admin users still have force_password_change = true, indicating fresh install.
-        
-        SECURITY: This endpoint is safe to expose publicly as it only reveals whether demo credentials
-        should be shown, not sensitive user information.
+    # First-run setup status (public). Drives the web-based install wizard:
+    # when no account exists yet, the frontend routes the visitor to /setup to
+    # create the initial administrator.
+    @app.get("/system/setup-status")
+    def get_setup_status(db: Session = Depends(get_db)):
+        """Report whether the instance still needs first-run setup.
+
+        SECURITY: Safe to expose publicly — it only reveals whether any account
+        exists (already inferable from the login flow), never user details.
         """
         try:
-            from ..models import User, Role
-            
-            # Check if any admin user has changed their password
-            admin_with_changed_password = db.query(User).filter(
-                User.role == Role.ADMIN.value,
-                User.force_password_change == False
-            ).first()
-            
-            # If any admin has changed their password, hide demo credentials
-            show_demo_credentials = admin_with_changed_password is None
-            
-            return {
-                "show_demo_credentials": show_demo_credentials,
-                "reason": "fresh_install" if show_demo_credentials else "password_changed"
-            }
+            from ..models import User
+            needs_setup = db.query(User).count() == 0
         except Exception as e:
-            logger.error(f"Error checking demo credentials status: {e}")
-            # Default to showing demo credentials on error
-            return {
-                "show_demo_credentials": True,
-                "reason": "error"
-            }
-    
+            logger.error(f"Error checking setup status: {e}")
+            # Fail safe: don't trap users in the setup wizard on a transient error.
+            needs_setup = False
+        return {"needs_setup": needs_setup}
+
     # Public endpoint for settings that need to be accessible without authentication
     # SECURITY NOTE: Only add settings here that are safe to expose to unauthenticated users
     # This endpoint should NOT expose sensitive configuration, secrets, or internal system details

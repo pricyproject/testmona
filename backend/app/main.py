@@ -1,5 +1,10 @@
-from fastapi import FastAPI
+import logging
+import threading
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from .config import settings
 from .database import init_db
@@ -42,6 +47,54 @@ app.add_middleware(
     # Expose pagination total so the browser can read it cross-origin.
     expose_headers=["X-Total-Count"],
 )
+
+logger = logging.getLogger(__name__)
+
+# --- Self-healing for a database/schema that disappears at runtime ---------
+# init_db() guarantees the schema on startup, but an operator can drop the
+# database (or its tables) while the app keeps running. Rather than 500 on every
+# request until a manual restart, detect the "missing schema" error, recreate it
+# once, and ask the client to retry.
+_schema_repair_lock = threading.Lock()
+_SCHEMA_MISSING_HINTS = (
+    "doesn't exist",     # MySQL/MariaDB 1146 (table)
+    "no such table",     # SQLite
+    "unknown database",  # MySQL/MariaDB 1049
+    "does not exist",    # PostgreSQL
+)
+
+
+def _looks_like_missing_schema(exc: Exception) -> bool:
+    text = str(getattr(exc, "orig", exc)).lower()
+    return any(hint in text for hint in _SCHEMA_MISSING_HINTS)
+
+
+def _self_heal_schema() -> None:
+    # Only one request repairs at a time; the rest just get a 503 + retry.
+    if not _schema_repair_lock.acquire(blocking=False):
+        return
+    try:
+        from .database import init_db
+        init_db()
+        logger.warning("Database schema was missing; it has been reinitialized.")
+    except Exception as repair_error:  # pragma: no cover - defensive
+        logger.error("Schema self-heal failed: %s", repair_error)
+    finally:
+        _schema_repair_lock.release()
+
+
+@app.exception_handler(ProgrammingError)
+@app.exception_handler(OperationalError)
+async def _database_error_handler(request: Request, exc: Exception):
+    if _looks_like_missing_schema(exc):
+        _self_heal_schema()
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "The database was reinitialized. Please retry."},
+            headers={"Retry-After": "2"},
+        )
+    logger.exception("Unhandled database error")
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 app.include_router(import_export_router, prefix="/import-export", tags=["Import/Export"])
 app.include_router(audit_router, prefix="/audit-trails", tags=["Audit Trails"])
@@ -104,6 +157,17 @@ register_advanced_search_routes(app)
 def startup_event():
     """Initialize database on startup"""
     init_db()
+
+    # On a fresh instance, surface the first-run setup token so the operator can
+    # create the admin securely (no-op once an account exists).
+    from .setup_security import announce_setup_token
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        announce_setup_token(db)
+    finally:
+        db.close()
+
     # Start token cleanup job after database is ready
     from .token_cleanup import start_token_cleanup
     start_token_cleanup()

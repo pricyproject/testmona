@@ -544,6 +544,19 @@ class UserCreate(UserBase):
     password: str
 
 
+class FirstAdminSetup(BaseModel):
+    """Payload for the token-gated first-run admin creation endpoint.
+
+    Deliberately minimal — role/superuser/active are decided server-side, never
+    accepted from the caller (no mass-assignment).
+    """
+    username: str
+    email: EmailStr
+    full_name: Optional[str] = None
+    password: str
+    setup_token: str
+
+
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None

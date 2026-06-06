@@ -12,67 +12,122 @@ from ..config import settings
 from ..models import User, Role, EntityType
 
 
+def _disable_public_signup(db, actor_user) -> None:
+    """Close public registration after first-run setup (idempotent upsert)."""
+    from ..models import SystemSettings as SystemSettingsModel
+    try:
+        setting = db.query(SystemSettingsModel).filter(
+            SystemSettingsModel.key == 'signup_enabled'
+        ).with_for_update().first()
+        if setting is None:
+            setting = SystemSettingsModel(
+                key='signup_enabled',
+                value='false',
+                description='Enable/disable public user registration',
+            )
+            db.add(setting)
+        else:
+            setting.value = 'false'
+        db.commit()
+        db.refresh(setting)
+        print("✅ Public signup disabled after first-run setup")
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=actor_user.id,
+                action="update",
+                entity_type=EntityType.SYSTEM_SETTING,
+                entity_id=setting.id,
+                description=f"Public signup disabled after first-run setup (admin: {actor_user.username})",
+            ))
+        except Exception as audit_error:
+            print(f"Failed to create audit trail for signup change: {audit_error}")
+    except Exception as e:
+        print(f"Failed to disable signup: {e}")
+        db.rollback()
+
+
 def register_auth_routes(app):
     """Register authentication routes with the FastAPI app."""
-    
+
+    @app.post("/system/setup", response_model=schemas.User)
+    def complete_first_run_setup(payload: schemas.FirstAdminSetup, db: Session = Depends(get_db)):
+        """Create the first administrator on a brand-new instance.
+
+        Token-gated and usable only while no account exists. This is the ONLY
+        way to create the initial admin; `/register` cannot. Two independent
+        gates close the first-run abuse window: the no-accounts check and the
+        server-issued setup token.
+        """
+        from ..setup_security import needs_setup, verify_setup_token, clear_setup_token
+
+        # Gate 1: permanently closed once any account exists.
+        if not needs_setup(db):
+            raise HTTPException(status_code=403, detail="Setup has already been completed.")
+        # Gate 2: caller must present the server-issued token (constant-time
+        # compare inside verify; generic message avoids an oracle).
+        if not verify_setup_token(payload.setup_token):
+            raise HTTPException(status_code=403, detail="Invalid or missing setup token.")
+
+        try:
+            auth.validate_password_strength(payload.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if crud.get_user_by_username(db, username=payload.username):
+            raise HTTPException(status_code=400, detail="Username already registered")
+        if crud.get_user_by_email(db, email=payload.email):
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+        # Privileges are fixed server-side — never accepted from the request.
+        admin = schemas.UserCreate(
+            username=payload.username,
+            email=payload.email,
+            full_name=payload.full_name,
+            password=payload.password,
+            role=Role.ADMIN,
+            is_active=True,
+            force_password_change=False,
+        )
+        new_user = crud.create_user(db=db, user=admin)
+        new_user.is_superuser = True
+        db.commit()
+        db.refresh(new_user)
+
+        _disable_public_signup(db, new_user)
+        clear_setup_token()  # single-use: invalidate the token immediately
+        return new_user
+
     @app.post("/register", response_model=schemas.User)
     def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-        # Check if signup is enabled (default to enabled if setting doesn't exist)
+        # The first account can only be created through the token-gated
+        # /system/setup endpoint — never here. This closes the "claim admin on
+        # an open install" race.
+        if db.query(User).count() == 0:
+            raise HTTPException(status_code=403, detail="Complete first-run setup before registering accounts.")
+
+        # Default-deny: public registration is off unless an admin explicitly
+        # enabled it (a missing setting counts as disabled).
         signup_enabled_setting = crud.get_system_setting(db, "signup_enabled")
-        if signup_enabled_setting and signup_enabled_setting.value == "false":
+        if not signup_enabled_setting or signup_enabled_setting.value != "true":
             raise HTTPException(status_code=403, detail="Public registration is disabled. Please contact an administrator.")
-        
-        db_user = crud.get_user_by_username(db, username=user.username)
-        if db_user:
-            raise HTTPException(status_code=400, detail="Username already registered")
-        db_user = crud.get_user_by_email(db, email=user.email)
-        if db_user:
-            raise HTTPException(status_code=400, detail="Email already registered")
-        
-        is_first_user = db.query(User).count() == 0
-        user = user.model_copy(update={"role": Role.ADMIN if is_first_user else Role.TESTER})
-        new_user = crud.create_user(db=db, user=user)
-        if is_first_user:
-            new_user.is_superuser = True
-            db.commit()
-            db.refresh(new_user)
-        
-        # Auto-disable signup after first user creation (with race condition protection)
-        from ..models import SystemSettings as SystemSettingsModel
+
         try:
-            # Use row-level locking to prevent race conditions
-            existing_setting = db.query(SystemSettingsModel).filter(
-                SystemSettingsModel.key == 'signup_enabled'
-            ).with_for_update().first()
-            
-            if existing_setting and existing_setting.value == "true":
-                # Check user count atomically
-                user_count = db.query(User).count()
-                if user_count == 1:  # Only disable if this is truly the first user
-                    existing_setting.value = "false"
-                    db.commit()
-                    print("✅ Signup automatically disabled after first user creation")
-                    
-                    # Create audit trail for signup_enabled change
-                    try:
-                        from ..services.audit_service import get_audit_service
-                        from ..schemas_audit import AuditTrailCreate
-                        audit_service = get_audit_service(db)
-                        audit_data = AuditTrailCreate(
-                            user_id=new_user.id,
-                            action="update",
-                            entity_type=EntityType.SYSTEM_SETTING,
-                            entity_id=existing_setting.id,
-                            description=f"Signup automatically disabled after first user creation (user: {new_user.username})",
-                        )
-                        audit_service.create_audit_trail(audit_data)
-                    except Exception as audit_error:
-                        print(f"Failed to create audit trail for signup change: {audit_error}")
-        except Exception as e:
-            print(f"Failed to auto-disable signup: {e}")
-            db.rollback()
-        
-        return new_user
+            auth.validate_password_strength(user.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if crud.get_user_by_username(db, username=user.username):
+            raise HTTPException(status_code=400, detail="Username already registered")
+        if crud.get_user_by_email(db, email=user.email):
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+        # Self-service registrants are always plain testers — the role cannot be
+        # escalated from the request body.
+        user = user.model_copy(update={"role": Role.TESTER, "force_password_change": False})
+        return crud.create_user(db=db, user=user)
 
     @app.post("/token", response_model=schemas.Token)
     async def login_for_access_token_json(login_data: schemas.LoginRequest, db: Session = Depends(get_db)):

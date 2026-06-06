@@ -138,43 +138,11 @@ def setup_frontend():
     print("✅ Frontend setup completed")
     return True
 
-def create_admin_user():
-    """Create default admin user"""
-    print("\n👤 Creating admin user...")
-    
-    backend_dir = Path("backend")
-    venv_python = backend_dir / "venv" / "bin" / "python"
-    if not venv_python.exists():
-        venv_python = backend_dir / "venv" / "Scripts" / "python.exe"
-    
-    create_user_script = """
-from app.database import SessionLocal
-from app.crud import create_user
-from app.schemas import UserCreate
-from app.models import Role
-
-db = SessionLocal()
-try:
-    admin_user = UserCreate(
-        username='admin',
-        email='admin@testmanagement.com',
-        password='admin123',
-        full_name='System Administrator',
-        role=Role.ADMIN,
-        is_active=True
-    )
-    user = create_user(db, admin_user)
-    print(f"✅ Admin user created: {user.username}")
-except Exception as e:
-    print(f"⚠️  Admin user might already exist: {e}")
-finally:
-    db.close()
-"""
-    
-    success, output = run_command(f'{venv_python} -c "{create_user_script}"', cwd=backend_dir)
-    if not success:
-        print(f"⚠️  Could not create admin user: {output}")
-    
+def announce_web_setup():
+    """No accounts are seeded — the admin is created via the web setup wizard."""
+    print("\n👤 Admin account:")
+    print("   No default account is created. On first launch the app sends you")
+    print("   to the setup wizard (/setup) to create your administrator securely.")
     return True
 
 def main():
@@ -197,9 +165,9 @@ def main():
         print("\n❌ Frontend setup failed.")
         sys.exit(1)
     
-    # Create admin user
-    create_admin_user()
-    
+    # No user seeding — the admin is created through the web setup wizard.
+    announce_web_setup()
+
     print("\n" + "=" * 40)
     print("🎉 Setup completed successfully!")
     print("\n📋 Next Steps:")
@@ -207,14 +175,12 @@ def main():
     print("   cd backend && source venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000")
     print("\n2. Start the frontend:")
     print("   cd frontend && npm run dev")
-    print("\n3. Access the application:")
-    print("   Frontend: http://localhost:3000")
+    print("\n3. Open the application and complete the one-time setup wizard:")
+    print("   Frontend: http://localhost:3000  (redirects to /setup on first run)")
     print("   Backend API: http://localhost:8000")
-    print("   API Documentation: http://localhost:8000/docs")
-    print("\n🔑 Default Login:")
-    print("   Username: admin")
-    print("   Password: admin123")
-    print("\n⚠️  Please change the default password after first login!")
+    print("   API Documentation: http://localhost:8000/api-docs")
+    print("\n🔐 No default credentials are shipped — the first account you create")
+    print("   becomes the administrator, and public signup is then closed.")
 
 if __name__ == "__main__":
     main()

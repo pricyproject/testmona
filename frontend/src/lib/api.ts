@@ -366,6 +366,24 @@ export const authAPI = {
     return response.data;
   },
 
+  // First-run setup: token-gated creation of the initial administrator.
+  completeSetup: async (
+    username: string,
+    email: string,
+    full_name: string,
+    password: string,
+    setup_token: string,
+  ) => {
+    const response = await api.post("/system/setup", {
+      username,
+      email,
+      full_name,
+      password,
+      setup_token,
+    });
+    return response.data;
+  },
+
   refreshToken: async (refreshToken: string) => {
     const response = await api.post("/refresh", {
       refresh_token: refreshToken,
