@@ -211,6 +211,33 @@ def verify_schema(db_url):
         if engine is not None:
             engine.dispose()
 
+def backfill_missing_tables(db_url):
+    """Create any tables that migrations didn't produce.
+
+    `alembic upgrade head` is a no-op when the database is already stamped at
+    head, even if tables are missing (partially-restored DB, a bare stamp, etc.).
+    create_all is idempotent, so this is a safe net that guarantees the app
+    never starts against an incomplete schema.
+    """
+    engine = None
+    try:
+        from app.database import Base
+        from app import models, models_versioning  # noqa: F401 (register metadata)
+
+        engine = create_engine(db_url)
+        before = set(inspect(engine).get_table_names())
+        Base.metadata.create_all(bind=engine)
+        created = sorted(set(inspect(engine).get_table_names()) - before)
+        if created:
+            logger.warning(f"🩹 Backfilled tables missing after migration: {created}")
+    except Exception as e:
+        logger.error(f"❌ Failed to backfill missing tables: {e}")
+        raise
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Database migration utility')
     parser.add_argument('--env', choices=['dev', 'prod', 'test'], default='dev',
@@ -320,7 +347,11 @@ def main():
                 else:
                     command.upgrade(alembic_cfg, "head")
                 logger.info("✅ Database upgraded successfully")
-                
+
+                # Safety net for the stamped-but-incomplete state, where the
+                # upgrade above is a no-op yet tables are missing.
+                backfill_missing_tables(db_url)
+
                 # Verify schema after upgrade unless skipped
                 if not getattr(args, 'no_verify', False):
                     if not verify_schema(db_url):

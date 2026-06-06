@@ -1,10 +1,109 @@
 from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, create_engine, event, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 import uuid
 
-engine = create_engine(settings.database_url)
+
+def ensure_database_exists(database_url: str) -> None:
+    """Create the target database/schema when it does not exist yet.
+
+    SQLite creates its file automatically, but server databases (MariaDB/MySQL,
+    PostgreSQL) require the database to be provisioned before we can connect to
+    it. This lets a fresh deployment simply point ``DATABASE_URL`` at a running
+    server — no manual ``CREATE DATABASE`` step needed.
+
+    Called from the explicit setup paths (``init_db`` and Alembic), never at
+    import time, so unit tests and CI stay unaffected.
+    """
+    url = make_url(database_url)
+    backend = url.get_backend_name()
+    db_name = url.database
+    if backend not in ("mysql", "postgresql") or not db_name:
+        return
+
+    if backend == "mysql":
+        # Connect to the server itself (no database selected).
+        # Note: URL.set(database=None) is a no-op in SQLAlchemy; pass "" to clear.
+        server_engine = create_engine(_normalize_url(database_url).set(database=""))
+        try:
+            with server_engine.connect() as connection:
+                # Check existence first (a read every user can do) so a
+                # least-privilege account pointed at a pre-created database is
+                # never blocked by lacking CREATE DATABASE — MySQL denies
+                # `CREATE DATABASE IF NOT EXISTS` on a privilege check before it
+                # even evaluates "IF NOT EXISTS".
+                exists = connection.execute(
+                    text("SELECT 1 FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = :name"),
+                    {"name": db_name},
+                ).scalar()
+                if not exists:
+                    connection.execute(
+                        text(
+                            f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
+                            "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                        )
+                    )
+        finally:
+            server_engine.dispose()
+    else:  # postgresql
+        # CREATE DATABASE can't run inside a transaction and we can't connect to
+        # the target DB yet, so use the maintenance 'postgres' database in
+        # autocommit mode.
+        server_engine = create_engine(
+            url.set(database="postgres"), isolation_level="AUTOCOMMIT"
+        )
+        try:
+            with server_engine.connect() as connection:
+                exists = connection.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                    {"name": db_name},
+                ).scalar()
+                if not exists:
+                    # Identifier can't be a bound parameter; db_name comes from
+                    # trusted configuration.
+                    connection.execute(text(f'CREATE DATABASE "{db_name}"'))
+        finally:
+            server_engine.dispose()
+
+
+def _normalize_url(database_url: str):
+    """Apply backend-appropriate connection defaults to a database URL.
+
+    For MariaDB/MySQL we force ``charset=utf8mb4`` (unless the URL already sets
+    a charset) so full 4-byte UTF-8 — emoji, non-BMP characters — round-trips
+    correctly. SQLite/PostgreSQL URLs are returned unchanged.
+    """
+    url = make_url(database_url)
+    if url.get_backend_name() == "mysql" and "charset" not in url.query:
+        url = url.update_query_dict({"charset": "utf8mb4"})
+    return url
+
+
+def _build_engine(database_url: str):
+    """Create an engine tuned for the configured database backend.
+
+    SQLite needs ``check_same_thread=False`` for FastAPI's threaded request
+    handling. Server databases (MariaDB/MySQL, PostgreSQL) need a pool that
+    survives idle/dropped connections, so we enable pre-ping and recycling.
+    """
+    url = _normalize_url(database_url)
+    backend = url.get_backend_name()
+    connect_args: dict = {}
+    engine_kwargs: dict = {}
+
+    if backend == "sqlite":
+        connect_args["check_same_thread"] = False
+    else:
+        engine_kwargs.update(pool_pre_ping=True, pool_recycle=1800)
+        if backend == "mysql":
+            engine_kwargs.update(pool_size=10, max_overflow=20)
+
+    return create_engine(url, connect_args=connect_args, **engine_kwargs)
+
+
+engine = _build_engine(settings.database_url)
 
 
 if settings.database_url.startswith("sqlite"):
@@ -123,21 +222,73 @@ def get_db():
         db.close()
 
 
+def _stamp_alembic_head_if_unmanaged() -> None:
+    """Stamp alembic_version to head when the schema was bootstrapped by
+    create_all rather than by migrations (i.e. no migration history yet).
+
+    Without this, a fresh create_all leaves alembic_version empty, so a later
+    `alembic upgrade head` would replay every migration against an already
+    complete schema. Best-effort: never block startup if alembic isn't usable.
+    """
+    try:
+        from pathlib import Path
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        backend_dir = Path(__file__).resolve().parent.parent
+        cfg = Config(str(backend_dir / "alembic.ini"))
+        cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+        if not head:
+            return
+
+        with engine.begin() as connection:
+            if not inspect(connection).has_table("alembic_version"):
+                connection.execute(
+                    text(
+                        "CREATE TABLE alembic_version ("
+                        "version_num VARCHAR(255) NOT NULL, "
+                        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+                    )
+                )
+            already = connection.execute(text("SELECT version_num FROM alembic_version")).first()
+            if already is None:
+                connection.execute(
+                    text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
+                    {"rev": head},
+                )
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"⚠️  Could not stamp alembic_version to head: {exc}")
+
+
 def init_db():
-    """Initialize or repair missing database tables."""
+    """Create or repair the database schema. Safe to run on every startup."""
+    # Provision the database itself for server backends (no-op for SQLite).
+    ensure_database_exists(settings.database_url)
+
     # Import all models to ensure they're registered with Base.metadata
     from . import models
     from . import models_versioning
-    
+
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     expected_tables = set(Base.metadata.tables.keys())
     missing_tables = expected_tables - existing_tables
+
+    # Always call create_all: it is idempotent (checkfirst skips existing
+    # tables) and is the authoritative safety net. This self-heals a database
+    # that has an alembic_version row but is missing tables — a state where
+    # `alembic upgrade head` is a silent no-op (partially restored DB, a stamp
+    # without a real upgrade, etc.) and the app would otherwise crash with
+    # "table doesn't exist".
+    Base.metadata.create_all(bind=engine)
     if missing_tables:
-        Base.metadata.create_all(bind=engine)
-        if existing_tables:
+        if existing_tables - {"alembic_version"}:
             print(f"✅ Missing database tables created: {', '.join(sorted(missing_tables))}")
         else:
             print("✅ Database tables created successfully")
+        # We just materialized the schema outside of Alembic — record it as head
+        # so migrations stay coherent.
+        _stamp_alembic_head_if_unmanaged()
 
     _repair_known_schema_drift()

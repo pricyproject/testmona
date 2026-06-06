@@ -6,7 +6,7 @@ Create Date: 2026-05-19 00:00:00.000000
 
 """
 from alembic import op
-from sqlalchemy import inspect
+from sqlalchemy import Integer, inspect
 
 from app.services.migration_helpers import column_exists, table_exists
 
@@ -93,8 +93,16 @@ def _require_association_columns() -> None:
             batch_op.alter_column("requirement_id", nullable=False)
             batch_op.alter_column("test_case_id", nullable=False)
     else:
-        op.alter_column("requirement_test_case_links", "requirement_id", nullable=False)
-        op.alter_column("requirement_test_case_links", "test_case_id", nullable=False)
+        # MySQL/MariaDB MODIFY COLUMN restates the full definition, so the
+        # existing type must be provided.
+        op.alter_column(
+            "requirement_test_case_links", "requirement_id",
+            existing_type=Integer(), nullable=False,
+        )
+        op.alter_column(
+            "requirement_test_case_links", "test_case_id",
+            existing_type=Integer(), nullable=False,
+        )
 
 
 def upgrade() -> None:
