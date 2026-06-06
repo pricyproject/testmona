@@ -73,10 +73,41 @@ services:
           cpus: '0.5'
           memory: '256m'
 
+  # Optional MariaDB backend. SQLite is the zero-config default; enable this
+  # with `docker compose --profile mariadb up` and point DATABASE_URL at it:
+  #   DATABASE_URL=mysql+pymysql://root:<pw>@mariadb:3306/test_management?charset=utf8mb4
+  mariadb:
+    image: mariadb:11.4
+    profiles: ["mariadb"]
+    environment:
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-changeme}
+      - MARIADB_DATABASE=${MARIADB_DATABASE:-test_management}
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   app-network:
     driver: bridge
 
 volumes:
   backend_data:
+    driver: local
+  mariadb_data:
     driver: local
