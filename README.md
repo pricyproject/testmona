@@ -66,17 +66,30 @@ npm run dev
 
 Open the app at [http://localhost:3000](http://localhost:3000). The backend API is available at [http://localhost:8000](http://localhost:8000), and Swagger docs are available at [http://localhost:8000/api-docs](http://localhost:8000/api-docs).
 
+## First-run setup
+
+No default credentials are shipped. On first launch the app sends you to a web setup wizard (`/setup`) to create your administrator account. For security, that one-time step is protected by a **setup token**: the backend prints it to the server logs on startup and writes it to `backend/.setup_token`. Paste the token into the wizard to create the admin. After that, the token is invalidated and public signup is disabled.
+
+For automated/headless provisioning, set the token yourself with the `SETUP_TOKEN` environment variable.
+
+## Database
+
+SQLite is the zero-config default. To use **MariaDB/MySQL** (or PostgreSQL), set `DATABASE_URL` — the target database is auto-created on first start:
+
+```bash
+# MariaDB / MySQL (driver: PyMySQL, already in requirements)
+DATABASE_URL="mysql+pymysql://user:password@localhost:3306/test_management?charset=utf8mb4"
+# PostgreSQL
+DATABASE_URL="postgresql+psycopg://user:password@localhost:5432/test_management"
+```
+
+**Database naming:** the database name is the last path segment of `DATABASE_URL` — you choose it. Prefer lowercase with underscores, no hyphens (e.g. `testmona`, `testmona_production`); avoid `test`-prefixed names on MySQL/MariaDB. The app auto-creates the database on first start if the user has the privilege; for production, a DBA can instead pre-create it with a least-privilege user scoped to that database — startup checks for existence first and won't require `CREATE DATABASE`.
+
 ## Docker
 
 ```bash
-docker-compose up --build
-```
-
-## Demo Login
-
-```text
-Email: demo@testmona.com
-Password: demo123
+docker compose up --build            # SQLite (default)
+docker compose --profile mariadb up   # bundled MariaDB service
 ```
 
 ## Repository Layout
