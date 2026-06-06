@@ -1,9 +1,44 @@
 from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.expression import UnaryExpression
 from .config import settings
 import uuid
+
+
+# --- Cross-dialect SQL compatibility ---------------------------------------
+# MySQL/MariaDB do not support the SQL-standard `NULLS FIRST` / `NULLS LAST`
+# ordering syntax (PostgreSQL and SQLite do). Without this, any query using
+# `.nullslast()` / `.nullsfirst()` raises a 1064 syntax error on MariaDB.
+# Rewrite it to the portable `ISNULL(col)` form for the MySQL family only;
+# every other backend keeps the native syntax. Registered globally on import,
+# so it applies no matter which entry point (app, migrations, installers)
+# loads the database module.
+@compiles(UnaryExpression, "mysql")
+@compiles(UnaryExpression, "mariadb")
+def _mysql_nulls_ordering(element, compiler, **kw):
+    modifier = getattr(element, "modifier", None)
+    if modifier not in (operators.nullsfirst_op, operators.nullslast_op):
+        # Any other unary expression (NOT, DISTINCT, IS NULL, negation, a bare
+        # ASC/DESC, ...) — fall back to the dialect's default rendering.
+        return compiler.visit_unary(element, **kw)
+
+    inner = element.element
+    # Strip an asc()/desc() wrapper to recover the bare column for the NULL test.
+    if isinstance(inner, UnaryExpression) and inner.modifier in (operators.asc_op, operators.desc_op):
+        column_sql = compiler.process(inner.element, **kw)
+    else:
+        column_sql = compiler.process(inner, **kw)
+    ordering_sql = compiler.process(inner, **kw)
+
+    # NULLS LAST  -> non-nulls first:  ISNULL(col) ASC, <ordering>
+    # NULLS FIRST -> nulls first:      ISNULL(col) DESC, <ordering>
+    if modifier is operators.nullslast_op:
+        return "ISNULL(%s), %s" % (column_sql, ordering_sql)
+    return "ISNULL(%s) DESC, %s" % (column_sql, ordering_sql)
 
 
 def ensure_database_exists(database_url: str) -> None:
