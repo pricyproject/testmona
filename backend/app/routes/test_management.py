@@ -741,15 +741,15 @@ def register_test_management_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        # Ensure default priority and test type definitions exist if they are blank in the DB
-        crud.ensure_default_priority_and_test_type_definitions(db, current_user.id)
-        
         # Validate that the test suite exists
         test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
         if not test_suite:
             raise HTTPException(status_code=404, detail="Test suite not found")
         if not rbac.has_permission(current_user, "write", test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to create test cases in this project")
+
+        # Ensure default priority and test type definitions exist for this project.
+        crud.ensure_default_priority_and_test_type_definitions(db, test_suite.project_id, current_user.id)
 
         if test_case.section_id is not None:
             section = crud.get_test_case_section(db, section_id=test_case.section_id)

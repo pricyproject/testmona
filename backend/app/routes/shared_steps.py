@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
 
-from .. import crud, schemas, auth, rbac
+from .. import crud, schemas, auth, rbac, models
 from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
@@ -198,10 +198,22 @@ def register_shared_steps_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "write"):
+        if template.project_id is not None:
+            if not rbac.has_permission(current_user, "write", template.project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        elif not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        existing_template = crud.get_shared_step_template_by_name(db, template.name)
+        # Name uniqueness is scoped to the project.
+        existing_template = (
+            db.query(models.SharedStepTemplate)
+            .filter(
+                models.SharedStepTemplate.project_id == template.project_id,
+                models.SharedStepTemplate.name == template.name,
+                models.SharedStepTemplate.is_active == True,  # noqa: E712
+            )
+            .first()
+        )
         if existing_template is not None:
             raise HTTPException(status_code=400, detail="Shared step template name already exists")
 
@@ -231,15 +243,19 @@ def register_shared_steps_routes(app):
 
     @app.get("/shared-step-templates/", response_model=List[schemas.SharedStepTemplate])
     def read_shared_step_templates(
+        project_id: Optional[int] = Query(None),
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=1000),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
+        if project_id is not None:
+            if not rbac.has_permission(current_user, "read", project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        elif not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        return crud.get_shared_step_templates(db, skip=skip, limit=limit)
+        return crud.get_shared_step_templates(db, skip=skip, limit=limit, project_id=project_id)
 
     @app.get("/shared-step-templates/{template_id}", response_model=schemas.SharedStepTemplate)
     def read_shared_step_template(

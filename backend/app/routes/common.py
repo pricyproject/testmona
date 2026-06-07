@@ -2,7 +2,9 @@
 Common routes for health checks and enum definitions.
 """
 
-from fastapi import Depends
+from typing import Optional
+
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas, models, auth
@@ -20,13 +22,14 @@ def register_common_routes(app):
 
     # Enum Endpoints
     @app.get("/enums/priorities")
-    def get_priority_enums(db: Session = Depends(get_db), current_user: schemas.User = Depends(auth.get_current_active_user)):
-        """Get priority enum values"""
+    def get_priority_enums(project_id: Optional[int] = Query(None), db: Session = Depends(get_db), current_user: schemas.User = Depends(auth.get_current_active_user)):
+        """Get priority enum values (scoped to a project when project_id is given)."""
         try:
-            # Get priority definitions from database
-            priority_definitions = db.query(models.PriorityDefinition).filter(
-                models.PriorityDefinition.is_active == True
-            ).order_by(models.PriorityDefinition.value.desc()).all()
+            query = db.query(models.PriorityDefinition).filter(models.PriorityDefinition.is_active == True)
+            if project_id is not None:
+                crud.ensure_default_priority_and_test_type_definitions(db, project_id, current_user.id)
+                query = query.filter(models.PriorityDefinition.project_id == project_id)
+            priority_definitions = query.order_by(models.PriorityDefinition.value.desc()).all()
             
             # Return priority definitions
             return [
@@ -50,13 +53,14 @@ def register_common_routes(app):
             ]
 
     @app.get("/enums/test-types")
-    def get_test_type_enums(db: Session = Depends(get_db), current_user: schemas.User = Depends(auth.get_current_active_user)):
-        """Get test type enum values"""
+    def get_test_type_enums(project_id: Optional[int] = Query(None), db: Session = Depends(get_db), current_user: schemas.User = Depends(auth.get_current_active_user)):
+        """Get test type enum values (scoped to a project when project_id is given)."""
         try:
-            # Get test type definitions from database
-            test_type_definitions = db.query(models.TestTypeDefinition).filter(
-                models.TestTypeDefinition.is_active == True
-            ).order_by(models.TestTypeDefinition.name).all()
+            query = db.query(models.TestTypeDefinition).filter(models.TestTypeDefinition.is_active == True)
+            if project_id is not None:
+                crud.ensure_default_priority_and_test_type_definitions(db, project_id, current_user.id)
+                query = query.filter(models.TestTypeDefinition.project_id == project_id)
+            test_type_definitions = query.order_by(models.TestTypeDefinition.name).all()
             
             # Return test type definitions
             return [

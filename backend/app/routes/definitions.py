@@ -1,10 +1,15 @@
 """
 Definition routes for test type and priority definitions.
+
+These catalogs are per-project: each project owns its own test types / priorities,
+lazily seeded from sensible defaults on first read. Pass ``project_id`` to scope a
+request to a project (the per-project UI always does); omitting it falls back to the
+legacy unscoped listing for backwards compatibility.
 """
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from .. import crud, schemas, auth, rbac
 from ..database import get_db
@@ -13,7 +18,13 @@ from ..auth import get_current_active_user
 
 def register_definitions_routes(app):
     """Register definition routes with the FastAPI app."""
-    
+
+    def _require_project_write(current_user, project_id, db):
+        if project_id is not None and not rbac.has_permission(current_user, "write", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if project_id is None and not rbac.has_permission(current_user, "write"):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     # Test Type Definition Endpoints
     @app.post("/test-type-definitions/", response_model=schemas.TestTypeDefinition)
     def create_test_type_definition(
@@ -21,23 +32,25 @@ def register_definitions_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        # Allow regular users to create test type definitions for smoother UX
-        if not rbac.has_permission(current_user, "write"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        _require_project_write(current_user, test_type.project_id, db)
         return crud.create_test_type_definition(db=db, test_type=test_type)
 
     @app.get("/test-type-definitions/", response_model=List[schemas.TestTypeDefinition])
     def read_test_type_definitions(
+        project_id: Optional[int] = Query(None),
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
+        if project_id is not None:
+            if not rbac.has_permission(current_user, "read", project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            # Seed this project's defaults on first access.
+            crud.ensure_default_priority_and_test_type_definitions(db, project_id, current_user.id)
+        elif not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.get_test_type_definitions(db, skip=skip, limit=limit)
+        return crud.get_test_type_definitions(db, skip=skip, limit=limit, project_id=project_id)
 
     @app.get("/test-type-definitions/{test_type_id}", response_model=schemas.TestTypeDefinition)
     def read_test_type_definition(
@@ -57,13 +70,11 @@ def register_definitions_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Only admins can update test type definitions")
-        
-        db_test_type = crud.update_test_type_definition(db, test_type_id=test_type_id, test_type=test_type)
-        if db_test_type is None:
+        existing = crud.get_test_type_definition(db, test_type_id=test_type_id)
+        if existing is None:
             raise HTTPException(status_code=404, detail="Test type definition not found")
-        return db_test_type
+        _require_project_write(current_user, existing.project_id, db)
+        return crud.update_test_type_definition(db, test_type_id=test_type_id, test_type=test_type)
 
     @app.delete("/test-type-definitions/{test_type_id}")
     def delete_test_type_definition(
@@ -71,12 +82,11 @@ def register_definitions_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Only admins can delete test type definitions")
-        
-        db_test_type = crud.delete_test_type_definition(db, test_type_id=test_type_id)
-        if db_test_type is None:
+        existing = crud.get_test_type_definition(db, test_type_id=test_type_id)
+        if existing is None:
             raise HTTPException(status_code=404, detail="Test type definition not found")
+        _require_project_write(current_user, existing.project_id, db)
+        crud.delete_test_type_definition(db, test_type_id=test_type_id)
         return {"message": "Test type definition deleted successfully"}
 
     # Priority Definition Endpoints
@@ -86,23 +96,24 @@ def register_definitions_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        # Allow regular users to create priority definitions for smoother UX
-        if not rbac.has_permission(current_user, "write"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        _require_project_write(current_user, priority.project_id, db)
         return crud.create_priority_definition(db=db, priority=priority)
 
     @app.get("/priority-definitions/", response_model=List[schemas.PriorityDefinition])
     def read_priority_definitions(
+        project_id: Optional[int] = Query(None),
         skip: int = 0,
         limit: int = 100,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
+        if project_id is not None:
+            if not rbac.has_permission(current_user, "read", project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            crud.ensure_default_priority_and_test_type_definitions(db, project_id, current_user.id)
+        elif not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.get_priority_definitions(db, skip=skip, limit=limit)
+        return crud.get_priority_definitions(db, skip=skip, limit=limit, project_id=project_id)
 
     @app.get("/priority-definitions/{priority_id}", response_model=schemas.PriorityDefinition)
     def read_priority_definition(
@@ -122,13 +133,11 @@ def register_definitions_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Only admins can update priority definitions")
-        
-        db_priority = crud.update_priority_definition(db, priority_id=priority_id, priority=priority)
-        if db_priority is None:
+        existing = crud.get_priority_definition(db, priority_id=priority_id)
+        if existing is None:
             raise HTTPException(status_code=404, detail="Priority definition not found")
-        return db_priority
+        _require_project_write(current_user, existing.project_id, db)
+        return crud.update_priority_definition(db, priority_id=priority_id, priority=priority)
 
     @app.delete("/priority-definitions/{priority_id}")
     def delete_priority_definition(
@@ -136,10 +145,9 @@ def register_definitions_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Only admins can delete priority definitions")
-        
-        db_priority = crud.delete_priority_definition(db, priority_id=priority_id)
-        if db_priority is None:
+        existing = crud.get_priority_definition(db, priority_id=priority_id)
+        if existing is None:
             raise HTTPException(status_code=404, detail="Priority definition not found")
+        _require_project_write(current_user, existing.project_id, db)
+        crud.delete_priority_definition(db, priority_id=priority_id)
         return {"message": "Priority definition deleted successfully"}
