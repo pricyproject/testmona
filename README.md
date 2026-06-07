@@ -34,12 +34,6 @@ Built with a React frontend and a FastAPI API.
 - **Audit & Collaboration** — Project audit trails (with purge), an RTL-aware
   notification system, and full internationalization (multi-language + RTL).
 
-## Tech Stack
-
-- Frontend: React 19, TypeScript, Vite, Tailwind CSS
-- Backend: FastAPI, SQLAlchemy, Alembic, Pydantic, JWT auth
-- AI: Pluggable provider manager for assistant and generation workflows
-- Tooling: Docker Compose, ESLint, Postman collections
 
 ## Quick Start
 
