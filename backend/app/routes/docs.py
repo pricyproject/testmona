@@ -561,6 +561,7 @@ def _space_view(space: models.DocSpace, doc_count: int = 0) -> schemas.DocSpace:
 def _list_item(doc: models.Doc) -> schemas.DocListItem:
     return schemas.DocListItem(
         id=doc.id,
+        project_seq=getattr(doc, "project_seq", None),
         uuid=doc.uuid,
         title=doc.title,
         slug=doc.slug,

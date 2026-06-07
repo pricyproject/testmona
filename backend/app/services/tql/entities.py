@@ -66,6 +66,7 @@ def _build_entities() -> Dict[str, EntitySpec]:
     def defect_row(d: Defect) -> dict:
         return {
             "id": d.id,
+            "project_seq": d.project_seq,
             "key": d.defect_id,
             "title": d.title,
             "status": _evalue(d.status),
@@ -82,6 +83,7 @@ def _build_entities() -> Dict[str, EntitySpec]:
     def requirement_row(r: Requirement) -> dict:
         return {
             "id": r.id,
+            "project_seq": r.project_seq,
             "key": r.requirement_id,
             "title": r.title,
             "status": _evalue(r.status),
@@ -101,7 +103,8 @@ def _build_entities() -> Dict[str, EntitySpec]:
     def testcase_row(tc: TestCase) -> dict:
         return {
             "id": tc.id,
-            "key": f"TC-{tc.id}",
+            "project_seq": tc.project_seq,
+            "key": f"TC-{tc.project_seq or tc.id}",
             "title": tc.title,
             "status": tc.status,
             "priority": tc.priority,
@@ -117,7 +120,8 @@ def _build_entities() -> Dict[str, EntitySpec]:
     def testplan_row(tp: TestPlan) -> dict:
         return {
             "id": tp.id,
-            "key": f"TP-{tp.id}",
+            "project_seq": tp.project_seq,
+            "key": f"TP-{tp.project_seq or tp.id}",
             "title": tp.title,
             "status": _evalue(tp.status),
             "created_at": tp.created_at.isoformat() if tp.created_at else None,
@@ -151,7 +155,8 @@ def _build_entities() -> Dict[str, EntitySpec]:
     def doc_row(d: Doc) -> dict:
         return {
             "id": d.id,
-            "key": f"DOC-{d.id}",
+            "project_seq": d.project_seq,
+            "key": f"DOC-{d.project_seq or d.id}",
             "title": d.title,
             "status": _evalue(d.status),
             "tags": d.tags,

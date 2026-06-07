@@ -109,6 +109,7 @@ def register_traceability_coverage_routes(app):
                 tc_open_defects = open_defects_by_tc.get(test_case.id, [])
                 test_cases.append({
                     "id": test_case.id,
+                    "project_seq": test_case.project_seq,
                     "title": test_case.title,
                     "status": status,
                     "test_run_id": latest_result.test_run_id if latest_result else None,

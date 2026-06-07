@@ -304,7 +304,7 @@ _LIST_EXCERPT_CHARS = 400
 def _list_columns():
     D = models.Doc
     return [
-        D.id, D.uuid, D.title, D.slug, D.space_id, D.folder_id, D.project_id,
+        D.id, D.project_seq, D.uuid, D.title, D.slug, D.space_id, D.folder_id, D.project_id,
         D.classification, D.status, D.tags, D.dir, D.language, D.current_version,
         D.share_scope, D.view_count, D.last_viewed_at, D.created_by, D.updated_by,
         D.created_at, D.updated_at,
