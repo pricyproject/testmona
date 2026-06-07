@@ -6,6 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   ShieldCheck,
   Eye,
   EyeOff,
@@ -17,6 +24,7 @@ import {
   X,
   Loader2,
   ArrowRight,
+  Languages,
 } from 'lucide-react';
 import { useAppName } from '@/hooks/useAppName';
 import { authAPI, getApiErrorMessage } from '@/lib/api';
@@ -56,8 +64,8 @@ export function Setup() {
   const [isLoading, setIsLoading] = useState(false);
 
   const { appName, appLogoUrl } = useAppName(false);
-  const { t, isRTL } = useTranslation();
-  const { login } = useAuthStore();
+  const { t, isRTL, language } = useTranslation();
+  const { login, setLanguage } = useAuthStore();
   const navigate = useNavigate();
 
   // RTL-aware positioning for inline field icons.
@@ -158,7 +166,25 @@ export function Setup() {
 
         <Card className="border-border/60 shadow-xl shadow-black/5">
           <CardHeader className="space-y-1.5 pb-4">
-            <CardTitle className="text-xl">{t('setupHeading')}</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-xl">{t('setupHeading')}</CardTitle>
+              <Select
+                value={language}
+                onValueChange={(value) => {
+                  setLanguage(value as 'en' | 'fa' | 'ar');
+                }}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <Languages className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">🇺🇸 English</SelectItem>
+                  <SelectItem value="fa">🇮🇷 فارسی</SelectItem>
+                  <SelectItem value="ar">🇸🇦 العربية</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <p className="text-sm text-muted-foreground">{t('setupSubtitle')}</p>
           </CardHeader>
           <CardContent>
