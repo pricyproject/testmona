@@ -4275,7 +4275,7 @@ export function TestCases() {
                       </p>
                     )}
                     <div className="flex items-center text-xs text-gray-500">
-                      <User className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {t('by')} {rev.changed_by || rev.author || t('unknown')}
+                      <User className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {t('by')} {rev.creator?.full_name || rev.creator?.username || t('unknown')}
                     </div>
                     <div className="flex gap-2 mt-3">
                       <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleCompareRevision(rev)}>{t('compare')}</Button>
