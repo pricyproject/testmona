@@ -405,10 +405,16 @@ export function useTestCaseExecution() {
     let cancelled = false;
     const loadExistingExecution = async () => {
       if (!testRunId || !testCaseId) return;
+      if (runLoading || tcLoading) return; // wait for the seq -> global id resolution
       setIsLoading(true);
       try {
         const results = await testResultsAPI.getAll(runGlobalId, tcGlobalId);
         if (cancelled) return;
+        // Transient defect-context inputs aren't persisted on the result, so clear
+        // them on every case load — otherwise a failing-step pick from the previous
+        // case leaks into the next one after Save & Next.
+        setSelectedFailureStepNumber('');
+        setFailureStepActual('');
         if (results.length > 0) {
           const result = results[0];
           setExecutionStatus(BACKEND_TO_STATUS[result.status] || 'pending');
@@ -477,7 +483,7 @@ export function useTestCaseExecution() {
     };
     loadExistingExecution();
     return () => { cancelled = true; };
-  }, [testRunId, testCaseId, testRun?.assigned_to, currentUser?.id, restoreTimingFromResult]);
+  }, [testRunId, testCaseId, runGlobalId, tcGlobalId, runLoading, tcLoading, testRun?.assigned_to, currentUser?.id, restoreTimingFromResult]);
 
   // Load per-step outcomes for the current result (multistep cases only).
   useEffect(() => {
