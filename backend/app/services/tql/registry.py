@@ -185,7 +185,9 @@ def _build_defect_registry() -> Dict[str, FieldSpec]:
     from ...models import Defect, DefectStatus, DefectSeverity, DefectPriority
 
     return {
-        "id": int_field(Defect.id),
+        # Project-first: `id` is the per-project number (matches the DEF- key/URL),
+        # not the hidden global primary key.
+        "id": int_field(Defect.project_seq),
         "status": enum_field(Defect.status, DefectStatus),
         "severity": enum_field(Defect.severity, DefectSeverity),
         "priority": enum_field(Defect.priority, DefectPriority),
@@ -209,7 +211,9 @@ def _build_requirement_registry() -> Dict[str, FieldSpec]:
     from ...models import Requirement, RequirementStatus, Priority
 
     return {
-        "id": int_field(Requirement.id),
+        # Project-first: `id` is the per-project number (matches REQ- key/URL),
+        # not the hidden global primary key.
+        "id": int_field(Requirement.project_seq),
         "status": enum_field(Requirement.status, RequirementStatus),
         "priority": enum_field(Requirement.priority, Priority),
         "assignee": user_field(Requirement.assigned_to),
@@ -229,7 +233,7 @@ def _build_testplan_registry() -> Dict[str, FieldSpec]:
     from ...models import TestPlan, TestStatus
 
     return {
-        "id": int_field(TestPlan.id),
+        "id": int_field(TestPlan.project_seq),
         "status": enum_field(TestPlan.status, TestStatus),
         "creator": user_field(TestPlan.created_by),
         "summary": text_field(TestPlan.title),
@@ -286,7 +290,7 @@ def _build_doc_registry() -> Dict[str, FieldSpec]:
     from ...models import Doc, DocStatus
 
     return {
-        "id": int_field(Doc.id),
+        "id": int_field(Doc.project_seq),
         "status": enum_field(Doc.status, DocStatus),
         "creator": user_field(Doc.created_by),
         "summary": text_field(Doc.title),
@@ -306,7 +310,7 @@ def _build_testcase_registry() -> Dict[str, FieldSpec]:
     # status / priority / test_type are plain String columns holding lowercase
     # tokens, so they use keyword fields rather than enum fields.
     return {
-        "id": int_field(TestCase.id),
+        "id": int_field(TestCase.project_seq),
         "status": keyword_field(TestCase.status, ("active", "inactive", "archived", "draft")),
         "priority": keyword_field(TestCase.priority, ("low", "medium", "high", "critical")),
         "type": keyword_field(TestCase.test_type, ("manual", "automated", "exploratory")),
