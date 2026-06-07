@@ -1,8 +1,9 @@
 import { Fragment, useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronRight, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Settings, Sun, User } from 'lucide-react';
+import { ChevronRight, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Settings, ShieldCheck, Sun, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
+import { isAdminUser } from '@/utils/roles';
 import { useProjectStore } from '@/stores/projectStore';
 import { NotificationDropdown } from '@/components/NotificationDropdown';
 import { ProjectSelector } from '@/components/ProjectSelector';
@@ -299,6 +300,12 @@ export function Navbar({
                 <Settings className={`h-[18px] w-[18px] ${isRTL ? 'ml-3' : 'mr-3'}`} />
                 <span className="text-sm font-medium">{t('settings')}</span>
               </DropdownMenuItem>
+              {isAdminUser(user) && (
+                <DropdownMenuItem onClick={() => navigate('/administrator')} className="cursor-pointer rounded-md px-3 py-2.5">
+                  <ShieldCheck className={`h-[18px] w-[18px] ${isRTL ? 'ml-3' : 'mr-3'}`} />
+                  <span className="text-sm font-medium">{t('administrator')}</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator className="my-2" />
               <DropdownMenuItem
                 onClick={handleLogout}
