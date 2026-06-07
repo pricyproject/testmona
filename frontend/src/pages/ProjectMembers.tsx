@@ -245,6 +245,13 @@ export function ProjectMembers() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddMember();
+    }
+  };
+
   const handleRemove = async () => {
     if (!removeTarget?.assignment_id) return;
     setIsRemoving(true);
@@ -460,7 +467,7 @@ export function ProjectMembers() {
       </Card>
 
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent>
+        <DialogContent onKeyDown={handleKeyDown}>
           <DialogHeader>
             <DialogTitle>{t('addMember')}</DialogTitle>
             <DialogDescription>{t('addMemberDescription')}</DialogDescription>

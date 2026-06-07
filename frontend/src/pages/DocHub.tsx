@@ -426,6 +426,13 @@ export function DocHub() {
     }
   };
 
+  const handleSpaceKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleCreateSpace();
+    }
+  };
+
   const handleCreateDoc = async () => {
     if (!newDocTitle.trim() || activeSpaceId == null) return;
     try {
@@ -448,16 +455,22 @@ export function DocHub() {
       const folder = await docsAPI.createFolder({
         space_id: activeSpaceId,
         name: newFolderName.trim(),
-        parent_folder_id: activeFolderId,
       });
       setFolderDialogOpen(false);
       setNewFolderName('');
-      await loadFolders();
-      setActiveFolderId(folder.id);
+      await loadSpaces();
+      toast({ title: t('success'), description: t('docFolderCreated') });
     } catch (e: any) {
       toast({ title: t('error'), description: e?.response?.data?.detail || t('docFolderCreateFailed'), variant: 'destructive' });
     } finally {
       setCreatingFolder(false);
+    }
+  };
+
+  const handleFolderKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleCreateFolder();
     }
   };
 
@@ -1134,7 +1147,7 @@ export function DocHub() {
 
       {/* New space dialog */}
       <Dialog open={spaceDialogOpen} onOpenChange={setSpaceDialogOpen}>
-        <DialogContent dir={isRTL ? 'rtl' : 'ltr'}>
+        <DialogContent dir={isRTL ? 'rtl' : 'ltr'} onKeyDown={handleSpaceKeyDown}>
           <DialogHeader>
             <DialogTitle>{t('docNewSpace')}</DialogTitle>
             <DialogDescription>{projectId ? t('docNewProjectSpaceDesc') : t('docNewGlobalSpaceDesc')}</DialogDescription>
@@ -1188,7 +1201,7 @@ export function DocHub() {
       </Dialog>
 
       <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
-        <DialogContent dir={isRTL ? 'rtl' : 'ltr'}>
+        <DialogContent dir={isRTL ? 'rtl' : 'ltr'} onKeyDown={handleFolderKeyDown}>
           <DialogHeader>
             <DialogTitle>{t('docNewFolder')}</DialogTitle>
             <DialogDescription>{t('docFolderDesc')}</DialogDescription>

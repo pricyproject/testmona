@@ -25,9 +25,16 @@ export function TwoFactorDialog({ isOpen, onClose, enabled, onToggle }: TwoFacto
     onClose();
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleToggle();
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent isRTL={isRTL} className="sm:max-w-md">
+      <DialogContent isRTL={isRTL} className="sm:max-w-md" onKeyDown={handleKeyDown}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Key className="h-5 w-5 text-gray-600 dark:text-gray-300" />

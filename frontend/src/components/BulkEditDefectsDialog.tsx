@@ -107,9 +107,16 @@ export function BulkEditDefectsDialog({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleApply();
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent onKeyDown={handleKeyDown}>
         <DialogHeader>
           <DialogTitle>{t('bulkEditTitle', { count: String(ids.length) })}</DialogTitle>
           <DialogDescription>{t('bulkEditDescription')}</DialogDescription>

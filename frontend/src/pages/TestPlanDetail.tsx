@@ -249,6 +249,13 @@ export function TestPlanDetail() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveRequirements();
+    }
+  };
+
   const filteredCandidates = useMemo(() => {
     const q = reqSearch.trim().toLowerCase();
     if (!q) return candidates;
@@ -521,7 +528,7 @@ export function TestPlanDetail() {
       </Card>
 
       <Dialog open={manageOpen} onOpenChange={(open) => (open ? null : setManageOpen(false))}>
-        <DialogContent isRTL={isRTL} className="max-h-[85vh] overflow-hidden sm:max-w-[560px]">
+        <DialogContent isRTL={isRTL} className="max-h-[85vh] overflow-hidden sm:max-w-[560px]" onKeyDown={handleKeyDown}>
           <DialogHeader>
             <DialogTitle>{t('manageRequirements')}</DialogTitle>
             <DialogDescription>{t('selectRequirementsToLink')}</DialogDescription>

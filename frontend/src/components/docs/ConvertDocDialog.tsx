@@ -279,6 +279,13 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleConvert();
+    }
+  };
+
   // Map only known skip reasons to a message; anything else falls back to the
   // generic notice (avoids surfacing a raw reason code, since `t` echoes
   // unknown keys verbatim).
@@ -292,6 +299,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       <DialogContent
         className="flex max-h-[90vh] w-[95vw] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:max-h-[88vh]"
         dir={isRTL ? 'rtl' : 'ltr'}
+        onKeyDown={handleKeyDown}
       >
         <DialogHeader className="border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:px-6 sm:py-4">
           <DialogTitle className="flex items-center gap-2">

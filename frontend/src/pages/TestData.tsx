@@ -156,6 +156,13 @@ export function TestData() {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
@@ -222,7 +229,7 @@ export function TestData() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl" onKeyDown={handleKeyDown}>
           <DialogHeader>
             <DialogTitle>{editingId == null ? t('newDataset') : t('editDataset')}</DialogTitle>
             <DialogDescription>{t('datasetDialogDescription')}</DialogDescription>

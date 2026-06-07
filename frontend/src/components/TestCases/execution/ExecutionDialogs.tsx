@@ -17,9 +17,19 @@ function DefectDialog() {
     defectTitleInputRef, isCreating, handleCreateDefect,
   } = useExecution();
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Allow both Enter and Ctrl+Enter for convenience
+    if (e.key === 'Enter' && !e.ctrlKey) {
+      e.preventDefault();
+      handleCreateDefect();
+    }
+    // Still call the existing handler for Ctrl+Enter
+    handleDefectDialogKeyDown(e);
+  };
+
   return (
     <Dialog open={isDefectDialogOpen} onOpenChange={handleDialogClose}>
-      <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={handleDefectDialogKeyDown}>
+      <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={handleKeyDown}>
         <DialogHeader>
           <DialogTitle>{t('reportNewDefect')}</DialogTitle>
           <DialogDescription>{t('reportExecutionDefectDesc')}</DialogDescription>
@@ -121,9 +131,17 @@ function ManualTimeDialog() {
     t, isRTL, showManualTimeDialog, setShowManualTimeDialog,
     manualTimeEntry, setManualTimeEntry, handleManualTimeEntry,
   } = useExecution();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleManualTimeEntry();
+    }
+  };
+
   return (
     <Dialog open={showManualTimeDialog} onOpenChange={setShowManualTimeDialog}>
-      <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+      <DialogContent isRTL={isRTL} className="sm:max-w-[400px]" onKeyDown={handleKeyDown}>
         <DialogHeader>
           <DialogTitle>{t('addManualTime')}</DialogTitle>
           <DialogDescription>{t('addManualTimeDesc')}</DialogDescription>
