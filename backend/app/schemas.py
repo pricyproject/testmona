@@ -151,6 +151,7 @@ class TestSuiteUpdate(BaseModel):
 
 class TestSuite(TestSuiteBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -243,6 +244,7 @@ class TestCaseUpdate(BaseModel):
 
 class TestCase(TestCaseBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     test_suite_id: int
     created_by: Optional[int] = None
     created_at: datetime
@@ -375,6 +377,7 @@ class TestRunAssign(BaseModel):
 
 class TestRun(TestRunBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     test_plan_id: Optional[int] = None
     milestone_id: Optional[int] = None
@@ -1284,6 +1287,7 @@ class CustomFieldDefinitionUpdate(BaseModel):
 
 class CustomFieldDefinition(CustomFieldDefinitionBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -1431,6 +1435,7 @@ class JiraIssue(JiraIssueBase):
 
 
 class TestTypeDefinitionBase(BaseModel):
+    project_id: Optional[int] = None  # per-project catalog
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=1000)
     color: str = "#3B82F6"
@@ -1481,6 +1486,7 @@ class TestTypeDefinitionUpdate(BaseModel):
 
 class TestTypeDefinition(TestTypeDefinitionBase):
     id: int
+    project_seq: Optional[int] = None
     usage_count: int
     created_by: int
     created_at: datetime
@@ -1488,6 +1494,7 @@ class TestTypeDefinition(TestTypeDefinitionBase):
 
 
 class PriorityDefinitionBase(BaseModel):
+    project_id: Optional[int] = None  # per-project catalog
     name: str = Field(..., min_length=1, max_length=100)
     value: int = Field(..., ge=1, le=10)
     color: str = "#F59E0B"
@@ -1540,12 +1547,14 @@ class PriorityDefinitionUpdate(BaseModel):
 
 class PriorityDefinition(PriorityDefinitionBase):
     id: int
+    project_seq: Optional[int] = None
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None
 
 
 class SharedStepTemplateBase(BaseModel):
+    project_id: Optional[int] = None  # per-project catalog
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=500)
     category: StepCategory
@@ -1638,6 +1647,7 @@ class SharedStepTemplateUpdate(BaseModel):
 
 class SharedStepTemplate(SharedStepTemplateBase):
     id: int
+    project_seq: Optional[int] = None
     usage_count: int
     created_by: int
     created_at: datetime
@@ -1930,7 +1940,9 @@ class TestCaseSectionWithCases(TestCaseSection):
 class RequirementBase(BaseModel):
     title: str
     description: Optional[str] = None
-    requirement_id: str
+    # Server-derived from the project sequence (REQ-NNN); optional on input so the
+    # client no longer manages a separate identifier.
+    requirement_id: Optional[str] = None
     status: RequirementStatus = RequirementStatus.DRAFT
     priority: Priority = Priority.MEDIUM
     parent_requirement_id: Optional[int] = None
@@ -1990,6 +2002,7 @@ class RequirementUpdate(BaseModel):
 
 class Requirement(RequirementBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_by: int
     created_at: datetime
@@ -2046,6 +2059,7 @@ class RequirementFolderUpdate(BaseModel):
 
 class RequirementFolder(RequirementFolderBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     requirement_count: int = 0
     created_at: datetime
@@ -2554,7 +2568,8 @@ def _sanitize_defect_strings(data):
 class DefectBase(BaseModel):
     title: str
     description: Optional[str] = None
-    defect_id: str
+    # Server-derived from the project sequence (P{pid}-DEF-NNN); optional on input.
+    defect_id: Optional[str] = None
     status: DefectStatus = DefectStatus.OPEN
     severity: DefectSeverity = DefectSeverity.MEDIUM
     priority: DefectPriority = DefectPriority.MEDIUM
@@ -2618,6 +2633,7 @@ class DefectUpdate(BaseModel):
 
 class Defect(DefectBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     reported_by: int
     external_last_sync: Optional[datetime] = None
@@ -3148,6 +3164,7 @@ class TestPlanUpdate(BaseModel):
 
 class TestPlan(TestPlanBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_by: int
     created_at: datetime
@@ -3239,6 +3256,7 @@ class MilestoneLinkedTestPlan(BaseModel):
 
 class Milestone(MilestoneBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_by: Optional[int] = None
     created_at: datetime
@@ -3735,6 +3753,7 @@ class SharedStepUpdate(BaseModel):
 
 class SharedStep(SharedStepBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -3771,6 +3790,7 @@ class GlobalParameterUpdate(BaseModel):
 
 class GlobalParameter(GlobalParameterBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -3851,6 +3871,7 @@ class TestDatasetUpdate(BaseModel):
 
 class TestDataset(TestDatasetBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_by: int
     created_at: datetime
@@ -3947,6 +3968,7 @@ class ExecutionEnvironmentUpdate(BaseModel):
 
 class ExecutionEnvironment(ExecutionEnvironmentBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -4393,6 +4415,7 @@ class DocSpaceUpdate(BaseModel):
 
 class DocSpace(DocSpaceBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     uuid: Optional[str] = None
     slug: str
     project_id: Optional[int] = None
@@ -4587,6 +4610,7 @@ class DocFacets(BaseModel):
 class DocListItem(BaseModel):
     """Lightweight doc row for the hub list (excludes full content)."""
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     uuid: Optional[str] = None
     title: str
     slug: str
@@ -4616,6 +4640,7 @@ class DocListItem(BaseModel):
 
 class Doc(DocBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     uuid: Optional[str] = None
     slug: str
     space_id: int

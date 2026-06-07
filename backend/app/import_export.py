@@ -1166,7 +1166,7 @@ async def import_test_cases(
         # Ensure default priority and test type definitions exist if they are blank in the DB
         # Use a default user ID (e.g., 1) since imports might not have a current user context
         from . import crud
-        crud.ensure_default_priority_and_test_type_definitions(db, created_by=current_user.id)
+        crud.ensure_default_priority_and_test_type_definitions(db, project_id, current_user.id)
 
         # Step 1: Apply bulk corrections if enabled
         if apply_corrections:
@@ -1466,7 +1466,7 @@ async def import_previewed_test_cases(
         custom_fields_by_id = normalize_custom_field_lookup(custom_fields)
 
         if not payload.dry_run:
-            crud.ensure_default_priority_and_test_type_definitions(db, created_by=current_user.id)
+            crud.ensure_default_priority_and_test_type_definitions(db, test_suite.project_id, current_user.id)
 
         imported_count = 0
         skipped_count = 0
@@ -2875,7 +2875,7 @@ async def _perform_import(
                     imported_count += 1
 
                 # Ensure default priority and test type definitions exist if they are blank in the DB
-                crud.ensure_default_priority_and_test_type_definitions(db, created_by=owner_id)
+                crud.ensure_default_priority_and_test_type_definitions(db, project_id, owner_id)
 
                 # Import custom field definitions first
                 if 'custom_field_definitions' in project_data:

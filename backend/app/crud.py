@@ -3696,11 +3696,13 @@ def _apply_test_type_usage_counts(db: Session, definitions: List[TestTypeDefinit
     return definitions
 
 
-def get_test_type_definitions(db: Session, skip: int = 0, limit: int = 100):
+def get_test_type_definitions(db: Session, skip: int = 0, limit: int = 100, project_id: Optional[int] = None):
+    query = db.query(TestTypeDefinition).filter(TestTypeDefinition.is_active == True)
+    if project_id is not None:
+        query = query.filter(TestTypeDefinition.project_id == project_id)
     definitions = (
-        db.query(TestTypeDefinition)
-        .filter(TestTypeDefinition.is_active == True)
-        .order_by(TestTypeDefinition.name)
+        query
+        .order_by(TestTypeDefinition.project_seq, TestTypeDefinition.name)
         .offset(skip)
         .limit(limit)
         .all()
@@ -3743,15 +3745,18 @@ def delete_test_type_definition(db: Session, test_type_id: int):
 
 
 # Priority Definition CRUD
-def get_priority_definitions(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(PriorityDefinition).filter(PriorityDefinition.is_active == True).order_by(PriorityDefinition.value.desc()).offset(skip).limit(limit).all()
+def get_priority_definitions(db: Session, skip: int = 0, limit: int = 100, project_id: Optional[int] = None):
+    query = db.query(PriorityDefinition).filter(PriorityDefinition.is_active == True)
+    if project_id is not None:
+        query = query.filter(PriorityDefinition.project_id == project_id)
+    return query.order_by(PriorityDefinition.value.desc()).offset(skip).limit(limit).all()
 
 
 def get_priority_definition(db: Session, priority_id: int):
     return db.query(PriorityDefinition).filter(PriorityDefinition.id == priority_id).first()
 
 
-def ensure_default_priority_and_test_type_definitions(db: Session, created_by: int):
+def ensure_default_priority_and_test_type_definitions(db: Session, project_id: int, created_by: int):
     """
     Ensure default priority and test type definitions exist in the database.
 
@@ -3777,9 +3782,11 @@ def ensure_default_priority_and_test_type_definitions(db: Session, created_by: i
     ]
     existing_priority_names = {
         (name or "").strip().lower()
-        for (name,) in db.query(PriorityDefinition.name).all()
+        for (name,) in db.query(PriorityDefinition.name).filter(PriorityDefinition.project_id == project_id).all()
     }
-    priority_default_taken = db.query(PriorityDefinition.id).filter(PriorityDefinition.is_default == True).first() is not None  # noqa: E712
+    priority_default_taken = db.query(PriorityDefinition.id).filter(
+        PriorityDefinition.project_id == project_id, PriorityDefinition.is_default == True  # noqa: E712
+    ).first() is not None
     for priority_data in default_priorities:
         if priority_data["name"].strip().lower() in existing_priority_names:
             continue
@@ -3787,7 +3794,7 @@ def ensure_default_priority_and_test_type_definitions(db: Session, created_by: i
         if priority_default_taken:
             payload["is_default"] = False
         try:
-            priority = PriorityDefinitionCreate(**payload, created_by=created_by)
+            priority = PriorityDefinitionCreate(**payload, project_id=project_id, created_by=created_by)
             create_priority_definition(db, priority)
             if payload.get("is_default"):
                 priority_default_taken = True
@@ -3809,13 +3816,13 @@ def ensure_default_priority_and_test_type_definitions(db: Session, created_by: i
     ]
     existing_test_type_names = {
         (name or "").strip().lower()
-        for (name,) in db.query(TestTypeDefinition.name).all()
+        for (name,) in db.query(TestTypeDefinition.name).filter(TestTypeDefinition.project_id == project_id).all()
     }
     for test_type_data in default_test_types:
         if test_type_data["name"].strip().lower() in existing_test_type_names:
             continue
         try:
-            test_type = TestTypeDefinitionCreate(**test_type_data, created_by=created_by)
+            test_type = TestTypeDefinitionCreate(**test_type_data, project_id=project_id, created_by=created_by)
             create_test_type_definition(db, test_type)
         except IntegrityError:
             db.rollback()
@@ -3865,9 +3872,12 @@ def ensure_default_environment_definitions(db: Session, project_id: int, created
 
 
 def create_priority_definition(db: Session, priority: PriorityDefinitionCreate):
-    # If this is set as default, remove default from others
+    # If this is set as default, remove default from others in the same project
     if priority.is_default:
-        db.query(PriorityDefinition).filter(PriorityDefinition.is_default == True).update({"is_default": False})
+        db.query(PriorityDefinition).filter(
+            PriorityDefinition.project_id == priority.project_id,
+            PriorityDefinition.is_default == True,  # noqa: E712
+        ).update({"is_default": False})
     
     db_priority = PriorityDefinition(**priority.model_dump())
     db.add(db_priority)
@@ -3901,8 +3911,10 @@ def delete_priority_definition(db: Session, priority_id: int):
 
 
 # Shared Step Template CRUD
-def get_shared_step_templates(db: Session, skip: int = 0, limit: int = 100):
+def get_shared_step_templates(db: Session, skip: int = 0, limit: int = 100, project_id: Optional[int] = None):
     query = db.query(SharedStepTemplate).filter(SharedStepTemplate.is_active == True)
+    if project_id is not None:
+        query = query.filter(SharedStepTemplate.project_id == project_id)
     return query.offset(skip).limit(limit).all()
 
 

@@ -242,6 +242,7 @@ class CustomFieldDefinition(Base):
     field_type = Column(Enum(CustomFieldType), nullable=False)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     is_required = Column(Boolean, default=False)
     default_value = Column(Text)
     options = Column(JSON)  # For select/multiselect fields
@@ -341,6 +342,7 @@ class SharedStep(Base):
     action = Column(Text, nullable=False)  # The action to perform
     expected_result = Column(Text, nullable=False)  # Expected result
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -366,6 +368,7 @@ class GlobalParameter(Base):
     description = Column(Text)
     parameter_type = Column(String(50), default="string")  # string, number, boolean, json
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=True)  # null for global, project_id for project-specific
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -424,6 +427,7 @@ class TestDataset(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     name = Column(String(150), nullable=False)
     description = Column(Text)
     parameters = Column(JSON, nullable=False, default=list)  # ordered list of column names
@@ -445,7 +449,10 @@ class TestTypeDefinition(Base):
     __tablename__ = "test_type_definitions"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True, index=True)
+    # Per-project catalog: each project owns its own test types (seeded from defaults).
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=True, index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence
+    name = Column(String(100), nullable=False, index=True)
     description = Column(Text)
     color = Column(String(7), nullable=False, default="#3B82F6")  # Hex color code
     icon = Column(String(10), nullable=False, default="🖱️")  # Emoji icon
@@ -455,15 +462,23 @@ class TestTypeDefinition(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    __table_args__ = (
+        UniqueConstraint('project_id', 'name', name='uq_test_type_definitions_project_name'),
+    )
+
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
+    project = relationship("Project")
 
 
 class PriorityDefinition(Base):
     __tablename__ = "priority_definitions"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(50), nullable=False, unique=True, index=True)
+    # Per-project catalog: each project owns its own priorities (seeded from defaults).
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=True, index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence
+    name = Column(String(50), nullable=False, index=True)
     value = Column(Integer, nullable=False)  # Priority value (1-10)
     color = Column(String(7), nullable=False, default="#F59E0B")  # Hex color code
     description = Column(Text)
@@ -473,14 +488,22 @@ class PriorityDefinition(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    __table_args__ = (
+        UniqueConstraint('project_id', 'name', name='uq_priority_definitions_project_name'),
+    )
+
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
+    project = relationship("Project")
 
 
 class SharedStepTemplate(Base):
     __tablename__ = "shared_step_templates"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Per-project catalog: each project owns its own step templates (seeded from defaults).
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=True, index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence
     name = Column(String(200), nullable=False, index=True)
     description = Column(Text)
     category = Column(Enum(StepCategory, values_callable=lambda enum_class: [item.value for item in enum_class]), nullable=False)
@@ -497,6 +520,7 @@ class SharedStepTemplate(Base):
 
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
+    project = relationship("Project")
 
 
 class TestExecutionSettings(Base):
@@ -625,6 +649,7 @@ class TestSuite(Base):
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     status = Column(Enum(Status), default=Status.ACTIVE)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -658,6 +683,9 @@ class TestCase(Base):
     __tablename__ = "test_cases"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Per-project sequence for URLs/badges. TestCase has no project_id column
+    # (project is derived via the suite), so uniqueness is enforced in app logic.
+    project_seq = Column(Integer, nullable=True, index=True)
     title = Column(String(255), nullable=False, index=True)
     description = Column(Text)
     test_type = Column(String(20), default='manual')
@@ -669,6 +697,9 @@ class TestCase(Base):
     reference = Column(String(255), nullable=True)  # Reference field for requirements, JIRA tickets, etc.
     test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False)
     section_id = Column(Integer, ForeignKey("test_case_sections.id"))
+    # Denormalised from the suite so test cases can be filtered/numbered per project
+    # without a join. Kept in sync on create and whenever the suite changes.
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
     tags = Column(String(500))
     order_index = Column(Integer, default=0)
     is_deleted = Column(Boolean, default=False)
@@ -690,16 +721,7 @@ class TestCase(Base):
     test_steps = relationship("TestCaseStep", back_populates="test_case", cascade="all, delete-orphan")
     dataset = relationship("TestDataset", foreign_keys=[dataset_id])
     creator = relationship("User", foreign_keys=[created_by])
-
-    @property
-    def project(self):
-        """Get the project through the test suite relationship"""
-        return self.test_suite.project if self.test_suite else None
-
-    @property
-    def project_id(self):
-        """Get the project ID through the test suite relationship"""
-        return self.test_suite.project_id if self.test_suite else None
+    project = relationship("Project")
 
 
 class TestCaseStep(Base):
@@ -771,6 +793,7 @@ class TestRun(Base):
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     test_plan_id = Column(Integer, ForeignKey("test_plans.id"))
     schedule_id = Column(Integer, ForeignKey("test_schedules.id"))
     environment_id = Column(Integer, ForeignKey("execution_environments.id"))
@@ -1027,6 +1050,7 @@ class RequirementFolder(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     parent_folder_id = Column(Integer, ForeignKey("requirement_folders.id"))
     order_index = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1049,6 +1073,7 @@ class Requirement(Base):
     status = Column(Enum(RequirementStatus), default=RequirementStatus.DRAFT)
     priority = Column(Enum(Priority), default=Priority.MEDIUM)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     # Optional folder/category this requirement is filed under.
     folder_id = Column(Integer, ForeignKey("requirement_folders.id"))
     parent_requirement_id = Column(Integer, ForeignKey("requirements.id"))
@@ -1203,6 +1228,7 @@ class Defect(Base):
     severity = Column(Enum(DefectSeverity), default=DefectSeverity.MEDIUM)
     priority = Column(Enum(DefectPriority), default=DefectPriority.MEDIUM)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     test_case_id = Column(Integer, ForeignKey("test_cases.id"))
     test_run_id = Column(Integer, ForeignKey("test_runs.id"))
     requirement_id = Column(Integer, ForeignKey("requirements.id"))
@@ -1285,6 +1311,7 @@ class TestPlan(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     milestone_id = Column(Integer, ForeignKey("milestones.id"))
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(Enum(TestStatus), default=TestStatus.PENDING)
@@ -1317,6 +1344,7 @@ class Milestone(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     status = Column(Enum(MilestoneStatus), default=MilestoneStatus.PLANNED)
     target_date = Column(DateTime(timezone=True), nullable=True)
     actual_date = Column(DateTime(timezone=True), nullable=True)
@@ -1560,6 +1588,7 @@ class ExecutionEnvironment(Base):
     name = Column(String(100), nullable=False)
     description = Column(Text)
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     environment_type = Column(String(50), nullable=False)  # development, staging, production, custom
     config_data = Column(JSON)  # Environment configuration (URLs, credentials, etc.)
     build_info = Column(JSON)   # Build information and artifacts
@@ -1971,6 +2000,7 @@ class DocSpace(Base):
     description = Column(Text)
     # NULL => global space available across the whole instance.
     project_id = Column(Integer, ForeignKey("projects.id"), index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     classification = Column(String(100))
     icon = Column(String(50))
     color = Column(String(20))
@@ -2021,6 +2051,7 @@ class Doc(Base):
     folder_id = Column(Integer, ForeignKey("doc_folders.id", ondelete="SET NULL"))
     # Denormalised from the space so project-scoped queries/AI retrieval are cheap.
     project_id = Column(Integer, ForeignKey("projects.id"), index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     classification = Column(String(100))
     status = Column(Enum(DocStatus), default=DocStatus.DRAFT, nullable=False)
     tags = Column(String(500))
@@ -2288,3 +2319,9 @@ TestCase.current_version = relationship(
     uselist=False,
     viewonly=True
 )
+
+# Auto-allocate per-project ``project_seq`` on insert for every project-scoped,
+# URL/badge-bearing entity (see services/sequence_service.py).
+from .services.sequence_service import register_sequence_listeners  # noqa: E402
+
+register_sequence_listeners()

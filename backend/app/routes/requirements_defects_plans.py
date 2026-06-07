@@ -432,16 +432,9 @@ def register_requirements_defects_plans_routes(app):
         # (prevents spoofing and invalid-foreign-key failures).
         requirement.created_by = current_user.id
 
-        # Reject duplicate human-facing IDs within the same project.
-        duplicate = db.query(models.Requirement).filter(
-            models.Requirement.project_id == requirement.project_id,
-            models.Requirement.requirement_id == requirement.requirement_id,
-        ).first()
-        if duplicate:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Requirement ID '{requirement.requirement_id}' already exists in this project.",
-            )
+        # The human-facing key (REQ-NNN) is derived from the project sequence on
+        # insert — the client no longer supplies or can collide on it.
+        requirement.requirement_id = None
 
         # Validate optional references so bad input fails clearly (not as a 500).
         if requirement.parent_requirement_id is not None:
@@ -1517,8 +1510,8 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", defect.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        if not defect.defect_id.strip() or not defect.title.strip():
-            raise HTTPException(status_code=400, detail="Defect ID and title are required")
+        if not defect.title.strip():
+            raise HTTPException(status_code=400, detail="Title is required")
 
         _validate_defect_links(
             db,
@@ -1530,7 +1523,8 @@ def register_requirements_defects_plans_routes(app):
         )
         defect = defect.model_copy(update={
             "reported_by": current_user.id,
-            "defect_id": defect.defect_id.strip(),
+            # Derived from the project sequence on insert (P{pid}-DEF-NNN).
+            "defect_id": None,
             "title": defect.title.strip(),
         })
         try:
