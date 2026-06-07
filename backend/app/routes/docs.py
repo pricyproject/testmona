@@ -2288,9 +2288,18 @@ def register_docs_routes(app) -> None:
         if project is not None and not is_feature_enabled(project, "ask_ai"):
             result.ai_skipped_reason = "ask_ai_disabled"
             return result
-        if not get_ai_manager_status(db).get("available"):
+        status = get_ai_manager_status(db)
+        if not status.get("available"):
             result.ai_skipped_reason = "ai_unavailable"
             return result
+
+        # Record the configured provider/model up front so that even a failed
+        # call (ai_error/rate_limited) clearly shows AI *is* configured, rather
+        # than a misleading null that looks like no provider was set. On success
+        # these are overwritten with the provider actually used (fallback-aware).
+        provider_info = status.get("provider") or {}
+        result.provider = provider_info.get("provider")
+        result.model = provider_info.get("model")
 
         result.ai_available = True
         try:

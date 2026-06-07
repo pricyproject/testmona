@@ -375,6 +375,17 @@ def _provider_requires_api_key(provider: str) -> bool:
     return provider != "litellm"
 
 
+def _provider_is_usable(provider: str, provider_config: Dict[str, Any]) -> bool:
+    """Whether a provider can actually serve requests: enabled and (if the
+    provider needs one) holding an API key. Mirrors the ``available`` logic in
+    ``get_ai_manager_status``."""
+    if not provider_config or not provider_config.get("enabled"):
+        return False
+    if _provider_requires_api_key(provider) and not provider_config.get("api_key"):
+        return False
+    return True
+
+
 def _public_provider_config(provider_config: Dict[str, Any]) -> Dict[str, Any]:
     public_config = {key: value for key, value in provider_config.items() if key != "api_key"}
     public_config["token_configured"] = bool(provider_config.get("api_key"))
@@ -537,6 +548,21 @@ def update_ai_manager_settings(db: Session, payload: AIManagerSettingsPayload) -
         )
         if provider_payload.api_key:
             provider_config["api_key"] = encrypt_data(provider_payload.api_key)
+
+    # Fresh-install convenience: the active provider defaults to "openai", so a
+    # user who configures only a different provider would otherwise save with an
+    # unusable active provider and find AI "unavailable". If the requested active
+    # provider isn't usable, fall back to the first submitted provider that is
+    # (enabled + key), making "configure and save one provider" activate it.
+    active = config["active_provider"]
+    if not _provider_is_usable(active, config["providers"].get(active, {})):
+        replacement = next(
+            (p.provider for p in payload.providers
+             if _provider_is_usable(p.provider, config["providers"].get(p.provider, {}))),
+            None,
+        )
+        if replacement:
+            config["active_provider"] = replacement
 
     _persist_setting(db, AI_MANAGER_CONFIG_KEY, config, "AI provider configuration and encrypted API tokens")
     return get_ai_manager_settings(db)
