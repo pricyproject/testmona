@@ -407,7 +407,8 @@ class VersioningService:
         created_by: int,
         tag_name: str,
         tag_type: str = "release",
-        description: str = ""
+        description: str = "",
+        color: str = "#007bff"
     ) -> VersionTag:
         """Add a tag to a version"""
         tag = VersionTag(
@@ -415,6 +416,7 @@ class VersioningService:
             tag_name=tag_name,
             tag_type=tag_type,
             description=description,
+            color=color,
             created_by=created_by
         )
         
