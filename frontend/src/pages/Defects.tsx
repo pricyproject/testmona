@@ -1778,7 +1778,7 @@ export function Defects() {
               <Button
                 type="submit"
                 onClick={handleCreateDefect}
-                disabled={!defectId.trim() || !defectTitle.trim() || isDuplicateDefectId || isExternalIssueUrlInvalid || isCreating}
+                disabled={!defectTitle.trim() || isDuplicateDefectId || isExternalIssueUrlInvalid || isCreating}
                 className="min-w-36 transition-all duration-200"
               >
                 {isCreating ? t('creating') : t('reportDefect')}

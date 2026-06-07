@@ -132,16 +132,22 @@ def create_defect_management(
                 ).with_for_update().all()
                 
                 # Extract and find the maximum defect number from all existing defect_ids
+                # Supports both formats: DEF-{number} and P{projectId}-DEF-{number}
                 max_defect_number = 0
                 for existing_defect in all_defects:
                     if existing_defect.defect_id:
-                        match = re.search(r'DEF-(\d+)', existing_defect.defect_id)
+                        # Try to match both formats
+                        match = re.search(r'(?:P\d+-)?DEF-(\d+)', existing_defect.defect_id)
                         if match:
                             defect_number = int(match.group(1))
                             if defect_number > max_defect_number:
                                 max_defect_number = defect_number
                 
-                defect.defect_id = f"DEF-{max_defect_number + 1:03d}"
+                # Generate ID with project prefix if project_id is provided
+                if project_id:
+                    defect.defect_id = f"P{project_id}-DEF-{max_defect_number + 1:03d}"
+                else:
+                    defect.defect_id = f"DEF-{max_defect_number + 1:03d}"
             
             db_defect = models.Defect(
                 **defect.model_dump(),
