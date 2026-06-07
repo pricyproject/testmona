@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy import func, or_, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import re
@@ -3798,9 +3798,13 @@ def ensure_default_priority_and_test_type_definitions(db: Session, project_id: i
             create_priority_definition(db, priority)
             if payload.get("is_default"):
                 priority_default_taken = True
-        except IntegrityError:
-            # Another concurrent caller inserted this row first. Rollback the
-            # failed insert only — don't poison the surrounding transaction.
+        except (IntegrityError, OperationalError):
+            # A concurrent caller seeded this set first. Either the unique-name
+            # insert collided (IntegrityError) or the clear-existing-default
+            # UPDATE conflicted with that concurrent write (OperationalError,
+            # e.g. MariaDB 1020 "record has changed since last read"). Roll back
+            # the failed statement only — don't poison the surrounding
+            # transaction — and let a later read finish the seed.
             db.rollback()
             existing_priority_names.add(priority_data["name"].strip().lower())
 
@@ -3824,7 +3828,7 @@ def ensure_default_priority_and_test_type_definitions(db: Session, project_id: i
         try:
             test_type = TestTypeDefinitionCreate(**test_type_data, project_id=project_id, created_by=created_by)
             create_test_type_definition(db, test_type)
-        except IntegrityError:
+        except (IntegrityError, OperationalError):
             db.rollback()
             existing_test_type_names.add(test_type_data["name"].strip().lower())
 
