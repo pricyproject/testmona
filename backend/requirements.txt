@@ -22,3 +22,4 @@ defusedxml==0.7.1
 markdown==3.8.1
 PyYAML==6.0.2
 lark==1.2.2
+json-repair==0.60.1  # tolerant fallback for malformed JSON returned by LLMs

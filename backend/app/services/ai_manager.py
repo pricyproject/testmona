@@ -33,6 +33,16 @@ MAX_RECENT_USAGE_EVENTS = 50
 DEFAULT_AI_REQUEST_TIMEOUT_SECONDS = 60
 MAX_AI_REQUEST_TIMEOUT_SECONDS = 300
 AI_LIMIT_WARNING_THRESHOLD = 80
+# Reasoning models (e.g. the default huggingface "openai/gpt-oss-20b") spend
+# hidden reasoning tokens out of the same OpenAI-style ``max_tokens`` budget as
+# the visible answer. Our callers size ``max_tokens`` for the visible output
+# only, so without headroom the model burns the budget thinking and the answer
+# is truncated mid-JSON (finish_reason="length") — which then fails parsing and
+# surfaces as a confusing "ai_error". Add a fixed allowance on top of the
+# requested budget so ``max_tokens`` stays the *visible-output* contract. It is
+# only a cap, so non-reasoning models (which stop early) are unaffected and
+# recorded usage still reflects actual tokens.
+REASONING_TOKEN_HEADROOM = 2048
 
 
 class AIProviderConfigPayload(BaseModel):
@@ -909,7 +919,7 @@ async def generate_ai_completion(
                         json={
                             "model": model,
                             "messages": messages,
-                            "max_tokens": request.max_tokens,
+                            "max_tokens": request.max_tokens + REASONING_TOKEN_HEADROOM,
                             "temperature": request.temperature,
                         },
                     )

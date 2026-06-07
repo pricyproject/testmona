@@ -7,6 +7,8 @@ import json
 import re
 from typing import Any, Optional
 
+from json_repair import repair_json
+
 
 def _unescape_literal_whitespace(text: str) -> str:
     """Restore real whitespace from the literal escape sequences some models
@@ -59,7 +61,21 @@ def extract_json_object(raw: str) -> dict[str, Any]:
     end = cleaned.rfind("}")
     if start == -1 or end == -1 or end <= start:
         raise ValueError("AI response did not include a JSON object")
-    return json.loads(cleaned[start : end + 1])
+    candidate = cleaned[start : end + 1]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        # Weaker models intermittently emit not-quite-valid JSON — a dropped
+        # array-closing bracket, an unescaped quote inside a Gherkin block, a
+        # trailing comma. Rather than fail the whole (paid) call, fall back to a
+        # tolerant repair pass. ``repair_json`` always returns a string; an empty
+        # object means it could not salvage anything, which we treat as a failure
+        # so the caller still degrades gracefully.
+        repaired = repair_json(candidate)
+        parsed = json.loads(repaired)
+        if not isinstance(parsed, dict) or not parsed:
+            raise ValueError("AI response could not be parsed as a JSON object")
+        return parsed
 
 
 def _toon_scalar(value: Any) -> str:
