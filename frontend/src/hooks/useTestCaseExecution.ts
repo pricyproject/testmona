@@ -332,6 +332,11 @@ export function useTestCaseExecution() {
         }
 
         try {
+          if (!currentTestCaseId || Number.isNaN(currentTestCaseId)) {
+            setExecutionHistory([]);
+            setHistoryLoadError(false);
+            return;
+          }
           const history = await testCasesAPI.getExecutionHistory(currentTestCaseId, 50);
           if (cancelled) return;
           setExecutionHistory(history);
@@ -744,14 +749,14 @@ export function useTestCaseExecution() {
   };
 
   const refreshHistory = useCallback(async () => {
-    if (!testCaseId) return;
+    if (!testCaseId || !tcGlobalId || Number.isNaN(tcGlobalId)) return;
     try {
       setExecutionHistory(await testCasesAPI.getExecutionHistory(tcGlobalId, 50));
       setHistoryLoadError(false);
     } catch (error) {
       console.error('Failed to refresh execution history:', error);
     }
-  }, [testCaseId]);
+  }, [testCaseId, tcGlobalId]);
 
   // --- Save execution ---
   const handleSaveExecution = useCallback(async (): Promise<boolean> => {
