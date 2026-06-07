@@ -202,6 +202,28 @@ const api = axios.create({
   },
 });
 
+// Resolve a project-first URL number (the per-project `project_seq`) to the global
+// entity id the rest of the API is keyed on. Falls back to treating the number as a
+// global id when no row in the project carries that seq (legacy bookmark, or a row
+// not yet numbered), so detail pages never hard-fail on an old link.
+export async function resolveProjectSeq(
+  projectId: number,
+  entity: string,
+  seqOrId: number,
+): Promise<number> {
+  try {
+    const response = await api.get(`/projects/${projectId}/lookup/${entity}/${seqOrId}`);
+    return response.data.id as number;
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      return seqOrId;
+    }
+    throw error;
+  }
+}
+
+export const seqAPI = { resolve: resolveProjectSeq };
+
 export const getApiErrorMessage = (error: unknown, fallback: string): string => {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
@@ -489,6 +511,11 @@ export const testSuitesAPI = {
     const response = await api.get(`/test-suites/${id}`);
     return response.data;
   },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'test-suites', seq);
+    const response = await api.get(`/test-suites/${id}`);
+    return response.data;
+  },
   create: async (testSuite: any) => {
     const response = await api.post('/test-suites', testSuite);
     return response.data;
@@ -561,6 +588,11 @@ export const requirementsAPI = {
     return response.data;
   },
   getById: async (id: number) => {
+    const response = await api.get(`/requirements/${id}`);
+    return response.data;
+  },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'requirements', seq);
     const response = await api.get(`/requirements/${id}`);
     return response.data;
   },
@@ -1215,6 +1247,11 @@ export const testRunsAPI = {
     const response = await api.get(`/test-runs/${id}`);
     return response.data;
   },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'test-runs', seq);
+    const response = await api.get(`/test-runs/${id}`);
+    return response.data;
+  },
   create: async (testRun: any) => {
     const response = await api.post('/test-runs', testRun);
     return response.data;
@@ -1614,6 +1651,11 @@ export const defectsAPI = {
     const response = await api.get(`/defects/${id}`);
     return response.data;
   },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'defects', seq);
+    const response = await api.get(`/defects/${id}`);
+    return response.data;
+  },
   getDetail: async (id: number, signal?: AbortSignal) => {
     const response = await api.get(`/defects/${id}/detail`, { signal });
     return response.data;
@@ -1645,6 +1687,11 @@ export const milestonesAPI = {
     return response.data;
   },
   getById: async (id: number) => {
+    const response = await api.get(`/milestones/${id}`);
+    return response.data;
+  },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'milestones', seq);
     const response = await api.get(`/milestones/${id}`);
     return response.data;
   },
@@ -2295,8 +2342,8 @@ export const testManagementAPI = {
     const response = await api.put('/users/me/notification-preferences', prefs);
     return response.data;
   },
-  getSharedStepTemplates: async (skip = 0, limit = 100) => {
-    const response = await api.get(`/shared-step-templates/?skip=${skip}&limit=${limit}`);
+  getSharedStepTemplates: async (skip = 0, limit = 100, projectId?: number) => {
+    const response = await api.get(`/shared-step-templates/?skip=${skip}&limit=${limit}${projectId ? `&project_id=${projectId}` : ''}`);
     return response.data;
   },
   getSharedStepTemplate: async (templateId: number) => {
@@ -2345,11 +2392,16 @@ let testTypesRequest: Promise<any> | null = null;
 
 // Enums API
 export const enumsAPI = {
-  getPriorities: async () => {
-    const response = await api.get('/enums/priorities');
+  getPriorities: async (projectId?: number) => {
+    const response = await api.get('/enums/priorities' + (projectId ? `?project_id=${projectId}` : ''));
     return response.data;
   },
-  getTestTypes: async () => {
+  getTestTypes: async (projectId?: number) => {
+    // Per-project lists are fetched fresh; only the global list is cached.
+    if (projectId) {
+      const response = await api.get(`/enums/test-types?project_id=${projectId}`);
+      return response.data;
+    }
     if (!testTypesRequest) {
       testTypesRequest = api.get('/enums/test-types')
         .then((response) => response.data)
@@ -2417,6 +2469,11 @@ export const testPlansAPI = {
     return response.data;
   },
   getById: async (id: number) => {
+    const response = await api.get(`/test-plans/${id}`);
+    return response.data;
+  },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'test-plans', seq);
     const response = await api.get(`/test-plans/${id}`);
     return response.data;
   },

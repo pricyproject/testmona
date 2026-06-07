@@ -26,6 +26,7 @@ export interface Project {
 
 export interface TestSuite {
   id: number;
+  project_seq?: number | null;
   name: string;
   description?: string;
   project_id: number;
@@ -40,6 +41,7 @@ export interface TestSuite {
 
 export interface TestCase {
   id: number;
+  project_seq?: number | null;
   title: string;
   description?: string;
   test_type: string;
@@ -95,6 +97,7 @@ export interface TestCaseSection {
 
 export interface SharedStep {
   id: number;
+  project_seq?: number | null;
   name: string;
   description?: string | null;
   action: string;
@@ -125,6 +128,7 @@ export interface SharedStepUpdate {
 
 export interface TestRun {
   id: number;
+  project_seq?: number | null;
   name: string;
   description?: string;
   project_id: number;
@@ -225,6 +229,7 @@ export type CustomFieldType = 'text' | 'number' | 'date' | 'boolean' | 'select' 
 
 export interface CustomFieldDefinition {
   id: number;
+  project_seq?: number | null;
   name: string;
   slug?: string;
   field_type: CustomFieldType;
@@ -366,6 +371,7 @@ export interface EntityHistory {
 
 export interface Requirement {
   id: number;
+  project_seq?: number | null;
   title: string;
   description?: string;
   requirement_id: string;
@@ -385,6 +391,7 @@ export interface Requirement {
 
 export interface RequirementFolder {
   id: number;
+  project_seq?: number | null;
   name: string;
   description?: string | null;
   project_id: number;
@@ -649,6 +656,7 @@ export interface MilestoneLinkedTestPlan {
 
 export interface Milestone {
   id: number;
+  project_seq?: number | null;
   title: string;
   description?: string;
   status: MilestoneStatus;
@@ -718,6 +726,7 @@ export type DocDir = 'ltr' | 'rtl' | 'auto';
 
 export interface DocSpace {
   id: number;
+  project_seq?: number | null;
   uuid?: string | null;
   name: string;
   slug: string;
@@ -770,6 +779,7 @@ export interface DocListPage {
 
 export interface DocListItem {
   id: number;
+  project_seq?: number | null;
   uuid?: string | null;
   title: string;
   slug: string;
@@ -796,6 +806,7 @@ export interface DocListItem {
 
 export interface Doc {
   id: number;
+  project_seq?: number | null;
   uuid?: string | null;
   title: string;
   slug: string;
@@ -893,6 +904,7 @@ export interface DocStats {
 
 export interface DocStatsMostViewed {
   id: number;
+  project_seq?: number | null;
   title: string;
   space_id: number;
   project_id?: number | null;
