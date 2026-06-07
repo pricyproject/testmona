@@ -5,9 +5,10 @@ import { ProjectGuard } from '@/components/ProjectGuard';
 import { FeatureGuard } from '@/components/FeatureGuard';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useAuthStore, initializeAuthFromLocalStorage } from '@/stores/authStore';
+import { isAdminUser } from '@/utils/roles';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAppName } from '@/hooks/useAppName';
-import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 
 const lazyPage = <P extends object = object>(loader: () => Promise<any>, exportName: string) =>
   lazy<ComponentType<P>>(() => loader().then((module) => ({ default: module[exportName] as ComponentType<P> })));
@@ -54,7 +55,7 @@ const SharedSteps = lazyPage(() => import('@/pages/SharedSteps'), 'SharedSteps')
 const GlobalParameters = lazyPage(() => import('@/pages/GlobalParameters'), 'GlobalParameters');
 const TestData = lazyPage(() => import('@/pages/TestData'), 'TestData');
 const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 'ActivityManagement');
-const Settings = lazyPage(() => import('@/pages/Settings'), 'Settings');
+const Settings = lazyPage<{ adminMode?: boolean; projectId?: number; singleTab?: string }>(() => import('@/pages/Settings'), 'Settings');
 const Profile = lazyPage(() => import('@/pages/Profile'), 'Profile');
 const ProjectMembers = lazyPage(() => import('@/pages/ProjectMembers'), 'ProjectMembers');
 const ProjectSettings = lazyPage(() => import('@/pages/ProjectSettings'), 'ProjectSettings');
@@ -66,6 +67,14 @@ function RedirectToTestSuites() {
   return <Navigate to={`/projects/${projectId || ''}/test-suites`} replace />;
 }
 
+// Per-project Test Management: test types / priorities / step templates are now
+// owned by each project, so this reuses the Settings test-management panel scoped
+// to the project rather than the old global /administrator tab.
+function ProjectTestManagement() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <Settings projectId={Number(projectId)} singleTab="test-management" />;
+}
+
 // An already-authenticated user landing on /login or /signup (e.g. via a
 // `?next=` deep link, or because auth flips to true while the URL is still on
 // the auth screen) must be sent to their intended destination, not blanket
@@ -74,6 +83,13 @@ function RedirectToTestSuites() {
 function PostAuthRedirect() {
   const [searchParams] = useSearchParams();
   return <Navigate to={resolveSafeRedirect(searchParams.get('next')) || '/projects'} replace />;
+}
+
+// Cross-project administration lives at /administrator and is restricted to
+// admins; everyone else is bounced to their projects.
+function AdminRoute({ children }: { children: ReactNode }) {
+  const { user } = useAuthStore();
+  return isAdminUser(user) ? <>{children}</> : <Navigate to="/projects" replace />;
 }
 
 function PageFallback() {
@@ -431,6 +447,11 @@ function AppWithRouter() {
             <ProjectSettings />
           </ProjectGuard>
         } />
+        <Route path="/projects/:projectId/test-management" element={
+          <ProjectGuard>
+            <ProjectTestManagement />
+          </ProjectGuard>
+        } />
         <Route path="/projects/:projectId/custom-fields" element={
           <ProjectGuard>
             <FeatureGuard feature="custom_fields">
@@ -503,6 +524,7 @@ function AppWithRouter() {
             old URL working by redirecting it. */}
         <Route path="/global-parameters" element={<Navigate to="/projects" replace />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/administrator" element={<AdminRoute><Settings adminMode /></AdminRoute>} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/api-tokens" element={<ApiTokens />} />
         <Route path="/projects/:projectId/webhooks" element={

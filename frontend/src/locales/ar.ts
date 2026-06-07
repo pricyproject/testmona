@@ -12,6 +12,7 @@ export const ar = {
     milestones: 'المعالم',
     customFields: 'الحقول المخصصة',
     settings: 'الإعدادات',
+    administrator: 'المسؤول',
     profile: 'الملف الشخصي',
     logout: 'تسجيل الخروج',
     

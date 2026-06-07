@@ -12,6 +12,7 @@ export const fa = {
     milestones: 'هدف‌ها',
     customFields: 'فیلدهای سفارشی',
     settings: 'تنظیمات',
+    administrator: 'مدیر سیستم',
     profile: 'پروفایل',
     logout: 'خروج',
     

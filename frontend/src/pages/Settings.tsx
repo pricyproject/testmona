@@ -321,7 +321,7 @@ function AIRoutingRow({
   );
 }
 
-export function Settings() {
+export function Settings({ adminMode = false, projectId, singleTab }: { adminMode?: boolean; projectId?: number; singleTab?: string } = {}) {
   const { language, setLanguage, compactMode, setCompactMode } = useAuthStore();
   const { t, isRTL } = useTranslation();
   const { appName, appLogoUrl, setAppName: setStoredAppName, setAppLogoUrl: setStoredAppLogoUrl } = useAppName(false);
@@ -330,7 +330,18 @@ export function Settings() {
   // Drive the active tab from the URL so other pages can deep-link to a section
   // (e.g. the notification dropdown jumping to Notification Settings).
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'general';
+  // Cross-project/admin settings live under /administrator (adminMode); per-user
+  // preferences and the AI manager stay on /settings. Constrain the active tab to
+  // the current surface so a stale ?tab= deep link can't render a hidden panel.
+  // Test types/priorities/step templates are per-project and managed under the
+  // project (singleTab='test-management'), not in /administrator.
+  const allowedTabs = singleTab
+    ? [singleTab]
+    : adminMode
+    ? ['general', 'integrations', 'users', 'audit']
+    : ['general', 'ai-manager'];
+  const rawTab = singleTab || searchParams.get('tab') || 'general';
+  const activeTab = allowedTabs.includes(rawTab) ? rawTab : allowedTabs[0];
   const handleTabChange = (value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -1033,7 +1044,7 @@ export function Settings() {
         return;
       }
 
-      const testTypesResponse = await api.get('/test-type-definitions/');
+      const testTypesResponse = await api.get('/test-type-definitions/' + (projectId ? `?project_id=${projectId}` : ''));
       const testTypesData = testTypesResponse.data;
       const mappedTestTypes = testTypesData.map((type: any) => ({
         id: type.id.toString(),
@@ -1049,7 +1060,7 @@ export function Settings() {
       setTestTypes(mappedTestTypes);
 
       // Load priority definitions from database API only
-      const prioritiesResponse = await api.get('/priority-definitions/');
+      const prioritiesResponse = await api.get('/priority-definitions/' + (projectId ? `?project_id=${projectId}` : ''));
       const prioritiesData = prioritiesResponse.data;
       const mappedPriorities = prioritiesData.map((priority: any) => ({
         id: priority.id.toString(),
@@ -1066,7 +1077,7 @@ export function Settings() {
 
       // Load shared step templates from API
       try {
-        const templatesData = await testManagementAPI.getSharedStepTemplates();
+        const templatesData = await testManagementAPI.getSharedStepTemplates(0, 100, projectId);
         setSharedStepTemplates(templatesData.map((template: any) => ({
           id: template.id.toString(),
           name: template.name,
@@ -1561,6 +1572,7 @@ export function Settings() {
   };
 
   const buildSharedStepTemplatePayload = () => ({
+    project_id: projectId,
     name: sharedStepForm.name.trim(),
     description: sharedStepForm.description.trim() || null,
     category: sharedStepForm.category,
@@ -1824,6 +1836,7 @@ export function Settings() {
 	      }
 
       const response = await api.post('/test-type-definitions/', {
+        project_id: projectId,
         name: testTypeForm.name,
         description: testTypeForm.description,
         color: testTypeForm.color,
@@ -1870,6 +1883,7 @@ export function Settings() {
 	      }
 
       const response = await api.post('/priority-definitions/', {
+        project_id: projectId,
         name: priorityForm.name,
         value: priorityForm.value,
         color: priorityForm.color,
@@ -2314,31 +2328,37 @@ export function Settings() {
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="inline-flex h-12 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground w-full">
+          {!singleTab && (
           <TabsTrigger value="general" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <Globe className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('general')}
           </TabsTrigger>
+          )}
+          {singleTab === 'test-management' && (
           <TabsTrigger value="test-management" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <FileText className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('testManagement')}
           </TabsTrigger>
-          {isAdminUser(user) && (
+          )}
+          {!singleTab && !adminMode && isAdminUser(user) && (
             <TabsTrigger value="ai-manager" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
               <BrainCircuit className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('aiManager')}
             </TabsTrigger>
           )}
+          {adminMode && (
           <TabsTrigger value="integrations" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
             <Link className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
             {t('integrations')}
           </TabsTrigger>
-          {isAdminUser(user) && (
+          )}
+          {adminMode && isAdminUser(user) && (
             <TabsTrigger value="users" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
               <Users className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('users')}
             </TabsTrigger>
           )}
-          {isAdminUser(user) && (
+          {adminMode && isAdminUser(user) && (
             <TabsTrigger value="audit" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-4 py-2 text-sm font-medium ring-offset-background transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs">
               <History className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('auditTrails')}

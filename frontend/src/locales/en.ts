@@ -12,6 +12,7 @@ export const en = {
   milestones: 'Milestones',
   customFields: 'Custom Fields',
   settings: 'Settings',
+  administrator: 'Administrator',
   profile: 'Profile',
   logout: 'Logout',
   

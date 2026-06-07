@@ -14,6 +14,7 @@ import {
   Flag,
   ChevronLeft,
   Settings2,
+  ShieldCheck,
   User,
   Sparkles,
   Database,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
+import { isAdminUser } from '@/utils/roles';
 import { useProjectStore } from '@/stores/projectStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { getAppInitials, useAppName } from '@/hooks/useAppName';
@@ -70,7 +72,7 @@ export function Sidebar({
   onClose
 }: SidebarProps) {
   const location = useLocation();
-  const { logout } = useAuthStore();
+  const { logout, user } = useAuthStore();
   const { selectedProject, projects } = useProjectStore();
   const { t, isRTL } = useTranslation();
   const { appName, appLogoUrl } = useAppName(false);
@@ -94,6 +96,7 @@ export function Sidebar({
           items: [
             { name: t('profile'), href: '/profile', icon: User },
             { name: t('settings'), href: '/settings', icon: Settings2 },
+            ...(isAdminUser(user) ? [{ name: t('administrator'), href: '/administrator', icon: ShieldCheck }] : []),
           ]
         }
       ];
@@ -116,6 +119,7 @@ export function Sidebar({
           items: [
             { name: t('profile'), href: '/profile', icon: User },
             { name: t('settings'), href: '/settings', icon: Settings2 },
+            ...(isAdminUser(user) ? [{ name: t('administrator'), href: '/administrator', icon: ShieldCheck }] : []),
           ]
         }
       ];
@@ -161,6 +165,7 @@ export function Sidebar({
         items: [
           { name: t('projectMembers'), href: `/projects/${projectId}/members`, icon: Users },
           { name: t('projectSettings'), href: `/projects/${projectId}/settings`, icon: Settings2 },
+          { name: t('testManagement'), href: `/projects/${projectId}/test-management`, icon: FileText },
           { name: t('customFields'), href: `/projects/${projectId}/custom-fields`, icon: Database, feature: 'custom_fields' },
           { name: t('sharedSteps'), href: `/projects/${projectId}/shared-steps`, icon: Layers, feature: 'shared_steps' },
           { name: t('globalParameters'), href: `/projects/${projectId}/global-parameters`, icon: Wrench, feature: 'global_parameters' },
