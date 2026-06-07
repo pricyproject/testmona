@@ -438,10 +438,10 @@ export function TestCases() {
         }
 
         const [prioritiesResponse, testTypesResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/priority-definitions/`, {
+          fetch(`${API_BASE_URL}/priority-definitions/?project_id=${projectId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
-          fetch(`${API_BASE_URL}/test-type-definitions/`, {
+          fetch(`${API_BASE_URL}/test-type-definitions/?project_id=${projectId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
         ]);
@@ -513,7 +513,7 @@ export function TestCases() {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/test-type-definitions/`, {
+      const response = await fetch(`${API_BASE_URL}/test-type-definitions/?project_id=${projectId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -530,7 +530,7 @@ export function TestCases() {
 
       if (response.ok) {
         // Refresh test types
-        const testTypesResponse = await fetch(`${API_BASE_URL}/test-type-definitions/`, {
+        const testTypesResponse = await fetch(`${API_BASE_URL}/test-type-definitions/?project_id=${projectId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const testTypesData = await testTypesResponse.json();
@@ -582,7 +582,7 @@ export function TestCases() {
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/priority-definitions/`, {
+      const response = await fetch(`${API_BASE_URL}/priority-definitions/?project_id=${projectId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -599,7 +599,7 @@ export function TestCases() {
 
       if (response.ok) {
         // Refresh priorities
-        const prioritiesResponse = await fetch(`${API_BASE_URL}/priority-definitions/`, {
+        const prioritiesResponse = await fetch(`${API_BASE_URL}/priority-definitions/?project_id=${projectId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const prioritiesData = await prioritiesResponse.json();
@@ -2400,9 +2400,9 @@ export function TestCases() {
 
   const handleExecute = (testCase: TestCase) => {
     if (projectId) {
-      navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`);
+      navigate(`/projects/${projectId}/test-cases/${testCase.project_seq ?? testCase.id}/execute`);
     } else {
-      navigate(`/test-cases/${testCase.id}/execute`);
+      navigate(`/test-cases/${testCase.project_seq ?? testCase.id}/execute`);
     }
   };
 
@@ -2442,9 +2442,9 @@ export function TestCases() {
   const handleCompareRevision = (revision: any) => {
     // Navigate to revisions page
     if (selectedTestCaseForHistory && projectId) {
-      navigate(`/projects/${projectId}/test-cases/${selectedTestCaseForHistory.id}/revisions`);
+      navigate(`/projects/${projectId}/test-cases/${selectedTestCaseForHistory.project_seq ?? selectedTestCaseForHistory.id}/revisions`);
     } else if (selectedTestCaseForHistory) {
-      navigate(`/test-cases/${selectedTestCaseForHistory.id}/revisions`);
+      navigate(`/test-cases/${selectedTestCaseForHistory.project_seq ?? selectedTestCaseForHistory.id}/revisions`);
     }
   };
 

@@ -27,6 +27,7 @@ import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI, projectAssignmentsAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import type { Doc, DocDir, DocFolder, DocListItem, DocSpace, DocStatus } from '@/types';
 
@@ -43,7 +44,10 @@ export function DocEditor() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const { docId, projectId } = useParams<{ docId: string; projectId?: string }>();
-  const parsedDocId = parsePositiveIntegerParam(docId);
+  const rawDocId = parsePositiveIntegerParam(docId);
+  // Project docs carry the per-project sequence in the URL; the global /docs route uses the raw id.
+  const { id: resolvedDocId, loading: docIdLoading } = useResolvedEntityId(projectId, 'docs', docId);
+  const parsedDocId = projectId ? resolvedDocId : rawDocId;
   const parsedProjectId = parsePositiveIntegerParam(projectId);
   const basePath = parsedProjectId ? `/projects/${parsedProjectId}/docs` : '/docs';
 
@@ -80,6 +84,7 @@ export function DocEditor() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (projectId && docIdLoading) return;  // wait for the seq -> id resolution
       if (!parsedDocId) {
         setDoc(null);
         setLoading(false);
@@ -129,7 +134,7 @@ export function DocEditor() {
       }
     })();
     return () => { cancelled = true; };
-  }, [parsedDocId, basePath, navigate, t, toast]);
+  }, [parsedDocId, docIdLoading, projectId, basePath, navigate, t, toast]);
 
   // Project members power @mention autocomplete (project docs only; global docs
   // have no member audience, matching the backend which never notifies on them).

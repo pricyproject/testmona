@@ -263,7 +263,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                       </div>
                       <CardTitle className="text-base font-semibold wrap-break-word">
                         <Link
-                          to={`/projects/${selectedProject}/requirements/${item.requirement_id}`}
+                          to={`/projects/${selectedProject}/requirements/${item.requirement_key || item.requirement_id}`}
                           className="text-gray-900 underline-offset-4 hover:text-blue-700 hover:underline dark:text-white dark:hover:text-blue-300"
                         >
                           {item.requirement_title}
@@ -315,22 +315,22 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                         <tbody className="divide-y dark:divide-gray-700">
                           {(item.test_cases || []).map((tc: any) => {
                             const executionPath = tc.test_run_id
-                              ? `/projects/${selectedProject}/test-runs/${tc.test_run_id}/test-cases/${tc.id}`
-                              : `/projects/${selectedProject}/test-cases/${tc.id}/execute`;
+                              ? `/projects/${selectedProject}/test-runs/${tc.test_run_id}/test-cases/${tc.project_seq ?? tc.id}`
+                              : `/projects/${selectedProject}/test-cases/${tc.project_seq ?? tc.id}/execute`;
                             const normalizedStatus = normalizeStatus(tc.status);
                             return (
                               <tr key={tc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                 <td className="px-6 py-4">
                                   <Link
-                                    to={`/projects/${selectedProject}/test-cases/${tc.id}`}
+                                    to={`/projects/${selectedProject}/test-cases/${tc.project_seq ?? tc.id}`}
                                     className="font-mono text-sm text-blue-600 underline-offset-4 hover:underline dark:text-blue-400"
                                   >
-                                    TC-{tc.id}
+                                    TC-{tc.project_seq ?? tc.id}
                                   </Link>
                                 </td>
                                 <td className="px-6 py-4 font-medium">
                                   <Link
-                                    to={`/projects/${selectedProject}/test-cases/${tc.id}`}
+                                    to={`/projects/${selectedProject}/test-cases/${tc.project_seq ?? tc.id}`}
                                     className="text-gray-900 underline-offset-4 hover:text-blue-700 hover:underline dark:text-white dark:hover:text-blue-300"
                                   >
                                     {tc.title}
@@ -375,21 +375,21 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                     <div className="md:hidden divide-y dark:divide-gray-700">
                       {(item.test_cases || []).map((tc: any) => {
                         const executionPath = tc.test_run_id
-                          ? `/projects/${selectedProject}/test-runs/${tc.test_run_id}/test-cases/${tc.id}`
-                          : `/projects/${selectedProject}/test-cases/${tc.id}/execute`;
+                          ? `/projects/${selectedProject}/test-runs/${tc.test_run_id}/test-cases/${tc.project_seq ?? tc.id}`
+                          : `/projects/${selectedProject}/test-cases/${tc.project_seq ?? tc.id}/execute`;
                         const normalizedStatus = normalizeStatus(tc.status);
                         return (
                           <div key={tc.id} className="p-4 space-y-2">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <Link
-                                  to={`/projects/${selectedProject}/test-cases/${tc.id}`}
+                                  to={`/projects/${selectedProject}/test-cases/${tc.project_seq ?? tc.id}`}
                                   className="font-mono text-xs text-blue-600 dark:text-blue-400"
                                 >
-                                  TC-{tc.id}
+                                  TC-{tc.project_seq ?? tc.id}
                                 </Link>
                                 <div className="font-medium wrap-break-word">
-                                  <Link to={`/projects/${selectedProject}/test-cases/${tc.id}`} className="text-gray-900 dark:text-white">
+                                  <Link to={`/projects/${selectedProject}/test-cases/${tc.project_seq ?? tc.id}`} className="text-gray-900 dark:text-white">
                                     {tc.title}
                                   </Link>
                                 </div>

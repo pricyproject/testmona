@@ -45,13 +45,13 @@ import { useToast } from '@/hooks/use-toast';
 
 // Per-entity detail routes so result rows link back to the real record.
 const DETAIL_PATH: Record<string, (projectId: string, row: Record<string, any>) => string | null> = {
-  defects: (p, r) => `/projects/${p}/defects/${r.id}`,
-  requirements: (p, r) => `/projects/${p}/requirements/${r.id}`,
-  test_cases: (p, r) => `/projects/${p}/test-cases/${r.id}`,
-  test_plans: (p, r) => `/projects/${p}/test-plans/${r.id}`,
+  defects: (p, r) => `/projects/${p}/defects/${r.project_seq ?? r.id}`,
+  requirements: (p, r) => `/projects/${p}/requirements/${r.project_seq ?? r.id}`,
+  test_cases: (p, r) => `/projects/${p}/test-cases/${r.project_seq ?? r.id}`,
+  test_plans: (p, r) => `/projects/${p}/test-plans/${r.project_seq ?? r.id}`,
   // Executions have no detail page of their own — open their test run.
   test_executions: (p, r) => (r.test_run_id ? `/projects/${p}/test-runs/${r.test_run_id}` : null),
-  docs: (p, r) => `/projects/${p}/docs/${r.id}`,
+  docs: (p, r) => `/projects/${p}/docs/${r.project_seq ?? r.id}`,
 };
 
 // Columns rendered per entity (keys map to the serialized result dict).

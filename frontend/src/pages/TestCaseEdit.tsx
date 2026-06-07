@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Sparkles, ListChecks, Target, FileCode2, Split, ShieldAlert, Check, CopyPlus, ExternalLink, type LucideIcon } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
 import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { loadProjectParameters } from '@/utils/parameters';
 import { CustomFieldDefinition } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
@@ -53,6 +54,8 @@ const parseBooleanFlag = (value: unknown): boolean => {
 
 export function TestCaseEdit() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
+  // The URL carries the per-project sequence; resolve it to the global test-case id.
+  const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const navigate = useNavigate();
   const { setSelectedProject, projects } = useProjectStore();
   const { t, isRTL, language } = useTranslation();
@@ -138,7 +141,8 @@ export function TestCaseEdit() {
       setIsValidatingProject(true);
       setLoadError(null);
 
-      const numericId = Number(id);
+      if (tcIdLoading) return;  // wait for the seq -> id resolution
+      const numericId = resolvedTcId;
       if (!id || !Number.isFinite(numericId) || numericId <= 0) {
         if (isMounted) {
           setLoadError('invalidTestCaseId');
@@ -261,7 +265,7 @@ export function TestCaseEdit() {
       isMounted = false;
     };
 
-  }, [id, projectId]);
+  }, [id, projectId, resolvedTcId, tcIdLoading]);
 
   useEffect(() => {
     let isMounted = true;
@@ -289,7 +293,7 @@ export function TestCaseEdit() {
     const loadTestTypes = async () => {
       setTestTypesLoading(true);
       try {
-        const definitions = await enumsAPI.getTestTypes();
+        const definitions = await enumsAPI.getTestTypes(projectId ? Number(projectId) : undefined);
         const options = (Array.isArray(definitions) ? definitions : [])
           .filter((definition: any) => definition?.name)
           .map((definition: any) => ({

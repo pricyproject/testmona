@@ -1589,11 +1589,8 @@ export function Defects() {
                 <Input
                   id="defectId"
                   value={defectId}
-                  onChange={(e) => setDefectId(e.target.value)}
-                  onBlur={() => setDefectTouchedFields({ ...defectTouchedFields, defectId: true })}
-                  className={`h-8 max-w-[200px] flex-1 border-0 bg-transparent px-1 font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-red-500 ${
-                    defectTouchedFields.defectId && (defectId.trim() === '' || isDuplicateDefectId) ? 'text-red-600' : ''
-                  }`}
+                  disabled
+                  className="h-8 max-w-[200px] flex-1 border-0 bg-transparent px-1 font-mono text-sm shadow-none"
                   placeholder={t('defectIdPlaceholder')}
                   maxLength={50}
                 />
@@ -1989,7 +1986,7 @@ export function Defects() {
                           onClick={(e) => e.stopPropagation()}
                         />
                         <Link
-                          to={`/projects/${projectId}/defects/${defect.id}`}
+                          to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
                           className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
                         >
                           {defect.defect_id}
@@ -2009,7 +2006,7 @@ export function Defects() {
                       </div>
                       <CardTitle className="text-base font-semibold">
                         <Link
-                          to={`/projects/${projectId}/defects/${defect.id}`}
+                          to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
                           className="text-slate-900 hover:text-blue-700 hover:underline dark:text-slate-50 dark:hover:text-blue-300"
                         >
                           {defect.title}

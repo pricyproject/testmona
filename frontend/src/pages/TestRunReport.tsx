@@ -8,6 +8,7 @@ import {
   Clock, FileText, Ban
 } from 'lucide-react';
 import { customFieldsAPI, projectsAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
 import { CustomFieldDefinition } from '@/types';
 import { formatDurationSeconds } from '@/utils/timeFormat';
@@ -42,6 +43,8 @@ const normalizeResultStatus = (status?: string): NormalizedResultStatus => {
 export function TestRunReport() {
   const navigate = useNavigate();
   const { projectId, testRunId } = useParams();
+  // The URL carries the per-project sequence; resolve it to the global test-run id.
+  const { id: runGlobalId, loading: runIdLoading } = useResolvedEntityId(projectId, 'test-runs', testRunId);
   const { t, isRTL } = useTranslation();
   const [testRun, setTestRun] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
@@ -51,10 +54,11 @@ export function TestRunReport() {
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
+    if (runIdLoading) return;  // wait for the seq -> id resolution
     try {
       setLoading(true);
       const parsedProjectId = projectId ? parseInt(projectId, 10) : undefined;
-      const parsedTestRunId = parseInt(testRunId!);
+      const parsedTestRunId = runGlobalId;
       // The report is an authoritative, complete document, so it must include
       // every result — not just the first page. Walk pages until one comes back
       // short, rather than relying on the API's default 100-row cap.
@@ -86,7 +90,7 @@ export function TestRunReport() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, testRunId]);
+  }, [projectId, testRunId, runGlobalId, runIdLoading]);
 
   useEffect(() => {
     loadData();

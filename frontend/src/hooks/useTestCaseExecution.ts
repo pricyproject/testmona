@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/stores/authStore';
 import {
@@ -82,6 +83,9 @@ const BACKEND_TO_STATUS: Record<string, ExecutionStatus> = {
 export function useTestCaseExecution() {
   const navigate = useNavigate();
   const { projectId, testRunId, testCaseId } = useParams();
+  // The URL carries per-project sequences; resolve both to global ids.
+  const { id: runGlobalId, loading: runLoading } = useResolvedEntityId(projectId, 'test-runs', testRunId);
+  const { id: tcGlobalId, loading: tcLoading } = useResolvedEntityId(projectId, 'test-cases', testCaseId);
   const { isRTL, t } = useTranslation();
   const { toast } = useToast();
   const { user: currentUser } = useAuthStore();
@@ -244,10 +248,10 @@ export function useTestCaseExecution() {
 
   // When completed, load the backend's final execution time (incl. adjustments).
   useEffect(() => {
-    if (executionState !== 'completed' || !testRunId || !testCaseId) return;
+    if (executionState !== 'completed' || !testRunId || !testCaseId || runLoading || tcLoading) return;
     (async () => {
       try {
-        const results = await testResultsAPI.getAll(parseInt(testRunId), parseInt(testCaseId));
+        const results = await testResultsAPI.getAll(runGlobalId, tcGlobalId);
         if (results.length > 0) {
           rebaseTimer(results[0].execution_time || 0);
           setManualTimeAdjustment(results[0].manual_time_adjustment || 0);
@@ -256,7 +260,7 @@ export function useTestCaseExecution() {
         console.error('Failed to load final execution time:', error);
       }
     })();
-  }, [executionState, testRunId, testCaseId, rebaseTimer]);
+  }, [executionState, testRunId, testCaseId, rebaseTimer, runGlobalId, tcGlobalId, runLoading, tcLoading]);
 
   // Load test case + run + steps + history. The `cancelled` guard prevents a
   // slow response for a previous case from overwriting the current one when the
@@ -264,6 +268,7 @@ export function useTestCaseExecution() {
   useEffect(() => {
     let cancelled = false;
     const loadTestData = async () => {
+      if (runLoading || tcLoading) return;  // wait for the seq -> id resolution
       if (!projectId || !testRunId || !testCaseId) {
         setLoadError(t('failedToLoadTestCaseOrTestRun'));
         setIsLoading(false);
@@ -274,8 +279,8 @@ export function useTestCaseExecution() {
         setLoadError(null);
 
         const currentProjectId = parseInt(projectId);
-        const currentTestRunId = parseInt(testRunId);
-        const currentTestCaseId = parseInt(testCaseId);
+        const currentTestRunId = runGlobalId;
+        const currentTestCaseId = tcGlobalId;
         if ([currentProjectId, currentTestRunId, currentTestCaseId].some(Number.isNaN)) {
           setLoadError(t('failedToLoadTestCaseOrTestRun'));
           return;
@@ -348,7 +353,7 @@ export function useTestCaseExecution() {
     };
     loadTestData();
     return () => { cancelled = true; };
-  }, [projectId, testCaseId, testRunId]);
+  }, [projectId, testCaseId, testRunId, runGlobalId, tcGlobalId, runLoading, tcLoading]);
 
   // Auto-focus the defect title when the dialog opens.
   useEffect(() => {
@@ -370,7 +375,7 @@ export function useTestCaseExecution() {
         setUsers(allUsers);
         if (currentUser) setAssignee((prev) => prev || currentUser.id.toString());
         if (testRunId) {
-          const results = await testResultsAPI.getAll(parseInt(testRunId));
+          const results = await testResultsAPI.getAll(runGlobalId);
           if (cancelled) return;
           setAllTestCases(results.map((r: any) => ({
             id: r.test_case_id,
@@ -397,7 +402,7 @@ export function useTestCaseExecution() {
       if (!testRunId || !testCaseId) return;
       setIsLoading(true);
       try {
-        const results = await testResultsAPI.getAll(parseInt(testRunId), parseInt(testCaseId));
+        const results = await testResultsAPI.getAll(runGlobalId, tcGlobalId);
         if (cancelled) return;
         if (results.length > 0) {
           const result = results[0];
@@ -504,8 +509,8 @@ export function useTestCaseExecution() {
         const allDefects = await defectsAPI.getAll(parseInt(projectId));
         if (cancelled) return;
         setAvailableDefects(Array.isArray(allDefects) ? allDefects : []);
-        const currentTestCaseId = Number(testCaseId);
-        const currentTestRunId = Number(testRunId);
+        const currentTestCaseId = tcGlobalId;
+        const currentTestRunId = runGlobalId;
         setDefects(allDefects.filter((defect: any) => {
           const linkedTestCaseId = Number(defect.test_case_id);
           const linkedTestRunId = defect.test_run_id == null ? null : Number(defect.test_run_id);
@@ -520,7 +525,7 @@ export function useTestCaseExecution() {
     };
     loadExistingDefects();
     return () => { cancelled = true; };
-  }, [projectId, testCaseId, testRunId]);
+  }, [projectId, testCaseId, testRunId, tcGlobalId, runGlobalId]);
 
   const loadResultDefectLinks = useCallback(async (resultId: number | null) => {
     if (!resultId) {
@@ -741,7 +746,7 @@ export function useTestCaseExecution() {
   const refreshHistory = useCallback(async () => {
     if (!testCaseId) return;
     try {
-      setExecutionHistory(await testCasesAPI.getExecutionHistory(parseInt(testCaseId), 50));
+      setExecutionHistory(await testCasesAPI.getExecutionHistory(tcGlobalId, 50));
       setHistoryLoadError(false);
     } catch (error) {
       console.error('Failed to refresh execution history:', error);
@@ -789,8 +794,8 @@ export function useTestCaseExecution() {
     // Recording a result completes the execution: stop the clock and persist the
     // full timing snapshot so reloads and analytics stay consistent.
     const executionData = {
-      test_case_id: parseInt(testCaseId),
-      test_run_id: parseInt(testRunId),
+      test_case_id: tcGlobalId,
+      test_run_id: runGlobalId,
       status: STATUS_TO_BACKEND[executionStatus] || 'skip',
       actual_result: executionNotes,
       iteration_results: iterationResultsPayload,
@@ -814,7 +819,7 @@ export function useTestCaseExecution() {
     savingRef.current = true;
     setIsSaving(true);
     try {
-      const existing = await testResultsAPI.getAll(parseInt(testRunId), parseInt(testCaseId));
+      const existing = await testResultsAPI.getAll(runGlobalId, tcGlobalId);
       const savedResult = existing.length > 0
         ? await testResultsAPI.update(existing[0].id, executionData)
         : await testResultsAPI.create(executionData);

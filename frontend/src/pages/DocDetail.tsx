@@ -54,6 +54,7 @@ import { DocShareDialog } from '@/components/docs/DocShareDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { formatServerDateTime } from '@/utils/datetime';
 import type { Doc, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocRequirementLink, DocSpace, DocStats } from '@/types';
@@ -73,7 +74,11 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { docId, projectId } = useParams<{ docId: string; projectId?: string }>();
-  const parsedDocId = parsePositiveIntegerParam(docId);
+  const rawDocId = parsePositiveIntegerParam(docId);
+  // Project docs carry the per-project sequence in the URL; the global /docs route
+  // (no projectId) addresses by the raw id.
+  const { id: resolvedDocId, loading: docIdLoading } = useResolvedEntityId(projectId, 'docs', docId);
+  const parsedDocId = projectId ? resolvedDocId : rawDocId;
   const parsedProjectId = parsePositiveIntegerParam(projectId);
   const basePath = parsedProjectId ? `/projects/${parsedProjectId}/docs` : '/docs';
 
@@ -106,6 +111,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [feedbackListLoading, setFeedbackListLoading] = useState(false);
 
   const load = useCallback(async () => {
+    if (projectId && docIdLoading) return;  // wait for the seq -> id resolution
     if (!parsedDocId) {
       setDoc(null);
       setLoading(false);
@@ -133,7 +139,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     } finally {
       setLoading(false);
     }
-  }, [parsedDocId, t, toast]);
+  }, [parsedDocId, docIdLoading, projectId, t, toast]);
 
   useEffect(() => { load(); }, [load]);
 

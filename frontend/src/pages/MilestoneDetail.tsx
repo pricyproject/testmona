@@ -49,6 +49,7 @@ import {
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { milestonesAPI, testPlansAPI, getApiErrorMessage } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import type { Milestone, MilestoneHealth, MilestoneStatus } from '@/types';
 
 type CandidatePlan = { id: number; title: string; status: string | null; milestone_id: number | null };
@@ -141,7 +142,8 @@ export function MilestoneDetail() {
   const { t, isRTL } = useTranslation();
 
   const numericProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
-  const numericMilestoneId = useMemo(() => parsePositiveInteger(milestoneId), [milestoneId]);
+  // The URL carries the per-project sequence; resolve it to the global milestone id.
+  const { id: numericMilestoneId, loading: milestoneIdLoading } = useResolvedEntityId(projectId, 'milestones', milestoneId);
 
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
@@ -179,6 +181,7 @@ export function MilestoneDetail() {
       setIsLoading(false);
       return;
     }
+    if (milestoneIdLoading) return;  // wait for the seq -> id resolution
     if (!numericMilestoneId || !Number.isFinite(numericMilestoneId)) {
       setError(t('invalidMilestoneId'));
       setIsLoading(false);
@@ -200,7 +203,7 @@ export function MilestoneDetail() {
     return () => {
       cancelled = true;
     };
-  }, [numericProjectId, numericMilestoneId, t, reload]);
+  }, [numericProjectId, numericMilestoneId, milestoneIdLoading, t, reload]);
 
   const openLinkDialog = async () => {
     if (!numericProjectId || !numericMilestoneId) return;

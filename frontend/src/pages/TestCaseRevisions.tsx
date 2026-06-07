@@ -8,6 +8,7 @@ import {
   Eye, EyeOff, RotateCcw
 } from 'lucide-react';
 import { testCasesAPI, api, getApiErrorMessage } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 
@@ -105,7 +106,8 @@ export function TestCaseRevisions() {
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
-  const testCaseId = useMemo(() => parsePositiveId(id), [id]);
+  // The URL carries the per-project sequence; resolve it to the global test-case id.
+  const { id: testCaseId, loading: testCaseIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const routeProjectId = useMemo(() => parsePositiveId(projectId), [projectId]);
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [currentTestCase, setCurrentTestCase] = useState<TestCase | null>(null);
@@ -118,6 +120,7 @@ export function TestCaseRevisions() {
   const BackIcon = isRTL ? ArrowRight : ArrowLeft;
 
   const loadRevisions = useCallback(async () => {
+    if (testCaseIdLoading) return;  // wait for the seq -> id resolution
     setLoading(true);
     setError(null);
 
@@ -158,7 +161,7 @@ export function TestCaseRevisions() {
     } finally {
       setLoading(false);
     }
-  }, [routeProjectId, t, testCaseId]);
+  }, [routeProjectId, t, testCaseId, testCaseIdLoading]);
 
   useEffect(() => {
     void loadRevisions();

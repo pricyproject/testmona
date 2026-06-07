@@ -25,6 +25,8 @@ import { Switch } from '@/components/ui/switch';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { entityKey } from '@/lib/utils';
 import { loadProjectParameters, paramsToMap, referencedKeys, resolveParameters } from '@/utils/parameters';
 import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSuite } from '@/types';
 
@@ -69,6 +71,8 @@ export function TestCaseDetail() {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
+  // The URL carries the per-project sequence; resolve it to the global test-case id.
+  const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const navigate = useNavigate();
   const [testCase, setTestCase] = useState<TestCase | null>(null);
   const [dataset, setDataset] = useState<TestDataset | null>(null);
@@ -146,10 +150,11 @@ export function TestCaseDetail() {
     let isMounted = true;
 
     const fetchTestCaseAndSuite = async () => {
+      if (tcIdLoading) return;  // wait for the seq -> id resolution
       setLoading(true);
       setIsValidatingProject(true);
 
-      const testCaseId = Number(id);
+      const testCaseId = resolvedTcId;
       if (!testCaseId || Number.isNaN(testCaseId)) {
         resetDetailState();
         setLoading(false);
@@ -320,7 +325,7 @@ export function TestCaseDetail() {
     };
     // resetDetailState only closes over setters (stable), so it doesn't belong in deps.
 
-  }, [id, projectId]);
+  }, [id, projectId, resolvedTcId, tcIdLoading]);
 
   // Load the attached dataset (if any) for read-only display.
   const attachedDatasetId = (testCase as any)?.dataset_id ?? null;
@@ -464,18 +469,18 @@ export function TestCaseDetail() {
   const handleExecute = () => {
     if (!testCase) return;
     if (effectiveProjectId) {
-      navigate(`/projects/${effectiveProjectId}/test-cases/${testCase.id}/execute`);
+      navigate(`/projects/${effectiveProjectId}/test-cases/${testCase.project_seq ?? testCase.id}/execute`);
       return;
     }
-    navigate(`/test-cases/${testCase.id}/execute`);
+    navigate(`/test-cases/${testCase.project_seq ?? testCase.id}/execute`);
   };
 
   const handleEdit = () => {
     if (effectiveProjectId) {
-      navigate(`/projects/${effectiveProjectId}/test-cases/${id}/edit`);
+      navigate(`/projects/${effectiveProjectId}/test-cases/${testCase?.project_seq ?? testCase?.id}/edit`);
       return;
     }
-    navigate(`/test-cases/${id}/edit`);
+    navigate(`/test-cases/${testCase?.project_seq ?? testCase?.id}/edit`);
   };
 
   const handleShare = async () => {
@@ -494,8 +499,8 @@ export function TestCaseDetail() {
     }
   };
 
-  const revisionsPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.id}/revisions` : `/test-cases/${testCase?.id}/revisions`;
-  const executionHistoryPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.id}/execution-history` : `/test-cases/${testCase?.id}/execution-history`;
+  const revisionsPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.project_seq ?? testCase?.id}/revisions` : `/test-cases/${testCase?.project_seq ?? testCase?.id}/revisions`;
+  const executionHistoryPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.project_seq ?? testCase?.id}/execution-history` : `/test-cases/${testCase?.project_seq ?? testCase?.id}/execution-history`;
   const getLinkedRequirementPath = (requirement: Requirement) => (
     effectiveProjectId ? `/projects/${effectiveProjectId}/requirements/${requirement.id}` : null
   );
@@ -564,7 +569,7 @@ export function TestCaseDetail() {
     );
   }
 
-  const testCaseIdLabel = `TC-${String(testCase.id ?? '').padStart(3, '0')}`;
+  const testCaseIdLabel = entityKey('TC', testCase);
 
   return (
     <div className="min-h-screen bg-linear-to-b from-slate-50 via-white to-white px-4 py-6 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>

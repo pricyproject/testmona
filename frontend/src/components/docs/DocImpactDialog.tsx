@@ -97,7 +97,8 @@ export function DocImpactDialog({ doc, open, onOpenChange, candidateMarkdown }: 
   const linkFor = (item: DocImpactItem): string | null => {
     const pid = analysis?.project_id;
     if (!pid) return null;
-    if (item.type === 'requirement') return `/projects/${pid}/requirements/${item.id}`;
+    // Requirement keys (REQ-NNN) resolve project-first; the detail page maps the key to the row.
+    if (item.type === 'requirement') return `/projects/${pid}/requirements/${item.key || item.id}`;
     if (item.type === 'test_case') return `/projects/${pid}/test-cases/${item.id}`;
     if (item.type === 'defect') return `/projects/${pid}/defects/${item.id}`;
     return null;

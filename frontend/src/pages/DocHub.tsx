@@ -433,7 +433,7 @@ export function DocHub() {
       const doc = await docsAPI.create({ title: newDocTitle.trim(), space_id: activeSpaceId, folder_id: activeFolderId, content_markdown: '' });
       setDocDialogOpen(false);
       setNewDocTitle('');
-      navigate(`${basePath}/${doc.id}/edit`);
+      navigate(`${basePath}/${doc.project_seq ?? doc.id}/edit`);
     } catch (e: any) {
       toast({ title: t('error'), description: e?.response?.data?.detail || t('docCreateFailed'), variant: 'destructive' });
     } finally {
@@ -540,7 +540,7 @@ export function DocHub() {
           <div className="mb-1 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => navigate(`${basePath}/${doc.id}`)}
+              onClick={() => navigate(`${basePath}/${doc.project_seq ?? doc.id}`)}
               className="min-w-0 flex-1 truncate text-start text-sm font-medium hover:text-primary"
               dir="auto"
               title={doc.title}
@@ -551,7 +551,7 @@ export function DocHub() {
           </div>
           <button
             type="button"
-            onClick={() => navigate(`${basePath}/${doc.id}`)}
+            onClick={() => navigate(`${basePath}/${doc.project_seq ?? doc.id}`)}
             className="block w-full truncate text-start text-xs text-muted-foreground hover:text-primary"
           >
             {doc.my_last_visited_at ? t('docVisitedTime', { time: formatRelativeTime(doc.my_last_visited_at) }) : t(`docStatus_${doc.status}` as any)}
@@ -916,7 +916,7 @@ export function DocHub() {
                       <ul className="divide-y rounded-lg border">
                         {overview.most_viewed.map((d) => (
                           <li key={d.id}>
-                            <button type="button" onClick={() => navigate(`${basePath}/${d.id}`)} className="flex w-full items-center gap-3 px-3 py-2 text-start hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <button type="button" onClick={() => navigate(`${basePath}/${d.project_seq ?? d.id}`)} className="flex w-full items-center gap-3 px-3 py-2 text-start hover:bg-slate-50 dark:hover:bg-slate-800/50">
                               <span className="min-w-0 flex-1 truncate text-sm font-medium" dir="auto">{d.title}</span>
                               {d.last_viewed_at && <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{formatServerDateTime(d.last_viewed_at)}</span>}
                               <Badge variant="outline" className="shrink-0 gap-1"><Eye className="h-3 w-3" />{d.view_count}</Badge>
@@ -993,7 +993,7 @@ export function DocHub() {
                   {docs.map((d) => (
                     <tr
                       key={d.id}
-                      onClick={() => navigate(`${basePath}/${d.id}`)}
+                      onClick={() => navigate(`${basePath}/${d.project_seq ?? d.id}`)}
                       className="cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
                     >
                       <td className="px-3 py-2">
@@ -1032,7 +1032,7 @@ export function DocHub() {
                 <li key={d.id} className="flex items-center gap-2 px-3 py-2.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <button
                     type="button"
-                    onClick={() => navigate(`${basePath}/${d.id}`)}
+                    onClick={() => navigate(`${basePath}/${d.project_seq ?? d.id}`)}
                     className="flex min-w-0 flex-1 items-center gap-3 text-start"
                   >
                     <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -1057,11 +1057,11 @@ export function DocHub() {
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => navigate(`${basePath}/${d.id}`)}
+                    onClick={() => navigate(`${basePath}/${d.project_seq ?? d.id}`)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        navigate(`${basePath}/${d.id}`);
+                        navigate(`${basePath}/${d.project_seq ?? d.id}`);
                       }
                     }}
                     className="flex h-full w-full flex-col rounded-lg border border-slate-200 bg-white p-4 text-start transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"

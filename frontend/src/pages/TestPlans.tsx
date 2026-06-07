@@ -68,6 +68,7 @@ type ExecutionStatus = 'not_started' | 'in_progress' | 'blocked' | 'failed' | 'p
 
 interface TestPlan {
   id: number;
+  project_seq?: number | null;
   title: string;
   description: string | null;
   project_id: number;
@@ -1445,7 +1446,7 @@ export function TestPlans() {
                       </div>
                       <h3
                         className="truncate text-base font-semibold leading-tight cursor-pointer hover:underline"
-                        onClick={() => navigate(`/projects/${projectId}/test-plans/${plan.id}`)}
+                        onClick={() => navigate(`/projects/${projectId}/test-plans/${plan.project_seq ?? plan.id}`)}
                         title={t('openTestPlan')}
                       >
                         {plan.title}
@@ -1523,7 +1524,7 @@ export function TestPlans() {
                       )}
                       {plan.test_run_count === 0 ? t('startNewRun') : t('viewTestRuns')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${projectId}/test-plans/${plan.id}`)}>
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${projectId}/test-plans/${plan.project_seq ?? plan.id}`)}>
                       <Eye className="mr-1.5 h-3.5 w-3.5" />
                       {t('openTestPlan')}
                     </Button>

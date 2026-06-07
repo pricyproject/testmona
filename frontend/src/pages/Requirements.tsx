@@ -47,6 +47,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter, requirementFoldersAPI } from '@/lib/api';
+import { entitySeq } from '@/lib/utils';
 import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus, RequirementFolder } from '@/types';
 import { RequirementChatPanel } from '@/components/requirements/RequirementChatPanel';
 import { useAuthStore } from '@/stores/authStore';
@@ -1070,7 +1071,7 @@ export function Requirements() {
 
   const handleViewRequirement = (requirement: Requirement) => {
     if (projectId) {
-      navigate(`/projects/${projectId}/requirements/${requirement.id}`);
+      navigate(`/projects/${projectId}/requirements/${entitySeq(requirement)}`);
     }
   };
 
@@ -1086,7 +1087,7 @@ export function Requirements() {
 
   const handleCopyRequirementLink = async (requirement: Requirement) => {
     // Absolute URL so the copied link works when pasted anywhere, not just in-app.
-    const url = `${window.location.origin}/projects/${projectId}/requirements/${requirement.id}`;
+    const url = `${window.location.origin}/projects/${projectId}/requirements/${entitySeq(requirement)}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopiedLinkId(requirement.id);
@@ -1669,21 +1670,18 @@ export function Requirements() {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
       <div className="space-y-2">
         <Label htmlFor={`${mode}-reqId`} className="text-sm font-medium">
-          {t('reqId')} {mode === 'create' && <span className="text-red-500">*</span>}
+          {t('reqId')}
         </Label>
         <Input
           id={`${mode}-reqId`}
           value={reqId}
-          onChange={(e) => setReqId(e.target.value)}
-          disabled={mode === 'edit'}
-          className={mode === 'edit' ? 'border-gray-300 bg-gray-100 text-sm dark:border-gray-600 dark:bg-gray-700' : 'text-sm transition-all focus:ring-2 focus:ring-blue-500'}
+          disabled
+          className="border-gray-300 bg-gray-100 text-sm dark:border-gray-600 dark:bg-gray-700"
           placeholder="REQ-001"
         />
-        {mode === 'edit' ? (
-          <p className="text-xs text-gray-500">{t('reqIdImmutable')}</p>
-        ) : reqId && !isRequirementIdValid ? (
-          <p className="text-xs text-red-500">{t('reqIdFormatHelper')}</p>
-        ) : null}
+        {/* The key is derived from the per-project sequence on the server. In
+            create mode the value shown is the next id that will be assigned. */}
+        <p className="text-xs text-gray-500">{t('reqIdImmutable')}</p>
       </div>
 
       <div className="space-y-2">

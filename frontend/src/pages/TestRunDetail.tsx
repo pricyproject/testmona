@@ -58,6 +58,7 @@ import {
 import { TestRunPieChart, TestRunBarChart, TestRunTrendChart } from '@/components/ui/chart';
 import { useTranslation } from '@/hooks/useTranslation';
 import { defectsAPI, environmentsAPI, getApiErrorMessage, sectionsAPI, testCasesAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useToast } from '@/hooks/use-toast';
@@ -85,6 +86,8 @@ interface TestRun {
 
 export function TestRunDetail() {
   const { id, projectId } = useParams<{ id: string; projectId: string }>();
+  // The URL carries the per-project sequence; resolve it to the global test-run id.
+  const { id: runGlobalId, loading: runIdLoading } = useResolvedEntityId(projectId, 'test-runs', id);
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
@@ -292,23 +295,23 @@ export function TestRunDetail() {
   };  
   // Load defect-linking coverage rollup for traceability reporting
   useEffect(() => {
-    if (!id) return;
+    if (!runGlobalId) return;
     let cancelled = false;
-    testRunsAPI.getDefectCoverage(parseInt(id))
+    testRunsAPI.getDefectCoverage(runGlobalId)
       .then((data) => { if (!cancelled) setDefectCoverage(data); })
       .catch((err) => { console.error('Failed to load defect coverage:', err); });
     return () => { cancelled = true; };
-  }, [id, testResults.length, derivedRefreshKey]);
+  }, [runGlobalId, testResults.length, derivedRefreshKey]);
 
   // Load cross-run flakiness for the test cases in this run
   useEffect(() => {
-    if (!id) return;
+    if (!runGlobalId) return;
     let cancelled = false;
-    testRunsAPI.getFlakiness(parseInt(id))
+    testRunsAPI.getFlakiness(runGlobalId)
       .then((data) => { if (!cancelled) setFlakiness(data || {}); })
       .catch((err) => { console.error('Failed to load flakiness:', err); });
     return () => { cancelled = true; };
-  }, [id, testResults.length, derivedRefreshKey]);
+  }, [runGlobalId, testResults.length, derivedRefreshKey]);
 
   // Load the project's defect catalog for inline defect linking.
   // Empty search → 100 most recent; otherwise server-side filtered (debounced).
@@ -428,16 +431,16 @@ export function TestRunDetail() {
       return runData;
     }
 
-    await testRunsAPI.update(parseInt(id), statusPayload);
-    return testRunsAPI.getById(parseInt(id));
+    await testRunsAPI.update(runGlobalId, statusPayload);
+    return testRunsAPI.getById(runGlobalId);
   };
 
   // Function to check and update test run status
   const checkAndUpdateStatus = async () => {
-    if (!id || !projectId) return;
+    if (runIdLoading || !id || !projectId || !runGlobalId) return;
     
     try {
-      const testRunData = await testRunsAPI.getById(parseInt(id));
+      const testRunData = await testRunsAPI.getById(runGlobalId);
       const currentProjectId = parseInt(projectId);
       if (Number.isNaN(currentProjectId) || Number(testRunData.project_id) !== currentProjectId) {
         setTestRun(null);
@@ -446,7 +449,7 @@ export function TestRunDetail() {
         return;
       }
 
-      const testResultsData = await testResultsAPI.getAll(parseInt(id));
+      const testResultsData = await testResultsAPI.getAll(runGlobalId);
       const updatedTestRun = await syncTestRunStatus(testRunData, testResultsData);
       setTestRun(updatedTestRun);
       setTestResults(testResultsData);
@@ -457,7 +460,8 @@ export function TestRunDetail() {
   
   useEffect(() => {
     const loadData = async () => {
-      if (!id || !projectId) {
+      if (runIdLoading) return;  // wait for the seq -> id resolution
+      if (!id || !projectId || !runGlobalId) {
         setError('Missing test run ID or project ID');
         setLoading(false);
         return;
@@ -468,7 +472,7 @@ export function TestRunDetail() {
         setError(null);
         
         // Load test run data
-        const testRunData = await testRunsAPI.getById(parseInt(id));
+        const testRunData = await testRunsAPI.getById(runGlobalId);
         const currentProjectId = parseInt(projectId);
         if (Number.isNaN(currentProjectId) || Number(testRunData.project_id) !== currentProjectId) {
           setTestRun(null);
@@ -479,7 +483,7 @@ export function TestRunDetail() {
         }
         
         // Load test results for this test run
-        const testResultsData = await testResultsAPI.getAll(parseInt(id));
+        const testResultsData = await testResultsAPI.getAll(runGlobalId);
         
         // Load users for dropdown
         const usersData = await usersAPI.getAll();
@@ -497,11 +501,11 @@ export function TestRunDetail() {
     };
 
     loadData();
-    
+
     // Set up interval to check status every 5 seconds
     const interval = setInterval(checkAndUpdateStatus, 5000);
     return () => clearInterval(interval);
-  }, [id, projectId]);
+  }, [id, projectId, runGlobalId, runIdLoading]);
 
   // Load sections for chart data
   useEffect(() => {
@@ -1198,7 +1202,7 @@ export function TestRunDetail() {
   };
 
   const handleResetTime = async () => {
-    if (!id) return;
+    if (!runGlobalId) return;
     
     if (!confirm('Are you sure you want to reset all timing data for this test run? This will clear execution times for all test results.')) {
       return;
@@ -1206,12 +1210,12 @@ export function TestRunDetail() {
 
     try {
       setIsResettingTime(true);
-      await testRunsAPI.resetTime(parseInt(id));
+      await testRunsAPI.resetTime(runGlobalId);
       
       // Reload test run and results to get updated data
       const [updatedTestRun, updatedTestResults] = await Promise.all([
-        testRunsAPI.getById(parseInt(id)),
-        testResultsAPI.getAll(parseInt(id))
+        testRunsAPI.getById(runGlobalId),
+        testResultsAPI.getAll(runGlobalId)
       ]);
       
       const syncedTestRun = await syncTestRunStatus(updatedTestRun, updatedTestResults);
@@ -1242,11 +1246,11 @@ export function TestRunDetail() {
   };
 
   const handleImportResults = async () => {
-    if (!id || !importFile) return;
+    if (!runGlobalId || !importFile) return;
     try {
       setIsImporting(true);
       setImportSummary(null);
-      const summary = await testRunsAPI.importResults(parseInt(id), importFile, {
+      const summary = await testRunsAPI.importResults(runGlobalId, importFile, {
         format: importFormat === 'auto' ? undefined : importFormat,
         autoCreate: importAutoCreate,
       });
@@ -1254,8 +1258,8 @@ export function TestRunDetail() {
 
       // Reload run + results so the table reflects the new statuses.
       const [updatedRun, updatedResults] = await Promise.all([
-        testRunsAPI.getById(parseInt(id)),
-        testResultsAPI.getAll(parseInt(id)),
+        testRunsAPI.getById(runGlobalId),
+        testResultsAPI.getAll(runGlobalId),
       ]);
       const syncedRun = await syncTestRunStatus(updatedRun, updatedResults);
       setTestRun(syncedRun);
@@ -1288,7 +1292,7 @@ export function TestRunDetail() {
   };
 
   const handleAssignRun = async (value: string) => {
-    if (!id) return;
+    if (!runGlobalId) return;
 
     const nextAssigneeId = value === 'unassigned' ? null : parseInt(value, 10);
     const normalizedId = Number.isInteger(nextAssigneeId) ? nextAssigneeId : null;
@@ -1314,7 +1318,7 @@ export function TestRunDetail() {
   };
 
   const handleSetEnvironment = async (value: string) => {
-    if (!id) return;
+    if (!runGlobalId) return;
 
     const nextEnvironmentId = value === 'none' ? null : parseInt(value, 10);
     const normalizedId = Number.isInteger(nextEnvironmentId) ? nextEnvironmentId : null;

@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { testPlansAPI, testRunsAPI, getApiErrorMessage } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TestRun } from '@/types';
 
@@ -111,7 +112,8 @@ export function TestPlanDetail() {
   const { projectId, testPlanId } = useParams<{ projectId: string; testPlanId: string }>();
   const { t, isRTL } = useTranslation();
   const numericProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
-  const numericPlanId = useMemo(() => parsePositiveInteger(testPlanId), [testPlanId]);
+  // The URL carries the per-project sequence; resolve it to the global test-plan id.
+  const { id: numericPlanId, loading: planIdLoading } = useResolvedEntityId(projectId, 'test-plans', testPlanId);
 
   const [plan, setPlan] = useState<TestPlanDetailData | null>(null);
   const [runs, setRuns] = useState<TestRun[]>([]);
@@ -140,6 +142,7 @@ export function TestPlanDetail() {
     let cancelled = false;
 
     const loadPlan = async () => {
+      if (planIdLoading) return;  // wait for the seq -> id resolution
       if (!numericProjectId || !numericPlanId) {
         setError(t('invalidProjectId'));
         setIsLoading(false);
@@ -179,7 +182,7 @@ export function TestPlanDetail() {
     return () => {
       cancelled = true;
     };
-  }, [numericPlanId, numericProjectId, t]);
+  }, [numericPlanId, planIdLoading, numericProjectId, t]);
 
   const executedRuns = runs.filter((run) => ['completed', 'passed', 'failed', 'blocked'].includes(run.status || '')).length;
   const latestRun = runs[0];

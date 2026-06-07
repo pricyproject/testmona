@@ -75,7 +75,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
         navigate(`/test-cases/${notification.related_entity_id}`);
       } else if (notification.related_entity_type === 'requirement') {
         const response = await api.get(`/requirements/${notification.related_entity_id}`);
-        navigate(`/projects/${response.data.project_id}/requirements/${notification.related_entity_id}`);
+        navigate(`/projects/${response.data.project_id}/requirements/${response.data.project_seq ?? notification.related_entity_id}`);
       } else if (notification.related_entity_type === 'doc') {
         const response = await api.get(`/docs/${notification.related_entity_id}`);
         const projectId = response.data.project_id;

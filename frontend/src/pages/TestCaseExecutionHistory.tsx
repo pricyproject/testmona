@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/useTranslation';
 import { testCasesAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { formatDurationSeconds } from '@/utils/timeFormat';
 
 const formatDateTime = (value?: string | null) => {
@@ -52,6 +53,8 @@ const getStatusIcon = (status?: string | null) => {
 
 export function TestCaseExecutionHistory() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
+  // The URL carries the per-project sequence; resolve it to the global test-case id.
+  const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const navigate = useNavigate();
   const { t, isRTL, language } = useTranslation();
   const [loading, setLoading] = useState(true);
@@ -63,7 +66,8 @@ export function TestCaseExecutionHistory() {
     let isMounted = true;
 
     const loadHistory = async () => {
-      const testCaseId = Number(id);
+      if (tcIdLoading) return;  // wait for the seq -> id resolution
+      const testCaseId = resolvedTcId;
       if (!testCaseId || Number.isNaN(testCaseId)) {
         setError(t('invalidTestCaseData'));
         setLoading(false);
@@ -95,7 +99,7 @@ export function TestCaseExecutionHistory() {
     return () => {
       isMounted = false;
     };
-  }, [id, language, t]);
+  }, [id, language, t, resolvedTcId, tcIdLoading]);
 
   const groupedRuns = useMemo(() => {
     const grouped = new Map<number, any[]>();

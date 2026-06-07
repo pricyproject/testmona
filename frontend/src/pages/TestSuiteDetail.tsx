@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { sectionsAPI, testCasesAPI, testSuitesAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { TestCase, TestSuite } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -206,11 +207,8 @@ export function TestSuiteDetail() {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }, [projectId]);
 
-  const numericSuiteId = useMemo(() => {
-    if (!id) return null;
-    const parsed = Number(id);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-  }, [id]);
+  // The URL carries the per-project sequence; resolve it to the global suite id.
+  const { id: numericSuiteId, loading: suiteIdLoading } = useResolvedEntityId(projectId, 'test-suites', id);
 
   const [testSuite, setTestSuite] = useState<TestSuite | null>(null);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -314,6 +312,7 @@ export function TestSuiteDetail() {
   }, [searchQuery, statusFilter, priorityFilter, selectedSectionId, isUnsectionedSelected]);
 
   const loadTestSuite = useCallback(async () => {
+    if (suiteIdLoading) return;  // wait for the seq -> id resolution
     if (!numericSuiteId || !numericProjectId) {
       setError(t('testSuiteNotFound') || 'Invalid suite or project ID');
       setLoading(false);
@@ -343,7 +342,7 @@ export function TestSuiteDetail() {
     } finally {
       if (requestId === loadRequestId.current) setLoading(false);
     }
-  }, [numericProjectId, numericSuiteId, t]);
+  }, [numericProjectId, numericSuiteId, suiteIdLoading, t]);
 
   useEffect(() => {
     loadTestSuite();
@@ -958,7 +957,7 @@ export function TestSuiteDetail() {
     setShowBulkDeleteDialog(false);
   };
 
-  if (!numericProjectId || !numericSuiteId) {
+  if (!numericProjectId || (!numericSuiteId && !suiteIdLoading)) {
     return (
       <div className={`space-y-4 ${isRTL ? 'rtl' : 'ltr'}`}>
         <Alert variant="destructive">

@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testResultsAPI, environmentsAPI, enumsAPI } from '@/lib/api';
 import { TestRun, TestCase } from '@/types';
+import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -280,7 +281,7 @@ export function TestRuns() {
     const loadPriorityOptions = async () => {
       try {
         setIsPrioritiesLoading(true);
-        const prioritiesData = await enumsAPI.getPriorities();
+        const prioritiesData = await enumsAPI.getPriorities(currentProjectId ?? undefined);
         const apiPriorityOptions = (Array.isArray(prioritiesData) ? prioritiesData : [])
           .filter((item: any) => item?.name)
           .sort((a: any, b: any) => Number(b.value || 0) - Number(a.value || 0))
@@ -463,7 +464,7 @@ export function TestRuns() {
       setIsCreateDialogOpen(false);
       
       // Navigate to the new test run detail page
-      navigate(`/projects/${currentProjectId}/test-runs/${newTestRun.id}`);
+      navigate(`/projects/${currentProjectId}/test-runs/${newTestRun.project_seq ?? newTestRun.id}`);
     } catch (err) {
       console.error('Failed to create test run:', err);
       setError(t('failedToCreateTestRun'));
@@ -1366,14 +1367,14 @@ export function TestRuns() {
                 <Card
                   key={run.id}
                   className="group relative cursor-pointer overflow-hidden border-slate-200/80 bg-white shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl dark:border-slate-800 dark:bg-slate-950"
-                  onClick={() => navigate(`/projects/${currentProjectId}/test-runs/${run.id}`)}
+                  onClick={() => navigate(`/projects/${currentProjectId}/test-runs/${run.project_seq ?? run.id}`)}
                 >
                   <div className={`absolute inset-x-0 top-0 h-1 bg-linear-to-r ${statusMeta.accentClass}`} />
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-2">
                         <div className="flex items-center gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                          <span>{t('runId')}: TR-{run.id.toString().padStart(3, '0')}</span>
+                          <span>{t('runId')}: {entityKey('TR', run)}</span>
                           <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
                           <span>{t('projectIdLabel')}: {run.project_id}</span>
                         </div>
@@ -1450,7 +1451,7 @@ export function TestRuns() {
                         className="shrink-0 text-blue-600 hover:text-blue-700 dark:text-blue-400"
                         onClick={(event) => {
                           event.stopPropagation();
-                          navigate(`/projects/${currentProjectId}/test-runs/${run.id}`);
+                          navigate(`/projects/${currentProjectId}/test-runs/${run.project_seq ?? run.id}`);
                         }}
                       >
                         {t('viewDetails')}

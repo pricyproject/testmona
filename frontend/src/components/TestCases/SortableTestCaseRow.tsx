@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { useTranslation } from '@/hooks/useTranslation';
+import { entityKey } from '@/lib/utils';
 import { TestCase } from '@/types';
 
 type BadgeStyle = string | Record<string, any>;
@@ -104,16 +105,16 @@ export function SortableTestCaseRow({
         <Button
           variant="link"
           className="p-0 h-auto font-medium text-xs text-blue-600 hover:text-blue-800"
-          onClick={() => navigate(getTestCaseDetailUrl(testCase.id))}
+          onClick={() => navigate(getTestCaseDetailUrl(testCase.project_seq ?? testCase.id))}
         >
-          TC-{testCase.id.toString().padStart(3, '0')}
+          {entityKey('TC', testCase)}
         </Button>
       </TableCell>
       <TableCell className="font-medium py-2 text-sm">
         <Button
           variant="link"
           className="p-0 h-auto font-medium text-sm text-left hover:text-blue-800"
-          onClick={() => navigate(getTestCaseDetailUrl(testCase.id))}
+          onClick={() => navigate(getTestCaseDetailUrl(testCase.project_seq ?? testCase.id))}
         >
           {testCase.title}
         </Button>

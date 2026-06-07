@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { testCasesAPI, testResultsAPI, testRunsAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 
 type CandidateRun = {
   id: number;
@@ -20,6 +21,8 @@ type CandidateRun = {
 
 export function TestCaseExecute() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
+  // The URL carries the per-project sequence; resolve it to the global test-case id.
+  const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const navigate = useNavigate();
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
@@ -41,7 +44,8 @@ export function TestCaseExecute() {
       setLoading(true);
       setError(null);
 
-      const testCaseId = Number(id);
+      if (tcIdLoading) return;  // wait for the seq -> id resolution
+      const testCaseId = resolvedTcId;
       const routeProjectId = projectId ? Number(projectId) : null;
 
       if (!testCaseId || Number.isNaN(testCaseId)) {
@@ -99,7 +103,7 @@ export function TestCaseExecute() {
     return () => {
       isMounted = false;
     };
-  }, [id, projectId, language]);
+  }, [id, projectId, language, resolvedTcId, tcIdLoading]);
 
   const selectedRun = useMemo(
     () => candidateRuns.find((run) => String(run.id) === selectedRunId) ?? null,
@@ -118,7 +122,7 @@ export function TestCaseExecute() {
   const ensureCaseInRunAndNavigate = async (runId: number) => {
     if (!id || !resolvedProjectId) return;
 
-    const testCaseId = Number(id);
+    const testCaseId = resolvedTcId;
     const existingResults = await testResultsAPI.getAll(runId, testCaseId, 0, 1);
 
     if (existingResults.length === 0) {

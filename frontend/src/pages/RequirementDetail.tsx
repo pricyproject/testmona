@@ -331,7 +331,9 @@ export function RequirementDetail() {
         let data: Requirement | null = null;
 
         if (Number.isInteger(numericId) && numericId > 0) {
-          data = await requirementsAPI.getById(numericId);
+          // URL carries the per-project sequence (REQ-001 -> /requirements/1);
+          // getBySeq resolves it within the project, falling back to a global id.
+          data = await requirementsAPI.getBySeq(Number(projectId), numericId);
         } else {
           const requirements = await requirementsAPI.getAll(Number(projectId), 0, 1000);
           data = requirements.find((item: Requirement) => item.requirement_id.toLowerCase() === decodeURIComponent(requirementId).toLowerCase()) || null;

@@ -36,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { defectsAPI, getApiErrorMessage, projectAssignmentsAPI, requirementsAPI, testResultsAPI } from '@/lib/api';
+import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 
 type DefectDetailResponse = {
@@ -130,9 +131,11 @@ export function DefectDetail() {
   const [requirements, setRequirements] = useState<any[]>([]);
   const [members, setMembers] = useState<{ id: number; name: string }[]>([]);
 
-  const numericDefectId = Number(defectId);
+  // The URL carries the per-project sequence; resolve it to the global defect id.
+  const { id: numericDefectId, loading: defectIdLoading } = useResolvedEntityId(projectId, 'defects', defectId);
 
   const loadDetail = async (signal?: AbortSignal, showSpinner = true) => {
+    if (defectIdLoading) return;  // wait for the seq -> id resolution
     if (!Number.isInteger(numericDefectId) || numericDefectId <= 0) {
       setError(t('defectNotFound'));
       setLoading(false);
@@ -163,7 +166,7 @@ export function DefectDetail() {
     const controller = new AbortController();
     void loadDetail(controller.signal);
     return () => controller.abort();
-  }, [defectId, projectId]);
+  }, [numericDefectId, defectIdLoading, projectId]);
 
   useEffect(() => {
     const numericProjectId = Number(projectId);

@@ -650,7 +650,7 @@ function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDel
           <Pencil className="mr-2 h-3.5 w-3.5" />
           {t('editMilestone')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/milestones/${milestone.id}`)}>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/milestones/${milestone.project_seq ?? milestone.id}`)}>
           <ArrowUpRight className="mr-2 h-3.5 w-3.5" />
           {t('openMilestoneDetail')}
         </DropdownMenuItem>
@@ -696,7 +696,7 @@ function MilestoneCard(props: CardProps) {
   const status = statusMeta(milestone.status, t);
   const HealthIcon = health.icon;
   const days = getDaysRemaining(milestone.target_date);
-  const goDetail = () => navigate(`/projects/${projectId}/milestones/${milestone.id}`);
+  const goDetail = () => navigate(`/projects/${projectId}/milestones/${milestone.project_seq ?? milestone.id}`);
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-md">
@@ -784,7 +784,7 @@ function MilestoneRow(props: CardProps) {
   const health = healthMeta(milestone.health, t);
   const HealthIcon = health.icon;
   const days = getDaysRemaining(milestone.target_date);
-  const goDetail = () => navigate(`/projects/${projectId}/milestones/${milestone.id}`);
+  const goDetail = () => navigate(`/projects/${projectId}/milestones/${milestone.project_seq ?? milestone.id}`);
 
   return (
     <div className="group flex items-center gap-4 p-4 transition hover:bg-muted/40">

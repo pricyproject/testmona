@@ -394,7 +394,7 @@ export function TestSuites() {
       });
 
       // Navigate to the new test suite detail page
-      navigate(`/projects/${currentProjectId}/test-suites/${newTestSuite.id}`);
+      navigate(`/projects/${currentProjectId}/test-suites/${newTestSuite.project_seq ?? newTestSuite.id}`);
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
@@ -1101,7 +1101,7 @@ export function TestSuites() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => navigate(`/projects/${currentProjectId}/test-suites/${suite.id}`)}>
+                              <DropdownMenuItem onClick={() => navigate(`/projects/${currentProjectId}/test-suites/${suite.project_seq ?? suite.id}`)}>
                                 <FileText className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                                 {t('viewDetails')}
                               </DropdownMenuItem>
@@ -1147,7 +1147,7 @@ export function TestSuites() {
 
                       <Button
                         variant="outline"
-                        onClick={() => navigate(`/projects/${currentProjectId}/test-suites/${suite.id}`)}
+                        onClick={() => navigate(`/projects/${currentProjectId}/test-suites/${suite.project_seq ?? suite.id}`)}
                         className="h-11 w-full rounded-2xl border-slate-200 font-semibold hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
                       >
                         {t('viewDetails')}
