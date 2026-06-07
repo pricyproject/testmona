@@ -2199,7 +2199,7 @@ export function Requirements() {
           </DropdownMenu>
 
           {/* View toggle */}
-          <div className="ml-auto flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border bg-muted/50 p-1">
+          <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border bg-muted/50 p-1">
             <ViewToggleButton active={viewMode === 'table'} onClick={() => changeViewMode('table')} icon={Table2} label={t('tableView')} />
             <ViewToggleButton active={viewMode === 'grid'} onClick={() => changeViewMode('grid')} icon={LayoutGrid} label={t('gridView')} />
           </div>
