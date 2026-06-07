@@ -374,6 +374,35 @@ def register_test_management_routes(app):
             db.rollback()
             raise
 
+        # Create TestRunEnvironment snapshot if environment_id is provided
+        if db_test_run.environment_id:
+            try:
+                environment = db.query(models.ExecutionEnvironment).filter(
+                    models.ExecutionEnvironment.id == db_test_run.environment_id
+                ).first()
+                if environment:
+                    test_run_env_data = {
+                        "test_run_id": db_test_run.id,
+                        "environment_id": db_test_run.environment_id,
+                        "config_snapshot": {
+                            "name": environment.name,
+                            "description": environment.description,
+                            "environment_type": environment.environment_type,
+                            "config_data": environment.config_data,
+                        } if environment.config_data else {
+                            "name": environment.name,
+                            "description": environment.description,
+                            "environment_type": environment.environment_type,
+                        },
+                        "build_snapshot": {
+                            "created_at": db_test_run.created_at.isoformat() if db_test_run.created_at else None,
+                            "test_run_name": db_test_run.name,
+                        }
+                    }
+                    crud.create_test_run_environment(db=db, test_run_environment=test_run_env_data)
+            except Exception as e:
+                logger.error(f"Failed to create test run environment snapshot from suite: {e}")
+
         # Create audit trail after the atomic run/result transaction succeeds.
         try:
             from ..services.audit_service import get_audit_service
@@ -1270,6 +1299,36 @@ def register_test_management_routes(app):
         _attach_test_run_progress(db, [db_test_run])
         _notify_test_run_assignee(db, db_test_run, current_user, assignee)
         
+        # Create TestRunEnvironment snapshot if environment_id is provided
+        if test_run.environment_id:
+            try:
+                environment = db.query(models.ExecutionEnvironment).filter(
+                    models.ExecutionEnvironment.id == test_run.environment_id
+                ).first()
+                if environment:
+                    # Create environment snapshot
+                    test_run_env_data = {
+                        "test_run_id": db_test_run.id,
+                        "environment_id": test_run.environment_id,
+                        "config_snapshot": {
+                            "name": environment.name,
+                            "description": environment.description,
+                            "environment_type": environment.environment_type,
+                            "config_data": environment.config_data,
+                        } if environment.config_data else {
+                            "name": environment.name,
+                            "description": environment.description,
+                            "environment_type": environment.environment_type,
+                        },
+                        "build_snapshot": {
+                            "created_at": db_test_run.created_at.isoformat() if db_test_run.created_at else None,
+                            "test_run_name": db_test_run.name,
+                        }
+                    }
+                    crud.create_test_run_environment(db=db, test_run_environment=test_run_env_data)
+            except Exception as e:
+                logger.error(f"Failed to create test run environment snapshot: {e}")
+        
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
@@ -1349,6 +1408,23 @@ def register_test_management_routes(app):
         _attach_test_run_progress(db, [db_test_run])
         return db_test_run
 
+    @app.get("/test-runs/{test_run_id}/environment", response_model=schemas.TestRunEnvironment)
+    def get_test_run_environment(test_run_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
+        """Get the environment snapshot for a test run"""
+        db_test_run = crud.get_test_run(db, test_run_id=test_run_id)
+        if db_test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        
+        # Check if user has permission to access this test run's project
+        if not rbac.has_permission(current_user, "read", db_test_run.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to access this test run")
+        
+        test_run_env = crud.get_test_run_environments(db, test_run_id=test_run_id)
+        if not test_run_env:
+            raise HTTPException(status_code=404, detail="Environment snapshot not found for this test run")
+        
+        return test_run_env[0]
+
     @app.put("/test-runs/{test_run_id}", response_model=schemas.TestRun)
     def update_test_run(test_run_id: int, test_run: schemas.TestRunUpdate, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
         # First get the test run to check project access
@@ -1381,6 +1457,43 @@ def register_test_management_routes(app):
         # Perform the update
         db_test_run = crud.update_test_run(db, test_run_id=test_run_id, test_run=test_run)
         _attach_test_run_progress(db, [db_test_run])
+
+        # Update TestRunEnvironment snapshot if environment_id changed
+        if "environment_id" in changed_fields:
+            try:
+                # Delete old snapshot if exists
+                old_snapshots = crud.get_test_run_environments(db, test_run_id=test_run_id)
+                for old_snapshot in old_snapshots:
+                    db.delete(old_snapshot)
+                
+                # Create new snapshot if environment_id is provided
+                if db_test_run.environment_id:
+                    environment = db.query(models.ExecutionEnvironment).filter(
+                        models.ExecutionEnvironment.id == db_test_run.environment_id
+                    ).first()
+                    if environment:
+                        test_run_env_data = {
+                            "test_run_id": db_test_run.id,
+                            "environment_id": db_test_run.environment_id,
+                            "config_snapshot": {
+                                "name": environment.name,
+                                "description": environment.description,
+                                "environment_type": environment.environment_type,
+                                "config_data": environment.config_data,
+                            } if environment.config_data else {
+                                "name": environment.name,
+                                "description": environment.description,
+                                "environment_type": environment.environment_type,
+                            },
+                            "build_snapshot": {
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                                "test_run_name": db_test_run.name,
+                            }
+                        }
+                        crud.create_test_run_environment(db=db, test_run_environment=test_run_env_data)
+                db.commit()
+            except Exception as e:
+                logger.error(f"Failed to update test run environment snapshot: {e}")
 
         if "assigned_to" in changed_fields and db_test_run.assigned_to != old_assignee_id:
             _notify_test_run_assignee(db, db_test_run, current_user, assignee)

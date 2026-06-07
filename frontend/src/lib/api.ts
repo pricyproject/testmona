@@ -1280,6 +1280,10 @@ export const testRunsAPI = {
     const response = await api.get(`/test-runs/${id}/flakiness`);
     return response.data;
   },
+  getEnvironment: async (id: number) => {
+    const response = await api.get(`/test-runs/${id}/environment`);
+    return response.data;
+  },
   importResults: async (
     id: number,
     file: File,

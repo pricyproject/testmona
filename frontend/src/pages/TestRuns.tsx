@@ -334,7 +334,11 @@ export function TestRuns() {
     if (!createFromQuery || createFromQueryHandled.current) return;
     createFromQueryHandled.current = true;
     setIsCreateDialogOpen(true);
-  }, [createFromQuery]);
+    // Pre-select environment if provided in URL
+    if (linkedEnvironmentId) {
+      setEnvironment(linkedEnvironmentId.toString());
+    }
+  }, [createFromQuery, linkedEnvironmentId]);
 
   // Track unsaved changes
   useEffect(() => {
