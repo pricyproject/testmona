@@ -77,8 +77,6 @@ DATABASE_URL="mysql+pymysql://user:password@localhost:3306/test_management?chars
 DATABASE_URL="postgresql+psycopg://user:password@localhost:5432/test_management"
 ```
 
-**Database naming:** the database name is the last path segment of `DATABASE_URL` — you choose it. Prefer lowercase with underscores, no hyphens (e.g. `testmona`, `testmona_production`); avoid `test`-prefixed names on MySQL/MariaDB. The app auto-creates the database on first start if the user has the privilege; for production, a DBA can instead pre-create it with a least-privilege user scoped to that database — startup checks for existence first and won't require `CREATE DATABASE`.
-
 ## Docker
 
 ```bash
@@ -86,13 +84,7 @@ docker compose up --build            # SQLite (default)
 docker compose --profile mariadb up   # bundled MariaDB service
 ```
 
-## Repository Layout
 
-```text
-backend/     FastAPI app, routes, models, migrations, OpenAPI, and Postman assets
-frontend/    React/Vite application
-Docs/        Screenshot assets
-```
 
 ## Useful Commands
 
