@@ -50,11 +50,10 @@ npm run dev
 
 Open the app at [http://localhost:3000](http://localhost:3000). The backend API is available at [http://localhost:8000](http://localhost:8000), and Swagger docs are available at [http://localhost:8000/api-docs](http://localhost:8000/api-docs).
 
-## First-run setup
+## Documentation
 
-No default credentials are shipped. On first launch the app sends you to a web setup wizard (`/setup`) to create your administrator account. For security, that one-time step is protected by a **setup token**: the backend prints it to the server logs on startup and writes it to `backend/.setup_token`. Paste the token into the wizard to create the admin. After that, the token is invalidated and public signup is disabled.
 
-For automated/headless provisioning, set the token yourself with the `SETUP_TOKEN` environment variable.
+[![Project Wiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pricyproject/testmona)
 
 ## Database
 
