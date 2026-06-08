@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Float, JSON, Table, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Float, JSON, Table, UniqueConstraint, Index
 from sqlalchemy.orm import relationship, backref, validates
 from sqlalchemy.sql import func
 from typing import Optional
@@ -822,6 +822,10 @@ class TestRun(Base):
 
 class TestResult(Base):
     __tablename__ = "test_results"
+    __table_args__ = (
+        Index("ix_test_results_test_run_id_status", "test_run_id", "status"),
+        Index("ix_test_results_test_case_id_executed_at", "test_case_id", "executed_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
@@ -886,10 +890,10 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
     force_password_change = Column(Boolean, default=False)
-    two_factor_enabled = Column(Boolean, default=False)
+    two_factor_enabled = Column(Boolean, default=False, nullable=False, server_default="0")
     two_factor_secret = Column(Text, nullable=True)
     two_factor_recovery_codes = Column(Text, nullable=True)
-    session_version = Column(Integer, default=0, nullable=False)
+    session_version = Column(Integer, default=0, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -1091,6 +1095,7 @@ class Requirement(Base):
 
     __table_args__ = (
         UniqueConstraint('project_id', 'requirement_id', name='uq_requirements_project_requirement_id'),
+        Index("ix_requirements_project_id_status_priority", "project_id", "status", "priority"),
     )
 
     # Relationships
@@ -1223,6 +1228,9 @@ class RequirementChatMessage(Base):
 
 class Defect(Base):
     __tablename__ = "defects"
+    __table_args__ = (
+        Index("ix_defects_project_id_status_severity", "project_id", "status", "severity"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
@@ -1830,6 +1838,9 @@ class SyncLog(Base):
 
 class AuditTrail(Base):
     __tablename__ = "audit_trails"
+    __table_args__ = (
+        Index("ix_audit_trails_user_id_created_at", "user_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -2209,6 +2220,7 @@ class DocVisit(Base):
 
     __table_args__ = (
         UniqueConstraint("doc_id", "user_id", name="uq_doc_visit_user"),
+        Index("ix_doc_visits_user_id_last_visited_at", "user_id", "last_visited_at"),
     )
 
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, create_engine, event, inspect, text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, MetaData, create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.declarative import declarative_base
@@ -151,7 +151,15 @@ if settings.database_url.startswith("sqlite"):
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(column_0_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
 
 def _add_column_if_missing(table_name: str, column: Column) -> bool:

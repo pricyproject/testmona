@@ -1,8 +1,72 @@
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any
+import re
 
-from sqlalchemy import inspect
+from sqlalchemy import Table, inspect, select, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import NoInspectionAvailable
+
+
+IGNORED_MIGRATION_TABLES = {"alembic_version"}
+IGNORED_MIGRATION_PREFIXES = ("sqlite_", "tmp_", "temp_")
+
+
+def include_migration_object(
+    object_: Any,
+    name: str | None,
+    type_: str,
+    reflected: bool,
+    compare_to: Any,
+) -> bool:
+    """Filter internal/transient objects out of Alembic autogenerate diffs."""
+    del object_, reflected, compare_to
+    if not name:
+        return True
+
+    if type_ == "table" and (name in IGNORED_MIGRATION_TABLES or name.startswith(IGNORED_MIGRATION_PREFIXES)):
+        return False
+
+    if type_ == "index" and name.startswith(IGNORED_MIGRATION_PREFIXES):
+        return False
+
+    return True
+
+
+def _normalize_default(default: Any) -> str:
+    if default is None:
+        return ""
+
+    normalized = str(default).lower().strip()
+    normalized = normalized.replace("`", "").replace("'", "").replace('"', "")
+    normalized = re.sub(r"\s+", "", normalized)
+    normalized = normalized.replace("defaultclause(", "")
+    normalized = normalized.replace("current_timestamp()", "current_timestamp")
+    normalized = normalized.replace("now()", "current_timestamp")
+    normalized = normalized.replace("false", "0").replace("true", "1")
+    return normalized
+
+
+def compare_server_default(
+    context: Any,
+    inspected_column: Any,
+    metadata_column: Any,
+    inspected_default: Any,
+    metadata_default: Any,
+    rendered_metadata_default: Any,
+) -> bool | None:
+    """Suppress equivalent default diffs while keeping real default drift visible."""
+    del context, inspected_column, metadata_column
+    inspected = _normalize_default(inspected_default)
+    metadata = _normalize_default(rendered_metadata_default or metadata_default)
+
+    if inspected == metadata:
+        return False
+
+    timestamp_defaults = {"current_timestamp", "current_timestamp(6)", "current_timestamponupdatecurrent_timestamp"}
+    if inspected in timestamp_defaults and metadata in timestamp_defaults:
+        return False
+
+    return None
 
 
 def can_inspect_database(connection: Connection) -> bool:
@@ -94,3 +158,79 @@ def drop_column_if_exists(operations: Any, table_name: str, column_name: str) ->
                 batch_op.drop_column(column_name)
         else:
             operations.drop_column(table_name, column_name)
+
+
+def require_table(connection: Connection, table_name: str) -> None:
+    """Fail a migration early when an expected table is absent."""
+    if not table_exists(connection, table_name):
+        raise RuntimeError(f"Required table is missing before migration: {table_name}")
+
+
+def require_column(connection: Connection, table_name: str, column_name: str) -> None:
+    """Fail a migration early when an expected column is absent."""
+    if not column_exists(connection, table_name, column_name):
+        raise RuntimeError(f"Required column is missing before migration: {table_name}.{column_name}")
+
+
+def require_column_absent(connection: Connection, table_name: str, column_name: str) -> None:
+    """Fail a migration early when an additive column would overwrite existing data."""
+    if column_exists(connection, table_name, column_name):
+        raise RuntimeError(f"Column already exists before migration: {table_name}.{column_name}")
+
+
+def create_index_if_missing(
+    operations: Any,
+    index_name: str,
+    table_name: str,
+    columns: Sequence[str],
+    *,
+    unique: bool = False,
+) -> None:
+    """Create an index only when the table exists and the index is absent."""
+    connection = operations.get_bind()
+    if table_exists(connection, table_name) and not index_exists(connection, table_name, index_name):
+        operations.create_index(index_name, table_name, list(columns), unique=unique)
+
+
+def drop_index_if_exists(operations: Any, index_name: str, table_name: str) -> None:
+    """Drop an index only when it is present."""
+    connection = operations.get_bind()
+    if index_exists(connection, table_name, index_name):
+        operations.drop_index(index_name, table_name=table_name)
+
+
+def iter_primary_key_batches(
+    connection: Connection,
+    table: Table,
+    primary_key_column: Any,
+    *,
+    batch_size: int = 500,
+) -> Iterator[list[Any]]:
+    """Yield primary-key batches for data backfills without long table locks."""
+    last_seen = None
+    while True:
+        statement = select(primary_key_column).select_from(table).order_by(primary_key_column).limit(batch_size)
+        if last_seen is not None:
+            statement = statement.where(primary_key_column > last_seen)
+
+        batch = [row[0] for row in connection.execute(statement).all()]
+        if not batch:
+            return
+
+        yield batch
+        last_seen = batch[-1]
+
+
+def run_batched_update(
+    connection: Connection,
+    batches: Iterable[Sequence[Any]],
+    update_sql: str,
+    bind_parameters: Callable[[Sequence[Any]], dict[str, Any]],
+) -> int:
+    """Run a parameterized update for each batch and return the affected row count."""
+    affected_rows = 0
+    statement = text(update_sql)
+    for batch in batches:
+        result = connection.execute(statement, bind_parameters(batch))
+        affected_rows += result.rowcount or 0
+    return affected_rows

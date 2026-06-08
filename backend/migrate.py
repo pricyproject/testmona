@@ -10,14 +10,20 @@ import argparse
 import shutil
 import logging
 import signal
-from datetime import datetime
+import re
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from alembic.config import Config
 from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import make_url
 from app.config import settings
+from app.services.migration_helpers import compare_server_default, include_migration_object
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -43,6 +49,19 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 logger = setup_logging()
+logger.setLevel(logging.INFO)
+
+MIGRATION_FILE_PATTERN = re.compile(r"^\d{14}_[a-z0-9_]+\.py$")
+LEGACY_REVISION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+DESTRUCTIVE_PATTERNS = (
+    ("drop_table", re.compile(r"\bop\.drop_table\(")),
+    ("drop_column", re.compile(r"\b(?:op|batch_op)\.drop_column\(")),
+    ("delete_data", re.compile(r"\b(?:DELETE|TRUNCATE)\b", re.IGNORECASE)),
+)
+REQUIRED_COLUMN_PATTERN = re.compile(
+    r"add_column\([^\n]+nullable\s*=\s*False(?![^\n]+server_default)",
+    re.DOTALL,
+)
 
 def validate_env_vars(env):
     """Validate required environment variables are set"""
@@ -75,7 +94,229 @@ def build_alembic_config(db_url):
     alembic_cfg = Config(str(BASE_DIR / "alembic.ini"))
     alembic_cfg.set_main_option("script_location", str(BASE_DIR / "alembic"))
     alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cfg.attributes["database_url"] = db_url
     return alembic_cfg
+
+
+def run_alembic_command(command_func, *args, **kwargs):
+    """Run an Alembic command without letting successful SystemExit skip cleanup."""
+    try:
+        return command_func(*args, **kwargs)
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            return None
+        raise
+
+
+def build_revision_id(message: str) -> str:
+    """Build sortable revision IDs with a compact timestamp and slug."""
+    slug = re.sub(r"[^a-z0-9]+", "_", message.lower()).strip("_") or "migration"
+    slug = re.sub(r"_+", "_", slug)[:40].strip("_") or "migration"
+    return f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{slug}"
+
+
+def check_single_head(alembic_cfg: Config) -> bool:
+    """Return True when the migration graph has exactly one head."""
+    script = ScriptDirectory.from_config(alembic_cfg)
+    heads = script.get_heads()
+    if len(heads) == 1:
+        logger.info(f"✅ Single migration head: {heads[0]}")
+        return True
+
+    if not heads:
+        logger.error("❌ No migration heads found")
+    else:
+        logger.error(f"❌ Multiple migration heads found: {', '.join(heads)}")
+    return False
+
+
+def format_schema_diff(diff: object) -> str:
+    """Render Alembic schema diff entries in a compact log-friendly form."""
+    text_value = repr(diff)
+    return text_value if len(text_value) <= 500 else f"{text_value[:497]}..."
+
+
+def _unique_index_signature(diff: object) -> tuple[str, tuple[str, ...]] | None:
+    if not isinstance(diff, tuple) or len(diff) < 2 or diff[0] != "remove_index":
+        return None
+
+    index = diff[1]
+    if not getattr(index, "unique", False):
+        return None
+
+    table = getattr(index, "table", None)
+    table_name = getattr(table, "name", None)
+    columns = tuple(column.name for column in getattr(index, "columns", []))
+    if not table_name or not columns:
+        return None
+    return table_name, columns
+
+
+def _unique_constraint_signature(diff: object) -> tuple[str, tuple[str, ...]] | None:
+    if not isinstance(diff, tuple) or len(diff) < 2 or diff[0] != "add_constraint":
+        return None
+
+    constraint = diff[1]
+    table = getattr(constraint, "table", None)
+    table_name = getattr(table, "name", None)
+    columns = tuple(column.name for column in getattr(constraint, "columns", []))
+    if not table_name or not columns:
+        return None
+    return table_name, columns
+
+
+def filter_schema_differences(differences: list[object]) -> list[object]:
+    """Drop dialect naming artifacts while preserving material schema drift."""
+    removed_unique_indexes = {
+        signature for difference in differences if (signature := _unique_index_signature(difference))
+    }
+    added_unique_constraints = {
+        signature for difference in differences if (signature := _unique_constraint_signature(difference))
+    }
+    equivalent_unique_signatures = removed_unique_indexes & added_unique_constraints
+
+    filtered: list[object] = []
+    for difference in differences:
+        unique_index_signature = _unique_index_signature(difference)
+        if unique_index_signature in equivalent_unique_signatures:
+            continue
+
+        unique_constraint_signature = _unique_constraint_signature(difference)
+        if unique_constraint_signature in equivalent_unique_signatures:
+            continue
+
+        filtered.append(difference)
+
+    return filtered
+
+
+def check_schema_drift(db_url: str, alembic_cfg: Config) -> bool:
+    """Compare live database schema with SQLAlchemy metadata."""
+    logger.info("🔍 Checking schema drift...")
+    engine = None
+    autogenerate_logger = logging.getLogger("alembic.autogenerate.compare")
+    runtime_logger = logging.getLogger("alembic.runtime.migration")
+    previous_autogenerate_level = autogenerate_logger.level
+    previous_runtime_level = runtime_logger.level
+    try:
+        from app.database import Base
+        from app import models, models_versioning  # noqa: F401 (register metadata)
+
+        engine = create_engine(db_url)
+        with engine.connect() as connection:
+            runtime_logger.setLevel(logging.WARNING)
+            expected_heads = set(ScriptDirectory.from_config(alembic_cfg).get_heads())
+            current_heads = set(MigrationContext.configure(connection).get_current_heads())
+            if current_heads != expected_heads:
+                logger.error(
+                    "❌ Database revision is not at migration head; "
+                    f"current={sorted(current_heads) or ['<unversioned>']} "
+                    f"expected={sorted(expected_heads)}"
+                )
+                return False
+
+            migration_context = MigrationContext.configure(
+                connection,
+                opts={
+                    "target_metadata": Base.metadata,
+                    "include_object": include_migration_object,
+                    "compare_type": True,
+                    "compare_server_default": compare_server_default,
+                },
+            )
+            # Alembic logs raw dialect artifacts before callers can filter them;
+            # keep check-drift output focused on material differences only.
+            autogenerate_logger.setLevel(logging.WARNING)
+            differences = filter_schema_differences(compare_metadata(migration_context, Base.metadata))
+
+        if differences:
+            logger.error(f"❌ Schema drift detected: {len(differences)} difference(s)")
+            for difference in differences[:25]:
+                logger.error(f"  - {format_schema_diff(difference)}")
+            if len(differences) > 25:
+                logger.error(f"  - ... {len(differences) - 25} more difference(s)")
+            return False
+
+        logger.info("✅ No schema drift detected")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Schema drift check failed: {e}")
+        return False
+    finally:
+        autogenerate_logger.setLevel(previous_autogenerate_level)
+        runtime_logger.setLevel(previous_runtime_level)
+        if engine is not None:
+            engine.dispose()
+
+
+def lint_migration_files(alembic_cfg: Config) -> bool:
+    """Run lightweight safety checks over migration scripts."""
+    script = ScriptDirectory.from_config(alembic_cfg)
+    version_dir = Path(script.versions)
+    revisions_by_path = {Path(revision.path).resolve(): revision.revision for revision in script.walk_revisions()}
+    ok = True
+    legacy_count = 0
+
+    for migration_path in sorted(version_dir.glob("*.py")):
+        if migration_path.name == "__init__.py":
+            continue
+
+        contents = migration_path.read_text(encoding="utf-8")
+        relative_path = migration_path.relative_to(BASE_DIR)
+        revision_id = revisions_by_path.get(migration_path.resolve(), migration_path.stem)
+        is_standard_revision = MIGRATION_FILE_PATTERN.match(f"{revision_id}.py") is not None
+        is_legacy_revision = LEGACY_REVISION_ID_PATTERN.match(revision_id) is not None
+
+        if not is_standard_revision:
+            if is_legacy_revision:
+                legacy_count += 1
+            else:
+                logger.error(f"❌ Non-standard migration revision ID: {revision_id} ({relative_path})")
+                ok = False
+
+        if "def downgrade()" not in contents:
+            logger.error(f"❌ Missing downgrade function: {relative_path}")
+            ok = False
+
+        if re.search(r"def downgrade\(\) -> None:\s+pass\b", contents) and is_standard_revision:
+            logger.error(f"❌ Empty downgrade function: {relative_path}")
+            ok = False
+
+        if REQUIRED_COLUMN_PATTERN.search(contents) and is_standard_revision:
+            logger.error(
+                f"❌ Required column added without an inline server_default; "
+                f"prefer nullable-first rollout: {relative_path}"
+            )
+            ok = False
+
+        if is_standard_revision:
+            for label, pattern in DESTRUCTIVE_PATTERNS:
+                if pattern.search(contents) and "migration-reviewed-destructive-operation" not in contents:
+                    logger.error(
+                        f"❌ Destructive operation ({label}) requires "
+                        f"migration-reviewed-destructive-operation marker: {relative_path}"
+                    )
+                    ok = False
+
+    if ok:
+        if legacy_count:
+            logger.info(f"ℹ️  Legacy migrations accepted without retroactive lint: {legacy_count}")
+        logger.info("✅ Migration lint completed")
+    return ok
+
+
+def warn_production_backup(args, db_url: str) -> None:
+    """Warn when production server-database migrations rely on external backups."""
+    if args.env != "prod" or args.action not in {"upgrade", "downgrade"} or getattr(args, "dry_run", False):
+        return
+
+    if make_url(db_url).drivername.startswith("sqlite"):
+        return
+
+    logger.warning(
+        "⚠️  Production server database detected. Confirm an external backup "
+        "or snapshot exists before applying migrations."
+    )
 
 def check_database_connection(db_url):
     """Check if database is accessible"""
@@ -124,9 +365,12 @@ def backup_sqlite_database(db_url):
         logger.error(f"❌ Backup failed: {e}")
         return None
 
-def check_sqlite_limitations(db_url):
+def check_sqlite_limitations(db_url, action, dry_run=False):
     """Check for SQLite-specific limitations"""
     if not make_url(db_url).drivername.startswith('sqlite'):
+        return True
+
+    if action not in {"upgrade", "downgrade"} or dry_run:
         return True
     
     logger.info("Checking SQLite limitations...")
@@ -250,6 +494,7 @@ def main():
     upgrade_parser.add_argument('--revision', help='Specific revision to upgrade to')
     upgrade_parser.add_argument('--dry-run', action='store_true', help='Preview changes without applying')
     upgrade_parser.add_argument('--no-backup', action='store_true', help='Skip database backup')
+    upgrade_parser.add_argument('--no-backfill', action='store_true', help='Do not create missing metadata tables after upgrade')
     upgrade_parser.add_argument('--no-verify', action='store_true', help='Skip schema verification after migration')
     
     # Downgrade command
@@ -261,6 +506,9 @@ def main():
     
     # Current command
     subparsers.add_parser('current', help='Show current revision')
+
+    # Heads command
+    subparsers.add_parser('heads', help='Show migration heads and fail on multiple heads')
     
     # History command
     history_parser = subparsers.add_parser('history', help='Show migration history')
@@ -270,6 +518,7 @@ def main():
     revision_parser = subparsers.add_parser('revision', help='Create new migration')
     revision_parser.add_argument('--message', '-m', required=True, help='Migration message')
     revision_parser.add_argument('--autogenerate', action='store_true', help='Autogenerate migration')
+    revision_parser.add_argument('--rev-id', help='Explicit revision ID override')
     
     # Stamp command
     stamp_parser = subparsers.add_parser('stamp', help='Stamp database with specific revision')
@@ -279,6 +528,15 @@ def main():
     # Show command
     show_parser = subparsers.add_parser('show', help='Show SQL for migration')
     show_parser.add_argument('--revision', required=True, help='Revision to show')
+
+    # Drift command
+    subparsers.add_parser('check-drift', help='Fail if models and database schema differ')
+
+    # Lint command
+    subparsers.add_parser('lint', help='Run migration graph and safety checks')
+
+    # Preflight command
+    subparsers.add_parser('preflight', help='Run connection, graph, lint, and drift checks')
     
     # Global timeout option
     parser.add_argument('--timeout', type=int, default=300, help='Timeout in seconds (default: 300)')
@@ -310,9 +568,10 @@ def main():
     alembic_cfg = build_alembic_config(db_url)
     
     logger.info(f"Using database: {safe_database_url(db_url)}")
+    warn_production_backup(args, db_url)
     
     # Check SQLite limitations
-    if not check_sqlite_limitations(db_url):
+    if not check_sqlite_limitations(db_url, args.action, getattr(args, 'dry_run', False)):
         logger.error("❌ SQLite limitations check failed")
         sys.exit(1)
     
@@ -337,20 +596,24 @@ def main():
                 logger.info(f"Backup created at: {backup_path}")
     
     try:
+        started_at = time.perf_counter()
         if args.action == 'upgrade':
+            if not check_single_head(alembic_cfg):
+                sys.exit(1)
             if getattr(args, 'dry_run', False):
                 logger.info("🔍 Dry-run mode: previewing upgrade")
-                command.upgrade(alembic_cfg, args.revision if args.revision else "head", sql=True)
+                run_alembic_command(command.upgrade, alembic_cfg, args.revision if args.revision else "head", sql=True)
             else:
                 if args.revision:
-                    command.upgrade(alembic_cfg, args.revision)
+                    run_alembic_command(command.upgrade, alembic_cfg, args.revision)
                 else:
-                    command.upgrade(alembic_cfg, "head")
+                    run_alembic_command(command.upgrade, alembic_cfg, "head")
                 logger.info("✅ Database upgraded successfully")
 
-                # Safety net for the stamped-but-incomplete state, where the
-                # upgrade above is a no-op yet tables are missing.
-                backfill_missing_tables(db_url)
+                if not getattr(args, 'no_backfill', False):
+                    # Safety net for the stamped-but-incomplete state, where the
+                    # upgrade above is a no-op yet tables are missing.
+                    backfill_missing_tables(db_url)
 
                 # Verify schema after upgrade unless skipped
                 if not getattr(args, 'no_verify', False):
@@ -359,11 +622,13 @@ def main():
                         sys.exit(1)
             
         elif args.action == 'downgrade':
+            if not check_single_head(alembic_cfg):
+                sys.exit(1)
             if getattr(args, 'dry_run', False):
                 logger.info("🔍 Dry-run mode: previewing downgrade")
-                command.downgrade(alembic_cfg, args.revision, sql=True)
+                run_alembic_command(command.downgrade, alembic_cfg, args.revision, sql=True)
             else:
-                command.downgrade(alembic_cfg, args.revision)
+                run_alembic_command(command.downgrade, alembic_cfg, args.revision)
                 logger.info(f"✅ Database downgraded to {args.revision}")
                 
                 # Verify schema after downgrade unless skipped
@@ -373,29 +638,67 @@ def main():
                         sys.exit(1)
             
         elif args.action == 'current':
-            command.current(alembic_cfg)
+            run_alembic_command(command.current, alembic_cfg)
+
+        elif args.action == 'heads':
+            run_alembic_command(command.heads, alembic_cfg)
+            if not check_single_head(alembic_cfg):
+                sys.exit(1)
             
         elif args.action == 'history':
             if args.verbose:
-                command.history(alembic_cfg, verbose=True)
+                run_alembic_command(command.history, alembic_cfg, verbose=True)
             else:
-                command.history(alembic_cfg)
+                run_alembic_command(command.history, alembic_cfg)
                 
         elif args.action == 'revision':
-            command.revision(alembic_cfg, message=args.message, autogenerate=args.autogenerate)
-            logger.info(f"✅ New migration created: {args.message}")
+            if not check_single_head(alembic_cfg):
+                sys.exit(1)
+            revision_id = args.rev_id or build_revision_id(args.message)
+            run_alembic_command(
+                command.revision,
+                alembic_cfg,
+                message=args.message,
+                autogenerate=args.autogenerate,
+                rev_id=revision_id,
+            )
+            logger.info(f"✅ New migration created: {revision_id} {args.message}")
             
         elif args.action == 'stamp':
             if getattr(args, 'purge', False):
-                command.stamp(alembic_cfg, args.revision, purge=True)
+                run_alembic_command(command.stamp, alembic_cfg, args.revision, purge=True)
             else:
-                command.stamp(alembic_cfg, args.revision)
+                run_alembic_command(command.stamp, alembic_cfg, args.revision)
             logger.info(f"✅ Database stamped to revision: {args.revision}")
             
         elif args.action == 'show':
             logger.info(f"Showing SQL for revision: {args.revision}")
-            command.upgrade(alembic_cfg, args.revision, sql=True)
-            
+            run_alembic_command(command.upgrade, alembic_cfg, args.revision, sql=True)
+
+        elif args.action == 'check-drift':
+            if not check_schema_drift(db_url, alembic_cfg):
+                sys.exit(1)
+
+        elif args.action == 'lint':
+            graph_ok = check_single_head(alembic_cfg)
+            lint_ok = lint_migration_files(alembic_cfg)
+            if not graph_ok or not lint_ok:
+                sys.exit(1)
+
+        elif args.action == 'preflight':
+            checks = [
+                check_database_connection(db_url),
+                check_single_head(alembic_cfg),
+                lint_migration_files(alembic_cfg),
+                check_schema_drift(db_url, alembic_cfg),
+            ]
+            if not all(checks):
+                sys.exit(1)
+            logger.info("✅ Migration preflight completed")
+
+        elapsed = time.perf_counter() - started_at
+        logger.info(f"Migration action '{args.action}' completed in {elapsed:.2f}s")
+
     except Exception as e:
         logger.error(f"❌ Migration error: {str(e)}")
         sys.exit(1)

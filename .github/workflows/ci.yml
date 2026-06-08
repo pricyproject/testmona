@@ -58,6 +58,13 @@ jobs:
           python -m compileall -q app alembic seed
           python -m py_compile migrate.py
 
+      - name: Validate database migrations
+        run: |
+          rm -f /tmp/testmona-ci.sqlite /tmp/testmona-test-ci.sqlite
+          python migrate.py lint
+          python migrate.py upgrade --no-backup --no-backfill
+          python migrate.py preflight
+
       - name: Validate OpenAPI schema
         run: |
           python - <<'PY'
@@ -112,3 +119,62 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  backend-mariadb:
+    name: Backend MariaDB migrations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+        shell: bash
+    env:
+      SECRET_KEY: ci-secret-key
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 480
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      ALLOWED_ORIGINS: http://localhost:3000
+      MARIADB_DATABASE: testmona_ci
+      MARIADB_ROOT_PASSWORD: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
+      MARIADB_USER: testmona_ci
+      MARIADB_PASSWORD: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
+      DATABASE_URL: "mysql+pymysql://testmona_ci:ci_${{ github.run_id }}_${{ github.run_attempt }}@127.0.0.1:3306/testmona_ci?charset=utf8mb4"
+      TEST_DATABASE_URL: "mysql+pymysql://testmona_ci:ci_${{ github.run_id }}_${{ github.run_attempt }}@127.0.0.1:3306/testmona_test_ci?charset=utf8mb4"
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_DATABASE: testmona_ci
+          MARIADB_ROOT_PASSWORD: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
+          MARIADB_USER: testmona_ci
+          MARIADB_PASSWORD: "ci_${{ github.run_id }}_${{ github.run_attempt }}"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -utestmona_ci -pci_${{ github.run_id }}_${{ github.run_attempt }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=20s
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Validate MariaDB migrations
+        run: |
+          python migrate.py lint
+          python migrate.py upgrade --no-backup --no-backfill
+          python migrate.py preflight

@@ -11,27 +11,33 @@ from app.database import Base
 from app.models import *
 from app.models_versioning import *
 from app.config import settings
+from app.services.migration_helpers import compare_server_default, include_migration_object
 
 config = context.config
 
-# Honor the same database configuration the app uses: an explicit DATABASE_URL
-# environment variable wins, otherwise fall back to the app settings (which read
-# the .env file). This keeps `alembic` and the running app pointed at the same DB.
-database_url = os.getenv("DATABASE_URL") or settings.database_url
+# Honor explicit callers first (`backend/migrate.py --url`), then the same
+# database configuration the app uses. This keeps CLI overrides from being
+# silently replaced by DATABASE_URL/settings inside Alembic's env.py.
+database_url = config.attributes.get("database_url") or os.getenv("DATABASE_URL") or settings.database_url
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
+    render_as_batch = url.startswith("sqlite")
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_migration_object,
+        compare_type=True,
+        compare_server_default=compare_server_default,
+        render_as_batch=render_as_batch,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -73,6 +79,9 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_object=include_migration_object,
+            compare_type=True,
+            compare_server_default=compare_server_default,
             render_as_batch=render_as_batch,
         )
 
