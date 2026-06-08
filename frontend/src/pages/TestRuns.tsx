@@ -48,6 +48,7 @@ import { TestRun, TestCase } from '@/types';
 import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
+import { caseBelongsToSuite, caseHasAnySuite } from '@/utils/testCaseSuites';
 
 // Define User interface locally since it's not in types
 interface User {
@@ -617,7 +618,7 @@ export function TestRuns() {
 
   // Toggle test suite selection
   const toggleTestSuiteSelection = (suiteId: number) => {
-    const suiteTestCases = testCases.filter(tc => tc.test_suite_id === suiteId);
+    const suiteTestCases = testCases.filter(tc => caseBelongsToSuite(tc, suiteId));
     const isAllSelected = suiteTestCases.every(tc => selectedTestCases.includes(tc.id));
     
     if (isAllSelected) {
@@ -1038,7 +1039,7 @@ export function TestRuns() {
                           {t('testSuitesLabel')}
                         </div>
                         {testSuites.map((suite) => {
-                          const suiteTestCases = testCases.filter(tc => tc.test_suite_id === suite.id);
+                          const suiteTestCases = testCases.filter(tc => caseBelongsToSuite(tc, suite.id));
                           const filteredSuiteTestCases = suiteTestCases.filter(tc => 
                             tc.title?.toLowerCase().includes(searchQuery.toLowerCase())
                           );
@@ -1126,14 +1127,14 @@ export function TestRuns() {
                     )}
 
                     {/* Uncategorized Test Cases */}
-                    {testCases.filter(tc => !tc.test_suite_id && !(tc as any).section_id).length > 0 && (
+                    {testCases.filter(tc => !caseHasAnySuite(tc) && !(tc as any).section_id).length > 0 && (
                       <div>
                         <div className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400">
                           {t('uncategorizedTestCases')}
                         </div>
                         <div className="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-slate-900">
                           {testCases
-                            .filter(tc => !tc.test_suite_id && !(tc as any).section_id)
+                            .filter(tc => !caseHasAnySuite(tc) && !(tc as any).section_id)
                             .filter(tc => tc.title?.toLowerCase().includes(searchQuery.toLowerCase()))
                             .slice(0, searchQuery ? undefined : 50)
                             .map((testCase) => (

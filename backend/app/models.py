@@ -656,6 +656,7 @@ class TestSuite(Base):
 
     project = relationship("Project", back_populates="test_suites")
     test_cases = relationship("TestCase", back_populates="test_suite")
+    test_case_memberships = relationship("TestCaseSuiteMembership", back_populates="test_suite", cascade="all, delete-orphan")
     sections = relationship("TestCaseSection", back_populates="test_suite")
 
 
@@ -677,6 +678,28 @@ class TestCaseSection(Base):
     parent_section = relationship("TestCaseSection", remote_side=[id])
     child_sections = relationship("TestCaseSection", back_populates="parent_section")
     test_cases = relationship("TestCase", back_populates="section")
+    test_case_memberships = relationship("TestCaseSuiteMembership", back_populates="section")
+
+
+class TestCaseSuiteMembership(Base):
+    __tablename__ = "test_case_suite_memberships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False, index=True)
+    test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False, index=True)
+    section_id = Column(Integer, ForeignKey("test_case_sections.id"), nullable=True, index=True)
+    order_index = Column(Integer, default=0)
+    is_primary = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    test_case = relationship("TestCase", back_populates="suite_memberships")
+    test_suite = relationship("TestSuite", back_populates="test_case_memberships")
+    section = relationship("TestCaseSection", back_populates="test_case_memberships")
+
+    __table_args__ = (
+        UniqueConstraint("test_case_id", "test_suite_id", name="uq_test_case_suite_memberships_case_suite"),
+    )
 
 
 class TestCase(Base):
@@ -713,6 +736,7 @@ class TestCase(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     test_suite = relationship("TestSuite", back_populates="test_cases")
+    suite_memberships = relationship("TestCaseSuiteMembership", back_populates="test_case", cascade="all, delete-orphan")
     section = relationship("TestCaseSection", back_populates="test_cases")
     test_results = relationship("TestResult", back_populates="test_case")
     custom_field_values = relationship("CustomFieldValue", back_populates="test_case")

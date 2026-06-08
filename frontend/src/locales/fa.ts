@@ -4084,4 +4084,10 @@ export const fa = {
   docConvertAiReason_rate_limited: 'سقف ماهانهٔ توکن هوش مصنوعی این پروژه پر شده است. آن را در مدیر هوش مصنوعی افزایش دهید یا تا دورهٔ بعد صبر کنید.',
   docConvertAiReason_nothing_to_enhance: 'هنوز چیزی برای بازبینی وجود ندارد.',
   aiSource_docs: 'اسناد',
+  additionalSuites: 'مجموعه‌های آزمون اضافی',
+  additionalTestSuite: 'مجموعه آزمون اضافی',
+  additionalTestSuites: 'مجموعه‌های آزمون اضافی',
+  noAdditionalSuites: 'مجموعه اضافی وجود ندارد',
+  noAdditionalSuitesSelected: 'هیچ مجموعه اضافی انتخاب نشده است',
+  primarySuite: 'اصلی',
 };

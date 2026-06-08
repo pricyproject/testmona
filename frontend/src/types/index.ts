@@ -79,8 +79,27 @@ export interface TestCase {
       name: string;
     };
   };
+  suite_memberships?: TestCaseSuiteMembership[];
   // For backward compatibility
   project_name?: string;
+}
+
+export interface TestCaseSuiteMembership {
+  id: number;
+  test_case_id: number;
+  test_suite_id: number;
+  section_id?: number | null;
+  order_index?: number | null;
+  is_primary?: boolean;
+  test_suite?: {
+    id: number;
+    name: string;
+    project_id: number;
+  };
+  section?: {
+    id: number;
+    name: string;
+  };
 }
 
 export interface TestCaseSection {

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,6 +26,8 @@ type TestCasePriority = 'low' | 'medium' | 'high' | 'critical';
 type TestCaseStatus = 'active' | 'inactive' | 'archived';
 type TestCaseType = string;
 type SelectOption = { value: string; label: string };
+type SectionOption = { id: number; name: string; indent: number };
+type SectionNode = { id: number; name: string; subsections?: SectionNode[] };
 type AIAssistantAction = 'suggest_steps' | 'improve_expected_result' | 'add_negative_cases' | 'convert_to_gherkin' | 'split_broad_case';
 
 // Each action maps to the kind of output the assistant returns, which drives how
@@ -86,6 +89,10 @@ export function TestCaseEdit() {
   const [sectionsLoading, setSectionsLoading] = useState(false);
   const [testSuiteOptions, setTestSuiteOptions] = useState<{ id: number; name: string }[]>([]);
   const [testSuitesLoading, setTestSuitesLoading] = useState(false);
+  const [secondarySuiteIds, setSecondarySuiteIds] = useState<number[]>([]);
+  const [originalSecondarySuiteIds, setOriginalSecondarySuiteIds] = useState<number[]>([]);
+  const [secondarySuiteSectionIds, setSecondarySuiteSectionIds] = useState<Record<number, number | null>>({});
+  const [sectionOptionsBySuite, setSectionOptionsBySuite] = useState<Record<number, SectionOption[]>>({});
   const [currentProjectId, setCurrentProjectId] = useState<number | null>(null);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [customFieldValues, setCustomFieldValues] = useState<Record<number, string>>({});
@@ -120,6 +127,25 @@ export function TestCaseEdit() {
       ...testTypeOptions,
     ];
   }, [formData.test_type, testTypeOptions]);
+
+  const additionalSuiteRows = useMemo(() => {
+    const suitesById = new Map(testSuiteOptions.map((suite) => [suite.id, suite.name]));
+
+    return Array.from(new Set(secondarySuiteIds))
+      .filter((suiteId) => suiteId !== formData.test_suite_id)
+      .map((suiteId) => {
+        const sectionId = secondarySuiteSectionIds[suiteId] ?? null;
+        const sectionName = sectionId
+          ? (sectionOptionsBySuite[suiteId] ?? []).find((section) => section.id === sectionId)?.name
+          : null;
+
+        return {
+          suiteId,
+          suiteName: suitesById.get(suiteId) ?? `${t('suite')} ${suiteId}`,
+          sectionName: sectionName ?? t('noSection'),
+        };
+      });
+  }, [secondarySuiteIds, formData.test_suite_id, secondarySuiteSectionIds, sectionOptionsBySuite, testSuiteOptions, t]);
 
   const navigateBack = () => {
     const targetProjectId = currentProjectId || (projectId ? parseInt(projectId, 10) : null);
@@ -178,6 +204,32 @@ export function TestCaseEdit() {
 
         const suiteId = (testCaseData as any).test_suite_id ?? null;
         const sectionId = (testCaseData as any).section_id ?? null;
+        const loadedSecondarySuiteIds: number[] = Array.from(new Set<number>(
+          ((testCaseData as any).suite_memberships || [])
+            .map((membership: { test_suite_id?: number | null }) => Number(membership.test_suite_id))
+            .filter((membershipSuiteId: number) => (
+              Number.isInteger(membershipSuiteId) &&
+              membershipSuiteId > 0 &&
+              membershipSuiteId !== suiteId
+            ))
+        ));
+        const loadedSecondarySectionIds = ((testCaseData as any).suite_memberships || []).reduce(
+          (
+            sections: Record<number, number | null>,
+            membership: { test_suite_id?: number | null; section_id?: number | null }
+          ) => {
+            const membershipSuiteId = Number(membership.test_suite_id);
+            if (
+              Number.isInteger(membershipSuiteId) &&
+              membershipSuiteId > 0 &&
+              membershipSuiteId !== suiteId
+            ) {
+              sections[membershipSuiteId] = membership.section_id ?? null;
+            }
+            return sections;
+          },
+          {}
+        );
         const existingCustomValues = ((testCaseData as any).custom_field_values || []).reduce(
           (
             values: {
@@ -214,6 +266,9 @@ export function TestCaseEdit() {
         });
         setCustomFieldValues(existingCustomValues.fieldValues);
         setExistingCustomFieldValueIds(existingCustomValues.valueIds);
+        setSecondarySuiteIds(loadedSecondarySuiteIds);
+        setOriginalSecondarySuiteIds(loadedSecondarySuiteIds);
+        setSecondarySuiteSectionIds(loadedSecondarySectionIds);
         setOriginalIsMultistep(isMultistep);
 
         if (isMultistep) {
@@ -366,14 +421,45 @@ export function TestCaseEdit() {
 
   useEffect(() => {
     const loadSections = async () => {
-      if (!currentProjectId || !formData.test_suite_id) {
+      if (!currentProjectId) {
         setSectionOptions([]);
+        setSectionOptionsBySuite({});
         return;
       }
       setSectionsLoading(true);
       try {
         const data = await sectionsAPI.getProjectSectionHierarchy(currentProjectId);
         const hierarchy = data?.hierarchy ?? [];
+        const optionsBySuite: Record<number, SectionOption[]> = {};
+
+        const flattenSections = (sections: SectionNode[] = []): SectionOption[] => {
+          const seenSections = new Set<number>();
+          const flat: SectionOption[] = [];
+
+          const pushSection = (section: SectionNode, indent: number) => {
+            if (seenSections.has(section.id)) return;
+            seenSections.add(section.id);
+            flat.push({ id: section.id, name: section.name, indent });
+            (section.subsections ?? []).forEach((subsection) => pushSection(subsection, indent + 1));
+          };
+
+          sections.forEach((section) => pushSection(section, 0));
+          return flat;
+        };
+
+        hierarchy.forEach((suiteBlock: { test_suite?: { id?: number }; sections?: SectionNode[] }) => {
+          const suiteId = Number(suiteBlock.test_suite?.id);
+          if (Number.isInteger(suiteId) && suiteId > 0) {
+            optionsBySuite[suiteId] = flattenSections(suiteBlock.sections ?? []);
+          }
+        });
+        setSectionOptionsBySuite(optionsBySuite);
+
+        if (!formData.test_suite_id) {
+          setSectionOptions([]);
+          return;
+        }
+
         const suiteBlock = hierarchy.find(
           (h: { test_suite: { id: number } }) => h.test_suite?.id === formData.test_suite_id
         );
@@ -383,36 +469,27 @@ export function TestCaseEdit() {
           return;
         }
 
-        // Use a Set to track unique section IDs and prevent duplicates
-        const seenSections = new Set<number>();
-        const flat: { id: number; name: string; indent: number }[] = [];
-        
-        const pushSection = (s: { id: number; name: string; subsections?: { id: number; name: string; subsections?: any[] }[] }, indent: number) => {
-          // Skip if we've already seen this section (prevents duplicates)
-          if (seenSections.has(s.id)) {
-            return;
-          }
-          seenSections.add(s.id);
-          flat.push({ id: s.id, name: s.name, indent });
-          (s.subsections ?? []).forEach((sub: { id: number; name: string; subsections?: any[] }) =>
-            pushSection(sub, indent + 1)
-          );
-        };
-        
-        (suiteBlock.sections ?? []).forEach((s: { id: number; name: string; subsections?: { id: number; name: string; subsections?: any[] }[] }) =>
-          pushSection(s, 0)
-        );
-        
-        setSectionOptions(flat);
+        setSectionOptions(optionsBySuite[formData.test_suite_id] ?? []);
       } catch (error) {
         console.error('Failed to load sections:', error);
         setSectionOptions([]);
+        setSectionOptionsBySuite({});
       } finally {
         setSectionsLoading(false);
       }
     };
     loadSections();
   }, [currentProjectId, formData.test_suite_id]);
+
+  useEffect(() => {
+    if (formData.test_suite_id === null) return;
+    setSecondarySuiteIds((current) => current.filter((suiteId) => suiteId !== formData.test_suite_id));
+    setSecondarySuiteSectionIds((current) => {
+      const next = { ...current };
+      delete next[formData.test_suite_id as number];
+      return next;
+    });
+  }, [formData.test_suite_id]);
 
   // Reusable datasets this case can iterate over during a run.
   useEffect(() => {
@@ -895,6 +972,37 @@ export function TestCaseEdit() {
     return { failedFields };
   };
 
+  const syncSuiteMemberships = async (testCaseId: number, primarySuiteId: number): Promise<void> => {
+    const desiredSecondarySuiteIds = Array.from(new Set(secondarySuiteIds))
+      .filter((suiteId) => suiteId !== primarySuiteId);
+    const desiredSecondarySet = new Set(desiredSecondarySuiteIds);
+
+    const suiteIdsToRemove = originalSecondarySuiteIds.filter(
+      (suiteId) => suiteId !== primarySuiteId && !desiredSecondarySet.has(suiteId)
+    );
+
+    await Promise.all([
+      ...desiredSecondarySuiteIds.map((suiteId) =>
+        testCasesAPI.addSuiteMembership(testCaseId, {
+          test_suite_id: suiteId,
+          section_id: secondarySuiteSectionIds[suiteId] ?? null,
+          order_index: 0,
+        })
+      ),
+      ...suiteIdsToRemove.map((suiteId) => testCasesAPI.removeSuiteMembership(testCaseId, suiteId)),
+    ]);
+
+    setSecondarySuiteIds(desiredSecondarySuiteIds);
+    setOriginalSecondarySuiteIds(desiredSecondarySuiteIds);
+    setSecondarySuiteSectionIds((current) => {
+      const next: Record<number, number | null> = {};
+      desiredSecondarySuiteIds.forEach((suiteId) => {
+        next[suiteId] = current[suiteId] ?? null;
+      });
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     const numericId = Number(id);
     if (!id || !Number.isFinite(numericId) || numericId <= 0) {
@@ -963,6 +1071,7 @@ export function TestCaseEdit() {
       await testCasesAPI.update(numericId, payload);
 
       const { failedFields } = await syncCustomFieldValues(numericId);
+      await syncSuiteMemberships(numericId, formData.test_suite_id);
 
       // Avoid an extra round-trip when the user was never in multistep mode
       // and didn't toggle on — there's nothing to clear.
@@ -1176,6 +1285,122 @@ export function TestCaseEdit() {
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                   {t('ensureTestCaseBelongsToProject')}
                 </p>
+              )}
+              {currentProjectId && testSuiteOptions.length > 1 && (
+                <div className="mt-3 rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <Label className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      {t('additionalSuites')}
+                    </Label>
+                    {secondarySuiteIds.length > 0 && (
+                      <Badge variant="secondary" className="text-[11px]">
+                        {secondarySuiteIds.length}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="max-h-36 space-y-2 overflow-y-auto pr-1">
+                    {testSuiteOptions.map((suite) => {
+                      const isPrimarySuite = suite.id === formData.test_suite_id;
+                      const checked = secondarySuiteIds.includes(suite.id);
+                      const suiteSectionOptions = sectionOptionsBySuite[suite.id] ?? [];
+                      return (
+                        <div
+                          key={suite.id}
+                          className={`rounded px-2 py-1 text-sm ${
+                            isPrimarySuite ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900'
+                          }`}
+                        >
+                          <label className={`flex items-center gap-2 ${isPrimarySuite ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                            <Checkbox
+                              checked={isPrimarySuite || checked}
+                              disabled={isPrimarySuite || saving}
+                              onCheckedChange={(value) => {
+                                const isChecked = value === true;
+                                setSecondarySuiteIds((current) => {
+                                  if (isChecked) {
+                                    return Array.from(new Set([...current, suite.id]));
+                                  }
+                                  return current.filter((suiteId) => suiteId !== suite.id);
+                                });
+                                setSecondarySuiteSectionIds((current) => {
+                                  if (isChecked) {
+                                    return { ...current, [suite.id]: current[suite.id] ?? null };
+                                  }
+                                  const next = { ...current };
+                                  delete next[suite.id];
+                                  return next;
+                                });
+                              }}
+                            />
+                            <span className="min-w-0 flex-1 truncate">{suite.name}</span>
+                            {isPrimarySuite && (
+                              <span className="shrink-0 text-[11px] text-slate-500">{t('primarySuite')}</span>
+                            )}
+                          </label>
+                          {!isPrimarySuite && checked && (
+                            <div className="mt-2 pl-6">
+                              <Select
+                                value={secondarySuiteSectionIds[suite.id] ? String(secondarySuiteSectionIds[suite.id]) : 'no-section'}
+                                onValueChange={(value) => {
+                                  setSecondarySuiteSectionIds((current) => ({
+                                    ...current,
+                                    [suite.id]: value === 'no-section' ? null : parseInt(value, 10),
+                                  }));
+                                }}
+                                disabled={saving || sectionsLoading || suiteSectionOptions.length === 0}
+                              >
+                                <SelectTrigger className="h-8 w-full text-xs">
+                                  <SelectValue placeholder={sectionsLoading ? t('loadingSections') : t('selectSection')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="no-section">{t('noSection')}</SelectItem>
+                                  {suiteSectionOptions.map((section) => (
+                                    <SelectItem key={section.id} value={String(section.id)}>
+                                      {'  '.repeat(section.indent)}{section.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {!sectionsLoading && suiteSectionOptions.length === 0 && (
+                                <p className="mt-1 text-xs text-slate-500">{t('noSectionsAvailable')}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 hover:bg-slate-50 dark:bg-slate-950/60 dark:hover:bg-slate-950/60">
+                          <TableHead className="h-9 px-3 text-xs">{t('additionalTestSuite')}</TableHead>
+                          <TableHead className="h-9 px-3 text-xs">{t('section')}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {additionalSuiteRows.length > 0 ? (
+                          additionalSuiteRows.map((row) => (
+                            <TableRow key={row.suiteId}>
+                              <TableCell className="px-3 py-2 text-xs font-medium text-slate-800 dark:text-slate-100">
+                                {row.suiteName}
+                              </TableCell>
+                              <TableCell className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+                                {row.sectionName}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={2} className="px-3 py-4 text-center text-xs text-slate-500">
+                              {t('noAdditionalSuitesSelected')}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
               )}
             </div>
             <div>

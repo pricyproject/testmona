@@ -93,6 +93,7 @@ import { ImportPreview } from '@/components/ImportPreview';
 import { SortableTestCaseRow } from '@/components/TestCases/SortableTestCaseRow';
 import { SavedFilters } from '@/components/SavedFilters';
 import { BulkEditTestCasesDialog } from '@/components/BulkEditTestCasesDialog';
+import { caseBelongsToSuite, caseSectionIdForSuite } from '@/utils/testCaseSuites';
 
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 const CUSTOM_FIELD_FILTER_ALL = 'all';
@@ -1440,16 +1441,21 @@ export function TestCases() {
         const selectedSuiteId = getSuiteIdFromSelectionValue(selectedTestSuite);
 
         if (selectedSuiteId) {
-          matchesSuite = testCase.test_suite_id === selectedSuiteId;
+          matchesSuite = caseBelongsToSuite(testCase, selectedSuiteId);
           if (isUnsectionedSelectionValue(selectedTestSuite)) {
-            matchesSuite = matchesSuite && !testCase.section_id;
+            matchesSuite = matchesSuite && !caseSectionIdForSuite(testCase, selectedSuiteId);
           }
         } else {
           const selectedSection = findSectionById(mockSections, selectedTestSuite);
           const sectionIds = selectedSection
             ? collectSectionAndDescendantIds(selectedSection)
             : [Number(selectedTestSuite)];
-          matchesSuite = !!testCase.section_id && sectionIds.includes(testCase.section_id);
+          matchesSuite = Boolean(
+            (testCase.section_id && sectionIds.includes(testCase.section_id)) ||
+            testCase.suite_memberships?.some(
+              (membership) => membership.section_id && sectionIds.includes(membership.section_id)
+            )
+          );
         }
       }
 
@@ -3868,13 +3874,13 @@ export function TestCases() {
                           {suiteData.name}
                         </span>
                         <span className="shrink-0 text-xs text-gray-500">
-                          {t('testCasesCountSimple', { count: apiTestCases.filter((tc) => tc.test_suite_id === suiteId).length })}
+                          {t('testCasesCountSimple', { count: apiTestCases.filter((tc) => caseBelongsToSuite(tc, suiteId)).length })}
                         </span>
                       </Button>
                       <div className="ml-2">
                         {(() => {
                           const unsectionedValue = getUnsectionedSelectionValue(suiteId);
-                          const unsectionedCount = apiTestCases.filter((tc) => tc.test_suite_id === suiteId && !tc.section_id).length;
+                          const unsectionedCount = apiTestCases.filter((tc) => caseBelongsToSuite(tc, suiteId) && !caseSectionIdForSuite(tc, suiteId)).length;
                           const unsectionedMatches = t('unsectioned').toLowerCase().includes(normalizedQuery);
                           const showUnsectioned = !normalizedQuery || suiteData.matchesSuite || unsectionedMatches || unsectionedCount > 0;
 
