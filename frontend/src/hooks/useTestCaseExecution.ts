@@ -379,7 +379,11 @@ export function useTestCaseExecution() {
         if (cancelled) return;
         setUsers(allUsers);
         if (currentUser) setAssignee((prev) => prev || currentUser.id.toString());
-        if (testRunId) {
+        // Only fetch the run's cases once the seq -> global id has resolved.
+        // Passing an unresolved NaN drops the test_run_id filter and would pull
+        // every result in the system, corrupting the "X of N" count and the
+        // prev/next list (cycling through cases that aren't in this run).
+        if (testRunId && Number.isFinite(runGlobalId)) {
           const results = await testResultsAPI.getAll(runGlobalId);
           if (cancelled) return;
           setAllTestCases(results.map((r: any) => ({
@@ -398,7 +402,7 @@ export function useTestCaseExecution() {
     };
     loadInitialData();
     return () => { cancelled = true; };
-  }, [testRunId, currentUser]);
+  }, [testRunId, runGlobalId, currentUser]);
 
   // Load any existing execution result for this case in this run.
   useEffect(() => {
