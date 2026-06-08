@@ -175,7 +175,7 @@ export function Profile() {
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [show2FADialog, setShow2FADialog] = useState(false);
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(Boolean(user?.two_factor_enabled));
   const [statistics, setStatistics] = useState({
     test_cases_created: 0,
     test_runs_executed: 0,
@@ -229,6 +229,7 @@ export function Profile() {
       };
       setFormData(newFormData);
       setOriginalFormData(newFormData);
+      setTwoFactorEnabled(Boolean(user.two_factor_enabled));
       // Reset validation states
       setFieldErrors({});
       setUsernameAvailable(null);
@@ -1270,7 +1271,12 @@ export function Profile() {
           isOpen={show2FADialog}
           onClose={() => setShow2FADialog(false)}
           enabled={twoFactorEnabled}
-          onToggle={() => setTwoFactorEnabled(!twoFactorEnabled)}
+          onStatusChange={(enabled) => {
+            setTwoFactorEnabled(enabled);
+            if (user) {
+              setUser({ ...user, two_factor_enabled: enabled });
+            }
+          }}
         />
       )}
 

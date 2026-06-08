@@ -5,11 +5,15 @@ Authentication routes for login, registration, and token management.
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
+import logging
 
 from .. import crud, schemas, auth
 from ..database import get_db
 from ..config import settings
 from ..models import User, Role, EntityType
+
+
+logger = logging.getLogger(__name__)
 
 
 def _disable_public_signup(db, actor_user) -> None:
@@ -138,6 +142,41 @@ def register_auth_routes(app):
                 detail="Incorrect username/email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+        if user.two_factor_enabled:
+            from ..services.totp_service import decrypt_totp_secret, encrypt_totp_secret, verify_and_consume_recovery_code, verify_totp
+
+            if not login_data.two_factor_code:
+                return {
+                    "access_token": None,
+                    "refresh_token": None,
+                    "token_type": "bearer",
+                    "requires_2fa": True,
+                    "force_password_change": user.force_password_change,
+                }
+
+            secret, was_encrypted = decrypt_totp_secret(user.two_factor_secret)
+            if secret and not was_encrypted:
+                user.two_factor_secret = encrypt_totp_secret(secret)
+                db.commit()
+
+            recovery_code_used = False
+            if not verify_totp(secret, login_data.two_factor_code):
+                recovery_code_used, updated_recovery_codes = verify_and_consume_recovery_code(
+                    user.two_factor_recovery_codes,
+                    login_data.two_factor_code,
+                )
+                if recovery_code_used:
+                    user.two_factor_recovery_codes = updated_recovery_codes
+                    db.commit()
+
+            if not verify_totp(secret, login_data.two_factor_code) and not recovery_code_used:
+                logger.warning("Login rejected due to invalid two-factor code for user_id=%s", user.id)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid two-factor authentication code",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         
         # Create audit trail for successful login
         try:
@@ -159,10 +198,10 @@ def register_auth_routes(app):
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         refresh_token_expires = timedelta(days=settings.refresh_token_expire_days)
         access_token = auth.create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": user.username, "sv": user.session_version}, expires_delta=access_token_expires
         )
         refresh_token = auth.create_refresh_token(
-            data={"sub": user.username}, 
+            data={"sub": user.username, "sv": user.session_version},
             expires_delta=refresh_token_expires,
             db=db,
             user_id=user.id,
@@ -172,7 +211,8 @@ def register_auth_routes(app):
             "access_token": access_token, 
             "refresh_token": refresh_token,
             "token_type": "bearer",
-            "force_password_change": user.force_password_change
+            "requires_2fa": False,
+            "force_password_change": user.force_password_change,
         }
 
     @app.post("/refresh", response_model=schemas.Token)
@@ -196,13 +236,13 @@ def register_auth_routes(app):
         # Create new access token
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = auth.create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": user.username, "sv": user.session_version}, expires_delta=access_token_expires
         )
         
         # Create new refresh token (rotation)
         refresh_token_expires = timedelta(days=settings.refresh_token_expire_days)
         new_refresh_token = auth.create_refresh_token(
-            data={"sub": user.username}, 
+            data={"sub": user.username, "sv": user.session_version},
             expires_delta=refresh_token_expires,
             db=db,
             user_id=user.id,
@@ -213,7 +253,8 @@ def register_auth_routes(app):
             "access_token": access_token,
             "refresh_token": new_refresh_token,  # Return new refresh token
             "token_type": "bearer",
-            "force_password_change": user.force_password_change
+            "requires_2fa": False,
+            "force_password_change": user.force_password_change,
         }
 
     @app.post("/logout")

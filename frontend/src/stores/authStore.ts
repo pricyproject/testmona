@@ -75,6 +75,8 @@ interface User {
   created_at: string;
   updated_at?: string;
   avatar_url?: string;
+  two_factor_enabled: boolean;
+  session_version: number;
 }
 
 interface AuthState {
@@ -87,7 +89,7 @@ interface AuthState {
   compactMode: boolean;
   appName: string;
   appLogoUrl: string;
-  login: (usernameOrEmail: string, password: string) => Promise<boolean>;
+  login: (usernameOrEmail: string, password: string, twoFactorCode?: string) => Promise<boolean | 'requires_2fa'>;
   logout: () => void;
   setUser: (user: User) => void;
   setLanguage: (language: 'en' | 'fa' | 'ar') => void;
@@ -100,7 +102,7 @@ interface AuthState {
   refreshAccessToken: () => Promise<void>;
   initializeDevAuth: () => Promise<void>;
   _isLoggingIn: boolean;
-  _loginPromise: Promise<boolean> | null;
+  _loginPromise: Promise<boolean | 'requires_2fa'> | null;
 }
 
 const applyCompactModeToDocument = (compactMode: boolean) => {
@@ -126,19 +128,27 @@ export const useAuthStore = create<AuthState>()(
       _isLoggingIn: false,
       _loginPromise: null,
 
-      login: async (usernameOrEmail: string, password: string) => {
+      login: async (usernameOrEmail: string, password: string, twoFactorCode?: string) => {
         // Prevent concurrent login requests
         if (get()._isLoggingIn) {
           // If already logging in, wait for the existing promise
           if (get()._loginPromise) {
-            await get()._loginPromise;
+            return await get()._loginPromise;
           }
-          return;
+          return false;
         }
 
         const loginPromise = (async () => {
           try {
-            const authData = await authAPI.login(usernameOrEmail, password);
+            const authData = await authAPI.login(usernameOrEmail, password, twoFactorCode);
+
+            if (authData.requires_2fa) {
+              return 'requires_2fa';
+            }
+
+            if (!authData.access_token) {
+              throw new Error('Login did not return an access token');
+            }
             
             // Store access token in localStorage (for axios interceptor)
             localStorage.setItem('token', authData.access_token);

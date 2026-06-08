@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-import { api } from '@/lib/api';
+import { api, usersAPI } from '@/lib/api';
 import {
   Dialog,
   DialogContent,
@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, MoreHorizontal, Trash2, Edit, Mail, Copy, Check } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Edit, Mail, Copy, Check, KeyRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { USER_ROLES, isAdminRole, isAdminUser, normalizeRole } from '@/utils/roles';
 
@@ -49,6 +49,7 @@ interface User {
   full_name?: string;
   role: string;
   is_active: boolean;
+  two_factor_enabled: boolean;
   created_at: string;
 }
 
@@ -317,6 +318,28 @@ export function UserManagement() {
     }
   };
 
+  const handleResetTwoFactor = async (user: User) => {
+    if (!window.confirm(t('reset2FAConfirm', { username: user.username || user.email }))) {
+      return;
+    }
+
+    try {
+      await usersAPI.resetTwoFactor(user.id);
+      setUsers(users.map((item) => item.id === user.id ? { ...item, two_factor_enabled: false } : item));
+      toast({
+        title: t('success'),
+        description: t('reset2FASuccess', { username: user.username || user.email }),
+      });
+    } catch (error: any) {
+      console.error('Failed to reset two-factor authentication:', error);
+      toast({
+        title: t('error'),
+        description: error.response?.data?.detail || t('reset2FAFailed'),
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleDeleteInvitation = async (invitationId: number) => {
     try {
       await api.delete(`/invitations/${invitationId}`);
@@ -392,6 +415,7 @@ export function UserManagement() {
                 <TableHead>{t('fullName')}</TableHead>
                 <TableHead>{t('role')}</TableHead>
                 <TableHead>{t('status')}</TableHead>
+                <TableHead>{t('twoFactorAuth')}</TableHead>
                 <TableHead>{t('created')}</TableHead>
                 <TableHead className="text-end">{t('actions')}</TableHead>
               </TableRow>
@@ -399,7 +423,7 @@ export function UserManagement() {
             <TableBody>
               {users.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-gray-500 py-8">
+                  <TableCell colSpan={8} className="text-center text-gray-500 py-8">
                     {t('noUsersFound')}
                   </TableCell>
                 </TableRow>
@@ -419,6 +443,11 @@ export function UserManagement() {
                         {user.is_active ? t('active') : t('inactive')}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <Badge variant={user.two_factor_enabled ? 'default' : 'secondary'}>
+                        {user.two_factor_enabled ? t('enabled') : t('disabled')}
+                      </Badge>
+                    </TableCell>
                     <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
                     <TableCell className="text-end">
                       <DropdownMenu>
@@ -434,6 +463,12 @@ export function UserManagement() {
                           </DropdownMenuItem>
                           {currentUser?.id !== user.id && (
                             <>
+                              {user.two_factor_enabled && (
+                                <DropdownMenuItem onClick={() => handleResetTwoFactor(user)}>
+                                  <KeyRound className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
+                                  {t('reset2FA')}
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={() => handleDeleteUser(user)}

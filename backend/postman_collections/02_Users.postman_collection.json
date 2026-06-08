@@ -44,7 +44,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"demo1234\",\n  \"username_or_email\": \"me@me.com\",\n  \"two_factor_code\": \"\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -414,6 +414,248 @@
               "    var jsonData = pm.response.json();",
               "    pm.expect(jsonData).to.have.property('id');",
               "    pm.expect(jsonData).to.have.property('role');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get Current User 2FA Status",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/users/me/2fa",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users",
+            "me",
+            "2fa"
+          ]
+        },
+        "description": "Get the current user's two-factor authentication status"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response contains enabled flag\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('enabled');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Setup Current User 2FA",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/users/me/2fa/setup",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users",
+            "me",
+            "2fa",
+            "setup"
+          ]
+        },
+        "description": "Create a pending authenticator secret for the current user"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 400 if already enabled\", function () {",
+              "    pm.expect([200, 400]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    pm.test(\"Response contains setup details\", function () {",
+              "        var jsonData = pm.response.json();",
+              "        pm.expect(jsonData).to.have.property('secret');",
+              "        pm.expect(jsonData).to.have.property('provisioning_uri');",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Enable Current User 2FA",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"current_password\": \"demo1234\",\n  \"code\": \"123456\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/users/me/2fa/enable",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users",
+            "me",
+            "2fa",
+            "enable"
+          ]
+        },
+        "description": "Enable two-factor authentication after setup with a valid TOTP code"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or validation error\", function () {",
+              "    pm.expect([200, 400]).to.include(pm.response.code);",
+              "});",
+              "",
+              "if (pm.response.code === 200) {",
+              "    pm.test(\"Response contains recovery codes\", function () {",
+              "        var jsonData = pm.response.json();",
+              "        pm.expect(jsonData).to.have.property('recovery_codes');",
+              "        pm.expect(jsonData.recovery_codes).to.be.an('array');",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Disable Current User 2FA",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"current_password\": \"demo1234\",\n  \"code\": \"123456\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/users/me/2fa/disable",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users",
+            "me",
+            "2fa",
+            "disable"
+          ]
+        },
+        "description": "Disable two-factor authentication with the user's password and current TOTP code"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or validation error\", function () {",
+              "    pm.expect([200, 400]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Regenerate Current User 2FA Recovery Codes",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"current_password\": \"demo1234\",\n  \"code\": \"123456\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/users/me/2fa/recovery-codes",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users",
+            "me",
+            "2fa",
+            "recovery-codes"
+          ]
+        },
+        "description": "Regenerate one-time backup recovery codes after verifying password and 2FA"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or validation error\", function () {",
+              "    pm.expect([200, 400]).to.include(pm.response.code);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Reset User 2FA",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/users/{{testUserId}}/2fa/reset",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "users",
+            "{{testUserId}}",
+            "2fa",
+            "reset"
+          ]
+        },
+        "description": "Admin recovery flow that disables 2FA for a locked-out user and revokes their sessions"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200, 400, or 404\", function () {",
+              "    pm.expect([200, 400, 404]).to.include(pm.response.code);",
               "});"
             ],
             "type": "text/javascript"

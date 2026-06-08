@@ -79,6 +79,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 
+def _token_session_is_current(payload: dict, user: User) -> bool:
+    token_session_version = int(payload.get("sv") or 0)
+    user_session_version = int(getattr(user, "session_version", 0) or 0)
+    return token_session_version == user_session_version
+
+
 def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None, db: Session = None, user_id: int = None, device_info: str = None):
     to_encode = data.copy()
     if expires_delta:
@@ -135,6 +141,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     user = get_user(db, username=username)
     if user is None:
         raise credentials_exception
+    if not _token_session_is_current(payload, user):
+        raise credentials_exception
     return user
 
 
@@ -154,6 +162,8 @@ async def get_current_user_check_password_change(token: str = Depends(oauth2_sch
         raise credentials_exception
     user = get_user(db, username=username)
     if user is None:
+        raise credentials_exception
+    if not _token_session_is_current(payload, user):
         raise credentials_exception
     
     # Check if user needs to change password
@@ -207,6 +217,8 @@ def verify_refresh_token(refresh_token: str, db: Session) -> Optional[User]:
     
     # Get user
     user = get_user(db, username)
+    if user is None or not _token_session_is_current(payload, user):
+        return None
     return user
 
 

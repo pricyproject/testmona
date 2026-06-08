@@ -522,6 +522,8 @@ class UserBase(BaseModel):
     role: Role = Role.TESTER
     is_active: bool = True
     force_password_change: bool = False
+    two_factor_enabled: bool = False
+    session_version: int = 0
     notifications_muted_until: Optional[datetime] = None
     do_not_disturb: bool = False
     notification_sound_enabled: bool = True
@@ -865,12 +867,53 @@ class LoginRequest(BaseModel):
         description="Username or email address used to sign in",
     )
     password: str
+    two_factor_code: Optional[str] = None
 
 
 class Token(BaseModel):
-    access_token: str
-    refresh_token: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str
+    requires_2fa: bool = False
+    force_password_change: bool = False
+
+
+class TwoFactorSetupResponse(BaseModel):
+    secret: str
+    provisioning_uri: str
+
+
+class TwoFactorEnableRequest(BaseModel):
+    current_password: str
+    code: str
+
+
+class TwoFactorEnableResponse(BaseModel):
+    enabled: bool
+    recovery_codes: List[str]
+
+
+class TwoFactorDisableRequest(BaseModel):
+    current_password: str
+    code: str
+
+
+class TwoFactorRecoveryCodesRequest(BaseModel):
+    current_password: str
+    code: str
+
+
+class TwoFactorRecoveryCodesResponse(BaseModel):
+    recovery_codes: List[str]
+
+
+class AdminTwoFactorResetResponse(BaseModel):
+    enabled: bool
+    user_id: int
+
+
+class TwoFactorStatus(BaseModel):
+    enabled: bool
 
 
 class TokenData(BaseModel):
@@ -2846,6 +2889,8 @@ class User(BaseModel):
     is_active: bool = True
     is_superuser: bool = False
     force_password_change: bool = False
+    two_factor_enabled: bool = False
+    session_version: int = 0
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -4283,7 +4328,7 @@ __all__ = [
     "ProjectAssignmentBase", "ProjectAssignmentCreate", "ProjectAssignmentUpdate", "ProjectAssignment",
     "TestScheduleBase", "TestScheduleCreate", "TestScheduleUpdate", "TestSchedule",
     "TestExecutionBase", "TestExecutionCreate", "TestExecutionUpdate", "TestExecution",
-    "Token", "TokenData", "LoginRequest",
+    "Token", "TokenData", "LoginRequest", "TwoFactorSetupResponse", "TwoFactorEnableRequest", "TwoFactorEnableResponse", "TwoFactorDisableRequest", "TwoFactorRecoveryCodesRequest", "TwoFactorRecoveryCodesResponse", "TwoFactorStatus", "AdminTwoFactorResetResponse",
     "TestRunWithResults", "TestCaseWithSuite", "TestSuiteWithCases", "ProjectWithSuites",
     "TestRunStatistics",
     "CustomFieldDefinitionBase", "CustomFieldDefinitionCreate", "CustomFieldDefinitionUpdate", "CustomFieldDefinition",

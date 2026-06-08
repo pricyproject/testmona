@@ -6,12 +6,22 @@ from fastapi import Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
+import logging
 
 from .. import crud, schemas, auth, crud_rbac, models, rbac
 from ..database import get_db
 from ..auth import get_current_active_user, check_password_change_required, verify_password, get_password_hash
 from ..security_utils import validate_file_size, validate_file_type, MAX_AVATAR_SIZE
 from ..utils import sanitize_data
+
+
+logger = logging.getLogger(__name__)
+
+
+def _revoke_user_sessions(db: Session, user: models.User) -> None:
+    user.session_version = int(user.session_version or 0) + 1
+    db.commit()
+    auth.revoke_all_user_refresh_tokens(user.id, db)
 
 
 def register_user_routes(app):
@@ -101,6 +111,149 @@ def register_user_routes(app):
             print(f"Failed to update onboarding task: {e}")
         
         return {"message": "Password changed successfully"}
+
+    @app.get("/users/me/2fa", response_model=schemas.TwoFactorStatus)
+    async def get_two_factor_status(
+        current_user: models.User = Depends(get_current_active_user)
+    ):
+        """Return the current user's two-factor authentication status."""
+        return {"enabled": bool(current_user.two_factor_enabled)}
+
+    @app.post("/users/me/2fa/setup", response_model=schemas.TwoFactorSetupResponse)
+    async def setup_two_factor(
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user)
+    ):
+        """Create a pending TOTP secret for the current user."""
+        check_password_change_required(current_user)
+        if current_user.two_factor_enabled:
+            raise HTTPException(status_code=400, detail="Two-factor authentication is already enabled")
+
+        from ..services.totp_service import encrypt_totp_secret, generate_totp_secret, provisioning_uri
+
+        secret = generate_totp_secret()
+        current_user.two_factor_secret = encrypt_totp_secret(secret)
+        current_user.two_factor_recovery_codes = None
+        db.commit()
+        app_name_setting = crud.get_system_setting(db, key="app_name")
+        app_name = app_name_setting.value.strip() if app_name_setting and app_name_setting.value else "TestMona"
+        logger.info("Two-factor setup secret generated for user_id=%s", current_user.id)
+        return {
+            "secret": secret,
+            "provisioning_uri": provisioning_uri(current_user.email, secret, app_name),
+        }
+
+    @app.post("/users/me/2fa/enable", response_model=schemas.TwoFactorEnableResponse)
+    async def enable_two_factor(
+        payload: schemas.TwoFactorEnableRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user)
+    ):
+        """Enable TOTP after verifying the user's password and current code."""
+        check_password_change_required(current_user)
+        if not verify_password(payload.current_password, current_user.hashed_password):
+            logger.warning("Two-factor enable rejected due to invalid password for user_id=%s", current_user.id)
+            raise HTTPException(status_code=400, detail="Incorrect password")
+
+        from ..services.totp_service import decrypt_totp_secret, encrypt_recovery_code_hashes, encrypt_totp_secret, generate_recovery_codes, verify_totp
+
+        secret, was_encrypted = decrypt_totp_secret(current_user.two_factor_secret)
+        if secret and not was_encrypted:
+            current_user.two_factor_secret = encrypt_totp_secret(secret)
+            db.commit()
+
+        if not verify_totp(secret, payload.code):
+            logger.warning("Two-factor enable rejected due to invalid code for user_id=%s", current_user.id)
+            raise HTTPException(status_code=400, detail="Invalid two-factor authentication code")
+
+        recovery_codes = generate_recovery_codes()
+        current_user.two_factor_enabled = True
+        current_user.two_factor_recovery_codes = encrypt_recovery_code_hashes(recovery_codes)
+        _revoke_user_sessions(db, current_user)
+        logger.info("Two-factor authentication enabled for user_id=%s", current_user.id)
+        return {"enabled": True, "recovery_codes": recovery_codes}
+
+    @app.post("/users/me/2fa/disable", response_model=schemas.TwoFactorStatus)
+    async def disable_two_factor(
+        payload: schemas.TwoFactorDisableRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user)
+    ):
+        """Disable TOTP after verifying the user's password and current code."""
+        check_password_change_required(current_user)
+        if not current_user.two_factor_enabled:
+            return {"enabled": False}
+        if not verify_password(payload.current_password, current_user.hashed_password):
+            logger.warning("Two-factor disable rejected due to invalid password for user_id=%s", current_user.id)
+            raise HTTPException(status_code=400, detail="Incorrect password")
+
+        if not current_user.two_factor_secret:
+            current_user.two_factor_enabled = False
+            current_user.two_factor_recovery_codes = None
+            _revoke_user_sessions(db, current_user)
+            logger.warning("Two-factor authentication disabled for user_id=%s because no secret was stored", current_user.id)
+            return {"enabled": False}
+
+        from ..services.totp_service import decrypt_totp_secret, encrypt_totp_secret, verify_and_consume_recovery_code, verify_totp
+
+        secret, was_encrypted = decrypt_totp_secret(current_user.two_factor_secret)
+        if secret and not was_encrypted:
+            current_user.two_factor_secret = encrypt_totp_secret(secret)
+            db.commit()
+
+        recovery_code_used = False
+        if not verify_totp(secret, payload.code):
+            recovery_code_used, updated_recovery_codes = verify_and_consume_recovery_code(
+                current_user.two_factor_recovery_codes,
+                payload.code,
+            )
+            if recovery_code_used:
+                current_user.two_factor_recovery_codes = updated_recovery_codes
+
+        if not verify_totp(secret, payload.code) and not recovery_code_used:
+            logger.warning("Two-factor disable rejected due to invalid code for user_id=%s", current_user.id)
+            raise HTTPException(status_code=400, detail="Invalid two-factor authentication code")
+
+        current_user.two_factor_enabled = False
+        current_user.two_factor_secret = None
+        current_user.two_factor_recovery_codes = None
+        _revoke_user_sessions(db, current_user)
+        logger.info("Two-factor authentication disabled for user_id=%s", current_user.id)
+        return {"enabled": False}
+
+    @app.post("/users/me/2fa/recovery-codes", response_model=schemas.TwoFactorRecoveryCodesResponse)
+    async def regenerate_two_factor_recovery_codes(
+        payload: schemas.TwoFactorRecoveryCodesRequest,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user)
+    ):
+        """Regenerate one-time backup recovery codes for the current user."""
+        check_password_change_required(current_user)
+        if not current_user.two_factor_enabled:
+            raise HTTPException(status_code=400, detail="Two-factor authentication is not enabled")
+        if not verify_password(payload.current_password, current_user.hashed_password):
+            logger.warning("Two-factor recovery code regeneration rejected due to invalid password for user_id=%s", current_user.id)
+            raise HTTPException(status_code=400, detail="Incorrect password")
+
+        from ..services.totp_service import decrypt_totp_secret, encrypt_recovery_code_hashes, encrypt_totp_secret, generate_recovery_codes, verify_and_consume_recovery_code, verify_totp
+
+        secret, was_encrypted = decrypt_totp_secret(current_user.two_factor_secret)
+        if secret and not was_encrypted:
+            current_user.two_factor_secret = encrypt_totp_secret(secret)
+            db.commit()
+
+        recovery_code_used = False
+        if not verify_totp(secret, payload.code):
+            recovery_code_used, _ = verify_and_consume_recovery_code(current_user.two_factor_recovery_codes, payload.code)
+        if not verify_totp(secret, payload.code) and not recovery_code_used:
+            logger.warning("Two-factor recovery code regeneration rejected due to invalid code for user_id=%s", current_user.id)
+            raise HTTPException(status_code=400, detail="Invalid two-factor authentication code")
+
+        recovery_codes = generate_recovery_codes()
+        current_user.two_factor_recovery_codes = encrypt_recovery_code_hashes(recovery_codes)
+        db.commit()
+        logger.info("Two-factor recovery codes regenerated for user_id=%s", current_user.id)
+        return {"recovery_codes": recovery_codes}
 
     @app.post("/users/me/avatar")
     async def upload_avatar(
@@ -426,6 +579,46 @@ def register_user_routes(app):
             print(f"Failed to create audit trail for user update: {e}")
         
         return db_user
+
+    @app.post("/users/{user_id}/2fa/reset", response_model=schemas.AdminTwoFactorResetResponse)
+    def reset_user_two_factor(
+        user_id: int,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_active_user)
+    ):
+        """Admin recovery flow for users locked out of two-factor authentication."""
+        check_password_change_required(current_user)
+        require_manage_users(current_user)
+        if current_user.id == user_id:
+            raise HTTPException(status_code=400, detail="Admins cannot reset their own two-factor authentication")
+
+        db_user = crud.get_user(db, user_id=user_id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        db_user.two_factor_enabled = False
+        db_user.two_factor_secret = None
+        db_user.two_factor_recovery_codes = None
+        _revoke_user_sessions(db, db_user)
+        logger.info("Two-factor authentication reset by admin user_id=%s for user_id=%s", current_user.id, db_user.id)
+
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..schemas_audit import AuditTrailCreate
+            from ..models import AuditAction, EntityType
+            audit_service = get_audit_service(db)
+            audit_service.create_audit_trail(AuditTrailCreate(
+                user_id=current_user.id,
+                action=AuditAction.UPDATE.value,
+                entity_type=EntityType.USER.value,
+                entity_id=db_user.id,
+                project_id=None,
+                description=f"Two-factor authentication reset for user: {db_user.username or db_user.email}",
+            ))
+        except Exception as e:
+            logger.warning("Failed to create audit trail for two-factor reset: %s", e)
+
+        return {"enabled": False, "user_id": db_user.id}
 
     @app.delete("/users/{user_id}")
     def delete_user(

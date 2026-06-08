@@ -886,6 +886,10 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
     force_password_change = Column(Boolean, default=False)
+    two_factor_enabled = Column(Boolean, default=False)
+    two_factor_secret = Column(Text, nullable=True)
+    two_factor_recovery_codes = Column(Text, nullable=True)
+    session_version = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     

@@ -370,10 +370,11 @@ api.interceptors.response.use(
 );
 
 export const authAPI = {
-  login: async (usernameOrEmail: string, password: string) => {
+  login: async (usernameOrEmail: string, password: string, twoFactorCode?: string) => {
     const response = await api.post("/token", {
       username_or_email: usernameOrEmail,
       password,
+      ...(twoFactorCode ? { two_factor_code: twoFactorCode } : {}),
     });
     return response.data;
   },
@@ -420,6 +421,35 @@ export const authAPI = {
 
   getCurrentUser: async () => {
     const response = await api.get("/users/me");
+    return response.data;
+  },
+
+  setupTwoFactor: async () => {
+    const response = await api.post("/users/me/2fa/setup");
+    return response.data;
+  },
+
+  enableTwoFactor: async (currentPassword: string, code: string) => {
+    const response = await api.post("/users/me/2fa/enable", {
+      current_password: currentPassword,
+      code,
+    });
+    return response.data;
+  },
+
+  disableTwoFactor: async (currentPassword: string, code: string) => {
+    const response = await api.post("/users/me/2fa/disable", {
+      current_password: currentPassword,
+      code,
+    });
+    return response.data;
+  },
+
+  regenerateTwoFactorRecoveryCodes: async (currentPassword: string, code: string) => {
+    const response = await api.post("/users/me/2fa/recovery-codes", {
+      current_password: currentPassword,
+      code,
+    });
     return response.data;
   },
 };
@@ -1426,6 +1456,10 @@ export const usersAPI = {
   },
   delete: async (id: number) => {
     const response = await api.delete(`/users/${id}`);
+    return response.data;
+  },
+  resetTwoFactor: async (id: number) => {
+    const response = await api.post(`/users/${id}/2fa/reset`);
     return response.data;
   },
 };

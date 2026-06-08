@@ -702,7 +702,9 @@ def create_user(db: Session, user: UserCreate):
         hashed_password=hashed_password,
         role=role_value(user.role, Role.TESTER),
         is_active=user.is_active,
-        force_password_change=user.force_password_change
+        force_password_change=user.force_password_change,
+        two_factor_enabled=user.two_factor_enabled,
+        session_version=user.session_version,
     )
     db.add(db_user)
     safe_commit(db)

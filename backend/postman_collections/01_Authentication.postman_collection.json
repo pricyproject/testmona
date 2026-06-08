@@ -124,7 +124,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"password\": \"demo123\",\n  \"username_or_email\": \"demo@testmona.com\"\n}"
+          "raw": "{\n  \"password\": \"demo1234\",\n  \"username_or_email\": \"me@me.com\",\n  \"two_factor_code\": \"\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/token",
@@ -135,7 +135,7 @@
             "token"
           ]
         },
-        "description": "Login with valid credentials (Default: demo@testmona.com/demo123)"
+        "description": "Login with valid credentials. If 2FA is enabled, repeat with a current authenticator code."
       },
       "event": [
         {
@@ -162,6 +162,11 @@
               "pm.test(\"Response contains refresh_token\", function () {",
               "    var jsonData = pm.response.json();",
               "    pm.expect(jsonData).to.have.property('refresh_token');",
+              "});",
+              "",
+              "pm.test(\"Response includes 2FA challenge flag\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('requires_2fa');",
               "});",
               "",
               "pm.test(\"Access token is JWT format\", function () {",
