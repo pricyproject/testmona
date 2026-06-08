@@ -244,6 +244,9 @@ class CustomFieldDefinition(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     is_required = Column(Boolean, default=False)
+    __table_args__ = (
+        Index("uq_custom_field_definitions_project_seq", "project_id", "project_seq", unique=True),
+    )
     default_value = Column(Text)
     options = Column(JSON)  # For select/multiselect fields
     validation_rules = Column(JSON)  # Validation rules like min_length, max_length, etc.
@@ -286,6 +289,13 @@ class CustomFieldValue(Base):
     test_run = relationship("TestRun", foreign_keys=[test_run_id])
     defect = relationship("Defect", foreign_keys=[defect_id])
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
+
+    # Index the polymorphic owner FKs (names match the unify_custom_fields_engine migration).
+    __table_args__ = (
+        Index("ix_cfv_test_run_id", "test_run_id"),
+        Index("ix_cfv_defect_id", "defect_id"),
+        Index("ix_cfv_requirement_id", "requirement_id"),
+    )
 
     @property
     def entity_type(self) -> Optional[str]:
@@ -344,6 +354,10 @@ class SharedStep(Base):
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
+
+    __table_args__ = (
+        Index("uq_shared_steps_project_seq", "project_id", "project_seq", unique=True),
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     is_active = Column(Boolean, default=True)
@@ -381,6 +395,7 @@ class GlobalParameter(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_global_parameter_project_name"),
+        Index("uq_global_parameters_project_seq", "project_id", "project_seq", unique=True),
     )
 
     @property
@@ -442,6 +457,7 @@ class TestDataset(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_test_dataset_project_name"),
+        Index("uq_test_datasets_project_seq", "project_id", "project_seq", unique=True),
     )
 
 
@@ -651,6 +667,9 @@ class TestSuite(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     status = Column(Enum(Status), default=Status.ACTIVE)
+    __table_args__ = (
+        Index("uq_test_suites_project_seq", "project_id", "project_seq", unique=True),
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -683,9 +702,10 @@ class TestCase(Base):
     __tablename__ = "test_cases"
 
     id = Column(Integer, primary_key=True, index=True)
-    # Per-project sequence for URLs/badges. TestCase has no project_id column
-    # (project is derived via the suite), so uniqueness is enforced in app logic.
-    project_seq = Column(Integer, nullable=True, index=True)
+    # Per-project sequence for URLs/badges. project_id is denormalised from the
+    # suite (see below), so a unique (project_id, project_seq) index in
+    # __table_args__ enforces per-project uniqueness.
+    project_seq = Column(Integer, nullable=True)
     title = Column(String(255), nullable=False, index=True)
     description = Column(Text)
     test_type = Column(String(20), default='manual')
@@ -722,6 +742,10 @@ class TestCase(Base):
     dataset = relationship("TestDataset", foreign_keys=[dataset_id])
     creator = relationship("User", foreign_keys=[created_by])
     project = relationship("Project")
+
+    __table_args__ = (
+        Index("uq_test_cases_project_seq", "project_id", "project_seq", unique=True),
+    )
 
 
 class TestCaseStep(Base):
@@ -795,6 +819,9 @@ class TestRun(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     test_plan_id = Column(Integer, ForeignKey("test_plans.id"))
+    __table_args__ = (
+        Index("uq_test_runs_project_seq", "project_id", "project_seq", unique=True),
+    )
     schedule_id = Column(Integer, ForeignKey("test_schedules.id"))
     environment_id = Column(Integer, ForeignKey("execution_environments.id"))
     execution_engine_id = Column(Integer, ForeignKey("execution_engines.id"))
@@ -1060,6 +1087,9 @@ class RequirementFolder(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     parent_folder_id = Column(Integer, ForeignKey("requirement_folders.id"))
+    __table_args__ = (
+        Index("uq_requirement_folders_project_seq", "project_id", "project_seq", unique=True),
+    )
     order_index = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -1096,6 +1126,7 @@ class Requirement(Base):
     __table_args__ = (
         UniqueConstraint('project_id', 'requirement_id', name='uq_requirements_project_requirement_id'),
         Index("ix_requirements_project_id_status_priority", "project_id", "status", "priority"),
+        Index("uq_requirements_project_seq", "project_id", "project_seq", unique=True),
     )
 
     # Relationships
@@ -1230,6 +1261,7 @@ class Defect(Base):
     __tablename__ = "defects"
     __table_args__ = (
         Index("ix_defects_project_id_status_severity", "project_id", "status", "severity"),
+        Index("uq_defects_project_seq", "project_id", "project_seq", unique=True),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -1325,6 +1357,9 @@ class TestPlan(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     milestone_id = Column(Integer, ForeignKey("milestones.id"))
+    __table_args__ = (
+        Index("uq_test_plans_project_seq", "project_id", "project_seq", unique=True),
+    )
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(Enum(TestStatus), default=TestStatus.PENDING)
     target_start_date = Column(DateTime(timezone=True))
@@ -1358,6 +1393,9 @@ class Milestone(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     status = Column(Enum(MilestoneStatus), default=MilestoneStatus.PLANNED)
+    __table_args__ = (
+        Index("uq_milestones_project_seq", "project_id", "project_seq", unique=True),
+    )
     target_date = Column(DateTime(timezone=True), nullable=True)
     actual_date = Column(DateTime(timezone=True), nullable=True)
     progress_percentage = Column(Integer, default=0)
@@ -1602,6 +1640,9 @@ class ExecutionEnvironment(Base):
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     environment_type = Column(String(50), nullable=False)  # development, staging, production, custom
+    __table_args__ = (
+        Index("uq_execution_environments_project_seq", "project_id", "project_seq", unique=True),
+    )
     config_data = Column(JSON)  # Environment configuration (URLs, credentials, etc.)
     build_info = Column(JSON)   # Build information and artifacts
     is_active = Column(Boolean, default=True)
@@ -2026,6 +2067,7 @@ class DocSpace(Base):
 
     __table_args__ = (
         UniqueConstraint("project_id", "slug", name="uq_doc_spaces_project_slug"),
+        Index("uq_doc_spaces_project_seq", "project_id", "project_seq", unique=True),
     )
 
     project = relationship("Project")
@@ -2069,6 +2111,9 @@ class Doc(Base):
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     classification = Column(String(100))
     status = Column(Enum(DocStatus), default=DocStatus.DRAFT, nullable=False)
+    __table_args__ = (
+        Index("uq_docs_project_seq", "project_id", "project_seq", unique=True),
+    )
     tags = Column(String(500))
     # Text direction hint for rendering: ltr | rtl | auto.
     dir = Column(String(10), default="auto")

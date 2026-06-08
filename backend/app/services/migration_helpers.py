@@ -9,6 +9,11 @@ from sqlalchemy.exc import NoInspectionAvailable
 
 IGNORED_MIGRATION_TABLES = {"alembic_version"}
 IGNORED_MIGRATION_PREFIXES = ("sqlite_", "tmp_", "temp_")
+# Partial indexes (``WHERE`` clause) created only on PostgreSQL/SQLite by
+# add_composite_indexes. MariaDB cannot express them, so they intentionally live
+# only in migrations (not in dialect-agnostic model metadata); exclude them from
+# drift comparison so they don't look like model/database divergence.
+IGNORED_MIGRATION_INDEXES = {"ix_test_results_status_active", "ix_defects_status_active"}
 
 
 def include_migration_object(
@@ -26,7 +31,7 @@ def include_migration_object(
     if type_ == "table" and (name in IGNORED_MIGRATION_TABLES or name.startswith(IGNORED_MIGRATION_PREFIXES)):
         return False
 
-    if type_ == "index" and name.startswith(IGNORED_MIGRATION_PREFIXES):
+    if type_ == "index" and (name.startswith(IGNORED_MIGRATION_PREFIXES) or name in IGNORED_MIGRATION_INDEXES):
         return False
 
     return True

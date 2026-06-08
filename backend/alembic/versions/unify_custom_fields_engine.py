@@ -8,7 +8,7 @@ Create Date: 2026-05-26 13:00:00.000000
 from alembic import op
 import sqlalchemy as sa
 
-from app.services.migration_helpers import column_exists
+from app.services.migration_helpers import column_exists, index_exists
 
 
 revision = "unify_custom_fields_engine"
@@ -42,10 +42,15 @@ def upgrade() -> None:
         batch.create_foreign_key("fk_cfv_defect_id", "defects", ["defect_id"], ["id"])
         batch.create_foreign_key("fk_cfv_requirement_id", "requirements", ["requirement_id"], ["id"])
 
-    # Helpful indexes for per-entity lookups.
-    op.create_index("ix_cfv_test_run_id", "custom_field_values", ["test_run_id"])
-    op.create_index("ix_cfv_defect_id", "custom_field_values", ["defect_id"])
-    op.create_index("ix_cfv_requirement_id", "custom_field_values", ["requirement_id"])
+    # Helpful indexes for per-entity lookups. Guarded so a bootstrap-created
+    # database (which builds these from the model metadata) upgrades cleanly.
+    for index_name, column in (
+        ("ix_cfv_test_run_id", "test_run_id"),
+        ("ix_cfv_defect_id", "defect_id"),
+        ("ix_cfv_requirement_id", "requirement_id"),
+    ):
+        if not index_exists(connection, "custom_field_values", index_name):
+            op.create_index(index_name, "custom_field_values", [column])
 
 
 def downgrade() -> None:
