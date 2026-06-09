@@ -197,6 +197,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
@@ -250,7 +251,7 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
 (api as any)._refreshPromise = null;
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = useAuthStore.getState().token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -287,7 +288,7 @@ api.interceptors.response.use(
       if ((api as any)._refreshing && (api as any)._refreshPromise) {
         try {
           await (api as any)._refreshPromise;
-          const token = localStorage.getItem("token");
+          const token = useAuthStore.getState().token;
           if (token) {
             originalRequest.headers.Authorization = `Bearer ${token}`;
           }
@@ -302,28 +303,24 @@ api.interceptors.response.use(
       
       try {
         (api as any)._refreshing = true;
-        const refreshToken = localStorage.getItem("refreshToken");
-        
-        if (refreshToken) {
-          // Create a single refresh promise that all requests can wait for
-          (api as any)._refreshPromise = authAPI.refreshToken(refreshToken);
-          const response = await (api as any)._refreshPromise;
-          
-          localStorage.setItem("token", response.access_token);
-          if (response.refresh_token) {
-            localStorage.setItem("refreshToken", response.refresh_token);
-          }
-          
-          // Sync with authStore to keep state consistent
-          useAuthStore.setState({
-            token: response.access_token,
-            refreshToken: response.refresh_token || refreshToken,
-          });
-          
-          // Retry original request with new token
+        const refreshToken = useAuthStore.getState().refreshToken;
+
+        // Create a single refresh promise that all requests can wait for. The
+        // backend can read the refresh token from an HttpOnly cookie.
+        (api as any)._refreshPromise = authAPI.refreshToken(refreshToken || undefined);
+        const response = await (api as any)._refreshPromise;
+
+        // Sync with authStore to keep in-memory bearer fallback consistent.
+        useAuthStore.setState({
+          token: response.access_token,
+          refreshToken: response.refresh_token || refreshToken || null,
+        });
+
+        // Retry original request with new token when one was returned.
+        if (response.access_token) {
           originalRequest.headers.Authorization = `Bearer ${response.access_token}`;
-          return api(originalRequest);
         }
+        return api(originalRequest);
       } catch (refreshError) {
         // Refresh failed, clear tokens and redirect to login
         if (!axios.isAxiosError(refreshError) || refreshError.response?.status !== 401) {
@@ -407,10 +404,10 @@ export const authAPI = {
     return response.data;
   },
 
-  refreshToken: async (refreshToken: string) => {
-    const response = await api.post("/refresh", {
+  refreshToken: async (refreshToken?: string) => {
+    const response = await api.post("/refresh", refreshToken ? {
       refresh_token: refreshToken,
-    });
+    } : {});
     return response.data;
   },
 

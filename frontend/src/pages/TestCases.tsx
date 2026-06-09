@@ -94,7 +94,6 @@ import { SortableTestCaseRow } from '@/components/TestCases/SortableTestCaseRow'
 import { SavedFilters } from '@/components/SavedFilters';
 import { BulkEditTestCasesDialog } from '@/components/BulkEditTestCasesDialog';
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 const CUSTOM_FIELD_FILTER_ALL = 'all';
 const CUSTOM_FIELD_FILTER_ANY_VALUE = '__any__';
 const SUITE_SELECTION_PREFIX = 'suite:';
@@ -432,26 +431,13 @@ export function TestCases() {
       try {
         setIsEnumsLoading(true);
 
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token');
-        }
-
         const [prioritiesResponse, testTypesResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/priority-definitions/?project_id=${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }),
-          fetch(`${API_BASE_URL}/test-type-definitions/?project_id=${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
+          api.get(`/priority-definitions/?project_id=${projectId}`),
+          api.get(`/test-type-definitions/?project_id=${projectId}`)
         ]);
 
-        if (!prioritiesResponse.ok || !testTypesResponse.ok) {
-          throw new Error('Failed to fetch enum definitions');
-        }
-
-        const prioritiesData = await prioritiesResponse.json();
-        const testTypesData = await testTypesResponse.json();
+        const prioritiesData = prioritiesResponse.data;
+        const testTypesData = testTypesResponse.data;
 
         setDbPriorities(prioritiesData.filter((p: any) => p.is_active));
         setDbTestTypes(testTypesData.filter((t: any) => t.is_active));
@@ -503,59 +489,35 @@ export function TestCases() {
   const handleCreateTestType = async () => {
     try {
       setIsCreatingTestType(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        toast({
-          title: t('error'),
-          description: t('authenticationRequired'),
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/test-type-definitions/?project_id=${projectId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name: newTestTypeName,
-          description: `Custom test type: ${newTestTypeName}`,
-          color: '#3B82F6',
-          icon: '📝',
-          created_by: 1 // Will be set by backend based on auth token
-        })
+      await api.post(`/test-type-definitions/?project_id=${projectId}`, {
+        name: newTestTypeName,
+        description: `Custom test type: ${newTestTypeName}`,
+        color: '#3B82F6',
+        icon: '📝',
       });
 
-      if (response.ok) {
-        // Refresh test types
-        const testTypesResponse = await fetch(`${API_BASE_URL}/test-type-definitions/?project_id=${projectId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const testTypesData = await testTypesResponse.json();
+      // Refresh test types
+      const testTypesResponse = await api.get(`/test-type-definitions/?project_id=${projectId}`);
+      const testTypesData = testTypesResponse.data;
 
-        setDbTestTypes(testTypesData.filter((t: any) => t.is_active));
-        const testTypeOptions = testTypesData
-          .filter((t: any) => t.is_active)
-          .map((testType: any) => ({
-            value: testType.name.toLowerCase(),
-            label: testType.name
-          }));
-        setTestTypeOptions(testTypeOptions);
-        setTestTypes(testTypeOptions.map((option) => option.value));
+      setDbTestTypes(testTypesData.filter((t: any) => t.is_active));
+      const testTypeOptions = testTypesData
+        .filter((t: any) => t.is_active)
+        .map((testType: any) => ({
+          value: testType.name.toLowerCase(),
+          label: testType.name
+        }));
+      setTestTypeOptions(testTypeOptions);
+      setTestTypes(testTypeOptions.map((option) => option.value));
 
-        // Select the newly created test type
-        handleTestTypeChange(newTestTypeName.toLowerCase());
-        setNewTestTypeName('');
+      // Select the newly created test type
+      handleTestTypeChange(newTestTypeName.toLowerCase());
+      setNewTestTypeName('');
 
-        toast({
-          title: t('success'),
-          description: t('testTypeCreatedSuccessfully', {name: newTestTypeName}),
-        });
-      } else {
-        throw new Error('Failed to create test type');
-      }
+      toast({
+        title: t('success'),
+        description: t('testTypeCreatedSuccessfully', {name: newTestTypeName}),
+      });
     } catch (error) {
       console.error('Failed to create test type:', error);
       toast({
@@ -572,60 +534,36 @@ export function TestCases() {
   const handleCreatePriority = async () => {
     try {
       setIsCreatingPriority(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        toast({
-          title: t('error'),
-          description: t('authenticationRequired'),
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/priority-definitions/?project_id=${projectId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name: newPriorityName,
-          value: newPriorityValue,
-          color: '#F59E0B',
-          description: `Custom priority: ${newPriorityName}`,
-          created_by: 1 // Will be set by backend based on auth token
-        })
+      await api.post(`/priority-definitions/?project_id=${projectId}`, {
+        name: newPriorityName,
+        value: newPriorityValue,
+        color: '#F59E0B',
+        description: `Custom priority: ${newPriorityName}`,
       });
 
-      if (response.ok) {
-        // Refresh priorities
-        const prioritiesResponse = await fetch(`${API_BASE_URL}/priority-definitions/?project_id=${projectId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const prioritiesData = await prioritiesResponse.json();
+      // Refresh priorities
+      const prioritiesResponse = await api.get(`/priority-definitions/?project_id=${projectId}`);
+      const prioritiesData = prioritiesResponse.data;
 
-        setDbPriorities(prioritiesData.filter((p: any) => p.is_active));
-        const priorityOptions = prioritiesData
-          .filter((p: any) => p.is_active)
-          .sort((a: any, b: any) => b.value - a.value)
-          .map((priority: any) => ({
-            value: priority.name.toLowerCase(),
-            label: priority.name
-          }));
-        setPriorityOptions(priorityOptions);
+      setDbPriorities(prioritiesData.filter((p: any) => p.is_active));
+      const priorityOptions = prioritiesData
+        .filter((p: any) => p.is_active)
+        .sort((a: any, b: any) => b.value - a.value)
+        .map((priority: any) => ({
+          value: priority.name.toLowerCase(),
+          label: priority.name
+        }));
+      setPriorityOptions(priorityOptions);
 
-        // Select the newly created priority
-        handlePriorityChange(newPriorityName.toLowerCase());
-        setNewPriorityName('');
-        setNewPriorityValue(2);
+      // Select the newly created priority
+      handlePriorityChange(newPriorityName.toLowerCase());
+      setNewPriorityName('');
+      setNewPriorityValue(2);
 
-        toast({
-          title: t('success'),
-          description: t('priorityCreatedSuccessfully', {name: newPriorityName}),
-        });
-      } else {
-        throw new Error('Failed to create priority');
-      }
+      toast({
+        title: t('success'),
+        description: t('priorityCreatedSuccessfully', {name: newPriorityName}),
+      });
     } catch (error) {
       console.error('Failed to create priority:', error);
       toast({
@@ -651,56 +589,35 @@ export function TestCases() {
 
     try {
       setIsCreatingEnvironment(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        toast({
-          title: t('error'),
-          description: t('authenticationRequired'),
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/environments/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name: newEnvironmentName,
-          description: newEnvironmentDescription || `${newEnvironmentName} environment`,
-          environment_type: 'testing',
-          project_id: currentProjectId
-        })
+      await environmentsAPI.create({
+        name: newEnvironmentName,
+        description: newEnvironmentDescription || `${newEnvironmentName} environment`,
+        environment_type: 'testing',
+        project_id: currentProjectId
       });
 
-      if (response.ok) {
-        const data = await environmentsAPI.getAll(currentProjectId);
+      const data = await environmentsAPI.getAll(currentProjectId);
 
-        const transformedEnvironments = data.map((env: any) => ({
-          id: env.id.toString(),
-          name: env.name,
-          description: env.description || `${env.name} environment`
-        }));
+      const transformedEnvironments = data.map((env: any) => ({
+        id: env.id.toString(),
+        name: env.name,
+        description: env.description || `${env.name} environment`
+      }));
 
-        setEnvironments(transformedEnvironments);
+      setEnvironments(transformedEnvironments);
 
-        // Select the newly created environment
-        const newEnv = transformedEnvironments.find((e: any) => e.name === newEnvironmentName);
-        if (newEnv) {
-          handleFieldChange('environment', newEnv.id);
-        }
-        setNewEnvironmentName('');
-        setNewEnvironmentDescription('');
-
-        toast({
-          title: t('success'),
-          description: t('environmentCreatedSuccessfully', {name: newEnvironmentName}),
-        });
-      } else {
-        throw new Error('Failed to create environment');
+      // Select the newly created environment
+      const newEnv = transformedEnvironments.find((e: any) => e.name === newEnvironmentName);
+      if (newEnv) {
+        handleFieldChange('environment', newEnv.id);
       }
+      setNewEnvironmentName('');
+      setNewEnvironmentDescription('');
+
+      toast({
+        title: t('success'),
+        description: t('environmentCreatedSuccessfully', {name: newEnvironmentName}),
+      });
     } catch (error) {
       console.error('Failed to create environment:', error);
       toast({

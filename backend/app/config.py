@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 480  # 8 hours instead of 30 minutes
     refresh_token_expire_days: int = 7
     allowed_origins: str = "http://localhost:3000"
+    auth_cookie_secure: bool = False
+    auth_cookie_samesite: str = "lax"
     test_database_url: str = "sqlite:///./test_test.db"
     webhook_allow_private_urls: bool = False
     

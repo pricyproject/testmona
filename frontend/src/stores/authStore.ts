@@ -9,7 +9,7 @@ const attemptDevAutoLogin = async () => {
   // This prevents accidental deployment of hardcoded credentials to production
   const devAutoLoginEnabled = import.meta.env.VITE_DEV_AUTO_LOGIN === 'true';
 
-  if (import.meta.env.DEV && devAutoLoginEnabled && !localStorage.getItem('token')) {
+  if (import.meta.env.DEV && devAutoLoginEnabled && !localStorage.getItem('auth-storage')) {
     const devEmail = import.meta.env.VITE_DEV_EMAIL;
     const devPassword = import.meta.env.VITE_DEV_PASSWORD;
     
@@ -40,22 +40,18 @@ const attemptDevAutoLogin = async () => {
   return false;
 };
 
-// Helper functions for HttpOnly cookies
-const setRefreshTokenCookie = (token: string) => {
-  // This will be handled by the backend setting HttpOnly cookie
-  // For now, we'll still store in localStorage as fallback
-  localStorage.setItem('refreshToken', token);
+// Helper functions for the in-memory token fallback. Browser persistence uses
+// HttpOnly cookies set by the backend.
+const setRefreshTokenCookie = (_token: string) => {
+  localStorage.removeItem('refreshToken');
 };
 
 const getRefreshTokenCookie = (): string | null => {
-  // Try to get from HttpOnly cookie first (via backend)
-  // Fallback to localStorage for development
-  return localStorage.getItem('refreshToken');
+  return useAuthStore.getState().refreshToken;
 };
 
 const removeRefreshTokenCookie = () => {
-  // This will be handled by backend clearing HttpOnly cookie
-  // For now, clear localStorage fallback
+  // Clear legacy localStorage tokens if they exist from older sessions.
   localStorage.removeItem('refreshToken');
 };
 
@@ -150,8 +146,7 @@ export const useAuthStore = create<AuthState>()(
               throw new Error('Login did not return an access token');
             }
             
-            // Store access token in localStorage (for axios interceptor)
-            localStorage.setItem('token', authData.access_token);
+            localStorage.removeItem('token');
             
             // Store refresh token (will be HttpOnly cookie in production)
             if (authData.refresh_token) {
@@ -193,7 +188,7 @@ export const useAuthStore = create<AuthState>()(
           console.error('Logout API call failed:', error);
         }
         
-        // Clear tokens from localStorage (for axios interceptor)
+        // Clear legacy localStorage tokens if they exist from older sessions.
         localStorage.removeItem('token');
         removeRefreshTokenCookie();
         
@@ -243,10 +238,7 @@ export const useAuthStore = create<AuthState>()(
 
           const authData = await authAPI.refreshToken(refreshToken);
           
-          // Update access token
-          localStorage.setItem('token', authData.access_token);
-          
-          // Update refresh token (token rotation)
+          // Update refresh token fallback (cookie rotation is handled by backend)
           if (authData.refresh_token) {
             setRefreshTokenCookie(authData.refresh_token);
           }
@@ -271,12 +263,10 @@ export const useAuthStore = create<AuthState>()(
             // Reload user data after successful auto-login
             try {
               const userData = await authAPI.getCurrentUser();
-              const token = localStorage.getItem('token');
-              const refreshToken = localStorage.getItem('refreshToken');
               set({
                 user: userData,
-                token,
-                refreshToken,
+                token: null,
+                refreshToken: null,
                 isAuthenticated: true,
               });
             } catch (error) {
@@ -284,22 +274,14 @@ export const useAuthStore = create<AuthState>()(
             }
           }
         } else {
-          // Even if authenticated, ensure localStorage is in sync
-          const { token, refreshToken } = get();
-          if (token) {
-            localStorage.setItem('token', token);
-          }
-          if (refreshToken) {
-            localStorage.setItem('refreshToken', refreshToken);
-          }
+          localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
         }
       },
     }),
     {
       name: 'auth-storage',
       partialize: (state: AuthState) => ({
-        token: state.token,
-        refreshToken: state.refreshToken,
         user: state.user,
         language: state.language,
         languageExplicitlySet: state.languageExplicitlySet,
@@ -308,20 +290,10 @@ export const useAuthStore = create<AuthState>()(
         appLogoUrl: state.appLogoUrl,
       }),
       onRehydrateStorage: () => (state) => {
-        if (state && state.token) {
-          // Ensure localStorage is in sync
-          localStorage.setItem('token', state.token);
-          if (state.refreshToken) {
-            localStorage.setItem('refreshToken', state.refreshToken);
-          }
-          // Set isAuthenticated only if both token and user exist
-          state.isAuthenticated = !!state.user;
-        } else if (state) {
-          // No token, ensure not authenticated
-          state.isAuthenticated = false;
-        }
-        // Reset login state on rehydration
         if (state) {
+          state.token = null;
+          state.refreshToken = null;
+          state.isAuthenticated = false;
           state._isLoggingIn = false;
           state._loginPromise = null;
         }
@@ -340,38 +312,27 @@ export const initializeAuthFromLocalStorage = async () => {
   }
 
   authInitializationPromise = (async () => {
-  const token = localStorage.getItem('token');
-  const refreshToken = localStorage.getItem('refreshToken');
-  
-  if (token) {
-    // Sync tokens to store
+  localStorage.removeItem('token');
+  localStorage.removeItem('refreshToken');
+
+  try {
+    const userData = await authAPI.getCurrentUser();
     useAuthStore.setState({
-      token,
-      refreshToken,
+      user: userData,
+      token: null,
+      refreshToken: null,
+      isAuthenticated: true,
     });
-    
-    // Validate token by attempting to fetch current user
-    try {
-      const userData = await authAPI.getCurrentUser();
-      // Token is valid, set user and authenticated state
-      useAuthStore.setState({
-        user: userData,
-        isAuthenticated: true,
-      });
-    } catch (error) {
-      // Token is invalid, clear auth state
-      if (!axios.isAxiosError(error) || error.response?.status !== 401) {
-        console.warn('Token validation failed, clearing auth state');
-      }
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      useAuthStore.setState({
-        token: null,
-        refreshToken: null,
-        user: null,
-        isAuthenticated: false,
-      });
+  } catch (error) {
+    if (!axios.isAxiosError(error) || error.response?.status !== 401) {
+      console.warn('Session validation failed, clearing auth state');
     }
+    useAuthStore.setState({
+      token: null,
+      refreshToken: null,
+      user: null,
+      isAuthenticated: false,
+    });
   }
   })();
 

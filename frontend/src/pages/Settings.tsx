@@ -50,7 +50,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
 import { Switch } from '@/components/ui/switch';
 import { api, auditAPI, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary, AISourceType, AIRoutingSettings, AIRoutingTarget } from '@/lib/api';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
@@ -522,11 +521,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const loadAuditTrailConfig = async () => {
     setLoadingAuditConfig(true);
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        return;
-      }
-
       const response = await api.get('/system/settings/audit-trail-config');
       if (response.data) {
         setAuditTrailEnabled(response.data.enabled ?? true);
@@ -555,16 +549,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const handleSaveAuditTrailConfig = async () => {
     setSavingAuditConfig(true);
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        toast({
-          title: t('error'),
-          description: t('authenticationRequired'),
-          variant: 'destructive',
-        });
-        return;
-      }
-
       await api.put('/system/settings/audit-trail-config', {
         enabled: auditTrailEnabled,
         entity_settings: auditEntitySettings
@@ -593,16 +577,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
 
     setSavingAuditConfig(true);
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        toast({
-          title: t('error'),
-          description: t('authenticationRequired'),
-          variant: 'destructive',
-        });
-        return;
-      }
-
       const response = await api.post('/system/settings/audit-trail-config/reset');
       if (response.data) {
         setAuditTrailEnabled(response.data.enabled ?? true);
@@ -644,19 +618,8 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     setShowDeleteConfirm(false);
     setSavingAuditConfig(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/system/settings/audit-trails/all`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete audit trails');
-      }
-
-      const data = await response.json();
+      const response = await api.delete('/system/settings/audit-trails/all');
+      const data = response.data;
       // All audit logs are gone, so no project is eligible for per-project delete.
       setProjectAuditCounts({});
       setSelectedAuditProjectId('');
@@ -965,13 +928,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const loadProjects = async () => {
     setLoadingProjects(true);
     try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setProjects([]);
-        setSelectedProjectId(null);
-        return;
-      }
-
       const response = await api.get('/projects');
       const projectData = Array.isArray(response.data) ? response.data : [];
       setProjects(projectData);
@@ -1043,13 +999,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     
     try {
       // Load test type definitions from database API only
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setTestManagementError(t('authenticationRequiredLoginAgain'));
-        setLoadingTestManagement(false);
-        return;
-      }
-
       const testTypesResponse = await api.get('/test-type-definitions/' + (projectId ? `?project_id=${projectId}` : ''));
       const testTypesData = testTypesResponse.data;
       const mappedTestTypes = testTypesData.map((type: any) => ({
@@ -1835,12 +1784,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     
     try {
       setIsCreating(true);
-	      const token = localStorage.getItem('token');
-	      if (!token) {
-	        showErrorToast(t('authenticationRequired'));
-	        return;
-	      }
-
       const response = await api.post('/test-type-definitions/', {
         project_id: projectId,
         name: testTypeForm.name,
@@ -1882,12 +1825,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     }
     
     try {
-	      const token = localStorage.getItem('token');
-	      if (!token) {
-	        showErrorToast(t('authenticationRequired'));
-	        return;
-	      }
-
       const response = await api.post('/priority-definitions/', {
         project_id: projectId,
         name: priorityForm.name,
@@ -1979,12 +1916,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const handleDeleteConfirm = async () => {
     if (deleteType === 'testType' && testTypeToDelete) {
       try {
-	        const token = localStorage.getItem('token');
-	        if (!token) {
-	          showErrorToast(t('authenticationRequired'));
-	          return;
-	        }
-
         await api.delete(`/test-type-definitions/${testTypeToDelete}`);
           setTestTypes(testTypes.map(type => 
             type.id === testTypeToDelete ? { ...type, is_active: false } : type
@@ -1995,12 +1926,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
 	      }
     } else if (deleteType === 'priority' && priorityToDelete) {
       try {
-	        const token = localStorage.getItem('token');
-	        if (!token) {
-	          showErrorToast(t('authenticationRequired'));
-	          return;
-	        }
-
         await api.delete(`/priority-definitions/${priorityToDelete}`);
           setPriorities(priorities.map(priority => 
             priority.id === priorityToDelete ? { ...priority, is_active: false } : priority
@@ -2038,12 +1963,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     if (!editingTestType) return;
     
     try {
-	      const token = localStorage.getItem('token');
-	      if (!token) {
-	        showErrorToast(t('authenticationRequired'));
-	        return;
-	      }
-
       const response = await api.put(`/test-type-definitions/${editingTestType.id}`, {
         name: testTypeForm.name,
         description: testTypeForm.description,
@@ -2129,12 +2048,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     if (!editingPriority) return;
     
     try {
-	      const token = localStorage.getItem('token');
-	      if (!token) {
-	        showErrorToast(t('authenticationRequired'));
-	        return;
-	      }
-
       const response = await api.put(`/priority-definitions/${editingPriority.id}`, {
         name: priorityForm.name,
         value: priorityForm.value,

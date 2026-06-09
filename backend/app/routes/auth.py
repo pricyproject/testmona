@@ -2,7 +2,7 @@
 Authentication routes for login, registration, and token management.
 """
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import logging
@@ -14,6 +14,37 @@ from ..models import User, Role, EntityType
 
 
 logger = logging.getLogger(__name__)
+
+
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=settings.access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        path="/",
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        path="/",
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    for cookie_name in ("access_token", "refresh_token"):
+        response.delete_cookie(
+            key=cookie_name,
+            secure=settings.auth_cookie_secure,
+            samesite=settings.auth_cookie_samesite,
+            path="/",
+        )
 
 
 def _disable_public_signup(db, actor_user) -> None:
@@ -134,7 +165,11 @@ def register_auth_routes(app):
         return crud.create_user(db=db, user=user)
 
     @app.post("/token", response_model=schemas.Token)
-    async def login_for_access_token_json(login_data: schemas.LoginRequest, db: Session = Depends(get_db)):
+    async def login_for_access_token_json(
+        login_data: schemas.LoginRequest,
+        response: Response,
+        db: Session = Depends(get_db),
+    ):
         user = auth.authenticate_user(db, login_data.username_or_email, login_data.password)
         if not user:
             raise HTTPException(
@@ -207,6 +242,7 @@ def register_auth_routes(app):
             user_id=user.id,
             device_info="web_client"  # You can extract this from request headers
         )
+        _set_auth_cookies(response, access_token, refresh_token)
         return {
             "access_token": access_token, 
             "refresh_token": refresh_token,
@@ -216,8 +252,13 @@ def register_auth_routes(app):
         }
 
     @app.post("/refresh", response_model=schemas.Token)
-    async def refresh_token(refresh_data: dict, db: Session = Depends(get_db)):
-        refresh_token = refresh_data.get('refresh_token')
+    async def refresh_token(
+        response: Response,
+        request: Request,
+        refresh_data: dict = None,
+        db: Session = Depends(get_db),
+    ):
+        refresh_token = (refresh_data or {}).get('refresh_token') or request.cookies.get("refresh_token")
         if not refresh_token:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -248,6 +289,7 @@ def register_auth_routes(app):
             user_id=user.id,
             device_info="refresh_rotation"
         )
+        _set_auth_cookies(response, access_token, new_refresh_token)
         
         return {
             "access_token": access_token,
@@ -259,6 +301,7 @@ def register_auth_routes(app):
 
     @app.post("/logout")
     async def logout(
+        response: Response,
         logout_data: dict = None,
         current_user: schemas.User = Depends(auth.get_current_active_user),
         db: Session = Depends(get_db)
@@ -271,6 +314,7 @@ def register_auth_routes(app):
         else:
             # Revoke all refresh tokens for the user
             auth.revoke_all_user_refresh_tokens(current_user.id, db)
+        _clear_auth_cookies(response)
         
         return {"message": "Successfully logged out"}
 
