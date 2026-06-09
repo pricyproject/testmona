@@ -490,12 +490,17 @@ def register_test_management_routes(app):
             .filter(models.TestCaseSection.test_suite_id == test_suite_id)
             .count()
         )
-        if test_case_count or section_count:
+        membership_count = (
+            db.query(models.TestCaseSuiteMembership)
+            .filter(models.TestCaseSuiteMembership.test_suite_id == test_suite_id)
+            .count()
+        )
+        if test_case_count or section_count or membership_count:
             raise HTTPException(
                 status_code=409,
                 detail=(
                     "Test suite is not empty. Move or delete its test cases and sections first "
-                    f"({test_case_count} test cases, {section_count} sections)."
+                    f"({test_case_count} test cases, {section_count} sections, {membership_count} memberships)."
                 ),
             )
 
@@ -729,10 +734,13 @@ def register_test_management_routes(app):
             models.TestCase.section_id == section_id,
             ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
         ).count()
-        if child_count or case_count:
+        membership_count = db.query(models.TestCaseSuiteMembership).filter(
+            models.TestCaseSuiteMembership.section_id == section_id,
+        ).count()
+        if child_count or case_count or membership_count:
             raise HTTPException(
                 status_code=409,
-                detail="Section is not empty. Move or delete its subsections and test cases first.",
+                detail="Section is not empty. Move or delete its subsections, test cases, and suite memberships first.",
             )
 
         section_id_val = db_section.id
@@ -865,6 +873,8 @@ def register_test_management_routes(app):
 
             query = db.query(models.TestCase).options(
                 joinedload(models.TestCase.test_suite).joinedload(models.TestSuite.project),
+                selectinload(models.TestCase.suite_memberships).joinedload(models.TestCaseSuiteMembership.test_suite),
+                selectinload(models.TestCase.suite_memberships).joinedload(models.TestCaseSuiteMembership.section),
                 joinedload(models.TestCase.section),
                 joinedload(models.TestCase.creator),
                 selectinload(models.TestCase.custom_field_values)
@@ -872,10 +882,17 @@ def register_test_management_routes(app):
                 models.TestSuite.project_id == scoped_project_id,
                 ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
             )
-            if test_suite_id is not None:
-                query = query.filter(models.TestCase.test_suite_id == test_suite_id)
+            query = crud.apply_test_suite_membership_filter(query, test_suite_id)
             if section_id is not None:
-                query = query.filter(models.TestCase.section_id == section_id)
+                if test_suite_id is not None:
+                    query = query.filter(
+                        or_(
+                            models.TestCase.section_id == section_id,
+                            models.TestCaseSuiteMembership.section_id == section_id,
+                        )
+                    )
+                else:
+                    query = query.filter(models.TestCase.section_id == section_id)
 
             sort_columns = {
                 "id": models.TestCase.id,
@@ -923,21 +940,35 @@ def register_test_management_routes(app):
                 models.TestSuite.project_id == project_id,
                 ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
             )
-            if test_suite_id:
-                query = query.filter(models.TestCase.test_suite_id == test_suite_id)
+            query = crud.apply_test_suite_membership_filter(query, test_suite_id)
             if section_id:
-                query = query.filter(models.TestCase.section_id == section_id)
-            count = query.count()
+                if test_suite_id:
+                    query = query.filter(
+                        or_(
+                            models.TestCase.section_id == section_id,
+                            models.TestCaseSuiteMembership.section_id == section_id,
+                        )
+                    )
+                else:
+                    query = query.filter(models.TestCase.section_id == section_id)
+            count = query.with_entities(func.count(func.distinct(models.TestCase.id))).scalar() or 0
         else:
             # Use existing logic from crud
             query = db.query(models.TestCase).filter(
                 ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
             )
-            if test_suite_id:
-                query = query.filter(models.TestCase.test_suite_id == test_suite_id)
+            query = crud.apply_test_suite_membership_filter(query, test_suite_id)
             if section_id:
-                query = query.filter(models.TestCase.section_id == section_id)
-            count = query.count()
+                if test_suite_id:
+                    query = query.filter(
+                        or_(
+                            models.TestCase.section_id == section_id,
+                            models.TestCaseSuiteMembership.section_id == section_id,
+                        )
+                    )
+                else:
+                    query = query.filter(models.TestCase.section_id == section_id)
+            count = query.with_entities(func.count(func.distinct(models.TestCase.id))).scalar() or 0
         return {"count": count}
 
     @app.get("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations)
@@ -962,6 +993,65 @@ def register_test_management_routes(app):
             db_test_case.linked_requirements = _get_test_case_linked_requirements(db, db_test_case, test_suite.project_id)
 
         return db_test_case
+
+    @app.post("/test-cases/{test_case_id}/suite-memberships", response_model=schemas.TestCaseSuiteMembership)
+    def add_test_case_suite_membership(
+        test_case_id: int,
+        membership: schemas.TestCaseSuiteMembershipCreate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        db_test_case = crud.get_test_case(db, test_case_id=test_case_id)
+        if db_test_case is None or getattr(db_test_case, "is_deleted", False):
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        primary_suite = crud.get_test_suite(db, test_suite_id=db_test_case.test_suite_id)
+        target_suite = crud.get_test_suite(db, test_suite_id=membership.test_suite_id)
+        if not primary_suite or not target_suite:
+            raise HTTPException(status_code=404, detail="Test suite not found")
+        if primary_suite.project_id != target_suite.project_id:
+            raise HTTPException(status_code=400, detail="Test case memberships must stay within the same project")
+        if not rbac.has_permission(current_user, "write", primary_suite.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to update this test case")
+
+        if membership.section_id is not None:
+            section = crud.get_test_case_section(db, section_id=membership.section_id)
+            if not section:
+                raise HTTPException(status_code=404, detail="Section not found")
+            if section.test_suite_id != target_suite.id:
+                raise HTTPException(status_code=400, detail="Section must belong to the membership test suite")
+
+        return crud.upsert_test_case_suite_membership(
+            db,
+            test_case_id=test_case_id,
+            test_suite_id=target_suite.id,
+            section_id=membership.section_id,
+            order_index=membership.order_index,
+        )
+
+    @app.delete("/test-cases/{test_case_id}/suite-memberships/{test_suite_id}")
+    def remove_test_case_suite_membership(
+        test_case_id: int,
+        test_suite_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        db_test_case = crud.get_test_case(db, test_case_id=test_case_id)
+        if db_test_case is None or getattr(db_test_case, "is_deleted", False):
+            raise HTTPException(status_code=404, detail="Test case not found")
+        if db_test_case.test_suite_id == test_suite_id:
+            raise HTTPException(status_code=400, detail="Cannot remove the primary suite membership")
+
+        primary_suite = crud.get_test_suite(db, test_suite_id=db_test_case.test_suite_id)
+        if not primary_suite:
+            raise HTTPException(status_code=404, detail="Test suite not found for this test case")
+        if not rbac.has_permission(current_user, "write", primary_suite.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to update this test case")
+
+        deleted = crud.delete_test_case_suite_membership(db, test_case_id=test_case_id, test_suite_id=test_suite_id)
+        if deleted is None:
+            raise HTTPException(status_code=404, detail="Suite membership not found")
+        return {"message": "Suite membership removed"}
 
     @app.put("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations)
     def update_test_case(
@@ -2493,10 +2583,13 @@ def register_test_management_routes(app):
             models.TestCase.section_id == section_id,
             ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
         ).count()
-        if child_count or case_count:
+        membership_count = db.query(models.TestCaseSuiteMembership).filter(
+            models.TestCaseSuiteMembership.section_id == section_id,
+        ).count()
+        if child_count or case_count or membership_count:
             raise HTTPException(
                 status_code=409,
-                detail="Section is not empty. Move or delete its subsections and test cases first.",
+                detail="Section is not empty. Move or delete its subsections, test cases, and suite memberships first.",
             )
 
         crud.delete_test_case_section(db, section_id=section_id)

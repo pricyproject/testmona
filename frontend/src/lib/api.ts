@@ -1207,6 +1207,17 @@ export const testCasesAPI = {
     const response = await api.delete(`/test-cases/${id}`);
     return response.data;
   },
+  addSuiteMembership: async (
+    id: number,
+    membership: { test_suite_id: number; section_id?: number | null; order_index?: number | null }
+  ) => {
+    const response = await api.post(`/test-cases/${id}/suite-memberships`, membership);
+    return response.data;
+  },
+  removeSuiteMembership: async (id: number, testSuiteId: number) => {
+    const response = await api.delete(`/test-cases/${id}/suite-memberships/${testSuiteId}`);
+    return response.data;
+  },
   getCount: async (projectId?: number, testSuiteId?: number, sectionId?: number) => {
     const params = new URLSearchParams();
     if (projectId) params.append('project_id', projectId.toString());

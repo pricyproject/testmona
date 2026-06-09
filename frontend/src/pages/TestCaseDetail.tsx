@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
@@ -466,6 +467,37 @@ export function TestCaseDetail() {
 
   const hasCustomFieldRows = customFieldsLoading || customFieldRows.length > 0;
 
+  const additionalSuiteRows = useMemo(() => {
+    const memberships = ((testCase as any)?.suite_memberships || []) as Array<{
+      id?: number;
+      test_suite_id?: number | null;
+      section_id?: number | null;
+      is_primary?: boolean;
+      test_suite?: { id?: number; name?: string | null } | null;
+      section?: { id?: number; name?: string | null } | null;
+    }>;
+    const seenSuiteIds = new Set<number>();
+
+    return memberships
+      .filter((membership) => {
+        const suiteId = Number(membership.test_suite_id);
+        if (!Number.isInteger(suiteId) || suiteId <= 0) return false;
+        if (suiteId === Number(testCase?.test_suite_id)) return false;
+        if (membership.is_primary) return false;
+        if (seenSuiteIds.has(suiteId)) return false;
+        seenSuiteIds.add(suiteId);
+        return true;
+      })
+      .map((membership) => {
+        const suiteId = Number(membership.test_suite_id);
+        return {
+          id: membership.id ?? suiteId,
+          suiteName: membership.test_suite?.name || `${t('suite')} ${suiteId}`,
+          sectionName: membership.section?.name || t('noSection'),
+        };
+      });
+  }, [testCase, t]);
+
   const handleExecute = () => {
     if (!testCase) return;
     if (effectiveProjectId) {
@@ -868,6 +900,48 @@ export function TestCaseDetail() {
                   ) : t('noSection')}
                 />
                 <PropertyRow label={t('testSuite')} value={testSuite?.name || `${t('suite')} ${testCase.test_suite_id}`} />
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      {t('additionalTestSuites')}
+                    </span>
+                    {additionalSuiteRows.length > 0 && (
+                      <Badge variant="secondary" className="text-[11px]">
+                        {additionalSuiteRows.length}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50 hover:bg-slate-50 dark:bg-slate-950/60 dark:hover:bg-slate-950/60">
+                          <TableHead className="h-9 px-3 text-xs">{t('testSuite')}</TableHead>
+                          <TableHead className="h-9 px-3 text-xs">{t('section')}</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {additionalSuiteRows.length > 0 ? (
+                          additionalSuiteRows.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="px-3 py-2 text-xs font-medium text-slate-800 dark:text-slate-100">
+                                {row.suiteName}
+                              </TableCell>
+                              <TableCell className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+                                {row.sectionName}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={2} className="px-3 py-4 text-center text-xs text-slate-500">
+                              {t('noAdditionalSuites')}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
                 {hasReference && (
                   <PropertyRow
                     label={t('reference')}

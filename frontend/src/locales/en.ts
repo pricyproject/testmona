@@ -4350,4 +4350,10 @@ export const en = {
   docConvertAiReason_rate_limited: 'Monthly AI token limit reached for this project. Raise it in AI Manager or wait for the next cycle.',
   docConvertAiReason_nothing_to_enhance: 'There is nothing to review yet.',
   aiSource_docs: 'Docs',
+  additionalSuites: 'Additional suites',
+  additionalTestSuite: 'Additional test suite',
+  additionalTestSuites: 'Additional test suites',
+  noAdditionalSuites: 'No additional suites',
+  noAdditionalSuitesSelected: 'No additional suites selected',
+  primarySuite: 'Primary',
 };

@@ -4168,4 +4168,10 @@ export const ar = {
   docConvertAiReason_rate_limited: 'تم بلوغ الحد الشهري لرموز الذكاء الاصطناعي لهذا المشروع. ارفعه من مدير الذكاء الاصطناعي أو انتظر الدورة التالية.',
   docConvertAiReason_nothing_to_enhance: 'لا يوجد شيء لمراجعته بعد.',
   aiSource_docs: 'المستندات',
+  additionalSuites: 'مجموعات اختبار إضافية',
+  additionalTestSuite: 'مجموعة اختبار إضافية',
+  additionalTestSuites: 'مجموعات اختبار إضافية',
+  noAdditionalSuites: 'لا توجد مجموعات إضافية',
+  noAdditionalSuitesSelected: 'لم يتم تحديد مجموعات إضافية',
+  primarySuite: 'أساسية',
 };

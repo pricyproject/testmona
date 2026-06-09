@@ -18,7 +18,7 @@ from .services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage, RequirementFolder
+from .models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, TestCaseSuiteMembership, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage, RequirementFolder
 from .schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -197,6 +197,10 @@ def delete_project(db: Session, project_id: int):
             )
 
         # Delete test cases (through test suites)
+        if test_case_ids:
+            db.query(TestCaseSuiteMembership).filter(
+                TestCaseSuiteMembership.test_case_id.in_(test_case_ids)
+            ).delete(synchronize_session=False)
         for test_suite in test_suites:
             db.query(TestCase).filter(TestCase.test_suite_id == test_suite.id).delete()
 
@@ -234,36 +238,67 @@ def get_test_suites(db: Session, project_id: Optional[int] = None, skip: int = 0
     return query.order_by(TestSuite.created_at.desc(), TestSuite.id.desc()).offset(skip).limit(limit).all()
 
 
+def _dedupe_ids(ids: List[int]) -> List[int]:
+    seen = set()
+    result = []
+    for item in ids:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
 def create_test_suite(db: Session, test_suite: TestSuiteCreate):
     payload = test_suite.model_dump()
-    # test_case_ids is handled separately below; remove it before constructing the model
-    requested_case_ids = payload.pop("test_case_ids", None) or []
+    # test_case_ids attaches existing reusable test cases to the new suite.
+    requested_case_ids = _dedupe_ids(payload.pop("test_case_ids", None) or [])
 
     db_test_suite = TestSuite(**payload)
-    db.add(db_test_suite)
-    safe_commit(db)
-    db.refresh(db_test_suite)
+    try:
+        db.add(db_test_suite)
+        db.flush()
 
-    if requested_case_ids:
-        # Only move cases that live in the same project and aren't soft-deleted.
-        valid_case_ids = [
-            row[0]
-            for row in db.query(TestCase.id)
-            .join(TestSuite, TestCase.test_suite_id == TestSuite.id)
-            .filter(
-                TestCase.id.in_(requested_case_ids),
-                TestSuite.project_id == db_test_suite.project_id,
-                ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
-            )
-            .all()
-        ]
-        if valid_case_ids:
-            db.query(TestCase).filter(TestCase.id.in_(valid_case_ids)).update(
-                {"test_suite_id": db_test_suite.id, "section_id": None},
-                synchronize_session=False,
-            )
-            safe_commit(db)
-            db.refresh(db_test_suite)
+        if requested_case_ids:
+            if any(case_id <= 0 for case_id in requested_case_ids):
+                raise ValueError("test_case_ids must contain positive integers")
+            if len(requested_case_ids) > 500:
+                raise ValueError("A maximum of 500 test cases can be attached to a suite at once")
+
+            source_case_ids = {
+                case_id
+                for (case_id,) in (
+                    db.query(TestCase.id)
+                    .join(TestSuite, TestCase.test_suite_id == TestSuite.id)
+                    .filter(
+                        TestCase.id.in_(requested_case_ids),
+                        TestSuite.project_id == db_test_suite.project_id,
+                        ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+                    )
+                    .all()
+                )
+            }
+            missing_or_invalid = [case_id for case_id in requested_case_ids if case_id not in source_case_ids]
+            if missing_or_invalid:
+                raise ValueError(
+                    f"Test cases must exist, be active, and belong to project {db_test_suite.project_id}: {missing_or_invalid}"
+                )
+
+            for case_id in requested_case_ids:
+                upsert_test_case_suite_membership(
+                    db,
+                    test_case_id=case_id,
+                    test_suite_id=db_test_suite.id,
+                    section_id=None,
+                    order_index=0,
+                    commit=False,
+                )
+
+        safe_commit(db)
+        db.refresh(db_test_suite)
+    except Exception:
+        db.rollback()
+        raise
 
     return db_test_suite
 
@@ -272,16 +307,39 @@ def get_test_case_counts_by_suite(db: Session, suite_ids: List[int]) -> dict:
     """Return {suite_id: count_of_non_deleted_test_cases} for a list of suite ids."""
     if not suite_ids:
         return {}
-    rows = (
+    membership_rows = (
+        db.query(
+            TestCaseSuiteMembership.test_suite_id,
+            func.count(func.distinct(TestCase.id)),
+        )
+        .join(TestCase, TestCase.id == TestCaseSuiteMembership.test_case_id)
+        .filter(
+            TestCaseSuiteMembership.test_suite_id.in_(suite_ids),
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        )
+        .group_by(TestCaseSuiteMembership.test_suite_id)
+        .all()
+    )
+    counts = {sid: int(cnt or 0) for sid, cnt in membership_rows}
+
+    legacy_rows = (
         db.query(TestCase.test_suite_id, func.count(TestCase.id))
+        .outerjoin(
+            TestCaseSuiteMembership,
+            (TestCaseSuiteMembership.test_case_id == TestCase.id)
+            & (TestCaseSuiteMembership.test_suite_id == TestCase.test_suite_id),
+        )
         .filter(
             TestCase.test_suite_id.in_(suite_ids),
+            TestCaseSuiteMembership.id.is_(None),
             ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
         )
         .group_by(TestCase.test_suite_id)
         .all()
     )
-    return {sid: int(cnt or 0) for sid, cnt in rows}
+    for suite_id, count in legacy_rows:
+        counts[suite_id] = counts.get(suite_id, 0) + int(count or 0)
+    return counts
 
 
 def update_test_suite(db: Session, test_suite_id: int, test_suite: TestSuiteUpdate):
@@ -309,10 +367,67 @@ def delete_test_suite(db: Session, test_suite_id: int):
 def get_test_case(db: Session, test_case_id: int):
     return db.query(TestCase).options(
         joinedload(TestCase.test_suite).joinedload(TestSuite.project),
+        selectinload(TestCase.suite_memberships).joinedload(TestCaseSuiteMembership.test_suite),
+        selectinload(TestCase.suite_memberships).joinedload(TestCaseSuiteMembership.section),
         joinedload(TestCase.section),
         joinedload(TestCase.creator),
         selectinload(TestCase.custom_field_values)
     ).filter(TestCase.id == test_case_id).first()
+
+
+def apply_test_suite_membership_filter(query, test_suite_id: Optional[int]):
+    if test_suite_id is None:
+        return query
+    return (
+        query.outerjoin(
+            TestCaseSuiteMembership,
+            TestCaseSuiteMembership.test_case_id == TestCase.id,
+        )
+        .filter(
+            or_(
+                TestCase.test_suite_id == test_suite_id,
+                TestCaseSuiteMembership.test_suite_id == test_suite_id,
+            )
+        )
+        .distinct()
+    )
+
+
+def ensure_primary_test_case_suite_membership(
+    db: Session,
+    test_case: TestCase,
+    *,
+    commit: bool = True,
+) -> TestCaseSuiteMembership:
+    membership = (
+        db.query(TestCaseSuiteMembership)
+        .filter(
+            TestCaseSuiteMembership.test_case_id == test_case.id,
+            TestCaseSuiteMembership.test_suite_id == test_case.test_suite_id,
+        )
+        .first()
+    )
+    if membership is None:
+        membership = TestCaseSuiteMembership(
+            test_case_id=test_case.id,
+            test_suite_id=test_case.test_suite_id,
+        )
+        db.add(membership)
+
+    membership.section_id = test_case.section_id
+    membership.order_index = test_case.order_index or 0
+    membership.is_primary = True
+
+    db.query(TestCaseSuiteMembership).filter(
+        TestCaseSuiteMembership.test_case_id == test_case.id,
+        TestCaseSuiteMembership.id != membership.id,
+        TestCaseSuiteMembership.is_primary.is_(True),
+    ).update({TestCaseSuiteMembership.is_primary: False}, synchronize_session=False)
+
+    if commit:
+        safe_commit(db)
+        db.refresh(membership)
+    return membership
 
 
 def get_test_cases(db: Session, test_suite_id: Optional[int] = None, section_id: Optional[int] = None, skip: int = 0, limit: int = 100):
@@ -320,16 +435,25 @@ def get_test_cases(db: Session, test_suite_id: Optional[int] = None, section_id:
 
     query = db.query(TestCase).options(
         joinedload(TestCase.test_suite).joinedload(TestSuite.project),
+        selectinload(TestCase.suite_memberships).joinedload(TestCaseSuiteMembership.test_suite),
+        selectinload(TestCase.suite_memberships).joinedload(TestCaseSuiteMembership.section),
         joinedload(TestCase.section),
         joinedload(TestCase.creator),
         selectinload(TestCase.custom_field_values)
     ).filter(
         ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)))
     )
-    if test_suite_id is not None:
-        query = query.filter(TestCase.test_suite_id == test_suite_id)
+    query = apply_test_suite_membership_filter(query, test_suite_id)
     if section_id is not None:
-        query = query.filter(TestCase.section_id == section_id)
+        if test_suite_id is not None:
+            query = query.filter(
+                or_(
+                    TestCase.section_id == section_id,
+                    TestCaseSuiteMembership.section_id == section_id,
+                )
+            )
+        else:
+            query = query.filter(TestCase.section_id == section_id)
     return query.offset(skip).limit(limit).all()
 
 
@@ -348,6 +472,7 @@ def create_test_case(db: Session, test_case: TestCaseCreate, created_by: int):
     db.add(db_test_case)
     safe_commit(db)
     db.refresh(db_test_case)
+    ensure_primary_test_case_suite_membership(db, db_test_case)
     
     # Create test steps if provided (multi-step support)
     if test_steps_data and len(test_steps_data) > 0:
@@ -368,7 +493,64 @@ def update_test_case(db: Session, test_case_id: int, test_case: TestCaseUpdate):
             setattr(db_test_case, key, value)
         safe_commit(db)
         db.refresh(db_test_case)
+        ensure_primary_test_case_suite_membership(db, db_test_case)
     return db_test_case
+
+
+def upsert_test_case_suite_membership(
+    db: Session,
+    *,
+    test_case_id: int,
+    test_suite_id: int,
+    section_id: Optional[int] = None,
+    order_index: Optional[int] = None,
+    commit: bool = True,
+) -> TestCaseSuiteMembership:
+    membership = (
+        db.query(TestCaseSuiteMembership)
+        .filter(
+            TestCaseSuiteMembership.test_case_id == test_case_id,
+            TestCaseSuiteMembership.test_suite_id == test_suite_id,
+        )
+        .first()
+    )
+    if membership is None:
+        membership = TestCaseSuiteMembership(
+            test_case_id=test_case_id,
+            test_suite_id=test_suite_id,
+            is_primary=False,
+        )
+        db.add(membership)
+
+    membership.section_id = section_id
+    if order_index is not None:
+        membership.order_index = order_index
+
+    if commit:
+        safe_commit(db)
+        db.refresh(membership)
+    return membership
+
+
+def delete_test_case_suite_membership(
+    db: Session,
+    *,
+    test_case_id: int,
+    test_suite_id: int,
+) -> Optional[TestCaseSuiteMembership]:
+    membership = (
+        db.query(TestCaseSuiteMembership)
+        .filter(
+            TestCaseSuiteMembership.test_case_id == test_case_id,
+            TestCaseSuiteMembership.test_suite_id == test_suite_id,
+        )
+        .first()
+    )
+    if membership is None:
+        return None
+    db.delete(membership)
+    safe_commit(db)
+    return membership
 
 
 def delete_test_case(db: Session, test_case_id: int):

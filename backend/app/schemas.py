@@ -128,8 +128,7 @@ class TestSuiteBase(BaseModel):
 
 class TestSuiteCreate(TestSuiteBase):
     project_id: int
-    # Optional bulk-move of existing test cases into the new suite. Cases that don't
-    # exist or live in another project are skipped rather than failing the whole create.
+    # Optional reusable attachments of existing project test cases to the new suite.
     test_case_ids: Optional[List[int]] = None
 
 
@@ -242,6 +241,17 @@ class TestCaseUpdate(BaseModel):
         return data
 
 
+class TestCaseSuiteMembershipCreate(BaseModel):
+    test_suite_id: int
+    section_id: Optional[int] = None
+    order_index: Optional[int] = 0
+
+
+class TestCaseSuiteMembershipUpdate(BaseModel):
+    section_id: Optional[int] = None
+    order_index: Optional[int] = None
+
+
 class TestCase(TestCaseBase):
     id: int
     project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
@@ -306,6 +316,20 @@ class TestCaseSectionNested(BaseModel):
         from_attributes = True
 
 
+class TestCaseSuiteMembership(BaseModel):
+    id: int
+    test_case_id: int
+    test_suite_id: int
+    section_id: Optional[int] = None
+    order_index: Optional[int] = 0
+    is_primary: Optional[bool] = False
+    test_suite: Optional[TestSuiteNested] = None
+    section: Optional[TestCaseSectionNested] = None
+
+    class Config:
+        from_attributes = True
+
+
 class TestCaseLinkedRequirement(BaseModel):
     id: int
     requirement_id: str
@@ -327,6 +351,7 @@ class TestCaseWithRelations(TestCaseBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     test_suite: Optional[TestSuiteNested] = None
+    suite_memberships: List[TestCaseSuiteMembership] = Field(default_factory=list)
     section: Optional[TestCaseSectionNested] = None
     test_steps: List[TestCaseStep] = []
     custom_field_values: List['CustomFieldValue'] = []
