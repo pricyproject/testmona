@@ -15,6 +15,8 @@ export const fa = {
     administrator: 'مدیر سیستم',
     profile: 'پروفایل',
     logout: 'خروج',
+    appUnexpectedErrorTitle: 'مشکلی پیش آمد',
+    appUnexpectedErrorDescription: 'صفحه با خطای غیرمنتظره‌ای روبه‌رو شد. برای بارگذاری دوباره برنامه و ادامه کار، تازه‌سازی کنید.',
     
     // Test Cases Page
     testCasesTitle: 'همه حالت‌های تست',

@@ -15,6 +15,8 @@ export const en = {
   administrator: 'Administrator',
   profile: 'Profile',
   logout: 'Logout',
+  appUnexpectedErrorTitle: 'Something went wrong',
+  appUnexpectedErrorDescription: 'The page hit an unexpected error. Refresh to reload the app and continue working.',
   
   // Test Cases Page
   testCasesTitle: 'All Test Cases',

@@ -1,8 +1,9 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { resolveSafeRedirect } from '@/utils/safeRedirect';
 import { Layout } from '@/components/Layout';
 import { ProjectGuard } from '@/components/ProjectGuard';
 import { FeatureGuard } from '@/components/FeatureGuard';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useAuthStore, initializeAuthFromLocalStorage } from '@/stores/authStore';
 import { isAdminUser } from '@/utils/roles';
@@ -541,11 +542,29 @@ function AppWithRouter() {
   );
 }
 
+function AppRouteBoundary() {
+  const { t, isRTL, language } = useTranslation();
+  const location = useLocation();
+
+  return (
+    <ErrorBoundary
+      description={t('appUnexpectedErrorDescription')}
+      isRTL={isRTL}
+      reloadLabel={t('refresh')}
+      resetKey={`${language}:${location.pathname}${location.search}`}
+      retryLabel={t('retry')}
+      title={t('appUnexpectedErrorTitle')}
+    >
+      <AppWithRouter />
+    </ErrorBoundary>
+  );
+}
+
 function App() {
   return (
     <ThemeProvider>
       <Router>
-        <AppWithRouter />
+        <AppRouteBoundary />
       </Router>
     </ThemeProvider>
   );

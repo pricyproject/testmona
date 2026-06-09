@@ -15,6 +15,8 @@ export const ar = {
     administrator: 'المسؤول',
     profile: 'الملف الشخصي',
     logout: 'تسجيل الخروج',
+    appUnexpectedErrorTitle: 'حدث خطأ ما',
+    appUnexpectedErrorDescription: 'واجهت الصفحة خطأ غير متوقع. قم بالتحديث لإعادة تحميل التطبيق ومتابعة العمل.',
     
     // Test Cases Page
     testCasesTitle: 'جميع حالات الاختبار',
