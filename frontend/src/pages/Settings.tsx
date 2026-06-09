@@ -202,6 +202,12 @@ const defaultAIProviders: AIProviderConfig[] = [
   { provider: 'litellm', enabled: false, model: 'gpt-4o-mini', base_url: 'http://localhost:4000/v1', request_timeout_seconds: 60, monthly_token_limit: null },
 ];
 
+const normalizeMonthlyTokenLimit = (value: unknown): number | null => {
+  if (value === '' || value === null || value === undefined) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : null;
+};
+
 const defaultRequirementChatSettings = {
   enabled: true,
   max_context_requirements: 40,
@@ -1415,7 +1421,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     try {
       const payload: AIManagerSettings = {
         active_provider: aiManagerSettings.active_provider,
-        per_project_monthly_token_limit: aiManagerSettings.per_project_monthly_token_limit || null,
+        per_project_monthly_token_limit: normalizeMonthlyTokenLimit(aiManagerSettings.per_project_monthly_token_limit),
         requirement_chat: aiManagerSettings.requirement_chat ?? defaultRequirementChatSettings,
         system_prompt: aiManagerSettings.system_prompt ?? '',
         compact_payload_default: aiManagerSettings.compact_payload_default ?? true,
@@ -1425,7 +1431,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
         providers: aiManagerSettings.providers.map((provider) => ({
           ...provider,
           api_key: provider.api_key?.trim() || undefined,
-          monthly_token_limit: provider.monthly_token_limit || null,
+          monthly_token_limit: normalizeMonthlyTokenLimit(provider.monthly_token_limit),
         })),
       };
       const savedSettings = await aiManagerAPI.updateSettings(payload);
@@ -2298,6 +2304,12 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const aiUsageLimits = aiUsage?.limits;
   const activeProviderLimit = aiUsageLimits?.active_provider_limit || null;
   const projectMonthlyLimit = aiUsageLimits?.project_monthly_limit;
+  const providerLimitBlocksBeforeProject = Boolean(
+    activeProviderLimit?.status === 'exceeded'
+    && activeProviderLimit.limit
+    && projectMonthlyLimit?.limit
+    && projectMonthlyLimit.limit > activeProviderLimit.limit,
+  );
   const formatAIUsageNumber = (value?: number | null) => Number(value || 0).toLocaleString();
   const getAIUsagePercent = (limit?: AIUsageLimitEntry | null) => Math.min(100, Math.max(0, Math.round(limit?.percent_used || 0)));
   const getAIUsageProgressClass = (status?: AIUsageLimitEntry['status']) => {
@@ -3674,17 +3686,26 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <TrendingUp className="h-4 w-4 text-emerald-600" />
-                        <h3 className="font-semibold">{t('monthlyUsageLimitIndicator')}</h3>
+                        <h3 className="font-semibold">{t('providerMonthlyUsageLimitIndicator')}</h3>
                         <Badge variant={getAIUsageBadgeVariant(activeProviderLimit?.status)}>
                           {getAIUsageStatusLabel(activeProviderLimit?.status)}
                         </Badge>
                       </div>
                       <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                        {t('monthlyUsageLimitSummary', {
+                        {t('providerMonthlyUsageLimitSummary', {
                           provider: activeAIProvider ? aiProviderLabels[activeAIProvider.provider] : t('unknown'),
                           month: aiUsageLimits?.current_month || t('currentMonth'),
                         })}
                       </p>
+                      {providerLimitBlocksBeforeProject && activeAIProvider && (
+                        <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                          {t('providerLimitBlocksProjectLimit', {
+                            provider: aiProviderLabels[activeAIProvider.provider],
+                            providerLimit: formatAIUsageNumber(activeProviderLimit.limit),
+                            projectLimit: formatAIUsageNumber(projectMonthlyLimit?.limit),
+                          })}
+                        </p>
+                      )}
                       <div className="mt-3">
                         <div className="mb-1 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
                           <span>{getAIUsageLimitLabel(activeProviderLimit)}</span>
@@ -3744,7 +3765,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                       value={aiManagerSettings.per_project_monthly_token_limit ?? ''}
                       onChange={(event) => setAIManagerSettings((current) => ({
                         ...current,
-                        per_project_monthly_token_limit: event.target.value ? Number(event.target.value) : null,
+                        per_project_monthly_token_limit: normalizeMonthlyTokenLimit(event.target.value),
                       }))}
                       placeholder={t('unlimited')}
                     />
@@ -4163,7 +4184,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                               type="number"
                               min={1}
                               value={provider.monthly_token_limit ?? ''}
-                              onChange={(event) => updateAIProvider(provider.provider, { monthly_token_limit: event.target.value ? Number(event.target.value) : null })}
+                              onChange={(event) => updateAIProvider(provider.provider, { monthly_token_limit: normalizeMonthlyTokenLimit(event.target.value) })}
                               placeholder={t('unlimited')}
                             />
                           </div>
