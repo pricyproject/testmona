@@ -1,5 +1,6 @@
 from functools import wraps
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from .models import User, Role, Project, ProjectAssignment
 from typing import List, Optional
@@ -131,13 +132,15 @@ def get_accessible_projects(user: User, db: Session) -> List[Project]:
     if getattr(user, "is_superuser", False) or is_role(user, Role.ADMIN) or is_role(user, Role.MANAGER):
         return db.query(Project).all()
     
-    # Get projects through assignments
+    # Get projects through assignments and ownership.
     assignments = db.query(ProjectAssignment).filter(
         ProjectAssignment.user_id == user.id
     ).all()
     
     project_ids = [assignment.project_id for assignment in assignments]
-    return db.query(Project).filter(Project.id.in_(project_ids)).all()
+    return db.query(Project).filter(
+        or_(Project.owner_id == user.id, Project.id.in_(project_ids))
+    ).all()
 
 
 def can_manage_project(user: User, project_id: int, db: Session) -> bool:
@@ -164,7 +167,18 @@ def get_user_projects(user: User, db: Session):
     ).all()
 
     result = []
+    seen_project_ids = set()
+    for project in db.query(Project).filter(Project.owner_id == user.id).all():
+        result.append({
+            "project": project,
+            "role": role_value(getattr(user, "role", None), Role.MANAGER),
+            "assigned_at": None
+        })
+        seen_project_ids.add(project.id)
+
     for assignment in assignments:
+        if assignment.project_id in seen_project_ids:
+            continue
         project = db.query(Project).filter(
             Project.id == assignment.project_id
         ).first()

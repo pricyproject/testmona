@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 
-from .. import crud, schemas, rbac
+from .. import crud, models, schemas, rbac
 from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
@@ -14,6 +14,26 @@ from ..auth import get_current_active_user
 
 def register_remaining_routes(app):
     """Register remaining routes with the FastAPI app."""
+
+    def _readable_project_ids(current_user: schemas.User, db: Session) -> List[int]:
+        return [project.id for project in rbac.get_accessible_projects(current_user, db)]
+
+    def _get_authorized_environments(
+        current_user: schemas.User,
+        db: Session,
+        project_id: int = None,
+    ) -> List[models.ExecutionEnvironment]:
+        if project_id is not None:
+            if not rbac.has_permission(current_user, "read", project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            return crud.get_execution_environments(db, project_id=project_id)
+
+        project_ids = _readable_project_ids(current_user, db)
+        if not project_ids:
+            return []
+        return db.query(models.ExecutionEnvironment).filter(
+            models.ExecutionEnvironment.project_id.in_(project_ids)
+        ).all()
 
     # Execution Environment Endpoints
     @app.get("/execution-environments/", response_model=List[schemas.ExecutionEnvironment])
@@ -24,10 +44,7 @@ def register_remaining_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        environments = crud.get_execution_environments(db, project_id=project_id)
+        environments = _get_authorized_environments(current_user, db, project_id)
         return environments[skip:skip+limit]
 
     @app.get("/execution-environments/{environment_id}", response_model=schemas.ExecutionEnvironment)
@@ -51,7 +68,7 @@ def register_remaining_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "manage", environment.project_id, db):
+        if not rbac.has_permission(current_user, "write", environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         db_environment = crud.create_execution_environment(db, environment.model_dump())
@@ -87,7 +104,7 @@ def register_remaining_routes(app):
         if db_environment is None:
             raise HTTPException(status_code=404, detail="Environment not found")
         
-        if not rbac.has_permission(current_user, "manage", db_environment.project_id, db):
+        if not rbac.has_permission(current_user, "write", db_environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         update_data = environment.model_dump(exclude_unset=True)
@@ -123,7 +140,7 @@ def register_remaining_routes(app):
         if db_environment is None:
             raise HTTPException(status_code=404, detail="Environment not found")
         
-        if not rbac.has_permission(current_user, "manage", db_environment.project_id, db):
+        if not rbac.has_permission(current_user, "delete", db_environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Store data for audit trail before deletion
@@ -164,10 +181,7 @@ def register_remaining_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         """Get environments - endpoint to match frontend expectations"""
-        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        environments = crud.get_execution_environments(db, project_id=project_id)
+        environments = _get_authorized_environments(current_user, db, project_id)
         return environments[skip:skip+limit]
 
     @app.get("/environments/{environment_id}", response_model=schemas.ExecutionEnvironment)
@@ -194,7 +208,7 @@ def register_remaining_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         """Create environment - endpoint to match frontend expectations"""
-        if not rbac.has_permission(current_user, "manage", environment.project_id, db):
+        if not rbac.has_permission(current_user, "write", environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         return crud.create_execution_environment(db, environment.model_dump())
@@ -211,7 +225,7 @@ def register_remaining_routes(app):
         if db_environment is None:
             raise HTTPException(status_code=404, detail="Environment not found")
         
-        if not rbac.has_permission(current_user, "manage", db_environment.project_id, db):
+        if not rbac.has_permission(current_user, "write", db_environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         update_data = environment.model_dump(exclude_unset=True)
@@ -228,7 +242,7 @@ def register_remaining_routes(app):
         if db_environment is None:
             raise HTTPException(status_code=404, detail="Environment not found")
         
-        if not rbac.has_permission(current_user, "manage", db_environment.project_id, db):
+        if not rbac.has_permission(current_user, "delete", db_environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         crud.delete_execution_environment(db, environment_id)

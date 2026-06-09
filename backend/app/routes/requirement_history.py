@@ -313,7 +313,7 @@ def register_requirement_history_routes(app) -> None:
             raise HTTPException(status_code=404, detail="Comment not found")
         project_id = comment.requirement.project_id
         # Authors can delete their own; project admins can moderate any.
-        if comment.user_id != current_user.id and not rbac.has_permission(current_user, "manage", project_id, db):
+        if comment.user_id != current_user.id and not rbac.has_permission(current_user, "delete", project_id, db):
             raise HTTPException(status_code=403, detail="You can only delete your own comments")
         if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")

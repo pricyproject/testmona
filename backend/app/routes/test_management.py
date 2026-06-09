@@ -929,8 +929,12 @@ def register_test_management_routes(app):
                 query = query.filter(models.TestCase.section_id == section_id)
             count = query.count()
         else:
-            # Use existing logic from crud
-            query = db.query(models.TestCase).filter(
+            accessible_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
+            if not accessible_project_ids:
+                return {"count": 0}
+
+            query = db.query(models.TestCase).join(models.TestSuite).filter(
+                models.TestSuite.project_id.in_(accessible_project_ids),
                 ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
             )
             if test_suite_id:
@@ -2594,8 +2598,47 @@ def register_test_management_routes(app):
 
     @app.get("/test-results", response_model=List[schemas.TestResultWithDetails])
     def read_test_results(test_run_id: int = None, test_case_id: int = None, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
-        test_results = crud.get_test_results(db, test_run_id=test_run_id, test_case_id=test_case_id, skip=skip, limit=limit)
-        return test_results
+        query = db.query(models.TestResult).options(
+            joinedload(models.TestResult.test_case).joinedload(models.TestCase.section),
+            joinedload(models.TestResult.test_case).selectinload(models.TestCase.custom_field_values),
+            joinedload(models.TestResult.executor),
+            selectinload(models.TestResult.defect_links).joinedload(models.TestResultDefectLink.defect),
+        ).join(models.TestRun).filter(
+            models.TestResult.test_case_id.isnot(None),
+            models.TestResult.test_run_id.isnot(None),
+            models.TestResult.test_case.has(
+                (models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))
+            ),
+        )
+
+        scoped_project_ids = None
+        if test_run_id is not None:
+            test_run = crud.get_test_run(db, test_run_id=test_run_id)
+            if not test_run:
+                raise HTTPException(status_code=404, detail="Test run not found")
+            if not rbac.has_permission(current_user, "read", test_run.project_id, db):
+                raise HTTPException(status_code=403, detail="Not authorized to access this test run")
+            scoped_project_ids = [test_run.project_id]
+            query = query.filter(models.TestResult.test_run_id == test_run_id)
+
+        if test_case_id is not None:
+            test_case = crud.get_test_case(db, test_case_id=test_case_id)
+            if not test_case or getattr(test_case, "is_deleted", False):
+                raise HTTPException(status_code=404, detail="Test case not found")
+            test_case_project_id = test_case.project_id or (test_case.test_suite.project_id if test_case.test_suite else None)
+            if test_case_project_id is None:
+                raise HTTPException(status_code=404, detail="Test case project not found")
+            if not rbac.has_permission(current_user, "read", test_case_project_id, db):
+                raise HTTPException(status_code=403, detail="Not authorized to access this test case")
+            scoped_project_ids = [test_case_project_id] if scoped_project_ids is None else scoped_project_ids
+            query = query.filter(models.TestResult.test_case_id == test_case_id)
+
+        if scoped_project_ids is None:
+            scoped_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
+        if not scoped_project_ids:
+            return []
+
+        return query.filter(models.TestRun.project_id.in_(scoped_project_ids)).offset(skip).limit(limit).all()
 
     @app.get("/test-results/{test_result_id}", response_model=schemas.TestResult)
     def read_test_result(test_result_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):

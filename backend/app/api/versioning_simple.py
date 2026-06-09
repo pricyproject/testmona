@@ -6,7 +6,7 @@ from ..database import get_db
 from ..services.versioning_service import VersioningService
 from ..auth import get_current_user
 from ..rbac import has_permission
-from ..models import User
+from ..models import TestCase, User
 from ..schemas import (
     TestCaseVersionCreate, TestCaseVersionUpdate
 )
@@ -22,6 +22,37 @@ def get_user_id(current_user: User) -> int:
     return current_user.id
 
 
+def get_test_case_project_id(db: Session, test_case_id: int) -> int:
+    test_case = db.query(TestCase).filter(
+        TestCase.id == test_case_id,
+        ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+    ).first()
+    project_id = test_case.project_id if test_case else None
+    if project_id is None and test_case and test_case.test_suite:
+        project_id = test_case.test_suite.project_id
+    if not test_case or project_id is None:
+        raise HTTPException(status_code=404, detail="Test case not found")
+    return project_id
+
+
+def require_test_case_permission(
+    current_user: User,
+    db: Session,
+    test_case_id: int,
+    permission: str,
+) -> int:
+    project_id = get_test_case_project_id(db, test_case_id)
+    if not has_permission(current_user, permission, project_id, db):
+        raise HTTPException(status_code=403, detail=f"No permission to {permission} versions")
+    return project_id
+
+
+def require_version_permission(current_user: User, db: Session, version, permission: str) -> int:
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return require_test_case_permission(current_user, db, version.test_case_id, permission)
+
+
 @router.post("/test-cases/{test_case_id}/versions")
 def create_version(
     test_case_id: int,
@@ -31,9 +62,7 @@ def create_version(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Create a new version of a test case"""
-    # Check permissions - simplified for now
-    if not has_permission(current_user, "write"):
-        raise HTTPException(status_code=403, detail="No permission to create version")
+    require_test_case_permission(current_user, db, test_case_id, "write")
     
     try:
         version = versioning_service.create_version(
@@ -54,9 +83,7 @@ def get_versions(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Get all versions of a test case"""
-    # Check permissions
-    if not has_permission(current_user, "read"):
-        raise HTTPException(status_code=403, detail="No permission to read versions")
+    require_test_case_permission(current_user, db, test_case_id, "read")
     
     versions = versioning_service.get_versions(test_case_id)
     # The current version is the latest published one; resolve its id once so
@@ -91,8 +118,7 @@ def get_latest_version(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Get the latest published version of a test case"""
-    if not has_permission(current_user, "read"):
-        raise HTTPException(status_code=403, detail="No permission to read versions")
+    require_test_case_permission(current_user, db, test_case_id, "read")
     
     version = versioning_service.get_latest_version(test_case_id)
     if not version:
@@ -116,10 +142,6 @@ def compare_versions(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Compare two versions"""
-    # Check permissions
-    if not has_permission(current_user, "read"):
-        raise HTTPException(status_code=403, detail="No permission to read versions")
-
     from_version_id = compare_data.get("from_version_id")
     to_version_id = compare_data.get("to_version_id")
 
@@ -132,6 +154,8 @@ def compare_versions(
 
     if not from_version or not to_version:
         raise HTTPException(status_code=404, detail="One or both versions not found")
+    require_version_permission(current_user, db, from_version, "read")
+    require_version_permission(current_user, db, to_version, "read")
 
     try:
         comparison = versioning_service.compare_versions(
@@ -162,10 +186,6 @@ def create_branch(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Create a branch from a specific version"""
-    # Check permissions
-    if not has_permission(current_user, "write"):
-        raise HTTPException(status_code=403, detail="No permission to create branch")
-
     parent_version_id = branch_data.get("parent_version_id")
     branch_name = (branch_data.get("branch_name") or "").strip()
     reason = branch_data.get("reason", "")
@@ -178,6 +198,7 @@ def create_branch(
     parent_version = versioning_service.get_version(parent_version_id)
     if not parent_version:
         raise HTTPException(status_code=404, detail="Parent version not found")
+    require_version_permission(current_user, db, parent_version, "write")
 
     try:
         branch = versioning_service.create_branch(
@@ -207,9 +228,7 @@ def rollback_to_version(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Rollback a test case to a specific version"""
-    # Check permissions
-    if not has_permission(current_user, "write"):
-        raise HTTPException(status_code=403, detail="No permission to rollback test case")
+    require_test_case_permission(current_user, db, test_case_id, "write")
 
     target_version_id = rollback_data.get("target_version_id")
     reason = rollback_data.get("reason", "Rollback")
@@ -243,9 +262,7 @@ def get_version_stats(
     versioning_service: VersioningService = Depends(get_versioning_service)
 ):
     """Get version statistics for a test case"""
-    # Check permissions
-    if not has_permission(current_user, "read"):
-        raise HTTPException(status_code=403, detail="No permission to read version stats")
+    require_test_case_permission(current_user, db, test_case_id, "read")
     
     versions = versioning_service.get_versions(test_case_id)
     current_version = versioning_service.get_latest_version(test_case_id)
