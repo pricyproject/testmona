@@ -772,7 +772,7 @@ export const en = {
   userCreatedSuccessfully: 'User {username} created successfully',
   failedToCreateUser: 'Failed to create user',
   pleaseEnterEmailAddress: 'Please enter an email address',
-  invitationSentCopyLink: 'Invitation sent to {email}. Copy the invite link to share.',
+  invitationSentCopyLink: 'Invitation created for {email}.',
   inviteLinkCopied: 'Invite Link Copied',
   invitationLinkCopiedToClipboard: 'Invitation link copied to clipboard',
   failedToSendInvitation: 'Failed to send invitation',

@@ -941,7 +941,7 @@ export const ar = {
     userCreatedSuccessfully: 'تم إنشاء المستخدم {username} بنجاح',
     failedToCreateUser: 'فشل إنشاء المستخدم',
     pleaseEnterEmailAddress: 'يرجى إدخال عنوان بريد إلكتروني',
-    invitationSentCopyLink: 'تم إرسال الدعوة إلى {email}. انسخ رابط الدعوة لمشاركته.',
+    invitationSentCopyLink: 'تم إنشاء الدعوة إلى {email}.',
     inviteLinkCopied: 'تم نسخ رابط الدعوة',
     invitationLinkCopiedToClipboard: 'تم نسخ رابط الدعوة إلى الحافظة',
     failedToSendInvitation: 'فشل إرسال الدعوة',

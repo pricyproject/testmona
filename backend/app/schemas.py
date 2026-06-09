@@ -757,6 +757,27 @@ class UserInvitation(UserInvitationBase):
         from_attributes = True
 
 
+class UserInvitationPublic(UserInvitationBase):
+    id: int
+    invited_by: int
+    expires_at: datetime
+    accepted_at: Optional[datetime] = None
+    is_used: bool
+    created_at: datetime
+
+    @field_validator('project_ids', mode='before')
+    @classmethod
+    def deserialize_project_ids(cls, value: Any) -> List[int]:
+        if value in (None, ''):
+            return []
+        if isinstance(value, str):
+            return [int(project_id.strip()) for project_id in value.split(',') if project_id.strip()]
+        return value
+
+    class Config:
+        from_attributes = True
+
+
 class UserInvitationAccept(BaseModel):
     token: str
     username: str

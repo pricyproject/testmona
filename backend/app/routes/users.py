@@ -665,7 +665,7 @@ def register_user_routes(app):
         return {"message": "User deleted successfully"}
 
     # User Invitation Endpoints
-    @app.post("/invitations", response_model=schemas.UserInvitation)
+    @app.post("/invitations", response_model=schemas.UserInvitationPublic)
     def create_invitation(
         invitation: schemas.UserInvitationCreate,
         db: Session = Depends(get_db),
@@ -700,13 +700,9 @@ def register_user_routes(app):
         except Exception as e:
             print(f"Failed to create audit trail for invitation creation: {e}")
         
-        # TODO: Send email with invitation link
-        # For now, we'll just return the invitation with the token
-        # In production, you would send an email here
-        
         return db_invitation
 
-    @app.get("/invitations", response_model=List[schemas.UserInvitation])
+    @app.get("/invitations", response_model=List[schemas.UserInvitationPublic])
     def read_invitations(
         skip: int = 0,
         limit: int = 100,

@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, MoreHorizontal, Trash2, Edit, Mail, Copy, Check, KeyRound } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Edit, Mail, KeyRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { USER_ROLES, isAdminRole, isAdminUser, normalizeRole } from '@/utils/roles';
 
@@ -57,7 +57,6 @@ interface Invitation {
   id: number;
   email: string;
   role: string;
-  token: string;
   expires_at: string;
   is_used: boolean;
   created_at: string;
@@ -103,9 +102,6 @@ export function UserManagement() {
   const [editRole, setEditRole] = useState('');
   const [originalRole, setOriginalRole] = useState('');
   const [editIsActive, setEditIsActive] = useState(true);
-  
-  // Copied token state
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
   
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -221,9 +217,6 @@ export function UserManagement() {
       const newInvitation = response.data;
       setInvitations([...invitations, newInvitation]);
       
-      // Generate invite link
-      const inviteLink = `${window.location.origin}/accept-invite/${newInvitation.token}`;
-      
       toast({
         title: t('success'),
         description: t('invitationSentCopyLink', { email: inviteEmail }),
@@ -234,13 +227,6 @@ export function UserManagement() {
       setInviteRole(USER_ROLES.TESTER);
       setSelectedProjects([]);
       setInviteDialogOpen(false);
-      
-      // Show the invite link
-      navigator.clipboard.writeText(inviteLink);
-      toast({
-        title: t('inviteLinkCopied'),
-        description: t('invitationLinkCopiedToClipboard'),
-      });
     } catch (error: any) {
       console.error('Failed to invite user:', error);
       toast({
@@ -358,18 +344,6 @@ export function UserManagement() {
         variant: "destructive",
       });
     }
-  };
-
-  const handleCopyInviteLink = (token: string) => {
-    const inviteLink = `${window.location.origin}/accept-invite/${token}`;
-    navigator.clipboard.writeText(inviteLink);
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken(null), 2000);
-    
-    toast({
-      title: t('copied'),
-      description: t('invitationLinkCopiedToClipboard'),
-    });
   };
 
   const toggleProjectSelection = (projectId: number) => {
@@ -532,17 +506,6 @@ export function UserManagement() {
                       </TableCell>
                       <TableCell className="text-end">
                         <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCopyInviteLink(invitation.token)}
-                          >
-                            {copiedToken === invitation.token ? (
-                              <Check className="h-4 w-4 text-green-600" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"

@@ -972,7 +972,7 @@ export const fa = {
     userCreatedSuccessfully: 'کاربر {username} با موفقیت ایجاد شد',
     failedToCreateUser: 'ایجاد کاربر ناموفق بود',
     pleaseEnterEmailAddress: 'لطفاً یک آدرس ایمیل وارد کنید',
-    invitationSentCopyLink: 'دعوت‌نامه به {email} ارسال شد. لینک دعوت را برای اشتراک‌گذاری کپی کنید.',
+    invitationSentCopyLink: 'دعوت‌نامه برای {email} ایجاد شد.',
     inviteLinkCopied: 'لینک دعوت کپی شد',
     invitationLinkCopiedToClipboard: 'لینک دعوت در کلیپ‌بورد کپی شد',
     failedToSendInvitation: 'ارسال دعوت‌نامه ناموفق بود',
