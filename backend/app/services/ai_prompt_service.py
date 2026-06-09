@@ -505,8 +505,9 @@ _DOC_CONVERT_ENHANCE_INSTRUCTIONS = (
     "  - suggested_description: a rewritten, unambiguous requirement statement in "
     "Markdown (use 'The system shall…' phrasing where natural). Keep the original "
     "intent; do not invent features.\n"
-    "  - suggested_acceptance: testable acceptance criteria in Markdown — Gherkin "
-    "(Given/When/Then) or a bullet list, covering the happy path plus the edge cases above.\n"
+    "  - suggested_acceptance: testable acceptance criteria in Markdown using valid "
+    "Gherkin only. Include a Scenario and Given/When/Then steps covering the happy "
+    "path plus the edge cases above. Do not return bullet lists or prose here.\n"
     "Then, in `suggested_requirements`, propose NEW requirements for important "
     "capabilities the document overlooks entirely (e.g. error handling, security, "
     "auditing, performance) — each with a title, a Markdown description, Markdown "
@@ -516,9 +517,9 @@ _DOC_CONVERT_ENHANCE_INSTRUCTIONS = (
     'Return JSON only: {"summary": "string (1-2 sentences on overall quality)", '
     '"items": [{"index": number, "quality": number, "issues": ["string"], '
     '"edge_cases": ["string"], "suggested_title": "string", '
-    '"suggested_description": "markdown string", "suggested_acceptance": "markdown string"}], '
+    '"suggested_description": "markdown string", "suggested_acceptance": "gherkin markdown string"}], '
     '"suggested_requirements": [{"title": "string", "description": "markdown string", '
-    '"acceptance": "markdown string", "rationale": "string"}]}'
+    '"acceptance": "gherkin markdown string", "rationale": "string"}]}'
 )
 
 

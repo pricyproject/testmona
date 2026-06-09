@@ -338,10 +338,12 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             {t('docImpactAnalyze')}
           </Button>
         )}
-        <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
-          <ArrowRightLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-          {t('docConvertToRequirements')}
-        </Button>
+        {doc.can_edit && (
+          <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
+            <ArrowRightLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+            {t('docConvertToRequirements')}
+          </Button>
+        )}
         {doc.can_edit && (
           <Button size="sm" onClick={() => navigate(`${basePath}/${doc.id}/edit`)}>
             <Pencil className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />

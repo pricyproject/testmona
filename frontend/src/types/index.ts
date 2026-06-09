@@ -1086,6 +1086,7 @@ export interface DocConvertResult {
 export interface DocConvertEnhanceRequest {
   mode: 'single' | 'split';
   heading_level?: number;
+  items?: DocConvertItemOverride[];
 }
 
 export interface DocConvertEnhanceItem {

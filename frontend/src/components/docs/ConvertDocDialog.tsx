@@ -36,6 +36,7 @@ import { sanitizeHtml } from '@/lib/sanitize';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI, projectsAPI } from '@/lib/api';
+import { formatGherkin, isGherkinText, lintGherkin } from '@/components/requirements/gherkin';
 import type {
   Doc,
   DocConvertEnhanceItem,
@@ -58,6 +59,211 @@ type Override = { description_html?: string; acceptance_html?: string };
 
 const STATUSES: ReqStatus[] = ['draft', 'reviewed', 'approved', 'implemented', 'verified', 'deprecated'];
 const PRIORITIES: ReqPriority[] = ['low', 'medium', 'high', 'critical'];
+const KNOWN_HTML_TAGS = 'a|abbr|b|blockquote|br|code|del|div|em|h[1-6]|hr|i|img|ins|kbd|li|ol|p|pre|s|span|strong|sub|sup|table|tbody|td|th|thead|tr|u|ul';
+const KNOWN_HTML_TAG_RE = new RegExp(`</?(?:${KNOWN_HTML_TAGS})(?:\\s[^>]*)?/?>`, 'gi');
+
+const decodeEntities = (value: string): string => {
+  if (typeof document === 'undefined') return value;
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = value;
+  return textarea.value;
+};
+
+const htmlToText = (value?: string | null): string => {
+  if (!value) return '';
+  const withBreaks = value
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|li|h[1-6]|tr|pre)\s*>/gi, '\n')
+    .replace(KNOWN_HTML_TAG_RE, ' ');
+  return decodeEntities(withBreaks)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
+const escapeHtml = (value: string): string => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const gherkinToHtml = (value: string): string => `<pre><code class="language-gherkin">${escapeHtml(value)}</code></pre>`;
+
+const stripListMarker = (value: string): string => value.replace(/^\s*(?:[-*+•]|\d+[.)])\s+/, '').trim();
+
+const stripCodeFence = (value: string): string => value
+  .replace(/^```(?:gherkin|feature)?\s*/i, '')
+  .replace(/```$/i, '')
+  .trim();
+
+const LOCALIZED_GHERKIN_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/^\s*(ویژگی|قابلیت)\s*[:：]\s*/i, 'Feature: '],
+  [/^\s*(خاصية|ميزة|الميزة)\s*[:：]\s*/i, 'Feature: '],
+  [/^\s*(سناریو|سيناريو)\s*[:：]\s*/i, 'Scenario: '],
+  [/^\s*(طرح سناریو|مخطط السيناريو)\s*[:：]\s*/i, 'Scenario Outline: '],
+  [/^\s*(پیش‌زمینه|پیش زمینه|الخلفية|خلفية)\s*[:：]\s*/i, 'Background: '],
+  [/^\s*(با فرض|فرض|بفرض)\s+/i, 'Given '],
+  [/^\s*(وقتی|زمانی که|هنگامی که|عندما|متى)\s+/i, 'When '],
+  [/^\s*(آنگاه|سپس|إذن|اذاً|عندئذ)\s+/i, 'Then '],
+  [/^\s*(اما|ولی|لكن)\s+/i, 'But '],
+  [/^\s*(و)\s+/i, 'And '],
+];
+
+const normalizeLocalizedGherkinKeywords = (value: string): string => value
+  .split('\n')
+  .map((line) => {
+    const trimmed = line.trimStart();
+    const indent = line.slice(0, line.length - trimmed.length);
+    for (const [pattern, replacement] of LOCALIZED_GHERKIN_REPLACEMENTS) {
+      if (pattern.test(trimmed)) return indent + trimmed.replace(pattern, replacement);
+    }
+    return line;
+  })
+  .join('\n');
+
+const isFeatureStyleGherkin = (value?: string | null): boolean => {
+  const text = htmlToText(value);
+  return hasFeatureStyleGherkinText(text);
+};
+
+const hasFeatureStyleGherkinText = (text: string): boolean =>
+  Boolean(
+    text
+    && /^\s*Feature:/im.test(text)
+    && /^\s*(Scenario|Scenario Outline|Background):/im.test(text)
+    && /^\s*Given\b/im.test(text)
+    && /^\s*When\b/im.test(text)
+    && /^\s*Then\b/im.test(text),
+  );
+
+const extractPlainCriteria = (value: string): string[] => value
+  .split('\n')
+  .map(stripListMarker)
+  .map((line) => line.replace(/\s+/g, ' ').trim())
+  .filter((line) => line && !/^acceptance criteria:?$/i.test(line))
+  .slice(0, 12);
+
+const gherkinHasOnlyRepairableIssues = (value: string): boolean => {
+  const issues = lintGherkin(value);
+  return issues.every((issue) => issue.code !== 'stepOutsideScenario');
+};
+
+const repairGherkinText = (rawValue: string, title: string, fallbackHtml?: string | null): string | null => {
+  let text = normalizeLocalizedGherkinKeywords(rawValue).trim();
+  if (!isGherkinText(text)) return null;
+
+  const safeTitle = title || 'Requirement';
+  const lines = text.split('\n');
+  const repaired: string[] = [];
+  let featureSeen = false;
+  let blockOpen = false;
+  let blockStart = -1;
+  let hasGiven = false;
+  let hasWhen = false;
+  let hasThen = false;
+  let currentBlockIsOutline = false;
+  let currentBlockHasExamples = false;
+
+  const finishBlock = () => {
+    if (!blockOpen || blockStart < 0) return;
+    if (currentBlockIsOutline && !currentBlockHasExamples) {
+      repaired[blockStart] = repaired[blockStart].replace(/Scenario Outline:/i, 'Scenario:');
+      for (let i = blockStart + 1; i < repaired.length; i += 1) {
+        repaired[i] = repaired[i].replace(/<([^<>]+)>/g, '$1');
+      }
+    }
+    if (!hasGiven) repaired.splice(blockStart + 1, 0, `    Given ${safeTitle} is in scope`);
+    if (!hasWhen) repaired.push('    When the requirement behavior is exercised');
+    if (!hasThen) {
+      const criteria = extractPlainCriteria(htmlToText(fallbackHtml));
+      repaired.push(`    Then ${criteria[0] || `${safeTitle} is satisfied`}`);
+    }
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      repaired.push('');
+      continue;
+    }
+    if (/^Feature:/i.test(trimmed)) {
+      if (featureSeen) continue;
+      finishBlock();
+      featureSeen = true;
+      blockOpen = false;
+      repaired.push(trimmed || `Feature: ${safeTitle}`);
+      continue;
+    }
+    if (/^Rule:/i.test(trimmed)) {
+      finishBlock();
+      blockOpen = false;
+      repaired.push(trimmed);
+      continue;
+    }
+    if (/^(Background|Scenario Outline|Scenario|Example):/i.test(trimmed)) {
+      finishBlock();
+      blockOpen = true;
+      blockStart = repaired.length;
+      hasGiven = false;
+      hasWhen = false;
+      hasThen = false;
+      currentBlockIsOutline = /^Scenario Outline:/i.test(trimmed);
+      currentBlockHasExamples = false;
+      repaired.push(trimmed);
+      continue;
+    }
+    if (/^Examples:/i.test(trimmed)) {
+      currentBlockHasExamples = true;
+      repaired.push(trimmed);
+      continue;
+    }
+    if (/^(Given|When|Then|And|But|\*)\b/i.test(trimmed)) {
+      if (!blockOpen) {
+        blockOpen = true;
+        blockStart = repaired.length;
+        hasGiven = false;
+        hasWhen = false;
+        hasThen = false;
+        currentBlockIsOutline = false;
+        currentBlockHasExamples = false;
+        repaired.push(`Scenario: ${safeTitle}`);
+      }
+      let stepLine = trimmed;
+      if (!hasGiven && /^(And|But)\b/i.test(stepLine)) stepLine = stepLine.replace(/^(And|But)\b/i, 'Given');
+      hasGiven = hasGiven || /^Given\b/i.test(stepLine);
+      hasWhen = hasWhen || /^When\b/i.test(stepLine);
+      hasThen = hasThen || /^Then\b/i.test(stepLine);
+      repaired.push(stepLine);
+      continue;
+    }
+    repaired.push(trimmed);
+  }
+  finishBlock();
+  if (!featureSeen) repaired.unshift(`Feature: ${safeTitle}`, '');
+  text = formatGherkin(repaired.join('\n'));
+  return hasFeatureStyleGherkinText(text) && gherkinHasOnlyRepairableIssues(text) ? text : null;
+};
+
+const proseCriteriaToFeature = (title: string, sourceText: string, fallbackHtml?: string | null): string => {
+  const safeTitle = (title || 'Requirement').trim() || 'Requirement';
+  const criteria = extractPlainCriteria(sourceText || htmlToText(fallbackHtml));
+  const scenarios = (criteria.length ? criteria : [`${safeTitle} is satisfied`]).map((criterion, index) => [
+    `  Scenario: ${criteria.length > 1 ? `${safeTitle} - criterion ${index + 1}` : safeTitle}`,
+    `    Given ${safeTitle} is in scope`,
+    '    When the requirement behavior is exercised',
+    `    Then ${criterion}`,
+  ].join('\n'));
+  return formatGherkin([`Feature: ${safeTitle}`, '', ...scenarios].join('\n\n'));
+};
+
+const normalizeToFeatureGherkin = (title: string, acceptanceHtml?: string | null, fallbackHtml?: string | null): string => {
+  const safeTitle = (title || 'Requirement').trim() || 'Requirement';
+  const sourceText = stripCodeFence(htmlToText(acceptanceHtml) || htmlToText(fallbackHtml));
+  return repairGherkinText(sourceText, safeTitle, fallbackHtml) ?? proseCriteriaToFeature(safeTitle, sourceText, fallbackHtml);
+};
 
 export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props) {
   const { t, isRTL } = useTranslation();
@@ -86,6 +292,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
   const [overrides, setOverrides] = useState<Record<number, Override>>({});
   const [applied, setApplied] = useState<Set<number>>(new Set());
   const [extraSelected, setExtraSelected] = useState<Set<number>>(new Set());
+  const [extraAcceptanceOverrides, setExtraAcceptanceOverrides] = useState<Record<number, string>>({});
 
   // Load projects for the target picker when converting a global doc.
   useEffect(() => {
@@ -102,6 +309,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
     setOverrides({});
     setApplied(new Set());
     setExtraSelected(new Set());
+    setExtraAcceptanceOverrides({});
   }, []);
 
   const loadPreview = useCallback(async () => {
@@ -115,6 +323,10 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       // Section indices change with mode/level, so any prior AI mapping is stale.
       resetAi();
     } catch {
+      setItems([]);
+      setTitles({});
+      setExcluded(new Set());
+      resetAi();
       toast({ title: t('error'), description: t('docConvertPreviewFailed'), variant: 'destructive' });
     } finally {
       setPreviewing(false);
@@ -135,8 +347,19 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
     loadPreview();
   }, [open, doc.id, mode, headingLevel, loadPreview]);
 
-  // Run the (paid) AI review when the user turns it on, and re-run whenever the
-  // preview (and thus the draft requirements) changes while it stays on.
+  const reviewItems = useMemo(() => items.map((item) => ({
+    index: item.index,
+    title: (titles[item.index] ?? item.title).trim(),
+    include: !excluded.has(item.index),
+    description_html: overrides[item.index]?.description_html,
+    acceptance_html: overrides[item.index]?.acceptance_html,
+  })), [excluded, items, overrides, titles]);
+  const reviewItemsRef = useRef(reviewItems);
+  useEffect(() => { reviewItemsRef.current = reviewItems; }, [reviewItems]);
+
+  // Run the (paid) AI review when the user turns it on, and re-run for structural
+  // preview changes. The latest edited draft is read from a ref to avoid re-running
+  // on every title edit or accepted suggestion.
   useEffect(() => {
     if (!aiEnabled || !open || items.length === 0) return;
     const controller = new AbortController();
@@ -145,7 +368,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       setEnhancing(true);
       setAiNotice(null);
       try {
-        const result = await docsAPI.enhanceConvert(doc.id, { mode, heading_level: headingLevel }, controller.signal);
+        const result = await docsAPI.enhanceConvert(doc.id, { mode, heading_level: headingLevel, items: reviewItemsRef.current }, controller.signal);
         if (!active) return;
         if (result.ai_available) {
           // A fresh analysis supersedes any prior staged suggestions, whose
@@ -153,6 +376,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
           setOverrides({});
           setApplied(new Set());
           setExtraSelected(new Set());
+          setExtraAcceptanceOverrides({});
           setEnhance(result);
         } else {
           setEnhance(null);
@@ -165,7 +389,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [aiEnabled, open, items, doc.id, mode, headingLevel]);
+  }, [aiEnabled, open, items.length, doc.id, mode, headingLevel]);
 
   const toggleExcluded = (index: number) => {
     setExcluded((prev) => {
@@ -207,7 +431,10 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
   // otherwise be created invisibly; applied per-draft edits are kept.
   const handleAiToggle = (on: boolean) => {
     setAiEnabled(on);
-    if (!on) setExtraSelected(new Set());
+    if (!on) {
+      setExtraSelected(new Set());
+      setExtraAcceptanceOverrides({});
+    }
   };
 
   const revertSuggestion = (index: number, originalTitle: string) => {
@@ -224,6 +451,37 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
     });
   };
 
+  const normalizeExtraAcceptance = (idx: number) => {
+    const sug = enhance?.suggested_requirements[idx];
+    if (!sug) return;
+    setExtraAcceptanceOverrides((prev) => ({
+      ...prev,
+      [idx]: gherkinToHtml(normalizeToFeatureGherkin(sug.title, prev[idx] ?? sug.acceptance_html, sug.description_html)),
+    }));
+  };
+
+  const normalizeAllExtras = () => {
+    if (!enhance) return;
+    setExtraAcceptanceOverrides((prev) => {
+      const next = { ...prev };
+      enhance.suggested_requirements.forEach((sug, idx) => {
+        if (!sug) return;
+        const current = next[idx] ?? sug.acceptance_html;
+        if (!isFeatureStyleGherkin(current)) {
+          next[idx] = gherkinToHtml(normalizeToFeatureGherkin(sug.title, current, sug.description_html));
+        }
+      });
+      return next;
+    });
+  };
+
+  const extrasNeedingGherkin = useMemo(() => {
+    if (!enhance) return 0;
+    return enhance.suggested_requirements.filter((sug, idx) =>
+      !isFeatureStyleGherkin(extraAcceptanceOverrides[idx] ?? sug.acceptance_html)
+    ).length;
+  }, [enhance, extraAcceptanceOverrides]);
+
   // In single mode the acceptance-criteria item becomes a field on the one
   // requirement, not a separate requirement — so it must not inflate the count.
   const includedPreviewCount = mode === 'single'
@@ -238,6 +496,17 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
     return includedItems.some((item) => !(titles[item.index] ?? item.title).trim());
   }, [excluded, items, mode, titles]);
 
+  const normalizedAcceptanceForItem = (item: DocConvertPreviewItem): string | undefined => {
+    if (item.is_acceptance_criteria) return overrides[item.index]?.acceptance_html;
+    const title = (titles[item.index] ?? item.title).trim() || item.title;
+    const acSection = mode === 'single' ? items.find((candidate) => candidate.is_acceptance_criteria) : undefined;
+    const baseAcceptance = overrides[item.index]?.acceptance_html
+      ?? item.acceptance_html
+      ?? (acSection ? overrides[acSection.index]?.description_html ?? acSection.description_html : undefined);
+    const fallback = overrides[item.index]?.description_html ?? item.description_html;
+    return gherkinToHtml(normalizeToFeatureGherkin(title, baseAcceptance, fallback));
+  };
+
   const handleConvert = async () => {
     if (isGlobal && targetProjectId == null) {
       toast({ title: t('error'), description: t('docConvertPickProject'), variant: 'destructive' });
@@ -249,9 +518,20 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       // any stale index whose suggestion is no longer present.
       const extras = (aiEnabled && enhance)
         ? [...extraSelected]
-            .map((idx) => enhance.suggested_requirements[idx])
-            .filter((s): s is NonNullable<typeof s> => !!s && !!s.title.trim())
-            .map((s) => ({ title: s.title, description_html: s.description_html, acceptance_html: s.acceptance_html }))
+            .map((idx) => ({ suggestion: enhance.suggested_requirements[idx], idx }))
+            .filter(({ suggestion }) => !!suggestion && !!suggestion.title.trim())
+            .map(({ suggestion, idx }) => {
+              const accepted = suggestion!;
+              return {
+                title: accepted.title,
+                description_html: accepted.description_html,
+                acceptance_html: gherkinToHtml(normalizeToFeatureGherkin(
+                  accepted.title,
+                  extraAcceptanceOverrides[idx] ?? accepted.acceptance_html,
+                  accepted.description_html,
+                )),
+              };
+            })
         : [];
       const extra_items = extras.length > 0 ? extras : undefined;
       const result = await docsAPI.convert(doc.id, {
@@ -265,7 +545,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
           title: (titles[i.index] ?? i.title).trim(),
           include: !excluded.has(i.index),
           description_html: overrides[i.index]?.description_html,
-          acceptance_html: overrides[i.index]?.acceptance_html,
+          acceptance_html: normalizedAcceptanceForItem(i),
         })),
         extra_items,
       });
@@ -280,7 +560,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleConvert();
     }
@@ -542,17 +822,36 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
               <div className="flex items-center gap-2 border-b border-emerald-200 px-3 py-2 dark:border-emerald-900/50">
                 <Plus className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 <span className="text-sm font-medium">{t('docConvertAiGaps')}</span>
-                <Badge variant="secondary" className="ms-auto">{extraSelected.size}/{enhance.suggested_requirements.length}</Badge>
+                {extrasNeedingGherkin > 0 && (
+                  <Button type="button" variant="ghost" size="sm" className="ms-auto h-7 text-xs text-emerald-700 hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-950/30" onClick={normalizeAllExtras}>
+                    <FileText className={`h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                    {t('docConvertNormalizeAllGherkin', { count: extrasNeedingGherkin })}
+                  </Button>
+                )}
+                <Badge variant="secondary" className={extrasNeedingGherkin > 0 ? '' : 'ms-auto'}>{extraSelected.size}/{enhance.suggested_requirements.length}</Badge>
               </div>
               <div className="space-y-2 p-3">
                 <p className="text-xs text-muted-foreground">{t('docConvertAiGapsHint')}</p>
                 {enhance.suggested_requirements.map((sug, idx) => {
                   const checked = extraSelected.has(idx);
+                  const acceptanceHtml = extraAcceptanceOverrides[idx] ?? sug.acceptance_html;
+                  const needsGherkin = !isFeatureStyleGherkin(acceptanceHtml);
                   return (
-                    <label key={idx} className={`flex cursor-pointer gap-2 rounded-md border p-2 transition-colors ${checked ? 'border-emerald-300 bg-white/60 dark:border-emerald-800 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-slate-700'}`}>
+                    <div key={idx} className={`flex gap-2 rounded-md border p-2 transition-colors ${checked ? 'border-emerald-300 bg-white/60 dark:border-emerald-800 dark:bg-emerald-950/30' : 'border-slate-200 dark:border-slate-700'}`}>
                       <input type="checkbox" checked={checked} onChange={() => toggleExtra(idx)} className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600" />
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium" dir="auto">{sug.title}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="min-w-0 flex-1 text-sm font-medium" dir="auto">{sug.title}</div>
+                          <Badge variant={needsGherkin ? 'outline' : 'secondary'} className="shrink-0 text-[10px]">
+                            {needsGherkin ? t('docConvertGherkinNeedsNormalization') : t('docConvertGherkinReady')}
+                          </Badge>
+                          {needsGherkin && (
+                            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-emerald-700 hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-950/30" onClick={(event) => { event.preventDefault(); normalizeExtraAcceptance(idx); }}>
+                              <FileText className={`h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                              {t('docConvertNormalizeGherkin')}
+                            </Button>
+                          )}
+                        </div>
                         {sug.rationale && <div className="text-[11px] text-emerald-700 dark:text-emerald-300" dir="auto">{sug.rationale}</div>}
                         {sug.description_html && (
                           <div
@@ -562,8 +861,19 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(sug.description_html) }}
                           />
                         )}
+                        {acceptanceHtml && (
+                          <div className="mt-1.5 rounded-md bg-white/60 px-2 py-1 dark:bg-emerald-950/30">
+                            <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('acceptanceCriteria')}</div>
+                            <div
+                              className="prose prose-sm max-h-24 max-w-none overflow-hidden text-xs text-muted-foreground dark:prose-invert"
+                              dir="auto"
+                              style={{ unicodeBidi: 'plaintext', textAlign: 'start' }}
+                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(acceptanceHtml) }}
+                            />
+                          </div>
+                        )}
                       </div>
-                    </label>
+                    </div>
                   );
                 })}
               </div>

@@ -12,6 +12,7 @@ they are never parsed as an integer id (the documented FastAPI gotcha).
 from __future__ import annotations
 
 import io
+import html
 import logging
 import os
 import re
@@ -34,6 +35,7 @@ from ..database import get_db
 from ..services import doc_conversion_service as conv
 from ..services import doc_impact_service
 from ..services import doc_release_notes_service as release_notes
+from ..services import feature_file_service
 from .project_ai_chat import _cancel_on_disconnect
 from ..services.ai_manager import AICompletionRequest, generate_ai_completion, get_ai_manager_status
 from ..services.ai_prompt_service import (
@@ -99,6 +101,16 @@ def _can_access(user: models.User, project_id: Optional[int], permission: str, d
 def _require(user: models.User, project_id: Optional[int], permission: str, db: Session) -> None:
     if not _can_access(user, project_id, permission, db):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+def _require_feature_enabled(db: Session, project_id: Optional[int], feature: str) -> None:
+    if project_id is None:
+        return
+    project = crud.get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not is_feature_enabled(project, feature):
+        raise HTTPException(status_code=403, detail=f"The '{feature}' feature is disabled for this project")
 
 
 def _is_admin(user: models.User) -> bool:
@@ -523,7 +535,11 @@ def _reconcile_grants_after_move(
         )
 
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_KNOWN_HTML_TAGS = (
+    "a|abbr|b|blockquote|br|code|del|div|em|h[1-6]|hr|i|img|ins|kbd|li|ol|p|pre|"
+    "s|span|strong|sub|sup|table|tbody|td|th|thead|tr|u|ul"
+)
+_HTML_TAG_RE = re.compile(rf"</?(?:{_KNOWN_HTML_TAGS})(?:\s[^>]*)?/?>", re.IGNORECASE)
 _TABLE_SEP_RE = re.compile(r"^\s*\|?[\s:|-]*-{2,}[\s:|-]*\|?\s*$", re.MULTILINE)
 _MD_STRIP_RE = re.compile(r"[#*_`>~\-\[\]\(\)!]|https?://\S+")
 
@@ -770,6 +786,184 @@ def _parse_convert_enhance(
         ))
 
     return summary, items, suggested
+
+
+_CONVERT_HTML_BLOCK_BREAK_RE = re.compile(r"<\s*br\s*/?>|</\s*(p|div|li|h[1-6]|tr|pre)\s*>", re.IGNORECASE)
+_CONVERT_HTML_TAG_RE = re.compile(rf"</?(?:{_KNOWN_HTML_TAGS})(?:\s[^>]*)?/?>", re.IGNORECASE)
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
+_GHERKIN_HINT_RE = re.compile(
+    r"^\s*(feature|rule|background|scenario outline|scenario|given|when|then|and|but)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+_LOCALIZED_GHERKIN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^\s*(ویژگی|قابلیت)\s*[:：]\s*", re.IGNORECASE), "Feature: "),
+    (re.compile(r"^\s*(خاصية|ميزة|الميزة)\s*[:：]\s*", re.IGNORECASE), "Feature: "),
+    (re.compile(r"^\s*(طرح سناریو|مخطط السيناريو)\s*[:：]\s*", re.IGNORECASE), "Scenario Outline: "),
+    (re.compile(r"^\s*(سناریو|سيناريو)\s*[:：]\s*", re.IGNORECASE), "Scenario: "),
+    (re.compile(r"^\s*(پیش‌زمینه|پیش زمینه|الخلفية|خلفية)\s*[:：]\s*", re.IGNORECASE), "Background: "),
+    (re.compile(r"^\s*(با فرض|فرض|بفرض)\s+", re.IGNORECASE), "Given "),
+    (re.compile(r"^\s*(وقتی|زمانی که|هنگامی که|عندما|متى)\s+", re.IGNORECASE), "When "),
+    (re.compile(r"^\s*(آنگاه|سپس|إذن|اذاً|عندئذ)\s+", re.IGNORECASE), "Then "),
+    (re.compile(r"^\s*(اما|ولی|لكن)\s+", re.IGNORECASE), "But "),
+    (re.compile(r"^\s*(و)\s+", re.IGNORECASE), "And "),
+]
+
+
+def _html_to_lines(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    text = _CONVERT_HTML_BLOCK_BREAK_RE.sub("\n", value)
+    text = _CONVERT_HTML_TAG_RE.sub(" ", text)
+    text = html.unescape(text).replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _strip_code_fence(value: str) -> str:
+    text = re.sub(r"^```(?:gherkin|feature)?\s*", "", value.strip(), flags=re.IGNORECASE)
+    return re.sub(r"```$", "", text, flags=re.IGNORECASE).strip()
+
+
+def _normalize_localized_gherkin(value: str) -> str:
+    out: list[str] = []
+    for line in value.split("\n"):
+        trimmed = line.lstrip()
+        indent = line[: len(line) - len(trimmed)]
+        replaced = None
+        for pattern, prefix in _LOCALIZED_GHERKIN_PATTERNS:
+            if pattern.search(trimmed):
+                replaced = indent + pattern.sub(prefix, trimmed)
+                break
+        out.append(replaced if replaced is not None else line)
+    return "\n".join(out)
+
+
+def _plain_criteria(value: str) -> list[str]:
+    criteria: list[str] = []
+    for raw in value.split("\n"):
+        line = _LIST_MARKER_RE.sub("", raw).strip()
+        line = re.sub(r"\s+", " ", line)
+        if line and not re.fullmatch(r"acceptance criteria:?", line, flags=re.IGNORECASE):
+            criteria.append(line)
+        if len(criteria) >= 12:
+            break
+    return criteria
+
+
+def _has_feature_style_gherkin(value: str) -> bool:
+    return bool(
+        re.search(r"^\s*Feature:", value, flags=re.IGNORECASE | re.MULTILINE)
+        and re.search(r"^\s*(Scenario|Scenario Outline|Background):", value, flags=re.IGNORECASE | re.MULTILINE)
+        and re.search(r"^\s*Given\b", value, flags=re.IGNORECASE | re.MULTILINE)
+        and re.search(r"^\s*When\b", value, flags=re.IGNORECASE | re.MULTILINE)
+        and re.search(r"^\s*Then\b", value, flags=re.IGNORECASE | re.MULTILINE)
+    )
+
+
+def _repair_gherkin(value: str, title: str, fallback_html: Optional[str]) -> Optional[str]:
+    text = _normalize_localized_gherkin(value).strip()
+    if not _GHERKIN_HINT_RE.search(text):
+        return None
+    out: list[str] = []
+    feature_seen = False
+    block_open = False
+    block_start = -1
+    has_given = has_when = has_then = False
+    outline = False
+    has_examples = False
+
+    def finish_block() -> None:
+        nonlocal block_open, block_start, has_given, has_when, has_then, outline, has_examples
+        if not block_open or block_start < 0:
+            return
+        if outline and not has_examples:
+            out[block_start] = re.sub(r"Scenario Outline:", "Scenario:", out[block_start], flags=re.IGNORECASE)
+            for idx in range(block_start + 1, len(out)):
+                out[idx] = re.sub(r"<([^<>]+)>", r"\1", out[idx])
+        if not has_given:
+            out.insert(block_start + 1, f"Given {title} is in scope")
+        if not has_when:
+            out.append("When the requirement behavior is exercised")
+        if not has_then:
+            criteria = _plain_criteria(_html_to_lines(fallback_html))
+            out.append(f"Then {criteria[0] if criteria else f'{title} is satisfied'}")
+        block_open = False
+
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            out.append("")
+            continue
+        if re.match(r"^Feature:", line, flags=re.IGNORECASE):
+            if feature_seen:
+                continue
+            finish_block()
+            feature_seen = True
+            out.append(line or f"Feature: {title}")
+            continue
+        if re.match(r"^Rule:", line, flags=re.IGNORECASE):
+            finish_block()
+            out.append(line)
+            continue
+        if re.match(r"^(Background|Scenario Outline|Scenario|Example):", line, flags=re.IGNORECASE):
+            finish_block()
+            block_open = True
+            block_start = len(out)
+            has_given = has_when = has_then = False
+            outline = bool(re.match(r"^Scenario Outline:", line, flags=re.IGNORECASE))
+            has_examples = False
+            out.append(line)
+            continue
+        if re.match(r"^Examples:", line, flags=re.IGNORECASE):
+            has_examples = True
+            out.append(line)
+            continue
+        if re.match(r"^(Given|When|Then|And|But|\*)\b", line, flags=re.IGNORECASE):
+            if not block_open:
+                block_open = True
+                block_start = len(out)
+                has_given = has_when = has_then = False
+                outline = has_examples = False
+                out.append(f"Scenario: {title}")
+            if not has_given and re.match(r"^(And|But)\b", line, flags=re.IGNORECASE):
+                line = re.sub(r"^(And|But)\b", "Given", line, flags=re.IGNORECASE)
+            has_given = has_given or bool(re.match(r"^Given\b", line, flags=re.IGNORECASE))
+            has_when = has_when or bool(re.match(r"^When\b", line, flags=re.IGNORECASE))
+            has_then = has_then or bool(re.match(r"^Then\b", line, flags=re.IGNORECASE))
+            out.append(line)
+            continue
+        out.append(line)
+
+    finish_block()
+    if not feature_seen:
+        out.insert(0, "")
+        out.insert(0, f"Feature: {title}")
+    formatted = feature_file_service.format_gherkin("\n".join(out))
+    return formatted if _has_feature_style_gherkin(formatted) else None
+
+
+def _prose_to_feature(title: str, value: str, fallback_html: Optional[str]) -> str:
+    criteria = _plain_criteria(value or _html_to_lines(fallback_html)) or [f"{title} is satisfied"]
+    scenarios: list[str] = []
+    for idx, criterion in enumerate(criteria):
+        scenario_title = f"{title} - criterion {idx + 1}" if len(criteria) > 1 else title
+        scenarios.append(
+            "\n".join([
+                f"Scenario: {scenario_title}",
+                f"Given {title} is in scope",
+                "When the requirement behavior is exercised",
+                f"Then {criterion}",
+            ])
+        )
+    return feature_file_service.format_gherkin(f"Feature: {title}\n\n" + "\n\n".join(scenarios))
+
+
+def _feature_acceptance_html(title: str, acceptance_html: Optional[str], fallback_html: Optional[str]) -> str:
+    safe_title = (title or "Requirement").strip() or "Requirement"
+    text = _strip_code_fence(_html_to_lines(acceptance_html) or _html_to_lines(fallback_html))
+    gherkin = _repair_gherkin(text, safe_title, fallback_html) or _prose_to_feature(safe_title, text, fallback_html)
+    return f'<pre><code class="language-gherkin">{html.escape(gherkin)}</code></pre>'
 
 
 def _audit_doc_impact(db: Session, actor: models.User, doc: models.Doc) -> None:
@@ -2120,7 +2314,9 @@ def register_docs_routes(app) -> None:
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         doc = _get_doc_or_404(db, doc_id)
-        _require(current_user, doc.project_id, "read", db)
+        _require(current_user, doc.project_id, "write", db)
+        _require_feature_enabled(db, doc.project_id, "doc_hub")
+        _require_feature_enabled(db, doc.project_id, "requirements")
         plan = conv.build_plan(doc, payload.mode, payload.heading_level)
         return schemas.DocConvertPreview(
             mode=plan.mode,
@@ -2144,6 +2340,7 @@ def register_docs_routes(app) -> None:
     ):
         doc = _get_doc_or_404(db, doc_id)
         _require(current_user, doc.project_id, "read", db)
+        _require_feature_enabled(db, doc.project_id, "doc_hub")
 
         target_project_id = doc.project_id or payload.target_project_id
         if target_project_id is None:
@@ -2152,6 +2349,7 @@ def register_docs_routes(app) -> None:
                 detail="target_project_id is required when converting a global doc",
             )
         _require(current_user, target_project_id, "write", db)
+        _require_feature_enabled(db, target_project_id, "requirements")
         if doc.project_id is None and crud.get_project(db, target_project_id) is None:
             raise HTTPException(status_code=404, detail="Target project not found")
 
@@ -2258,10 +2456,13 @@ def register_docs_routes(app) -> None:
         preview is unaffected; this is the optional, best-effort AI layer that
         degrades gracefully when AI is off/unavailable."""
         doc = _get_doc_or_404(db, doc_id)
-        _require(current_user, doc.project_id, "read", db)
+        _require(current_user, doc.project_id, "write", db)
+        _require_feature_enabled(db, doc.project_id, "doc_hub")
+        _require_feature_enabled(db, doc.project_id, "requirements")
 
         plan = conv.build_plan(doc, payload.mode, payload.heading_level)
         result = schemas.DocConvertEnhanceResult()
+        submitted_items = {it.index: it for it in (payload.items or [])}
 
         # Draft rows (plain text) the model reviews — one per non-AC section.
         ac_section = next((x for x in plan.sections if x.is_acceptance_criteria), None)
@@ -2269,12 +2470,20 @@ def register_docs_routes(app) -> None:
         for s in plan.sections:
             if s.is_acceptance_criteria:
                 continue
+            ov = submitted_items.get(s.index)
+            if ov is not None and not ov.include:
+                continue
             # Split sections carry their own AC; in single mode it's a sibling.
-            acceptance_html = s.acceptance_html or (ac_section.description_html if ac_section else "")
+            acceptance_html = (
+                ov.acceptance_html if (ov and ov.acceptance_html is not None)
+                else (s.acceptance_html or (ac_section.description_html if ac_section else ""))
+            )
             items_payload.append({
                 "index": s.index,
-                "title": s.title,
-                "description": strip_html(s.description_html),
+                "title": (ov.title if ov else s.title),
+                "description": strip_html(
+                    ov.description_html if (ov and ov.description_html is not None) else s.description_html
+                ),
                 "acceptance": strip_html(acceptance_html),
             })
 
@@ -2467,7 +2676,7 @@ def register_docs_routes(app) -> None:
         req_create = schemas.RequirementCreate(
             title=title,
             description=description_html,
-            acceptance_criteria=acceptance_html,
+            acceptance_criteria=_feature_acceptance_html(title, acceptance_html, description_html),
             requirement_id=conv.next_requirement_id(db, project_id),
             status=payload.default_status,
             priority=payload.default_priority,
