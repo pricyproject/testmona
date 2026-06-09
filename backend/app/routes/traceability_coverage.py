@@ -14,7 +14,7 @@ from ..crud import (
     update_traceability_matrix_entry, delete_traceability_matrix_entry,
     create_coverage_report, get_coverage_reports, get_coverage_report, update_coverage_report, delete_coverage_report
 )
-from ._analytics_shared import (
+from ..services.analytics_shared import (
     normalize_result_status,
     enum_value,
     get_linked_requirement_test_case_ids,

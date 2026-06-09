@@ -1,20 +1,15 @@
-"""
-Shared helpers for the analytics, coverage, and traceability routes.
-
-These were previously defined inline inside ``register_remaining_routes`` and are
-used by both ``analytics_dashboard`` and ``traceability_coverage`` route modules,
-so they live here as plain module-level functions to avoid duplication.
-"""
+"""Shared analytics, coverage, and traceability helpers."""
 
 import re
 from datetime import datetime
+from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
 from .. import models
 
 
-def normalize_result_status(status: str) -> str:
+def normalize_result_status(status: str | None) -> str:
     status_map = {
         "pass": "passed",
         "passed": "passed",
@@ -26,15 +21,16 @@ def normalize_result_status(status: str) -> str:
         "skipped": "skipped",
         "not_started": "not_started",
     }
-    return status_map.get((status or "").lower(), (status or "").lower())
+    normalized = str(status or "").strip().lower()
+    return status_map.get(normalized, normalized)
 
 
-def enum_value(value):
+def enum_value(value: Any) -> Any:
     return getattr(value, "value", value)
 
 
 def get_reference_tokens(value: str | None) -> list[str]:
-    raw_value = value or ""
+    raw_value = str(value or "")
     tokens = [
         token.strip("()[]{}\"'.,").lower()
         for token in re.split(r"[\s,;|]+", raw_value)
@@ -46,15 +42,43 @@ def get_reference_tokens(value: str | None) -> list[str]:
 
 def add_legacy_reference_links(linked_test_case_ids: dict[int, set[int]], requirements: list, test_cases: list) -> None:
     for requirement in requirements:
-        requirement_key = str(requirement.requirement_id or "").lower()
+        requirement_id = getattr(requirement, "id", None)
+        requirement_key = str(getattr(requirement, "requirement_id", None) or "").lower()
+        if requirement_id is None:
+            continue
         if not requirement_key:
             continue
         for test_case in test_cases:
-            if requirement_key in get_reference_tokens(test_case.reference):
-                linked_test_case_ids.setdefault(requirement.id, set()).add(test_case.id)
+            test_case_id = getattr(test_case, "id", None)
+            if test_case_id is None:
+                continue
+            if requirement_key in get_reference_tokens(getattr(test_case, "reference", None)):
+                linked_test_case_ids.setdefault(requirement_id, set()).add(test_case_id)
+
+
+def _unique_ids(ids: Iterable[int | None]) -> list[int]:
+    return list(dict.fromkeys(value for value in ids if value is not None))
+
+
+def _datetime_sort_value(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if hasattr(value, "timestamp"):
+        return float(value.timestamp())
+    return 0.0
+
+
+def _result_sort_key(result: Any) -> tuple[float, float, int]:
+    return (
+        _datetime_sort_value(getattr(result, "executed_at", None)),
+        _datetime_sort_value(getattr(result, "created_at", None)),
+        int(getattr(result, "id", 0) or 0),
+    )
 
 
 def get_linked_requirement_test_case_ids(db: Session, requirement_ids: list[int], project_test_case_ids: list[int]) -> dict[int, set[int]]:
+    requirement_ids = _unique_ids(requirement_ids)
+    project_test_case_ids = _unique_ids(project_test_case_ids)
     linked_test_case_ids = {requirement_id: set() for requirement_id in requirement_ids}
     if not requirement_ids or not project_test_case_ids:
         return linked_test_case_ids
@@ -80,24 +104,25 @@ def get_linked_requirement_test_case_ids(db: Session, requirement_ids: list[int]
     return linked_test_case_ids
 
 
-def build_coverage_report(db: Session, project_id: int, generated: bool = False):
+def build_coverage_report(db: Session, project_id: int, generated: bool = False) -> dict[str, Any]:
     from ..models import TestCase, TestSuite, TestResult, TestRun, Requirement
 
-    test_suite_ids = [row.id for row in db.query(TestSuite.id).filter(TestSuite.project_id == project_id).all()]
+    test_suite_ids = _unique_ids(row.id for row in db.query(TestSuite.id).filter(TestSuite.project_id == project_id).all())
     test_cases_query = db.query(TestCase).filter(TestCase.test_suite_id.in_(test_suite_ids), TestCase.is_deleted == False)
     test_cases = test_cases_query.all() if test_suite_ids else []
-    test_case_ids = [test_case.id for test_case in test_cases]
+    test_case_ids = _unique_ids(test_case.id for test_case in test_cases)
     total_test_cases = len(test_cases)
 
-    test_run_ids = [row.id for row in db.query(TestRun.id).filter(TestRun.project_id == project_id).all()]
+    test_run_ids = _unique_ids(row.id for row in db.query(TestRun.id).filter(TestRun.project_id == project_id).all())
     test_results = db.query(TestResult).filter(TestResult.test_run_id.in_(test_run_ids)).all() if test_run_ids else []
-    latest_by_test_case = {}
+    latest_by_test_case: dict[int, Any] = {}
     for result in test_results:
-        current = latest_by_test_case.get(result.test_case_id)
-        if current is None or (result.executed_at and current.executed_at and result.executed_at > current.executed_at):
-            latest_by_test_case[result.test_case_id] = result
-        elif current is None or (result.executed_at and not current.executed_at):
-            latest_by_test_case[result.test_case_id] = result
+        test_case_id = getattr(result, "test_case_id", None)
+        if test_case_id is None:
+            continue
+        current = latest_by_test_case.get(test_case_id)
+        if current is None or _result_sort_key(result) > _result_sort_key(current):
+            latest_by_test_case[test_case_id] = result
 
     normalized_statuses = [normalize_result_status(result.status) for result in latest_by_test_case.values()]
     executed_statuses = {"passed", "failed", "blocked", "skipped"}
@@ -108,8 +133,6 @@ def build_coverage_report(db: Session, project_id: int, generated: bool = False)
     skipped_test_cases = normalized_statuses.count("skipped")
     not_started_cases = max(total_test_cases - executed_test_cases, 0)
 
-    # Triage breakdown for blocked tests: why couldn't they run? Tests saved
-    # before this field existed (or without a reason) fall into "unspecified".
     blocker_reason_counts: dict[str, int] = {}
     for result in latest_by_test_case.values():
         if normalize_result_status(result.status) != "blocked":
@@ -119,17 +142,12 @@ def build_coverage_report(db: Session, project_id: int, generated: bool = False)
 
     requirements = db.query(Requirement).filter(Requirement.project_id == project_id).all()
     total_requirements = len(requirements)
-    requirement_ids = [requirement.id for requirement in requirements]
+    requirement_ids = _unique_ids(requirement.id for requirement in requirements)
     linked_test_case_ids = get_linked_requirement_test_case_ids(db, requirement_ids, test_case_ids)
     add_legacy_reference_links(linked_test_case_ids, requirements, test_cases)
     covered_requirements = len([requirement_id for requirement_id, linked_ids in linked_test_case_ids.items() if linked_ids])
     coverage_percentage = (covered_requirements / total_requirements * 100) if total_requirements else 0
 
-    # Build priority buckets from the priority values actually carried by the
-    # project's requirements. The PriorityDefinition table is not authoritative
-    # here: a requirement's priority (e.g. "high") may not exist as an active
-    # PriorityDefinition, and keying off the definitions silently dropped those
-    # requirements from the report. Fall back to the standard set when empty.
     linked_requirement_ids = {requirement_id for requirement_id, linked_ids in linked_test_case_ids.items() if linked_ids}
     priority_order = ["critical", "high", "medium", "low"]
     present_priorities = []

@@ -28,7 +28,7 @@ from ..crud import (
     update_dashboard_widget, delete_dashboard_widget,
     generate_dashboard_analytics
 )
-from ._analytics_shared import normalize_result_status, build_coverage_report
+from ..services.analytics_shared import normalize_result_status, build_coverage_report
 
 
 REPORT_SECTIONS = {"kpis", "summary", "recent_activity", "trends", "team_performance", "upcoming"}

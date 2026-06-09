@@ -29,7 +29,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..routes._analytics_shared import (
+from .analytics_shared import (
     add_legacy_reference_links,
     get_linked_requirement_test_case_ids,
 )
