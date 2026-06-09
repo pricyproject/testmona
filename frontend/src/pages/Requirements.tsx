@@ -57,6 +57,7 @@ import { GherkinEditor } from '@/components/requirements/GherkinEditor';
 import { isGherkinText } from '@/components/requirements/gherkin';
 import { decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup, richTextToMarkdownForEdit } from '@/components/requirements/richText';
 import { diffWords } from 'diff';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 const parsePositiveQueryNumber = (value: string | null): number | undefined => {
   if (!value || !/^\d+$/.test(value)) return undefined;
@@ -1600,7 +1601,7 @@ export function Requirements() {
           <div className="font-medium">{t('rteInlineDiff')}</div>
           <div
             className="prose prose-sm max-w-none whitespace-pre-wrap"
-            dangerouslySetInnerHTML={{ __html: buildDiffHtml(fromSnapshot.description, toSnapshot.description) }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(buildDiffHtml(fromSnapshot.description, toSnapshot.description)) }}
           />
         </div>
       )}
