@@ -141,15 +141,3 @@ def get_users_by_role(db: Session, role: str, skip: int = 0, limit: int = 100):
     from .rbac import role_value
     return db.query(User).filter(User.role == role_value(role)).offset(skip).limit(limit).all()
 
-
-def has_project_permission(db: Session, user_id: int, project_id: int, permission: str) -> bool:
-    """
-    Check if a user has permission to access a project.
-    Proper RBAC implementation based on project assignments and user roles.
-    """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        return False
-
-    from .rbac import has_permission
-    return has_permission(user, permission, project_id, db)

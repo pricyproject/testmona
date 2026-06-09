@@ -9,7 +9,7 @@ from ..schemas_audit import (
     AuditTrailResponse, AuditTrailList, AuditTrailFilter,
     ActivitySummary, EntityHistory, AuditTrailUpdate
 )
-from .. import crud_rbac, rbac
+from .. import rbac
 from ..auth import get_current_user
 from ..models import AuditAction, EntityType
 from ..services.request_context import get_request_client_ip, get_request_user_agent
@@ -71,7 +71,7 @@ async def get_audit_trails(
         raise HTTPException(status_code=400, detail="date_from cannot be after date_to")
 
     # Check permissions - users can only see audit trails for entities they have access to
-    if project_id and not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if project_id and not rbac.has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Not enough permissions to view audit trails for this project")
 
     accessible_project_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
@@ -102,7 +102,7 @@ async def get_recent_activities(
     Returns activities the current user has permission to see.
     """
     # Check project permissions if project_id is specified
-    if project_id and not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if project_id and not rbac.has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Not enough permissions to view activities for this project")
 
     filters = AuditTrailFilter(limit=limit, project_id=project_id)
@@ -132,9 +132,7 @@ async def get_project_audit_counts(
     for project_id, count in counts:
         if project_id is None:
             continue
-        if current_user.is_superuser or crud_rbac.has_project_permission(
-            db, current_user.id, project_id, "manage_projects"
-        ):
+        if current_user.is_superuser or rbac.has_permission(current_user, "manage_projects", project_id, db):
             result[project_id] = count
     return result
 
@@ -155,7 +153,7 @@ async def get_audit_trail(
 
     # Check permissions
     if (audit_trail.user_id != current_user.id and 
-        not (audit_trail.project_id and crud_rbac.has_project_permission(db, current_user.id, audit_trail.project_id, "view")) and
+        not (audit_trail.project_id and rbac.has_permission(current_user, "view", audit_trail.project_id, db)) and
         not current_user.is_superuser):
         raise HTTPException(status_code=403, detail="Not enough permissions to view this audit trail")
 
@@ -178,7 +176,7 @@ async def get_entity_history(
         # Check based on entity type
         entity_type_value = entity_type.value
         if entity_type_value == "project":
-            if not crud_rbac.has_project_permission(db, current_user.id, entity_id, "view"):
+            if not rbac.has_permission(current_user, "view", entity_id, db):
                 raise HTTPException(status_code=403, detail="Not enough permissions to view this entity history")
         elif entity_type_value in ["test_case", "test_suite", "test_run", "test_result", "test_plan", "requirement", "defect", "milestone"]:
             # For project-related entities, check if user has view permission on the project
@@ -200,7 +198,7 @@ async def get_entity_history(
                 if not entity:
                     raise HTTPException(status_code=404, detail="Entity not found")
                 if hasattr(entity, 'project_id') and entity.project_id:
-                    if not crud_rbac.has_project_permission(db, current_user.id, entity.project_id, "view"):
+                    if not rbac.has_permission(current_user, "view", entity.project_id, db):
                         raise HTTPException(status_code=403, detail="Not enough permissions to view this entity history")
         elif entity_type_value == "user":
             # Users can only view their own user history
@@ -213,7 +211,7 @@ async def get_entity_history(
     filtered_history = []
     for audit in history.history:
         if (audit.user_id == current_user.id or 
-            (audit.project_id and crud_rbac.has_project_permission(db, current_user.id, audit.project_id, "view")) or
+            (audit.project_id and rbac.has_permission(current_user, "view", audit.project_id, db)) or
             current_user.is_superuser):
             filtered_history.append(audit)
 
@@ -254,7 +252,7 @@ async def get_project_activity_summary(
     Get activity summary for a specific project.
     Requires view permissions for the project.
     """
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not rbac.has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Not enough permissions to view project activity summary")
 
     summary = audit_service.get_project_activity_summary(project_id, days)
@@ -317,9 +315,7 @@ async def delete_project_audit_trails(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if not current_user.is_superuser and not crud_rbac.has_project_permission(
-        db, current_user.id, project_id, "manage_projects"
-    ):
+    if not current_user.is_superuser and not rbac.has_permission(current_user, "manage_projects", project_id, db):
         raise HTTPException(
             status_code=403,
             detail="Not enough permissions to delete audit trails for this project",
@@ -371,7 +367,7 @@ async def create_audit_trail(
     # Prevent forging audit entries for projects the user cannot access
     if (audit_create.project_id
             and not current_user.is_superuser
-            and not crud_rbac.has_project_permission(db, current_user.id, audit_create.project_id, "view")):
+            and not rbac.has_permission(current_user, "view", audit_create.project_id, db)):
         raise HTTPException(
             status_code=403,
             detail="Not enough permissions to create audit trails for this project",

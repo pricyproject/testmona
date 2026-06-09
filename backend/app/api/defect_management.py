@@ -1,10 +1,10 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from app import crud, crud_defect_management, models, schemas, crud_rbac
+from app import crud, crud_defect_management, models, schemas
 from app.database import get_db
 from app.auth import get_current_user
-from app.rbac import require_permission
+from app.rbac import has_permission, require_permission
 from app.security_utils import validate_file_size, MAX_ATTACHMENT_SIZE
 import os
 import uuid
@@ -122,7 +122,7 @@ def get_defects_management(
 ):
     """Get all defects for a project with advanced filtering"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
     return crud_defect_management.get_defects_management(
@@ -146,7 +146,7 @@ def get_defect_management_detail(
 ):
     """Get detailed defect information with all related data"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
     defect = crud_defect_management.get_defect_management_detail(db, defect_id=defect_id)
@@ -164,10 +164,10 @@ def create_defect_management(
 ):
     """Create a new defect with enhanced fields"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
     
     return crud_defect_management.create_defect_management(
@@ -187,10 +187,10 @@ def update_defect_management(
 ):
     """Update defect with change tracking"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
     
     # Get existing defect for change tracking
@@ -217,10 +217,10 @@ def delete_defect_management(
 ):
     """Delete a defect"""
     # Check project access and delete permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
+    if not has_permission(current_user, "delete", project_id, db):
         raise HTTPException(status_code=403, detail="Delete permission required")
     
     success = crud_defect_management.delete_defect_management(db, defect_id=defect_id)
@@ -242,7 +242,7 @@ def get_defect_comments(
 ):
     """Get all comments for a defect"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Ensure the defect belongs to this project
@@ -260,10 +260,10 @@ def create_defect_comment(
 ):
     """Add a comment to a defect"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
 
     # Ensure the defect belongs to this project
@@ -287,10 +287,10 @@ def update_defect_comment(
 ):
     """Update a comment"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
 
     # Ensure the defect belongs to this project
@@ -313,10 +313,10 @@ def delete_defect_comment(
 ):
     """Delete a comment"""
     # Check project access and delete permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
+    if not has_permission(current_user, "delete", project_id, db):
         raise HTTPException(status_code=403, detail="Delete permission required")
 
     # Ensure the defect belongs to this project
@@ -339,7 +339,7 @@ def get_defect_attachments(
 ):
     """Get all attachments for a defect"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Ensure the defect belongs to this project
@@ -357,10 +357,10 @@ async def upload_defect_attachment(
 ):
     """Upload an attachment to a defect"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
 
     # Ensure the defect exists and belongs to this project before writing any file
@@ -422,10 +422,10 @@ def delete_defect_attachment(
 ):
     """Delete an attachment"""
     # Check project access and delete permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
+    if not has_permission(current_user, "delete", project_id, db):
         raise HTTPException(status_code=403, detail="Delete permission required")
 
     # Ensure the defect belongs to this project
@@ -472,7 +472,7 @@ def get_defect_history(
 ):
     """Get change history for a defect"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Ensure the defect belongs to this project
@@ -490,7 +490,7 @@ def get_issue_tracker_integrations(
 ):
     """Get all issue tracker integrations for a project"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
     return crud_defect_management.get_issue_tracker_integrations(db, project_id=project_id)
@@ -504,10 +504,10 @@ def create_issue_tracker_integration(
 ):
     """Create a new issue tracker integration"""
     # Check project access and manage permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
+    if not has_permission(current_user, "manage_projects", project_id, db):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
     
     return crud_defect_management.create_issue_tracker_integration(
@@ -527,10 +527,10 @@ def update_issue_tracker_integration(
 ):
     """Update an issue tracker integration"""
     # Check project access and manage permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
+    if not has_permission(current_user, "manage_projects", project_id, db):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
 
     # Ensure the integration belongs to this project
@@ -551,10 +551,10 @@ def delete_issue_tracker_integration(
 ):
     """Delete an issue tracker integration"""
     # Check project access and manage permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
+    if not has_permission(current_user, "manage_projects", project_id, db):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
 
     # Ensure the integration belongs to this project
@@ -575,10 +575,10 @@ def test_issue_tracker_connection(
 ):
     """Test connection to an issue tracker integration"""
     # Check project access and manage permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "manage_projects"):
+    if not has_permission(current_user, "manage_projects", project_id, db):
         raise HTTPException(status_code=403, detail="Manage projects permission required")
 
     # Get integration, ensuring it belongs to this project
@@ -607,10 +607,10 @@ def sync_defect_with_external(
 ):
     """Sync a defect with external issue tracker"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
     
     # Get defect, ensuring it belongs to this project
@@ -737,7 +737,7 @@ def get_defect_templates(
 ):
     """Get all defect templates for a project"""
     # Check project access
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
     return crud_defect_management.get_defect_templates(db, project_id=project_id)
@@ -751,10 +751,10 @@ def create_defect_template(
 ):
     """Create a new defect template"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
     
     return crud_defect_management.create_defect_template(
@@ -774,10 +774,10 @@ def update_defect_template(
 ):
     """Update a defect template"""
     # Check project access and write permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "write"):
+    if not has_permission(current_user, "write", project_id, db):
         raise HTTPException(status_code=403, detail="Write permission required")
 
     # Ensure the template belongs to this project
@@ -798,10 +798,10 @@ def delete_defect_template(
 ):
     """Delete a defect template"""
     # Check project access and delete permission
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "view"):
+    if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    if not crud_rbac.has_project_permission(db, current_user.id, project_id, "delete"):
+    if not has_permission(current_user, "delete", project_id, db):
         raise HTTPException(status_code=403, detail="Delete permission required")
 
     # Ensure the template belongs to this project
