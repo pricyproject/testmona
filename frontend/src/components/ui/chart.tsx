@@ -120,7 +120,7 @@ export function TestRunPieChart({ data, title, onChartClick }: TestRunChartProps
   };
 
   return (
-    <Card className="overflow-hidden border-slate-200/80 bg-linear-to-br from-white to-slate-50 shadow-xs dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
+    <Card className="min-w-0 overflow-hidden border-slate-200/80 bg-linear-to-br from-white to-slate-50 shadow-xs dark:border-slate-800 dark:from-slate-950 dark:to-slate-900">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -137,8 +137,8 @@ export function TestRunPieChart({ data, title, onChartClick }: TestRunChartProps
           <EmptyChart />
         ) : (
           <>
-            <div className="relative h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="relative h-[260px] min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={260}>
                 <PieChart>
                   <Pie
                     data={data}
@@ -241,7 +241,7 @@ export function TestRunBarChart({ data, title, onChartClick, activeSection }: { 
   const cellOpacity = (section: SectionData) => (hasActiveSection && !isSectionActive(section) ? 0.3 : 1);
 
   return (
-    <Card className="overflow-hidden border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-950">
+    <Card className="min-w-0 overflow-hidden border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-950">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -262,7 +262,8 @@ export function TestRunBarChart({ data, title, onChartClick, activeSection }: { 
           <EmptyChart />
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={angledLabels ? 252 : 208}>
+            <div className="min-w-0">
+            <ResponsiveContainer width="100%" height={angledLabels ? 252 : 208} minWidth={0} minHeight={angledLabels ? 252 : 208}>
               <BarChart data={visibleData} margin={{ top: 12, right: 8, left: -16, bottom: 0 }} barCategoryGap={18}>
                 <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e2e8f0" />
                 <XAxis
@@ -299,6 +300,7 @@ export function TestRunBarChart({ data, title, onChartClick, activeSection }: { 
                 ))}
               </BarChart>
             </ResponsiveContainer>
+            </div>
 
             {/* All sections scrollable list — each row toggles the table's
                 section filter, so sections beyond the top-8 bars stay filterable. */}
@@ -353,7 +355,7 @@ export function TestRunTrendChart({ data, title }: { data: TrendData[]; title: s
   const delta = latest && first ? latest.passRate - first.passRate : 0;
 
   return (
-    <Card className="overflow-hidden border-slate-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_32%),linear-gradient(180deg,#fff,#f8fafc)] shadow-xs dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.2),transparent_32%),linear-gradient(180deg,#020617,#0f172a)]">
+    <Card className="min-w-0 overflow-hidden border-slate-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_32%),linear-gradient(180deg,#fff,#f8fafc)] shadow-xs dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.2),transparent_32%),linear-gradient(180deg,#020617,#0f172a)]">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -372,7 +374,8 @@ export function TestRunTrendChart({ data, title }: { data: TrendData[]; title: s
           <EmptyChart />
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={280}>
+            <div className="min-w-0">
+            <ResponsiveContainer width="100%" height={280} minWidth={0} minHeight={280}>
               <AreaChart data={data} margin={{ top: 14, right: 8, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="passRateGradient" x1="0" y1="0" x2="0" y2="1">
@@ -394,6 +397,7 @@ export function TestRunTrendChart({ data, title }: { data: TrendData[]; title: s
                 <Area type="monotone" dataKey="passRate" name={t('passRatePercent')} stroke={COLORS.trend} strokeWidth={3} fill="url(#passRateGradient)" activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }} />
               </AreaChart>
             </ResponsiveContainer>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-white/80 p-3 text-sm shadow-xs dark:bg-slate-950/60">
                 <div className="text-xs text-slate-500 dark:text-slate-400">{t('latestPassRate')}</div>
