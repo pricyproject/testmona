@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -185,6 +186,7 @@ export function TestPlans() {
   const createFromQuery = searchParams.get('create') === '1';
   const editIdFromQuery = searchParams.get('edit');
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
 
   const numericProjectId = useMemo(() => {
     if (!projectId) return null;
@@ -1132,12 +1134,14 @@ export function TestPlans() {
             </div>
           </div>
           <Dialog open={isCreateOpen} onOpenChange={(open) => (open ? openCreateDialog() : closeCreateDialog())}>
-            <DialogTrigger asChild>
-              <Button disabled={!numericProjectId} className="shrink-0">
-                <Plus className="mr-2 h-4 w-4" />
-                {t('createTestPlan')}
-              </Button>
-            </DialogTrigger>
+            {canWrite && (
+              <DialogTrigger asChild>
+                <Button disabled={!numericProjectId} className="shrink-0">
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t('createTestPlan')}
+                </Button>
+              </DialogTrigger>
+            )}
             <DialogContent isRTL={isRTL} className="max-h-[88vh] overflow-y-auto sm:max-w-[760px]">
               <DialogHeader>
                 <DialogTitle>{t('createNewTestPlan')}</DialogTitle>
@@ -1383,12 +1387,12 @@ export function TestPlans() {
                 <X className="mr-1.5 h-3.5 w-3.5" />
                 {t('clearFilters')}
               </Button>
-            ) : (
+            ) : canWrite ? (
               <Button onClick={openCreateDialog} disabled={!numericProjectId}>
                 <Plus className="mr-2 h-4 w-4" />
                 {t('createTestPlan')}
               </Button>
-            )}
+            ) : null}
           </CardContent>
         </Card>
       ) : (

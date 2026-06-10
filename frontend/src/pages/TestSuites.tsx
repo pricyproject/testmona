@@ -56,6 +56,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface SectionNode {
   id: number;
@@ -78,6 +79,7 @@ export function TestSuites() {
   const { projectId } = useParams<{ projectId?: string }>();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   
   // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -523,12 +525,14 @@ export function TestSuites() {
               </div>
 
               <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
-                <DialogTrigger asChild>
-                  <Button className="h-12 rounded-2xl bg-blue-600 px-5 font-semibold text-white shadow-xl shadow-blue-600/20 hover:bg-blue-700 dark:bg-white dark:text-slate-950 dark:shadow-blue-950/25 dark:hover:bg-blue-50">
-                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                    {t('createTestSuite')}
-                  </Button>
-                </DialogTrigger>
+                {canWrite && (
+                  <DialogTrigger asChild>
+                    <Button className="h-12 rounded-2xl bg-blue-600 px-5 font-semibold text-white shadow-xl shadow-blue-600/20 hover:bg-blue-700 dark:bg-white dark:text-slate-950 dark:shadow-blue-950/25 dark:hover:bg-blue-50">
+                      <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                      {t('createTestSuite')}
+                    </Button>
+                  </DialogTrigger>
+                )}
                 <DialogContent
                   isRTL={isRTL}
                   className={`max-h-[92vh] overflow-hidden p-0 sm:max-w-[980px] ${isRTL ? 'rtl' : 'ltr'}`}
@@ -1029,10 +1033,12 @@ export function TestSuites() {
                 <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                   {t('createFirstTestSuite')}
                 </p>
-                <Button onClick={() => setIsDialogOpen(true)} className="mt-5 rounded-2xl bg-blue-600 hover:bg-blue-700">
-                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                  {t('createYourFirstTestSuite')}
-                </Button>
+                {canWrite && (
+                  <Button onClick={() => setIsDialogOpen(true)} className="mt-5 rounded-2xl bg-blue-600 hover:bg-blue-700">
+                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('createYourFirstTestSuite')}
+                  </Button>
+                )}
               </div>
             </div>
           ) : filteredTestSuites.length === 0 ? (
@@ -1105,18 +1111,22 @@ export function TestSuites() {
                                 <FileText className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                                 {t('viewDetails')}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleDuplicateSuite(suite)}>
-                                <Copy className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                {t('duplicateSuite')}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => setDeleteTarget(suite)}
-                                className="text-red-600 dark:text-red-400"
-                              >
-                                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                {t('delete')}
-                              </DropdownMenuItem>
+                              {canWrite && (
+                                <>
+                                  <DropdownMenuItem onClick={() => handleDuplicateSuite(suite)}>
+                                    <Copy className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                    {t('duplicateSuite')}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setDeleteTarget(suite)}
+                                    className="text-red-600 dark:text-red-400"
+                                  >
+                                    <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                    {t('delete')}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>

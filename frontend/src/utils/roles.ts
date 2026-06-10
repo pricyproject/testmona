@@ -24,10 +24,17 @@ export function isViewerRole(role?: string | null): boolean {
 }
 
 /**
- * Whether a user may perform write actions (record results, edit, link defects).
+ * Whether a user may perform write actions (create/edit/delete/execute content).
  * Superusers always can; known viewers cannot; any other/unknown role is allowed
- * (the backend still enforces project-scoped RBAC as the source of truth).
+ * (the backend still enforces RBAC — incl. the viewer read-only guard — as the
+ * source of truth, so this is UX gating only).
  */
-export function canWriteResults(user?: { role?: string | null; is_superuser?: boolean } | null): boolean {
+export function canWrite(user?: { role?: string | null; is_superuser?: boolean } | null): boolean {
   return Boolean(user?.is_superuser) || !isViewerRole(user?.role);
 }
+
+/**
+ * Backwards-compatible alias for {@link canWrite}, kept so existing call sites
+ * (test execution, requirements) don't need to change.
+ */
+export const canWriteResults = canWrite;

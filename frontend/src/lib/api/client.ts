@@ -82,6 +82,15 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // Read-only (viewer) guard from the backend. Surface a friendly toast so any
+    // write control that wasn't gated in the UI still fails gracefully instead of
+    // looking broken. The backend remains the source of truth.
+    if (error.response?.status === 403 &&
+        error.response?.data?.detail === "Viewer role is read-only") {
+      window.dispatchEvent(new CustomEvent('viewerReadOnly'));
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       if ((api as any)._refreshing && (api as any)._refreshPromise) {
         try {

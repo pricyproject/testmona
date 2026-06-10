@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -48,6 +49,7 @@ export function Environments() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const routeProjectId = Number(projectId);
   const currentProjectId =
     projectId && Number.isInteger(routeProjectId) && routeProjectId > 0 ? routeProjectId : null;
@@ -299,12 +301,14 @@ export function Environments() {
           <p className="text-gray-600 dark:text-gray-400">{t('executionEnvironmentsDescription')}</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={handleDialogClose}>
-          <DialogTrigger asChild>
-            <Button disabled={!currentProjectId}>
-              <Plus className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
-              {t('addEnvironment')}
-            </Button>
-          </DialogTrigger>
+          {canWrite && (
+            <DialogTrigger asChild>
+              <Button disabled={!currentProjectId}>
+                <Plus className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
+                {t('addEnvironment')}
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent isRTL={isRTL} className="sm:max-w-[600px]" onKeyDown={handleKeyDown}>
             <DialogHeader>
               <DialogTitle>{isEditing ? t('editEnvironment') : t('createNewEnvironment')}</DialogTitle>

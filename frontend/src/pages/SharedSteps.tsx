@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { sharedStepsAPI } from '@/lib/api';
 import { SharedStep, SharedStepCreate } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -74,6 +75,7 @@ const formatDateTime = (value?: string, fallback = '') => {
 export function SharedSteps() {
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const [sharedSteps, setSharedSteps] = useState<SharedStep[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -459,12 +461,14 @@ export function SharedSteps() {
           <p className="text-gray-600">{t('sharedStepsSubtitle')}</p>
         </div>
         <Dialog open={isCreateDialogOpen} onOpenChange={handleCreateDialogOpenChange}>
-          <DialogTrigger asChild>
-            <Button disabled={!isProjectIdValid || !numericProjectId}>
-              <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {t('createSharedStep')}
-            </Button>
-          </DialogTrigger>
+          {canWrite && (
+            <DialogTrigger asChild>
+              <Button disabled={!isProjectIdValid || !numericProjectId}>
+                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('createSharedStep')}
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent isRTL={isRTL} className="sm:max-w-[600px]" onKeyDown={handleKeyDown}>
             <DialogHeader>
               <DialogTitle>{t('createNewSharedStep')}</DialogTitle>

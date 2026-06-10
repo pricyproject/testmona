@@ -48,6 +48,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAuthStore } from '@/stores/authStore';
 import { docsAPI, type DocListParams } from '@/lib/api';
 import { parsePositiveIntegerParam } from '@/utils/validation';
@@ -130,6 +131,7 @@ function DocCardSkeleton() {
 
 export function DocHub() {
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -591,9 +593,11 @@ export function DocHub() {
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('docSpaces')}</h2>
             <div className="flex items-center gap-0.5">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSpaceDialogOpen(true)} title={t('docNewSpace')}>
-                <FolderPlus className="h-4 w-4" />
-              </Button>
+              {canWrite && (
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSpaceDialogOpen(true)} title={t('docNewSpace')}>
+                  <FolderPlus className="h-4 w-4" />
+                </Button>
+              )}
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSidebarCollapsed(true)} title={t('docHideSidebar')}>
                 <PanelLeftClose className="h-4 w-4" />
               </Button>
@@ -767,10 +771,12 @@ export function DocHub() {
                 <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                 {t('export')}
               </Button>
-              <Button size="sm" disabled={activeSpaceId == null} onClick={() => setDocDialogOpen(true)}>
-                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('docNewDoc')}
-              </Button>
+              {canWrite && (
+                <Button size="sm" disabled={activeSpaceId == null} onClick={() => setDocDialogOpen(true)}>
+                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('docNewDoc')}
+                </Button>
+              )}
             </div>
 
             {/* Status pills */}

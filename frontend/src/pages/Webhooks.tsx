@@ -46,6 +46,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { webhooksAPI, getApiErrorMessage } from '@/lib/api';
 
 interface WebhookRow {
@@ -125,6 +126,7 @@ export function Webhooks() {
   const numericProjectId = projectId ? Number(projectId) : null;
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { canWrite } = usePermissions();
 
   const [hooks, setHooks] = useState<WebhookRow[]>([]);
   const [supportedEvents, setSupportedEvents] = useState<string[]>([]);
@@ -339,16 +341,18 @@ export function Webhooks() {
             <p className="text-sm text-muted-foreground">{t('webhooksSubtitle')}</p>
           </div>
         </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setCreateOpen(true);
-          }}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          {t('createWebhook')}
-        </Button>
+        {canWrite && (
+          <Button
+            onClick={() => {
+              resetForm();
+              setCreateOpen(true);
+            }}
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            {t('createWebhook')}
+          </Button>
+        )}
       </div>
 
       <Card>

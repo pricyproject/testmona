@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,6 +59,7 @@ export function CustomFields() {
   const { projectId: urlProjectId } = useParams();
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
+  const { canWrite } = usePermissions();
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -582,12 +584,14 @@ export function CustomFields() {
                 <p className="text-sm text-gray-600">{t('customFieldDefinitionsDesc')}</p>
               </div>
               <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
-                <DialogTrigger asChild>
-                  <Button onClick={() => { resetForm(); setEditingField(null); }}>
-                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                    {t('addField')}
-                  </Button>
-                </DialogTrigger>
+                {canWrite && (
+                  <DialogTrigger asChild>
+                    <Button onClick={() => { resetForm(); setEditingField(null); }}>
+                      <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                      {t('addField')}
+                    </Button>
+                  </DialogTrigger>
+                )}
                 <DialogContent isRTL={isRTL} onKeyDown={handleKeyDown} className="max-w-lg max-h-[90vh]">
                   <DialogHeader className="space-y-2 pb-4">
                     <DialogTitle id="custom-field-dialog-title" className="text-xl font-semibold">

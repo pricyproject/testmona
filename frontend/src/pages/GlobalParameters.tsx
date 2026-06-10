@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -68,6 +69,7 @@ function ParametersManager({ projectId }: ManagerProps) {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const user = useAuthStore((state) => state.user);
+  const { canWrite } = usePermissions();
 
   const isProjectPage = projectId != null;
   // Cross-project globals are admin-or-higher only — both to view and to manage.
@@ -76,7 +78,7 @@ function ParametersManager({ projectId }: ManagerProps) {
   const isAdmin = Boolean(user?.is_superuser) || user?.role?.toLowerCase() === 'admin';
   // Who can mutate which scope. Project params: anyone who reached the (guarded)
   // project page — the backend still enforces write. Global params: admins+.
-  const canManageProject = isProjectPage;
+  const canManageProject = isProjectPage && canWrite;
   const canManageGlobal = isAdmin;
   // Non-admins can neither see nor edit cross-project globals.
   const canViewGlobal = isAdmin;

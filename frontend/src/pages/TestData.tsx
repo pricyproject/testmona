@@ -29,6 +29,7 @@ import {
 
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { datasetsAPI, getApiErrorMessage, type TestDataset } from '@/lib/api';
 
 interface DatasetForm {
@@ -62,6 +63,7 @@ export function TestData() {
   const projectIdNum = projectId ? parseInt(projectId) : null;
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
+  const { canWrite } = usePermissions();
 
   const [datasets, setDatasets] = useState<TestDataset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,9 +186,11 @@ export function TestData() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">{t('testDataDescription')}</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('newDataset')}
-        </Button>
+        {canWrite && (
+          <Button onClick={openCreate}>
+            <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('newDataset')}
+          </Button>
+        )}
       </div>
 
       {loading ? (

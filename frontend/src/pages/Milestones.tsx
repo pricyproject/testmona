@@ -59,6 +59,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { milestonesAPI, testPlansAPI } from '@/lib/api';
 import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 
 type TFn = (key: any, params?: Record<string, string | number>) => string;
 type ViewMode = 'grid' | 'list';
@@ -104,6 +105,7 @@ export function Milestones() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const currentProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
 
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -405,12 +407,14 @@ export function Milestones() {
               </div>
             </div>
             <Dialog open={isDialogOpen} onOpenChange={(open) => (open ? setIsDialogOpen(true) : closeDialog())}>
-              <DialogTrigger asChild>
-                <Button size="lg" className="gap-2 shadow-sm" onClick={openCreateDialog} disabled={!currentProjectId}>
-                  <Plus className="h-4 w-4" />
-                  {t('addMilestone')}
-                </Button>
-              </DialogTrigger>
+              {canWrite && (
+                <DialogTrigger asChild>
+                  <Button size="lg" className="gap-2 shadow-sm" onClick={openCreateDialog} disabled={!currentProjectId}>
+                    <Plus className="h-4 w-4" />
+                    {t('addMilestone')}
+                  </Button>
+                </DialogTrigger>
+              )}
               <MilestoneFormDialog
                 t={t}
                 isRTL={isRTL}

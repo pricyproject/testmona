@@ -1990,6 +1990,9 @@ export const en = {
   failedToDeleteAccount: 'Failed to delete account. Please try again.',
   profileOfflineMessage: 'You are offline. Some features may not be available. Please check your internet connection.',
 
+  // Read-only (viewer) role
+  readOnlyAccess: 'Read-only access',
+  readOnlyAccessDescription: "Your role can view but not change this. Contact an admin if you need edit access.",
   // Forced Password Change
   passwordChangeRequired: 'Password Change Required',
   passwordChangeRequiredDescription: 'For security reasons, you must change your default password before continuing.',

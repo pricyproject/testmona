@@ -13,6 +13,7 @@ import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequ
 import { SearchableTestCaseSelect } from '@/components/Defects/SearchableTestCaseSelect';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAppName } from '@/hooks/useAppName';
 import {
   Dialog,
@@ -236,6 +237,7 @@ export function Defects() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const { appName } = useAppName(false);
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   
@@ -1620,12 +1622,14 @@ export function Defects() {
             </DialogContent>
           </Dialog>
           <Dialog open={isCreateDialogOpen} onOpenChange={handleDialogClose}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                {t('reportDefect')}
-              </Button>
-            </DialogTrigger>
+            {canWrite && (
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="h-4 w-4 mr-2" />
+                  {t('reportDefect')}
+                </Button>
+              </DialogTrigger>
+            )}
           <DialogContent
             isRTL={isRTL}
             className={`p-0 ${isCreateDialogExpanded ? 'h-[calc(100svh-1.5rem)] max-h-[calc(100svh-1.5rem)] overflow-y-auto sm:max-w-[calc(100vw-1.5rem)]' : 'max-h-[92svh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-[900px]'}`}
@@ -2454,12 +2458,12 @@ export function Defects() {
                   <X className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   {t('defectsClearFilters')}
                 </Button>
-              ) : (
+              ) : canWrite ? (
                 <Button onClick={() => setIsCreateDialogOpen(true)}>
                   <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   {t('reportDefect')}
                 </Button>
-              )}
+              ) : null}
             </div>
           </div>
         )}

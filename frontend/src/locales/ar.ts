@@ -2226,6 +2226,9 @@ export const ar = {
     failedToDeleteAccount: 'فشل حذف الحساب. الرجاء المحاولة مرة أخرى.',
     profileOfflineMessage: 'أنت غير متصل. قد لا تكون بعض الميزات متاحة. الرجاء التحقق من اتصال الإنترنت.',
 
+    // Read-only (viewer) role
+    readOnlyAccess: 'وصول للقراءة فقط',
+    readOnlyAccessDescription: 'يمكن لدورك العرض دون التعديل. تواصل مع المسؤول إذا كنت بحاجة إلى صلاحية التعديل.',
     // Forced Password Change
     passwordChangeRequired: 'تغيير كلمة المرور مطلوب',
     passwordChangeRequiredDescription: 'لأسباب أمنية، يجب عليك تغيير كلمة المرور الافتراضية قبل المتابعة.',

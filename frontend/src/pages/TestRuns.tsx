@@ -47,6 +47,7 @@ import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testRe
 import { TestRun, TestCase } from '@/types';
 import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAuthStore } from '@/stores/authStore';
 
 // Define User interface locally since it's not in types
@@ -86,6 +87,7 @@ export function TestRuns() {
   const { projectId } = useParams<{ projectId?: string }>();
   const [searchParams] = useSearchParams();
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const { user: currentUser } = useAuthStore();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [runName, setRunName] = useState('');
@@ -749,12 +751,14 @@ export function TestRuns() {
           <p className="text-gray-600">{t('testRunsDescription')}</p>
         </div>
         <Dialog open={isCreateDialogOpen} onOpenChange={handleDialogClose}>
-          <DialogTrigger asChild>
-            <Button type="button">
-              <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {t('createTestRun')}
-            </Button>
-          </DialogTrigger>
+          {canWrite && (
+            <DialogTrigger asChild>
+              <Button type="button">
+                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('createTestRun')}
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent isRTL={isRTL} className={`max-h-[92vh] overflow-hidden p-0 sm:max-w-[1100px] ${isRTL ? 'rtl' : 'ltr'}`} onKeyDown={handleKeyDown}>
             <div className="max-h-[92vh] overflow-y-auto bg-slate-50 dark:bg-slate-950">
             <DialogHeader className="border-b border-slate-200 bg-white px-6 py-5 dark:border-slate-800 dark:bg-slate-900">

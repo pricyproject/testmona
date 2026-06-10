@@ -6,6 +6,8 @@ import { PasswordChangeDialog } from '@/components/Profile/PasswordChangeDialog'
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+import { useTranslation } from '@/hooks/useTranslation';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -14,6 +16,8 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const { theme, toggleTheme } = useTheme();
   const { language } = useAuthStore();
+  const { toast } = useToast();
+  const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
   // Collapsed by default; remember the user's choice across reloads.
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState<boolean>(() => {
@@ -44,6 +48,22 @@ export function Layout({ children }: LayoutProps) {
       window.removeEventListener('passwordChangeRequired', handlePasswordChangeRequired);
     };
   }, []);
+
+  // Global listener for the backend viewer read-only guard. Ensures any write
+  // attempt that slipped past UI gating fails with a clear message.
+  React.useEffect(() => {
+    const handleViewerReadOnly = () => {
+      toast({
+        title: t('readOnlyAccess'),
+        description: t('readOnlyAccessDescription'),
+        variant: 'destructive',
+      });
+    };
+    window.addEventListener('viewerReadOnly', handleViewerReadOnly);
+    return () => {
+      window.removeEventListener('viewerReadOnly', handleViewerReadOnly);
+    };
+  }, [toast, t]);
 
   const handlePasswordChange = async (oldPassword: string, newPassword: string) => {
     try {

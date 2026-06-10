@@ -30,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { apiTokensAPI, getApiErrorMessage } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface TokenRow {
   id: number;
@@ -50,6 +51,7 @@ const formatWhen = (value?: string | null, fallback = '-'): string => {
 export function ApiTokens() {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { canWrite } = usePermissions();
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -164,10 +166,12 @@ export function ApiTokens() {
           <h1 className="text-2xl font-semibold tracking-tight">{t('apiTokens')}</h1>
           <p className="text-sm text-muted-foreground">{t('apiTokensSubtitle')}</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          {t('createApiToken')}
-        </Button>
+        {canWrite && (
+          <Button onClick={() => setCreateOpen(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            {t('createApiToken')}
+          </Button>
+        )}
       </div>
 
       <Card>

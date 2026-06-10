@@ -2257,6 +2257,9 @@ export const fa = {
     failedToDeleteAccount: 'حذف حساب کاربری شکست خورد. لطفاً دوباره تلاش کنید.',
     profileOfflineMessage: 'شما آفلاین هستید. برخی ویژگی‌ها ممکن است در دسترس نباشند. لطفاً اتصال اینترنت خود را بررسی کنید.',
 
+    // Read-only (viewer) role
+    readOnlyAccess: 'دسترسی فقط‌خواندنی',
+    readOnlyAccessDescription: 'نقش شما اجازه مشاهده دارد اما امکان تغییر ندارد. برای دسترسی ویرایش با مدیر تماس بگیرید.',
     // Forced Password Change
     passwordChangeRequired: 'تغییر رمز عبور الزامی است',
     passwordChangeRequiredDescription: 'برای اطمینان از امنیت، باید قبل از ادامه رمز عبور پیش‌فرض خود را تغییر دهید.',

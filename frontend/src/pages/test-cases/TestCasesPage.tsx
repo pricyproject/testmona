@@ -84,6 +84,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { customFieldsAPI } from '@/lib/api';
@@ -122,6 +123,7 @@ type AIAssistantAction = 'suggest_steps' | 'improve_expected_result' | 'add_nega
 
 export function TestCases() {
   const { t, isRTL } = useTranslation();
+  const { canWrite } = usePermissions();
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
   const [searchParams] = useSearchParams();
@@ -2820,12 +2822,14 @@ export function TestCases() {
             </Button>
           ) : !currentTestSuiteId ? (
             <Dialog open={isSuiteDialogOpen} onOpenChange={setIsSuiteDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                  {t('createTestSuite')}
-                </Button>
-              </DialogTrigger>
+              {canWrite && (
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('createTestSuite')}
+                  </Button>
+                </DialogTrigger>
+              )}
               <DialogContent isRTL={isRTL} className={`sm:max-w-[600px] ${isRTL ? 'font-vazir' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
                 <DialogHeader>
                   <DialogTitle>{t('createNewTestSuite')}</DialogTitle>
@@ -2906,12 +2910,14 @@ export function TestCases() {
               handleOpenModal();
             }
           }}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('addNewTestCase')}
-              </Button>
-            </DialogTrigger>
+            {canWrite && (
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('addNewTestCase')}
+                </Button>
+              </DialogTrigger>
+            )}
             <DialogContent isRTL={isRTL} className={`sm:max-w-[900px] max-h-[80vh] overflow-y-auto ${isRTL ? 'font-vazir' : ''}`} onKeyDown={handleKeyDown}>
               <DialogHeader>
                 <DialogTitle>{t('createNewTestCase')}</DialogTitle>
