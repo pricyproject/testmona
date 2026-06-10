@@ -30,20 +30,22 @@ def slugify(value: str) -> str:
     return text or "item"
 
 
-def _unique_space_slug(db: Session, project_id: Optional[int], base: str) -> str:
+def _unique_space_slug(db: Session, project_id: Optional[int], base: str, exclude_id: Optional[int] = None) -> str:
     slug = base
     n = 2
-    while (
-        db.query(models.DocSpace)
-        .filter(models.DocSpace.project_id.is_(project_id) if project_id is None
-                else models.DocSpace.project_id == project_id)
-        .filter(models.DocSpace.slug == slug)
-        .first()
-        is not None
-    ):
+    while True:
+        q = (
+            db.query(models.DocSpace)
+            .filter(models.DocSpace.project_id.is_(project_id) if project_id is None
+                    else models.DocSpace.project_id == project_id)
+            .filter(models.DocSpace.slug == slug)
+        )
+        if exclude_id is not None:
+            q = q.filter(models.DocSpace.id != exclude_id)
+        if q.first() is None:
+            return slug
         slug = f"{base}-{n}"
         n += 1
-    return slug
 
 
 def _unique_doc_slug(db: Session, space_id: int, base: str, exclude_id: Optional[int] = None) -> str:
@@ -89,13 +91,50 @@ def list_spaces(
     return q.order_by(models.DocSpace.order_index, models.DocSpace.name).all()
 
 
-def space_doc_counts(db: Session) -> dict:
-    rows = (
-        db.query(models.Doc.space_id, func.count(models.Doc.id))
-        .group_by(models.Doc.space_id)
+def space_stats(db: Session) -> dict:
+    """Per-space rollups for the hub sidebar/header: total + per-status doc
+    counts, folder count, and the most recent doc activity timestamp."""
+    stats: dict[int, dict[str, Any]] = {}
+
+    def entry(space_id: int) -> dict[str, Any]:
+        return stats.setdefault(space_id, {
+            "doc_count": 0,
+            "draft_count": 0,
+            "published_count": 0,
+            "archived_count": 0,
+            "folder_count": 0,
+            "last_doc_updated_at": None,
+        })
+
+    doc_rows = (
+        db.query(
+            models.Doc.space_id,
+            models.Doc.status,
+            func.count(models.Doc.id),
+            func.max(func.coalesce(models.Doc.updated_at, models.Doc.created_at)),
+        )
+        .group_by(models.Doc.space_id, models.Doc.status)
         .all()
     )
-    return {space_id: count for space_id, count in rows}
+    for space_id, status, count, last_at in doc_rows:
+        e = entry(space_id)
+        e["doc_count"] += count
+        status_value = status.value if hasattr(status, "value") else str(status)
+        key = f"{status_value}_count"
+        if key in e:
+            e[key] += count
+        if last_at is not None and (e["last_doc_updated_at"] is None or last_at > e["last_doc_updated_at"]):
+            e["last_doc_updated_at"] = last_at
+
+    folder_rows = (
+        db.query(models.DocFolder.space_id, func.count(models.DocFolder.id))
+        .group_by(models.DocFolder.space_id)
+        .all()
+    )
+    for space_id, count in folder_rows:
+        entry(space_id)["folder_count"] = count
+
+    return stats
 
 
 def create_space(db: Session, payload: schemas.DocSpaceCreate, actor_id: int) -> models.DocSpace:
@@ -118,11 +157,22 @@ def create_space(db: Session, payload: schemas.DocSpaceCreate, actor_id: int) ->
 
 def update_space(db: Session, space: models.DocSpace, payload: schemas.DocSpaceUpdate) -> models.DocSpace:
     data = payload.model_dump(exclude_unset=True)
+    new_name = data.get("name")
+    if new_name and new_name != space.name:
+        space.slug = _unique_space_slug(db, space.project_id, slugify(new_name), exclude_id=space.id)
     for field, value in data.items():
         setattr(space, field, value)
     safe_commit(db)
     db.refresh(space)
     return space
+
+
+def reorder_spaces(db: Session, spaces: List[models.DocSpace]) -> None:
+    """Persist the given display order (position becomes ``order_index``)."""
+    for index, space in enumerate(spaces):
+        if (space.order_index or 0) != index:
+            space.order_index = index
+    safe_commit(db)
 
 
 def delete_space(db: Session, space: models.DocSpace) -> None:

@@ -737,6 +737,11 @@ export interface DocSpace {
   project_id?: number | null;
   order_index: number;
   doc_count: number;
+  draft_count: number;
+  published_count: number;
+  archived_count: number;
+  folder_count: number;
+  last_doc_updated_at?: string | null;
   created_by: number;
   created_at: string;
   updated_at?: string | null;
@@ -749,6 +754,15 @@ export interface DocSpaceCreate {
   icon?: string | null;
   color?: string | null;
   project_id?: number | null;
+}
+
+export interface DocSpaceUpdate {
+  name?: string;
+  description?: string | null;
+  classification?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  order_index?: number;
 }
 
 export interface DocFolder {

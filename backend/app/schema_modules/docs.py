@@ -54,9 +54,24 @@ def _clean_plain_text(value: Optional[str], *, max_len: Optional[int] = None) ->
     return cleaned
 
 
+_SPACE_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+DOC_SPACE_DESCRIPTION_MAX = 2000
+
+
+def _validate_space_color(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    cleaned = v.strip()
+    if not cleaned:
+        return None
+    if not _SPACE_COLOR_RE.match(cleaned):
+        raise ValueError("color must be a hex value like #0ea5e9")
+    return cleaned.lower()
+
+
 class DocSpaceBase(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=DOC_SPACE_DESCRIPTION_MAX)
     classification: Optional[str] = Field(default=None, max_length=100)
     icon: Optional[str] = Field(default=None, max_length=50)
     color: Optional[str] = Field(default=None, max_length=20)
@@ -69,13 +84,18 @@ class DocSpaceBase(BaseModel):
             raise ValueError("Space name cannot be empty")
         return cleaned
 
-    @field_validator("classification", "icon", "color")
+    @field_validator("classification", "icon", "description")
     @classmethod
     def _strip_optional_short_text(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
         cleaned = v.strip()
         return cleaned or None
+
+    @field_validator("color")
+    @classmethod
+    def _validate_color(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_space_color(v)
 
 
 class DocSpaceCreate(DocSpaceBase):
@@ -85,7 +105,7 @@ class DocSpaceCreate(DocSpaceBase):
 
 class DocSpaceUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=DOC_SPACE_DESCRIPTION_MAX)
     classification: Optional[str] = Field(default=None, max_length=100)
     icon: Optional[str] = Field(default=None, max_length=50)
     color: Optional[str] = Field(default=None, max_length=20)
@@ -101,13 +121,30 @@ class DocSpaceUpdate(BaseModel):
             raise ValueError("Space name cannot be empty")
         return cleaned
 
-    @field_validator("classification", "icon", "color")
+    @field_validator("classification", "icon", "description")
     @classmethod
     def _strip_optional_short_text(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
         cleaned = v.strip()
         return cleaned or None
+
+    @field_validator("color")
+    @classmethod
+    def _validate_color(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_space_color(v)
+
+
+class DocSpaceReorder(BaseModel):
+    """New display order for spaces — position in the list becomes order_index."""
+    space_ids: List[int] = Field(min_length=1, max_length=500)
+
+    @field_validator("space_ids")
+    @classmethod
+    def _unique_ids(cls, v: List[int]) -> List[int]:
+        if len(set(v)) != len(v):
+            raise ValueError("space_ids must not contain duplicates")
+        return v
 
 
 class DocSpace(DocSpaceBase):
@@ -118,6 +155,11 @@ class DocSpace(DocSpaceBase):
     project_id: Optional[int] = None
     order_index: int = 0
     doc_count: int = 0
+    draft_count: int = 0
+    published_count: int = 0
+    archived_count: int = 0
+    folder_count: int = 0
+    last_doc_updated_at: Optional[datetime] = None
     created_by: int
     created_at: datetime
     updated_at: Optional[datetime] = None

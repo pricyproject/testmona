@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   BookOpen,
   ChevronDown,
@@ -10,19 +12,23 @@ import {
   Download,
   Eye,
   FileText,
+  Folder,
   FolderPlus,
   Globe,
   Layers,
   LayoutGrid,
   List as ListIcon,
   Loader2,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Pin,
   Plus,
   Search,
   SlidersHorizontal,
   Table as TableIcon,
+  Trash2,
   Upload,
   Rocket,
   X,
@@ -46,6 +52,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -84,6 +108,43 @@ const statusTone: Record<string, string> = {
 };
 
 const STATUS_FILTERS: Array<DocStatus | 'all'> = ['all', 'draft', 'published', 'archived'];
+
+// Curated presets for space identity. Free-form values from the API still render.
+const SPACE_ICONS = ['📘', '📐', '🛠️', '🚀', '🔒', '🧪', '📋', '💡', '🌐', '📦'];
+const SPACE_COLORS = ['#0ea5e9', '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#10b981', '#64748b'];
+
+/** Expand #abc to #aabbcc so an alpha suffix can be appended safely. */
+const expandHex = (hex: string) =>
+  hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
+
+function SpaceAvatar({
+  icon,
+  color,
+  isGlobal,
+  className = 'h-7 w-7 text-sm',
+}: {
+  icon?: string | null;
+  color?: string | null;
+  isGlobal: boolean;
+  className?: string;
+}) {
+  const hex = color ? expandHex(color) : null;
+  return (
+    <span
+      aria-hidden
+      className={`flex shrink-0 items-center justify-center rounded-lg ${hex ? '' : 'bg-slate-100 text-muted-foreground dark:bg-slate-800'} ${className}`}
+      style={hex ? { backgroundColor: `${hex}24`, color: hex } : undefined}
+    >
+      {icon ? (
+        <span className="leading-none">{icon}</span>
+      ) : isGlobal ? (
+        <Globe className="h-[55%] w-[55%]" />
+      ) : (
+        <FileText className="h-[55%] w-[55%]" />
+      )}
+    </span>
+  );
+}
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -200,10 +261,14 @@ export function DocHub() {
     setSearchParams({});
   };
 
+  const emptySpaceForm = { name: '', description: '', classification: '', icon: '', color: '' };
   const [spaceDialogOpen, setSpaceDialogOpen] = useState(false);
-  const [newSpaceName, setNewSpaceName] = useState('');
-  const [newSpaceClass, setNewSpaceClass] = useState('');
-  const [creatingSpace, setCreatingSpace] = useState(false);
+  const [editingSpace, setEditingSpace] = useState<DocSpace | null>(null);
+  const [spaceForm, setSpaceForm] = useState(emptySpaceForm);
+  const [savingSpace, setSavingSpace] = useState(false);
+  const [deletingSpace, setDeletingSpace] = useState<DocSpace | null>(null);
+  const [deleteSpaceBusy, setDeleteSpaceBusy] = useState(false);
+  const [reorderingSpaces, setReorderingSpaces] = useState(false);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -406,32 +471,100 @@ export function DocHub() {
     return () => window.removeEventListener('keydown', onKey);
   }, [search]);
 
-  const handleCreateSpace = async () => {
-    if (!newSpaceName.trim()) return;
+  // UX gating only — the backend enforces permissions. Global spaces are
+  // writable only by admins; project spaces follow the project write role.
+  const canManageSpace = (space: DocSpace) => (space.project_id == null ? isAdmin : canWrite);
+
+  const openCreateSpace = () => {
+    setEditingSpace(null);
+    setSpaceForm(emptySpaceForm);
+    setSpaceDialogOpen(true);
+  };
+
+  const openEditSpace = (space: DocSpace) => {
+    setEditingSpace(space);
+    setSpaceForm({
+      name: space.name,
+      description: space.description || '',
+      classification: space.classification || '',
+      icon: space.icon || '',
+      color: space.color || '',
+    });
+    setSpaceDialogOpen(true);
+  };
+
+  const handleSaveSpace = async () => {
+    if (!spaceForm.name.trim()) return;
+    const payload = {
+      name: spaceForm.name.trim(),
+      description: spaceForm.description.trim() || null,
+      classification: spaceForm.classification.trim() || null,
+      icon: spaceForm.icon || null,
+      color: spaceForm.color || null,
+    };
     try {
-      setCreatingSpace(true);
-      const space = await docsAPI.createSpace({
-        name: newSpaceName.trim(),
-        classification: newSpaceClass.trim() || null,
-        project_id: projectId ?? null,
-      });
+      setSavingSpace(true);
+      if (editingSpace) {
+        await docsAPI.updateSpace(editingSpace.id, payload);
+        toast({ title: t('success'), description: t('docSpaceUpdated') });
+      } else {
+        const space = await docsAPI.createSpace({ ...payload, project_id: projectId ?? null });
+        toast({ title: t('success'), description: t('docSpaceCreated') });
+        setActiveSpaceId(space.id);
+      }
       setSpaceDialogOpen(false);
-      setNewSpaceName('');
-      setNewSpaceClass('');
       await loadSpaces();
-      setActiveSpaceId(space.id);
-      toast({ title: t('success'), description: t('docSpaceCreated') });
     } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docSpaceCreateFailed'), variant: 'destructive' });
+      toast({
+        title: t('error'),
+        description: e?.response?.data?.detail || t(editingSpace ? 'docSpaceUpdateFailed' : 'docSpaceCreateFailed'),
+        variant: 'destructive',
+      });
     } finally {
-      setCreatingSpace(false);
+      setSavingSpace(false);
     }
   };
 
   const handleSpaceKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+    // Enter submits from single-line inputs; the description textarea keeps it.
+    if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
       e.preventDefault();
-      handleCreateSpace();
+      handleSaveSpace();
+    }
+  };
+
+  const handleMoveSpace = async (space: DocSpace, dir: -1 | 1) => {
+    const index = spaces.findIndex((s) => s.id === space.id);
+    const target = index + dir;
+    if (reorderingSpaces || index < 0 || target < 0 || target >= spaces.length) return;
+    const next = [...spaces];
+    [next[index], next[target]] = [next[target], next[index]];
+    setSpaces(next);
+    try {
+      setReorderingSpaces(true);
+      const updated = await docsAPI.reorderSpaces(next.map((s) => s.id));
+      setSpaces(updated);
+    } catch {
+      await loadSpaces();
+      toast({ title: t('error'), description: t('docSpaceReorderFailed'), variant: 'destructive' });
+    } finally {
+      setReorderingSpaces(false);
+    }
+  };
+
+  const handleDeleteSpace = async () => {
+    if (!deletingSpace) return;
+    try {
+      setDeleteSpaceBusy(true);
+      await docsAPI.deleteSpace(deletingSpace.id);
+      toast({ title: t('success'), description: t('docSpaceDeleted') });
+      setDeletingSpace(null);
+      await loadSpaces();
+      await loadDocHighlights();
+    } catch (e: any) {
+      toast({ title: t('error'), description: e?.response?.data?.detail || t('docSpaceDeleteFailed'), variant: 'destructive' });
+    } finally {
+      setDeleteSpaceBusy(false);
     }
   };
 
@@ -594,7 +727,7 @@ export function DocHub() {
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('docSpaces')}</h2>
             <div className="flex items-center gap-0.5">
               {canWrite && (
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setSpaceDialogOpen(true)} title={t('docNewSpace')}>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openCreateSpace} title={t('docNewSpace')}>
                   <FolderPlus className="h-4 w-4" />
                 </Button>
               )}
@@ -610,26 +743,85 @@ export function DocHub() {
           ) : spaces.length === 0 ? (
             <button
               type="button"
-              onClick={() => setSpaceDialogOpen(true)}
+              onClick={openCreateSpace}
               className="w-full rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-muted-foreground hover:border-primary/40 dark:border-slate-700"
             >
               {t('docCreateFirstSpace')}
             </button>
           ) : (
             <ul className="space-y-1">
-              {spaces.map((space) => {
+              {spaces.map((space, index) => {
                 const active = space.id === activeSpaceId;
+                const manageable = canManageSpace(space);
+                const prev = spaces[index - 1];
+                const next = spaces[index + 1];
+                const canMoveUp = !!prev && manageable && canManageSpace(prev);
+                const canMoveDown = !!next && manageable && canManageSpace(next);
                 return (
                   <li key={space.id}>
-                    <button
-                      type="button"
-                      onClick={() => selectSpace(space.id)}
-                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm transition-colors ${active ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                    <div
+                      className={`group flex w-full items-center gap-1.5 rounded-lg py-1.5 pe-1 ps-2 transition-colors ${active ? 'bg-primary/10' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                     >
-                      {space.project_id == null ? <Globe className="h-4 w-4 shrink-0 opacity-70" /> : <FileText className="h-4 w-4 shrink-0 opacity-70" />}
-                      <span className="flex-1 truncate" dir="auto">{space.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => selectSpace(space.id)}
+                        className={`flex min-w-0 flex-1 items-center gap-2 text-start text-sm ${active ? 'font-medium text-primary' : ''}`}
+                      >
+                        <SpaceAvatar icon={space.icon} color={space.color} isGlobal={space.project_id == null} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate" dir="auto" title={space.name}>{space.name}</span>
+                          {space.classification && (
+                            <span className="block truncate text-[11px] font-normal text-muted-foreground" dir="auto">
+                              {space.classification}
+                            </span>
+                          )}
+                        </span>
+                      </button>
                       <Badge variant="secondary" className="shrink-0">{space.doc_count}</Badge>
-                    </button>
+                      {(manageable || canMoveUp || canMoveDown) && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 text-muted-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+                              aria-label={t('docSpaceActions')}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align={isRTL ? 'start' : 'end'}>
+                            {manageable && (
+                              <DropdownMenuItem onClick={() => openEditSpace(space)}>
+                                <Pencil className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('docEditSpace')}
+                              </DropdownMenuItem>
+                            )}
+                            {canMoveUp && (
+                              <DropdownMenuItem onClick={() => handleMoveSpace(space, -1)}>
+                                <ArrowUp className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('docMoveUp')}
+                              </DropdownMenuItem>
+                            )}
+                            {canMoveDown && (
+                              <DropdownMenuItem onClick={() => handleMoveSpace(space, 1)}>
+                                <ArrowDown className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('docMoveDown')}
+                              </DropdownMenuItem>
+                            )}
+                            {manageable && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => setDeletingSpace(space)}>
+                                  <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                  {t('docDeleteSpace')}
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
                   </li>
                 );
               })}
@@ -664,6 +856,75 @@ export function DocHub() {
 
         {/* Docs panel */}
         <section className="min-w-0">
+          {/* Active space header */}
+          {!scopeAll && activeSpace && (
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-wrap items-start gap-3">
+                <SpaceAvatar
+                  icon={activeSpace.icon}
+                  color={activeSpace.color}
+                  isGlobal={activeSpace.project_id == null}
+                  className="h-12 w-12 text-2xl"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-lg font-semibold leading-tight" dir="auto">{activeSpace.name}</h2>
+                    {activeSpace.project_id == null && (
+                      <Badge variant="outline" className="gap-1">
+                        <Globe className="h-3 w-3" />
+                        {t('docSpaceGlobal')}
+                      </Badge>
+                    )}
+                    {activeSpace.classification && <Badge variant="secondary" dir="auto">{activeSpace.classification}</Badge>}
+                  </div>
+                  {activeSpace.description && (
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground" dir="auto">{activeSpace.description}</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5" />
+                      {t('docSpaceDocCount', { n: activeSpace.doc_count })}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Folder className="h-3.5 w-3.5" />
+                      {t('docSpaceFolderCount', { n: activeSpace.folder_count })}
+                    </span>
+                    {activeSpace.published_count > 0 && (
+                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {activeSpace.published_count} {t('docStatus_published')}
+                      </span>
+                    )}
+                    {activeSpace.draft_count > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-current opacity-50" />
+                        {activeSpace.draft_count} {t('docStatus_draft')}
+                      </span>
+                    )}
+                    {activeSpace.archived_count > 0 && (
+                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {activeSpace.archived_count} {t('docStatus_archived')}
+                      </span>
+                    )}
+                    {activeSpace.last_doc_updated_at && (
+                      <span className="inline-flex items-center gap-1" title={formatServerDateTime(activeSpace.last_doc_updated_at)}>
+                        <Clock className="h-3.5 w-3.5" />
+                        {t('docSpaceLastUpdated', { time: formatRelativeTime(activeSpace.last_doc_updated_at) })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {canManageSpace(activeSpace) && (
+                  <Button variant="outline" size="sm" className="shrink-0" onClick={() => openEditSpace(activeSpace)}>
+                    <Pencil className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('docEditSpace')}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Smart search + filters toolbar */}
           <div className="mb-4 space-y-3">
             {/* Search row */}
@@ -1151,32 +1412,129 @@ export function DocHub() {
         </section>
       </div>
 
-      {/* New space dialog */}
+      {/* Create / edit space dialog */}
       <Dialog open={spaceDialogOpen} onOpenChange={setSpaceDialogOpen}>
         <DialogContent dir={isRTL ? 'rtl' : 'ltr'} onKeyDown={handleSpaceKeyDown}>
           <DialogHeader>
-            <DialogTitle>{t('docNewSpace')}</DialogTitle>
-            <DialogDescription>{projectId ? t('docNewProjectSpaceDesc') : t('docNewGlobalSpaceDesc')}</DialogDescription>
+            <DialogTitle>{editingSpace ? t('docEditSpace') : t('docNewSpace')}</DialogTitle>
+            <DialogDescription>
+              {editingSpace
+                ? t('docEditSpaceDesc')
+                : projectId ? t('docNewProjectSpaceDesc') : t('docNewGlobalSpaceDesc')}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>{t('name')}</Label>
-              <Input value={newSpaceName} onChange={(e) => setNewSpaceName(e.target.value)} placeholder={t('docSpaceNamePlaceholder')} dir="auto" autoFocus />
+              <Input
+                value={spaceForm.name}
+                onChange={(e) => setSpaceForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder={t('docSpaceNamePlaceholder')}
+                dir="auto"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>{t('description')}</Label>
+              <Textarea
+                value={spaceForm.description}
+                onChange={(e) => setSpaceForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder={t('docSpaceDescriptionPlaceholder')}
+                rows={2}
+                dir="auto"
+              />
             </div>
             <div className="space-y-1">
               <Label>{t('docClassification')}</Label>
-              <Input value={newSpaceClass} onChange={(e) => setNewSpaceClass(e.target.value)} placeholder={t('docClassificationPlaceholder')} />
+              <Input
+                value={spaceForm.classification}
+                onChange={(e) => setSpaceForm((f) => ({ ...f, classification: e.target.value }))}
+                placeholder={t('docClassificationPlaceholder')}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('docSpaceIcon')}</Label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSpaceForm((f) => ({ ...f, icon: '' }))}
+                  aria-pressed={!spaceForm.icon}
+                  title={t('docSpaceNone')}
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg border text-xs transition-colors ${!spaceForm.icon ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-muted-foreground hover:border-primary/40 dark:border-slate-700'}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+                {SPACE_ICONS.map((icon) => (
+                  <button
+                    key={icon}
+                    type="button"
+                    onClick={() => setSpaceForm((f) => ({ ...f, icon: f.icon === icon ? '' : icon }))}
+                    aria-pressed={spaceForm.icon === icon}
+                    className={`flex h-8 w-8 items-center justify-center rounded-lg border text-base transition-colors ${spaceForm.icon === icon ? 'border-primary bg-primary/10' : 'border-slate-200 hover:border-primary/40 dark:border-slate-700'}`}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('docSpaceColor')}</Label>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSpaceForm((f) => ({ ...f, color: '' }))}
+                  aria-pressed={!spaceForm.color}
+                  title={t('docSpaceNone')}
+                  className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors ${!spaceForm.color ? 'border-primary text-primary' : 'border-slate-200 text-muted-foreground hover:border-primary/40 dark:border-slate-700'}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+                {SPACE_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setSpaceForm((f) => ({ ...f, color: f.color === color ? '' : color }))}
+                    aria-pressed={spaceForm.color === color}
+                    title={color}
+                    className={`h-7 w-7 rounded-full border-2 transition-transform ${spaceForm.color === color ? 'scale-110 border-foreground' : 'border-transparent hover:scale-105'}`}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSpaceDialogOpen(false)} disabled={creatingSpace}>{t('cancel')}</Button>
-            <Button onClick={handleCreateSpace} disabled={creatingSpace || !newSpaceName.trim()}>
-              {creatingSpace && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
-              {t('create')}
+            <Button variant="outline" onClick={() => setSpaceDialogOpen(false)} disabled={savingSpace}>{t('cancel')}</Button>
+            <Button onClick={handleSaveSpace} disabled={savingSpace || !spaceForm.name.trim()}>
+              {savingSpace && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {editingSpace ? t('save') : t('create')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete space confirmation */}
+      <AlertDialog open={deletingSpace != null} onOpenChange={(open) => { if (!open) setDeletingSpace(null); }}>
+        <AlertDialogContent dir={isRTL ? 'rtl' : 'ltr'}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('docSpaceDeleteTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('docSpaceDeleteDesc', { name: deletingSpace?.name ?? '', n: deletingSpace?.doc_count ?? 0 })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteSpaceBusy}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              disabled={deleteSpaceBusy}
+              onClick={(e) => { e.preventDefault(); handleDeleteSpace(); }}
+            >
+              {deleteSpaceBusy && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('docDeleteSpace')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* New doc dialog */}
       <Dialog open={docDialogOpen} onOpenChange={setDocDialogOpen}>

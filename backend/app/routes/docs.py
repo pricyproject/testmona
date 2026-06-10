@@ -555,7 +555,8 @@ def _excerpt(md: Optional[str], limit: int = 200) -> str:
     return text[:limit]
 
 
-def _space_view(space: models.DocSpace, doc_count: int = 0) -> schemas.DocSpace:
+def _space_view(space: models.DocSpace, stats: Optional[dict] = None) -> schemas.DocSpace:
+    stats = stats or {}
     return schemas.DocSpace(
         id=space.id,
         uuid=space.uuid,
@@ -567,7 +568,12 @@ def _space_view(space: models.DocSpace, doc_count: int = 0) -> schemas.DocSpace:
         color=space.color,
         project_id=space.project_id,
         order_index=space.order_index or 0,
-        doc_count=doc_count,
+        doc_count=stats.get("doc_count", 0),
+        draft_count=stats.get("draft_count", 0),
+        published_count=stats.get("published_count", 0),
+        archived_count=stats.get("archived_count", 0),
+        folder_count=stats.get("folder_count", 0),
+        last_doc_updated_at=stats.get("last_doc_updated_at"),
         created_by=space.created_by,
         created_at=space.created_at,
         updated_at=space.updated_at,
@@ -1047,8 +1053,8 @@ def register_docs_routes(app) -> None:
         if project_id is not None:
             _require(current_user, project_id, "read", db)
         spaces = crud_docs.list_spaces(db, project_id=project_id, include_global=include_global)
-        counts = crud_docs.space_doc_counts(db)
-        return [_space_view(s, counts.get(s.id, 0)) for s in spaces]
+        stats = crud_docs.space_stats(db)
+        return [_space_view(s, stats.get(s.id)) for s in spaces]
 
     @app.post("/docs/spaces", response_model=schemas.DocSpace, status_code=201, tags=["Docs"])
     def create_doc_space(
@@ -1062,7 +1068,24 @@ def register_docs_routes(app) -> None:
                 raise HTTPException(status_code=404, detail="Project not found")
         _require(current_user, payload.project_id, "write", db)
         space = crud_docs.create_space(db, payload, actor_id=current_user.id)
-        return _space_view(space, 0)
+        return _space_view(space)
+
+    # Static path: must be registered before the /docs/spaces/{space_id} routes.
+    @app.post("/docs/spaces/reorder", response_model=List[schemas.DocSpace], tags=["Docs"])
+    def reorder_doc_spaces(
+        payload: schemas.DocSpaceReorder,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        spaces = [_get_space_or_404(db, space_id) for space_id in payload.space_ids]
+        # Only spaces whose position actually changes need write access, so a
+        # project member can reorder project spaces around read-only globals.
+        for index, space in enumerate(spaces):
+            if (space.order_index or 0) != index:
+                _require(current_user, space.project_id, "write", db)
+        crud_docs.reorder_spaces(db, spaces)
+        stats = crud_docs.space_stats(db)
+        return [_space_view(s, stats.get(s.id)) for s in spaces]
 
     @app.get("/docs/spaces/{space_id}", response_model=schemas.DocSpace, tags=["Docs"])
     def get_doc_space(
@@ -1072,8 +1095,8 @@ def register_docs_routes(app) -> None:
     ):
         space = _get_space_or_404(db, space_id)
         _require(current_user, space.project_id, "read", db)
-        counts = crud_docs.space_doc_counts(db)
-        return _space_view(space, counts.get(space.id, 0))
+        stats = crud_docs.space_stats(db)
+        return _space_view(space, stats.get(space.id))
 
     @app.put("/docs/spaces/{space_id}", response_model=schemas.DocSpace, tags=["Docs"])
     def update_doc_space(
@@ -1085,8 +1108,8 @@ def register_docs_routes(app) -> None:
         space = _get_space_or_404(db, space_id)
         _require(current_user, space.project_id, "write", db)
         space = crud_docs.update_space(db, space, payload)
-        counts = crud_docs.space_doc_counts(db)
-        return _space_view(space, counts.get(space.id, 0))
+        stats = crud_docs.space_stats(db)
+        return _space_view(space, stats.get(space.id))
 
     @app.delete("/docs/spaces/{space_id}", status_code=204, tags=["Docs"])
     def delete_doc_space(
