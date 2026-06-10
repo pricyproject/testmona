@@ -1,6 +1,14 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    # These models live in sibling schema modules and are referenced here only as
+    # string forward refs (resolved by ``schemas.py`` via ``model_rebuild`` over the
+    # aggregated namespace). Importing them under TYPE_CHECKING binds the names for
+    # static analysis without introducing runtime circular imports.
+    from .custom_fields import CustomFieldValue
+    from .defects import TestResultDefectLink, User
 from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
 import re
 import html
