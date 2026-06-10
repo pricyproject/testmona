@@ -58,6 +58,9 @@ from .custom_fields import *
 from .integrations import *
 from .requirements import *
 from .defects_planning import *
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_notification(db: Session, notification: NotificationCreate):
     db_notification = Notification(**notification.model_dump())
@@ -680,7 +683,7 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
         if upcoming_milestone and upcoming_milestone.target_date:
             release_deadline = upcoming_milestone.target_date.strftime("%Y-%m-%d")
     except Exception as exc:
-        print(f"Could not determine release deadline for project {project_id}: {exc}")
+        logger.warning(f"Could not determine release deadline for project {project_id}: {exc}")
         release_deadline = "N/A"
     
     return {

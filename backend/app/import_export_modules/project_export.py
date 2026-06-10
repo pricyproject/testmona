@@ -55,6 +55,8 @@ from .schemas import *
 from .helpers import *
 from .test_cases import *
 
+logger = logging.getLogger(__name__)
+
 async def export_projects(
     project_id: Optional[int] = None,
     format: str = "json",
@@ -278,7 +280,7 @@ async def _perform_export(
                 ]
             except Exception as e:
                 # Handle missing columns gracefully
-                print(f"Warning: Could not export test plans due to: {str(e)}")
+                logger.warning(f"Warning: Could not export test plans due to: {str(e)}")
                 project_data["test_plans"] = []
 
             # Get milestones (handle missing columns gracefully)
@@ -299,7 +301,7 @@ async def _perform_export(
                     for ms in milestones
                 ]
             except Exception as e:
-                print(f"Warning: Could not export milestones due to: {str(e)}")
+                logger.warning(f"Warning: Could not export milestones due to: {str(e)}")
                 project_data["milestones"] = []
 
             # Get requirements (handle missing columns gracefully)
@@ -318,7 +320,7 @@ async def _perform_export(
                     for req in requirements
                 ]
             except Exception as e:
-                print(f"Warning: Could not export requirements due to: {str(e)}")
+                logger.warning(f"Warning: Could not export requirements due to: {str(e)}")
                 project_data["requirements"] = []
 
             # Get defects (handle missing columns gracefully)
@@ -339,7 +341,7 @@ async def _perform_export(
                     for defect in defects
                 ]
             except Exception as e:
-                print(f"Warning: Could not export defects due to: {str(e)}")
+                logger.warning(f"Warning: Could not export defects due to: {str(e)}")
                 project_data["defects"] = []
 
             # Get custom field definitions (handle missing columns gracefully)
@@ -360,7 +362,7 @@ async def _perform_export(
                     for cf in custom_fields
                 ]
             except Exception as e:
-                print(f"Warning: Could not export custom field definitions due to: {str(e)}")
+                logger.warning(f"Warning: Could not export custom field definitions due to: {str(e)}")
                 project_data["custom_field_definitions"] = []
 
         export_data.append(project_data)

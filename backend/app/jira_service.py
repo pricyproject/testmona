@@ -7,6 +7,9 @@ import json
 import re
 from urllib.parse import urlparse
 import ipaddress
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def is_safe_url(url: str) -> bool:
@@ -151,7 +154,7 @@ class JiraService:
             if response.status_code == 201:
                 return response.json()
         except Exception as e:
-            print(f"Error creating Jira issue: {e}")
+            logger.warning(f"Error creating Jira issue: {e}")
         return None
 
     def update_issue(self, issue_key: str, update_data: Dict[str, Any]) -> bool:
@@ -195,7 +198,7 @@ class JiraService:
             
             return response.status_code in [200, 204]
         except Exception as e:
-            print(f"Error updating Jira issue: {e}")
+            logger.warning(f"Error updating Jira issue: {e}")
         return False
 
     def get_issue(self, issue_key: str) -> Optional[Dict]:
@@ -211,7 +214,7 @@ class JiraService:
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
-            print(f"Error getting Jira issue: {e}")
+            logger.warning(f"Error getting Jira issue: {e}")
         return None
 
     def add_comment(self, issue_key: str, comment: str) -> bool:
@@ -245,7 +248,7 @@ class JiraService:
             
             return response.status_code == 201
         except Exception as e:
-            print(f"Error adding comment to Jira issue: {e}")
+            logger.warning(f"Error adding comment to Jira issue: {e}")
         return False
 
     def transition_issue(self, issue_key: str, transition_name: str) -> bool:
@@ -285,7 +288,7 @@ class JiraService:
                     
                     return response.status_code == 204
         except Exception as e:
-            print(f"Error transitioning Jira issue: {e}")
+            logger.warning(f"Error transitioning Jira issue: {e}")
         return False
 
     def search_issues(self, jql: str) -> Optional[List[Dict]]:
@@ -307,5 +310,5 @@ class JiraService:
             if response.status_code == 200:
                 return response.json().get("issues", [])
         except Exception as e:
-            print(f"Error searching Jira issues: {e}")
+            logger.warning(f"Error searching Jira issues: {e}")
         return None

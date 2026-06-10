@@ -60,6 +60,9 @@ from .requirements import *
 from .defects_planning import *
 from .notifications_analytics import *
 from .assets_execution import *
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_test_case_revisions(db: Session, test_case_id: int):
     return db.query(TestCaseRevision).filter(
@@ -116,7 +119,7 @@ def create_test_case_revision(db: Session, revision: TestCaseRevisionCreate):
         db.refresh(db_revision)
         return db_revision
     except Exception as e:
-        print(f"CRUD: Error creating revision: {e}")
+        logger.warning(f"CRUD: Error creating revision: {e}")
         raise
 
 

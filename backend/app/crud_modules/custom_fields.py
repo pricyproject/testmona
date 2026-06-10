@@ -54,6 +54,9 @@ from ..schemas import (
 from .projects import *
 from .test_management import *
 from .users import *
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_custom_field_definition(db: Session, field_id: int):
     return db.query(CustomFieldDefinition).filter(CustomFieldDefinition.id == field_id).first()
@@ -96,7 +99,7 @@ def create_custom_field_definition(db: Session, field: CustomFieldDefinitionCrea
         )
         audit_service.create_audit_trail(audit_data)
     except Exception as e:
-        print(f"Failed to create audit trail for custom field definition: {e}")
+        logger.warning(f"Failed to create audit trail for custom field definition: {e}")
     
     return db_field
 
@@ -160,7 +163,7 @@ def update_custom_field_definition(db: Session, field_id: int, field: CustomFiel
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for custom field definition update: {e}")
+            logger.warning(f"Failed to create audit trail for custom field definition update: {e}")
         
         return db_field
 
@@ -190,7 +193,7 @@ def delete_custom_field_definition(db: Session, field_id: int, user_id: Optional
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for custom field definition delete: {e}")
+            logger.warning(f"Failed to create audit trail for custom field definition delete: {e}")
     
     return db_field
 
@@ -460,7 +463,7 @@ def create_custom_field_value(db: Session, value: CustomFieldValueCreate, user_i
         )
         audit_service.create_audit_trail(audit_data)
     except Exception as e:
-        print(f"Failed to create audit trail for custom field value: {e}")
+        logger.warning(f"Failed to create audit trail for custom field value: {e}")
     
     return db_value
 
@@ -510,7 +513,7 @@ def update_custom_field_value(db: Session, value_id: int, value: CustomFieldValu
         )
         audit_service.create_audit_trail(audit_data)
     except Exception as e:
-        print(f"Failed to create audit trail for custom field value update: {e}")
+        logger.warning(f"Failed to create audit trail for custom field value update: {e}")
 
     return db_value
 
@@ -547,7 +550,7 @@ def delete_custom_field_value(db: Session, value_id: int, user_id: Optional[int]
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for custom field value delete: {e}")
+            logger.warning(f"Failed to create audit trail for custom field value delete: {e}")
     
     return db_value
 

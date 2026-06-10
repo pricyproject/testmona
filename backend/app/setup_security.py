@@ -105,13 +105,13 @@ def announce_setup_token(db: Session) -> None:
         return
 
     rule = "=" * 72
-    print(
+    banner = (
         f"\n{rule}\n"
-        "🔐 FIRST-RUN SETUP REQUIRED\n"
+        "FIRST-RUN SETUP REQUIRED\n"
         "Open the app and create your administrator. When prompted for the\n"
         f"setup token, paste the value below (also saved to {SETUP_TOKEN_FILE}):\n\n"
         f"    {token}\n\n"
         "Anyone with this token can create the first admin — keep it private.\n"
-        f"{rule}",
-        flush=True,
+        f"{rule}"
     )
+    logger.info(banner)
