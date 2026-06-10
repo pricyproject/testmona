@@ -212,8 +212,9 @@ Thumbs.db
 
 # Test files
 test_*.py
-!app/routes/test_management.py
-!app/services/test_plan_service.py
+# ...but never ignore source modules under app/ that happen to be named test_*.py
+# (e.g. test_management, test_cases). Real tests live in backend/tests/.
+!app/**/test_*.py
 !test_*.py.bak
 test_csv_import.py
 test_custom_fields.py
