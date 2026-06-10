@@ -7,6 +7,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-06-10
+
+### Added
+- **Two-factor authentication.** A secure TOTP-based 2FA flow with setup, enable/disable,
+  and recovery codes, plus an admin reset.
+- Redesigned **Report Defect** modal.
+- Language selector on the first-run setup page.
+- React Query provider and a top-level error boundary on the frontend.
+
+### Changed
+- Large backend/frontend modularization: schemas and models, CRUD, and import/export
+  split into focused modules; test-management route registrars and the frontend API/page
+  facades split apart; shared analytics helpers moved into the services layer.
+
+### Fixed
+- AI: surface the configured provider on failed calls and auto-activate the only usable
+  provider; prevent reasoning-model truncation and malformed JSON from failing calls;
+  clarify provider token limits.
+- Execution: scope prev/next navigation to the run once its id resolves, and reset the
+  form when paging to the next case after *Save & Next*.
+- Docs: normalize converted requirements; tighten conversion and defect schemas.
+- Migrations: align model metadata with migration-created indexes.
+- Build: stop `.gitignore` from swallowing `app/**/test_*.py` source modules, and bind
+  Pydantic forward refs under `TYPE_CHECKING` to satisfy ruff.
+
+### Security
+- **Viewer role is now genuinely read-only.** A central guard at the auth choke point
+  blocks all non-self-service writes for the viewer role (account, own notifications, and
+  personal saved views remain allowed); the UI hides write controls to match.
+- Enforce project-scoped access and consolidate project permission checks.
+- Use HttpOnly cookies for browser sessions; redact invitation tokens; sanitize diff HTML.
+
+## [0.5.2] - 2026-06-07
+
+### Added
+- Environment **snapshot** for test runs, capturing the environment at run time.
+- Enter-key support for saving in modal dialogs.
+
+### Fixed
+- Defect ID generation and validation.
+- Requirements toolbar: prevent the view toggle from wrapping to the far right.
+- Execution: prevent `NaN` from being passed to the execution-history API.
+- Versioning: add the missing `color` parameter when creating a version tag.
+- Revision history: display the correct user.
+- Definitions: swallow the concurrent-seed race (MariaDB error 1020) in the default seeder.
+
+## [0.5.1] - 2026-06-07
+
+### Added
+- **Per-project sequential IDs (`project_seq`).** Stable, per-project numbering for
+  entities, with a resolver, helpers, and types; project-first URLs and badges across the
+  app; and `project_seq` exposed in cross-reference and doc APIs.
+- Dedicated `/administrator` settings area and per-project test management, with an
+  *Administrator* entry in the profile dropdown for admins.
+- Per-project test types, priorities, and step templates.
+- Composite and partial database indexes.
+
+### Fixed
+- Advanced search: the TQL `id` field now refers to the per-project number, not the
+  global id.
+- Database: MySQL dialect-scoped compiler hook for `NULLS LAST/FIRST` ordering.
+
+## [0.5.0] - 2026-06-06
+
+### Added
+- **MariaDB / MySQL support** with automatic database provisioning, an optional Compose
+  service, env templates, and the PyMySQL driver.
+- **Web-based first-run setup** with a secure setup flow and an admin-configurable
+  default language.
+- **Project feature toggles** — per-project enable/disable of modules, enforced across the
+  API and surfaced in project settings.
+- **Doc Hub** maturation: granular sharing (user/role/project grants with audit trail),
+  AI-assisted conversion and enhancement, living release notes, change-impact analysis
+  (with tf-idf ranking and an optional AI risk assessment), a reader feedback loop,
+  favorites/pins, and recently-viewed docs.
+- **Advanced Search & TQL** overhaul: AST + parser compiled through a per-entity field
+  registry, actionable parse errors, deterministic value suggestions, and feature-gated
+  export/values endpoints.
+- **Project AI assistant** for requirements (backend + frontend), with action-specific
+  test-case assistant workflows and AI similarity / duplicate detection for test-case
+  generation.
+- **AI provider manager** backend and model-routing settings.
+- Requirements: folders and assistant metadata, redesigned portfolio views, review
+  comments and history, tracker import, and bulk views.
+- Test runs: environment selection and validation, assignee/executor and execution
+  progress tracking, milestone linking, and clickable/editable linked defects.
+- Test plans: derived rollups and plan-link management.
+- Defects: link defects to requirements and test cases; first-class test-result
+  defect links.
+- Reports/analytics: consolidated analytics workspace, public shared-report viewer, and
+  improved printable run reports.
+- Test data: data-driven test support.
+- Gherkin `.feature` import/export for requirements; `blocker_reason` as a first-class,
+  reportable field; `skipped` status and a `blocked`/`failed` split.
+- Compact density mode, redesigned notifications dropdown (RTL-aware), and sidebar groups.
+- Elastic License 2.0 (ELv2).
+
+### Changed
+- Unified the not-executed result status to `not_started`.
+- Merged global parameters into the project view and consolidated the analytics workspace
+  (removed the standalone traceability page).
+
+### Fixed
+- Numerous test-run chart/report, requirement-editing, notification, and RTL-layout fixes.
+- Import/export: align test-case endpoint URLs with backend routes and prevent dry-runs
+  from breaking real imports.
+
+### Security
+- Resolved a large batch of code-scanning alerts (HTML/URL sanitization, path-expression
+  handling, exception exposure) and bumped vulnerable dependencies (cryptography,
+  urllib3, python-jose, python-multipart, requests).
+- Added a vulnerability reporting policy and enforced defect project-ownership checks.
+
 ## [0.4.4] - 2026-06-04
 
 ### Added
@@ -146,7 +259,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of TestMona: projects, requirements, test cases, suites, runs,
   defects, milestones, and reports.
 
-[Unreleased]: https://github.com/pricyproject/testmona/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/pricyproject/testmona/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/pricyproject/testmona/compare/v0.5.2...v0.5.3
+[0.5.2]: https://github.com/pricyproject/testmona/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/pricyproject/testmona/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/pricyproject/testmona/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/pricyproject/testmona/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/pricyproject/testmona/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/pricyproject/testmona/compare/v0.4.1...v0.4.2
