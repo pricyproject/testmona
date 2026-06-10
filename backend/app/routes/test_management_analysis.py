@@ -72,7 +72,7 @@ def register_analysis_routes(app):
         
         return crud.update_test_mindmap(db, mindmap_id=mindmap_id, mindmap=mindmap.model_dump(exclude_unset=True))
 
-    @app.delete("/test-mindmaps/{mindmap_id}")
+    @app.delete("/test-mindmaps/{mindmap_id}", response_model=schemas.MessageResponse)
     def delete_test_mindmap(
         mindmap_id: int,
         db: Session = Depends(get_db),
@@ -143,7 +143,7 @@ def register_analysis_routes(app):
         
         return crud.update_impact_analysis(db, analysis_id=analysis_id, analysis=analysis.model_dump(exclude_unset=True))
 
-    @app.delete("/impact-analyses/{analysis_id}")
+    @app.delete("/impact-analyses/{analysis_id}", response_model=schemas.MessageResponse)
     def delete_impact_analysis(
         analysis_id: int,
         db: Session = Depends(get_db),

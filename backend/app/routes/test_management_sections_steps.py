@@ -208,7 +208,7 @@ def register_section_step_routes(app):
         
         return crud.update_test_case_step(db, step_id=step_id, step=step)
 
-    @app.delete("/test-case-steps/{step_id}")
+    @app.delete("/test-case-steps/{step_id}", response_model=schemas.MessageResponse)
     def delete_test_case_step_endpoint(
         step_id: int,
         db: Session = Depends(get_db),
@@ -225,7 +225,7 @@ def register_section_step_routes(app):
         crud.delete_test_case_step(db, step_id=step_id)
         return {"message": "Test case step deleted successfully"}
 
-    @app.get("/sections/")
+    @app.get("/sections/", response_model=List[schemas.TestCaseSection])
     def get_sections(
         test_suite_id: Optional[int] = Query(None, ge=1),
         parent_section_id: Optional[int] = Query(None, ge=1),
@@ -259,21 +259,7 @@ def register_section_step_routes(app):
         if project_id is not None:
             query = query.join(models.TestSuite).filter(models.TestSuite.project_id == project_id)
 
-        sections = query.offset(skip).limit(limit).all()
-        return [
-            {
-                "id": s.id,
-                "name": s.name,
-                "description": s.description,
-                "test_suite_id": s.test_suite_id,
-                "parent_section_id": s.parent_section_id,
-                "order_index": s.order_index,
-                "is_active": s.is_active,
-                "created_at": s.created_at,
-                "updated_at": s.updated_at
-            }
-            for s in sections
-        ]
+        return query.offset(skip).limit(limit).all()
 
     @app.get("/sections/{section_id}", response_model=schemas.TestCaseSection)
     def get_section(
@@ -586,7 +572,7 @@ def register_section_step_routes(app):
 
         return crud.update_test_case_section(db, section_id=section_id, section=section)
 
-    @app.delete("/sections/{section_id}")
+    @app.delete("/sections/{section_id}", response_model=schemas.MessageResponse)
     def delete_section(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),

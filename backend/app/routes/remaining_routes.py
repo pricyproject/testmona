@@ -10,6 +10,9 @@ from .. import crud, models, schemas, rbac
 from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def register_remaining_routes(app):
@@ -89,7 +92,7 @@ def register_remaining_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for execution environment creation: {e}")
+            logger.warning(f"Failed to create audit trail for execution environment creation: {e}")
         
         return db_environment
 
@@ -126,11 +129,11 @@ def register_remaining_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for execution environment update: {e}")
+            logger.warning(f"Failed to create audit trail for execution environment update: {e}")
         
         return db_environment
 
-    @app.delete("/execution-environments/{environment_id}")
+    @app.delete("/execution-environments/{environment_id}", response_model=schemas.MessageResponse)
     def delete_execution_environment(
         environment_id: int,
         db: Session = Depends(get_db),
@@ -166,7 +169,7 @@ def register_remaining_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for execution environment deletion: {e}")
+            logger.warning(f"Failed to create audit trail for execution environment deletion: {e}")
         
         return {"message": "Environment deleted successfully"}
 
@@ -231,7 +234,7 @@ def register_remaining_routes(app):
         update_data = environment.model_dump(exclude_unset=True)
         return crud.update_execution_environment(db, environment_id, update_data)
 
-    @app.delete("/environments/{environment_id}")
+    @app.delete("/environments/{environment_id}", response_model=schemas.MessageResponse)
     def delete_environment(
         environment_id: int,
         db: Session = Depends(get_db),

@@ -127,7 +127,7 @@ def register_custom_fields_routes(app):
         # Reuse existing CRUD function
         return crud.update_custom_field_definition(db, field_id=field_id, field=field, user_id=current_user.id)
 
-    @app.delete("/custom-fields/definitions/{field_id}")
+    @app.delete("/custom-fields/definitions/{field_id}", response_model=schemas.MessageResponse)
     def delete_custom_fields_definition(
         field_id: int,
         db: Session = Depends(get_db),
@@ -330,7 +330,7 @@ def register_custom_fields_routes(app):
         
         return crud.update_custom_field_definition(db, field_id=field_id, field=field, user_id=current_user.id)
 
-    @app.delete("/custom-field-definitions/{field_id}")
+    @app.delete("/custom-field-definitions/{field_id}", response_model=schemas.MessageResponse)
     def delete_custom_field_definition_original(
         field_id: int,
         db: Session = Depends(get_db),
@@ -441,7 +441,7 @@ def register_custom_fields_routes(app):
 
         return crud.update_custom_field_value(db, value_id=value_id, value=value, user_id=current_user.id)
 
-    @app.delete("/custom-field-values/{value_id}")
+    @app.delete("/custom-field-values/{value_id}", response_model=schemas.MessageResponse)
     def delete_custom_field_value(
         value_id: int,
         db: Session = Depends(get_db),

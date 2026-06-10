@@ -76,7 +76,7 @@ def register_definitions_routes(app):
         _require_project_write(current_user, existing.project_id, db)
         return crud.update_test_type_definition(db, test_type_id=test_type_id, test_type=test_type)
 
-    @app.delete("/test-type-definitions/{test_type_id}")
+    @app.delete("/test-type-definitions/{test_type_id}", response_model=schemas.MessageResponse)
     def delete_test_type_definition(
         test_type_id: int,
         db: Session = Depends(get_db),
@@ -139,7 +139,7 @@ def register_definitions_routes(app):
         _require_project_write(current_user, existing.project_id, db)
         return crud.update_priority_definition(db, priority_id=priority_id, priority=priority)
 
-    @app.delete("/priority-definitions/{priority_id}")
+    @app.delete("/priority-definitions/{priority_id}", response_model=schemas.MessageResponse)
     def delete_priority_definition(
         priority_id: int,
         db: Session = Depends(get_db),

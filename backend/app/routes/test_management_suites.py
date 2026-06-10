@@ -218,7 +218,7 @@ def register_suite_routes(app):
 
         return db_test_suite
 
-    @app.delete("/test-suites/{test_suite_id}")
+    @app.delete("/test-suites/{test_suite_id}", response_model=schemas.MessageResponse)
     def delete_test_suite(
         test_suite_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),

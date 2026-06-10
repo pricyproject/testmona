@@ -102,7 +102,7 @@ def register_result_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test result creation: {e}")
+            logger.warning(f"Failed to create audit trail for test result creation: {e}")
         
         return db_test_result
 
@@ -196,7 +196,7 @@ def register_result_routes(app):
         db_test_result = crud.update_test_result(db, test_result_id=test_result_id, test_result=test_result)
         return crud.get_test_result(db, test_result_id=db_test_result.id)
 
-    @app.delete("/test-results/{test_result_id}")
+    @app.delete("/test-results/{test_result_id}", response_model=schemas.MessageResponse)
     def delete_test_result(test_result_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
         # First get the test result to check project access
         db_test_result = crud.get_test_result(db, test_result_id=test_result_id)
@@ -349,7 +349,7 @@ def register_result_routes(app):
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
-                print(f"Failed to create audit trail for test result time reset: {e}")
+                logger.warning(f"Failed to create audit trail for test result time reset: {e}")
             
             return {
                 "message": "Test result time reset successfully",
@@ -391,7 +391,7 @@ def register_result_routes(app):
             raise HTTPException(status_code=403, detail="Not authorized to modify this test result")
         return crud.replace_test_step_results(db, test_result_id, step_results)
 
-    @app.get("/test-cases/{test_case_id}/execution-history")
+    @app.get("/test-cases/{test_case_id}/execution-history", response_model=List[schemas.ExecutionHistoryItem])
     def get_test_case_execution_history(
         test_case_id: int,
         limit: int = Query(50, ge=1, le=200),

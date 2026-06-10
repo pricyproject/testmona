@@ -132,7 +132,7 @@ def register_shared_steps_routes(app):
         
         return db_step
 
-    @app.delete("/shared-steps/{step_id}")
+    @app.delete("/shared-steps/{step_id}", response_model=schemas.MessageResponse)
     def delete_shared_step(
         step_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -317,7 +317,7 @@ def register_shared_steps_routes(app):
         
         return db_template
 
-    @app.delete("/shared-step-templates/{template_id}")
+    @app.delete("/shared-step-templates/{template_id}", response_model=schemas.MessageResponse)
     def delete_shared_step_template(
         template_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),

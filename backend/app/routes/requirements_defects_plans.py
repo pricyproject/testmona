@@ -474,7 +474,7 @@ def register_requirements_defects_plans_routes(app):
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
-                print(f"Failed to create audit trail for requirement creation: {e}")
+                logger.warning(f"Failed to create audit trail for requirement creation: {e}")
             
             return db_requirement
         except IntegrityError as e:
@@ -588,7 +588,7 @@ def register_requirements_defects_plans_routes(app):
             raise HTTPException(status_code=400, detail="A folder with this name already exists here.")
         return crud.update_requirement_folder(db, folder_id, payload)
 
-    @app.delete("/requirements/folders/{folder_id}")
+    @app.delete("/requirements/folders/{folder_id}", response_model=schemas.MessageResponse)
     def delete_requirement_folder_endpoint(
         folder_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -1453,13 +1453,13 @@ def register_requirements_defects_plans_routes(app):
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
-                print(f"Failed to create audit trail for requirement update: {e}")
+                logger.warning(f"Failed to create audit trail for requirement update: {e}")
             
             return db_requirement
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    @app.delete("/requirements/{requirement_id}")
+    @app.delete("/requirements/{requirement_id}", response_model=schemas.MessageResponse)
     def delete_requirement_endpoint(
         requirement_id: int,
         db: Session = Depends(get_db),
@@ -1495,7 +1495,7 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for requirement deletion: {e}")
+            logger.warning(f"Failed to create audit trail for requirement deletion: {e}")
         
         return {"message": "Requirement deleted successfully"}
 
@@ -1550,7 +1550,7 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for defect creation: {e}")
+            logger.warning(f"Failed to create audit trail for defect creation: {e}")
         
         return db_defect
 
@@ -1739,11 +1739,11 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for defect update: {e}")
+            logger.warning(f"Failed to create audit trail for defect update: {e}")
         
         return db_defect
 
-    @app.delete("/defects/{defect_id}")
+    @app.delete("/defects/{defect_id}", response_model=schemas.MessageResponse)
     def delete_defect_endpoint(
         defect_id: int,
         db: Session = Depends(get_db),
@@ -1779,7 +1779,7 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for defect deletion: {e}")
+            logger.warning(f"Failed to create audit trail for defect deletion: {e}")
         
         return {"message": "Defect deleted successfully"}
 
@@ -2054,11 +2054,11 @@ def register_requirements_defects_plans_routes(app):
                 description=f"Defect {defect.defect_id} linked to test result ({link_type})",
             ))
         except Exception as e:
-            print(f"Failed to create audit trail for defect link: {e}")
+            logger.warning(f"Failed to create audit trail for defect link: {e}")
 
         return crud.get_test_result_defect_link(db, link.id)
 
-    @app.delete("/test-results/{test_result_id}/defect-links/{link_id}")
+    @app.delete("/test-results/{test_result_id}/defect-links/{link_id}", response_model=schemas.MessageResponse)
     def delete_test_result_defect_link(
         test_result_id: int,
         link_id: int,
@@ -2128,7 +2128,7 @@ def register_requirements_defects_plans_routes(app):
                 description=f"Defect link snapshot corrected for link {link_id}",
             ))
         except Exception as e:
-            print(f"Failed to create audit trail for defect link snapshot correction: {e}")
+            logger.warning(f"Failed to create audit trail for defect link snapshot correction: {e}")
 
         return crud.get_test_result_defect_link(db, link_id)
 
@@ -2206,7 +2206,7 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test plan creation: {e}")
+            logger.warning(f"Failed to create audit trail for test plan creation: {e}")
         
         return db_test_plan
 
@@ -2388,11 +2388,11 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test plan update: {e}")
+            logger.warning(f"Failed to create audit trail for test plan update: {e}")
         
         return db_test_plan
 
-    @app.delete("/test-plans/{test_plan_id}")
+    @app.delete("/test-plans/{test_plan_id}", response_model=schemas.MessageResponse)
     def delete_test_plan_endpoint(
         test_plan_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -2596,7 +2596,7 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for milestone creation: {e}")
+            logger.warning(f"Failed to create audit trail for milestone creation: {e}")
 
         return enrich_milestone(db, db_milestone)
 
@@ -2695,11 +2695,11 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for milestone update: {e}")
+            logger.warning(f"Failed to create audit trail for milestone update: {e}")
 
         return enrich_milestone(db, db_milestone)
 
-    @app.delete("/milestones/{milestone_id}")
+    @app.delete("/milestones/{milestone_id}", response_model=schemas.MessageResponse)
     def delete_milestone_endpoint(
         milestone_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -2744,7 +2744,7 @@ def register_requirements_defects_plans_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for milestone deletion: {e}")
+            logger.warning(f"Failed to create audit trail for milestone deletion: {e}")
 
         return {"message": "Milestone deleted successfully"}
 

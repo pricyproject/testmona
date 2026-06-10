@@ -65,7 +65,7 @@ def _disable_public_signup(db, actor_user) -> None:
             setting.value = 'false'
         db.commit()
         db.refresh(setting)
-        print("✅ Public signup disabled after first-run setup")
+        logger.info("✅ Public signup disabled after first-run setup")
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
@@ -78,9 +78,9 @@ def _disable_public_signup(db, actor_user) -> None:
                 description=f"Public signup disabled after first-run setup (admin: {actor_user.username})",
             ))
         except Exception as audit_error:
-            print(f"Failed to create audit trail for signup change: {audit_error}")
+            logger.warning(f"Failed to create audit trail for signup change: {audit_error}")
     except Exception as e:
-        print(f"Failed to disable signup: {e}")
+        logger.warning(f"Failed to disable signup: {e}")
         db.rollback()
 
 
@@ -228,7 +228,7 @@ def register_auth_routes(app):
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             # Log error but don't fail the login
-            print(f"Failed to create audit trail for login: {e}")
+            logger.warning(f"Failed to create audit trail for login: {e}")
         
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         refresh_token_expires = timedelta(days=settings.refresh_token_expire_days)
@@ -299,7 +299,7 @@ def register_auth_routes(app):
             "force_password_change": user.force_password_change,
         }
 
-    @app.post("/logout")
+    @app.post("/logout", response_model=schemas.MessageResponse)
     async def logout(
         response: Response,
         logout_data: dict = None,

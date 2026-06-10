@@ -88,7 +88,7 @@ def register_run_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test run creation: {e}")
+            logger.warning(f"Failed to create audit trail for test run creation: {e}")
         
         return db_test_run
 
@@ -257,7 +257,7 @@ def register_run_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test run update: {e}")
+            logger.warning(f"Failed to create audit trail for test run update: {e}")
         
         return db_test_run
 
@@ -370,7 +370,7 @@ def register_run_routes(app):
 
         return summary.to_dict()
 
-    @app.delete("/test-runs/{test_run_id}")
+    @app.delete("/test-runs/{test_run_id}", response_model=schemas.MessageResponse)
     def delete_test_run(test_run_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
         # First get the test run to check project access
         db_test_run = crud.get_test_run(db, test_run_id=test_run_id)
@@ -405,7 +405,7 @@ def register_run_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test run deletion: {e}")
+            logger.warning(f"Failed to create audit trail for test run deletion: {e}")
         
         return {"message": "Test run deleted successfully"}
 
@@ -463,7 +463,7 @@ def register_run_routes(app):
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
-                print(f"Failed to create audit trail for test run time reset: {e}")
+                logger.warning(f"Failed to create audit trail for test run time reset: {e}")
             
             return {
                 "message": "Test run time reset successfully",

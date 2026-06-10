@@ -242,7 +242,7 @@ def register_project_routes(app):
         )
         return db_project
 
-    @app.delete("/projects/{project_id}")
+    @app.delete("/projects/{project_id}", response_model=schemas.MessageResponse)
     def delete_project(
         project_id: int,
         db: Session = Depends(get_db),
@@ -265,7 +265,7 @@ def register_project_routes(app):
         )
         return {"message": "Project deleted successfully"}
 
-    @app.post("/projects/{project_id}/delete")
+    @app.post("/projects/{project_id}/delete", response_model=schemas.MessageResponse)
     def delete_project_with_verification(
         project_id: int, 
         delete_data: dict,
@@ -496,7 +496,7 @@ def register_project_routes(app):
         )
         return updated
 
-    @app.delete("/project-assignments/{assignment_id}")
+    @app.delete("/project-assignments/{assignment_id}", response_model=schemas.MessageResponse)
     def delete_project_assignment(
         assignment_id: int,
         db: Session = Depends(get_db),
@@ -628,7 +628,7 @@ def register_project_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test schedule creation: {e}")
+            logger.warning(f"Failed to create audit trail for test schedule creation: {e}")
         
         return db_schedule
 
@@ -681,7 +681,7 @@ def register_project_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test execution creation: {e}")
+            logger.warning(f"Failed to create audit trail for test execution creation: {e}")
         
         return db_execution
 
@@ -746,7 +746,7 @@ def register_project_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test execution settings update: {e}")
+            logger.warning(f"Failed to create audit trail for test execution settings update: {e}")
         
         return db_settings
 
@@ -797,6 +797,6 @@ def register_project_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for automation settings update: {e}")
+            logger.warning(f"Failed to create audit trail for automation settings update: {e}")
         
         return db_settings

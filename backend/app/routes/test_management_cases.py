@@ -63,7 +63,7 @@ def register_case_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test case section creation: {e}")
+            logger.warning(f"Failed to create audit trail for test case section creation: {e}")
         
         return db_section
 
@@ -185,11 +185,11 @@ def register_case_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test case section update: {e}")
+            logger.warning(f"Failed to create audit trail for test case section update: {e}")
         
         return db_section
 
-    @app.delete("/test-case-sections/{section_id}")
+    @app.delete("/test-case-sections/{section_id}", response_model=schemas.MessageResponse)
     def delete_test_case_section(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -246,7 +246,7 @@ def register_case_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test case section deletion: {e}")
+            logger.warning(f"Failed to create audit trail for test case section deletion: {e}")
         
         return {"message": "Test case section deleted successfully"}
 
@@ -320,7 +320,7 @@ def register_case_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test case creation: {e}")
+            logger.warning(f"Failed to create audit trail for test case creation: {e}")
         
         return db_test_case
 
@@ -383,16 +383,19 @@ def register_case_routes(app):
                 skip=skip,
                 limit=limit,
             )
+            suite_ids = {case.test_suite_id for case in test_cases if case.test_suite_id}
+            suites = db.query(models.TestSuite).filter(models.TestSuite.id.in_(suite_ids)).all() if suite_ids else []
+            suite_map = {s.id: s for s in suites}
             authorized_cases = []
             for case in test_cases:
-                test_suite = crud.get_test_suite(db, test_suite_id=case.test_suite_id)
+                test_suite = suite_map.get(case.test_suite_id)
                 if test_suite and rbac.has_permission(current_user, "read", test_suite.project_id, db):
                     authorized_cases.append(case)
             test_cases = authorized_cases
 
         return test_cases
 
-    @app.get("/test-cases/count")
+    @app.get("/test-cases/count", response_model=schemas.CountResponse)
     def get_test_cases_count(
         project_id: int = None,
         test_suite_id: int = None, 
@@ -590,7 +593,7 @@ def register_case_routes(app):
 
         return db_test_case
 
-    @app.delete("/test-cases/{test_case_id}")
+    @app.delete("/test-cases/{test_case_id}", response_model=schemas.MessageResponse)
     def delete_test_case(
         test_case_id: int,
         db: Session = Depends(get_db),

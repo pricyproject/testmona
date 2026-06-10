@@ -973,3 +973,37 @@ class TestRunStatistics(BaseModel):
     blocked: int
     pass_rate: float
     execution_time: Optional[float] = None
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class CountResponse(BaseModel):
+    count: int
+
+
+class ExecutionHistoryItem(BaseModel):
+    id: int
+    test_run_id: Optional[int] = None
+    test_run_name: Optional[str] = None
+    test_run_status: Optional[str] = None
+    test_run_priority: Optional[str] = None
+    test_run_created_at: Optional[datetime] = None
+    test_run_started_at: Optional[datetime] = None
+    test_run_completed_at: Optional[datetime] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
+    status: Optional[str] = None
+    executed_by: Optional[str] = None
+    executed_by_full_name: Optional[str] = None
+    executed_by_email: Optional[str] = None
+    executed_by_id: Optional[int] = None
+    executor_source: Optional[str] = None
+    executed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    comments: Optional[str] = None
+    actual_result: Optional[str] = None
+    execution_started_at: Optional[datetime] = None
+    execution_time: Optional[float] = None
