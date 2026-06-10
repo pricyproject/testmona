@@ -56,6 +56,7 @@ from .helpers import *
 from .test_cases import *
 from .project_export import *
 
+@router.post("/import/projects/")
 async def import_projects(
     file: UploadFile = File(...),
     merge_strategy: str = Form("skip"),  # skip, update, or merge

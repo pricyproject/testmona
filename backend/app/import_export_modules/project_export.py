@@ -57,6 +57,50 @@ from .test_cases import *
 
 logger = logging.getLogger(__name__)
 
+@router.get("/export/test-results/")
+def export_test_results(
+    test_run_id: int = None,
+    format: str = "csv",
+    db: Session = Depends(get_db),
+):
+    if format.lower() != "csv":
+        raise HTTPException(status_code=400, detail="Only CSV format is supported")
+
+    test_results = crud.get_test_results(db, test_run_id=test_run_id)
+
+    fieldnames = [
+        'id', 'test_case_id', 'test_case_title', 'test_run_id', 'status',
+        'actual_result', 'comments', 'execution_time', 'executed_by',
+        'executed_at', 'created_at',
+    ]
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for result in test_results:
+        writer.writerow({
+            'id': result.id,
+            'test_case_id': result.test_case_id,
+            'test_case_title': result.test_case.title if result.test_case else '',
+            'test_run_id': result.test_run_id,
+            'status': result.status.value,
+            'actual_result': result.actual_result or '',
+            'comments': result.comments or '',
+            'execution_time': result.execution_time or 0,
+            'executed_by': result.executed_by or '',
+            'executed_at': result.executed_at,
+            'created_at': result.created_at,
+        })
+
+    return {
+        "filename": "test_results.csv",
+        "content": output.getvalue(),
+        "media_type": "text/csv",
+    }
+
+
+@router.get("/export/projects/")
 async def export_projects(
     project_id: Optional[int] = None,
     format: str = "json",

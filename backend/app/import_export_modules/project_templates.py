@@ -56,6 +56,7 @@ from .helpers import *
 from .test_cases import *
 from .project_import import *
 
+@router.get("/import/projects/template")
 def get_project_import_template(
     format: str = "json",
     db: Session = Depends(get_db),

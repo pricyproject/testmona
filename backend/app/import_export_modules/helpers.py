@@ -575,6 +575,28 @@ def release_import_lock(db: Session, lock_key: Optional[str], owner: Optional[st
         db.commit()
 
 
+def transform_custom_field_value(value: str, field_def: CustomFieldDefinition) -> str:
+    value_str = str(value).strip()
+    if field_def.field_type == CustomFieldType.NUMBER:
+        try:
+            return str(float(value_str))
+        except ValueError:
+            return value_str
+    elif field_def.field_type == CustomFieldType.DATE:
+        cleaned_date = clean_date_string(value_str)
+        return cleaned_date if cleaned_date else value_str
+    elif field_def.field_type == CustomFieldType.BOOLEAN:
+        boolean_map = {
+            'true': 'true', 'yes': 'true', '1': 'true', 'on': 'true',
+            'false': 'false', 'no': 'false', '0': 'false', 'off': 'false',
+        }
+        return boolean_map.get(value_str.lower(), value_str)
+    elif field_def.field_type == CustomFieldType.MULTISELECT:
+        values = [v.strip() for v in value_str.split(',') if v.strip()]
+        return ', '.join(values)
+    return value_str
+
+
 def normalize_match_value(value: Any) -> str:
     return str(value or '').strip().lower()
 
