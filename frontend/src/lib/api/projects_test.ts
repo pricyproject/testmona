@@ -137,16 +137,19 @@ export const testAssetHealthAPI = {
   listDebtItems: async (
     projectId: number,
     filters: { debt_type?: TestDebtType | 'all'; severity?: TestDebtSeverity | 'all'; resolved?: 'active' | 'resolved' | 'all'; skip?: number; limit?: number } = {},
-  ): Promise<TestDebtItem[]> => {
+  ): Promise<{ items: TestDebtItem[]; total: number }> => {
     const params = new URLSearchParams({
       skip: String(filters.skip ?? 0),
-      limit: String(filters.limit ?? 100),
+      limit: String(filters.limit ?? 25),
       resolved: filters.resolved || 'active',
     });
     if (filters.debt_type && filters.debt_type !== 'all') params.append('debt_type', filters.debt_type);
     if (filters.severity && filters.severity !== 'all') params.append('severity', filters.severity);
     const response = await api.get(`/projects/${projectId}/test-asset-health/debt-items?${params}`);
-    return response.data;
+    return {
+      items: response.data,
+      total: parseInt(response.headers['x-total-count'] ?? '0', 10),
+    };
   },
   detect: async (projectId: number): Promise<TestAssetDebtDetectionResult> => {
     const response = await api.post(`/projects/${projectId}/test-asset-health/detect`);

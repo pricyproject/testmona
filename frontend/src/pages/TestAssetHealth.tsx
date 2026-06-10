@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, HeartPulse, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, HeartPulse, Loader2, RefreshCw } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ const severityClass: Record<TestDebtSeverity, string> = {
 };
 
 const DEBT_TYPES: TestDebtType[] = ['stale', 'duplicate', 'orphan', 'always_pass', 'never_run', 'no_requirement_link'];
+const PAGE_SIZE = 25;
 
 export function TestAssetHealth() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -34,6 +35,8 @@ export function TestAssetHealth() {
 
   const [summary, setSummary] = useState<TestAssetHealthSummary | null>(null);
   const [items, setItems] = useState<TestDebtItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [detecting, setDetecting] = useState(false);
   const [debtType, setDebtType] = useState<TestDebtType | 'all'>('all');
@@ -47,12 +50,19 @@ export function TestAssetHealth() {
     }
     setLoading(true);
     try {
-      const [nextSummary, nextItems] = await Promise.all([
+      const [nextSummary, { items: nextItems, total: nextTotal }] = await Promise.all([
         testAssetHealthAPI.getSummary(projectIdNum),
-        testAssetHealthAPI.listDebtItems(projectIdNum, { debt_type: debtType, severity, resolved }),
+        testAssetHealthAPI.listDebtItems(projectIdNum, {
+          debt_type: debtType,
+          severity,
+          resolved,
+          skip: page * PAGE_SIZE,
+          limit: PAGE_SIZE,
+        }),
       ]);
       setSummary(nextSummary);
       setItems(nextItems);
+      setTotal(nextTotal);
     } catch (err) {
       toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestAssetHealth')), variant: 'destructive' });
     } finally {
@@ -62,7 +72,7 @@ export function TestAssetHealth() {
 
   useEffect(() => {
     load();
-  }, [projectIdNum, debtType, severity, resolved]);
+  }, [projectIdNum, debtType, severity, resolved, page]);
 
   const detectDebt = async () => {
     if (!projectIdNum) return;
@@ -134,7 +144,7 @@ export function TestAssetHealth() {
                 <button
                   key={type}
                   type="button"
-                  onClick={() => setDebtType(selected ? 'all' : type)}
+                  onClick={() => { setDebtType(selected ? 'all' : type); setPage(0); }}
                   className={`rounded-lg border p-3 text-start transition-colors ${
                     selected ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-muted/50'
                   }`}
@@ -155,7 +165,7 @@ export function TestAssetHealth() {
               <AlertTriangle className="h-5 w-5 text-amber-600" /> {t('testDebtBacklog')}
             </CardTitle>
             <div className="grid gap-2 sm:grid-cols-3 lg:w-[660px]">
-              <Select value={debtType} onValueChange={(value) => setDebtType(value as TestDebtType | 'all')}>
+              <Select value={debtType} onValueChange={(value) => { setDebtType(value as TestDebtType | 'all'); setPage(0); }}>
                 <SelectTrigger><SelectValue placeholder={t('debtType')} /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t('allDebtTypes')}</SelectItem>
@@ -164,7 +174,7 @@ export function TestAssetHealth() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={severity} onValueChange={(value) => setSeverity(value as TestDebtSeverity | 'all')}>
+              <Select value={severity} onValueChange={(value) => { setSeverity(value as TestDebtSeverity | 'all'); setPage(0); }}>
                 <SelectTrigger><SelectValue placeholder={t('severity')} /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t('allSeverities')}</SelectItem>
@@ -173,7 +183,7 @@ export function TestAssetHealth() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={resolved} onValueChange={(value) => setResolved(value as ResolvedFilter)}>
+              <Select value={resolved} onValueChange={(value) => { setResolved(value as ResolvedFilter); setPage(0); }}>
                 <SelectTrigger><SelectValue placeholder={t('statusLabel')} /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="active">{t('activeDebt')}</SelectItem>
@@ -202,42 +212,72 @@ export function TestAssetHealth() {
               )}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('testCase')}</TableHead>
-                  <TableHead>{t('debtType')}</TableHead>
-                  <TableHead>{t('severity')}</TableHead>
-                  <TableHead>{t('suggestedAction')}</TableHead>
-                  <TableHead>{t('details')}</TableHead>
-                  <TableHead>{t('source')}</TableHead>
-                  <TableHead className="text-right">{t('actionsLabel')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium">
-                      <Link className="text-blue-600 hover:underline" to={`/projects/${projectIdNum}/test-cases/${item.test_case?.project_seq || item.test_case_id}`}>
-                        {item.test_case?.title || t('testCaseIdValue', { id: String(item.test_case_id) })}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{t(`debtType_${item.debt_type}` as any)}</TableCell>
-                    <TableCell><Badge className={severityClass[item.severity]}>{t(item.severity)}</Badge></TableCell>
-                    <TableCell>{t(`debtAction_${item.suggested_action}` as any)}</TableCell>
-                    <TableCell className="max-w-md text-muted-foreground">{item.details || t('noDetails')}</TableCell>
-                    <TableCell>{item.auto_detected ? t('autoDetected') : t('manual')}</TableCell>
-                    <TableCell className="text-right">
-                      {!item.resolved_at && canWrite ? (
-                        <Button variant="outline" size="sm" onClick={() => resolveItem(item)}>{t('resolve')}</Button>
-                      ) : item.resolved_at ? (
-                        <Badge variant="secondary">{t('resolved')}</Badge>
-                      ) : null}
-                    </TableCell>
+            <div className="space-y-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('testCase')}</TableHead>
+                    <TableHead>{t('debtType')}</TableHead>
+                    <TableHead>{t('severity')}</TableHead>
+                    <TableHead>{t('suggestedAction')}</TableHead>
+                    <TableHead>{t('details')}</TableHead>
+                    <TableHead>{t('source')}</TableHead>
+                    <TableHead className="text-right">{t('actionsLabel')}</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">
+                        <Link className="text-blue-600 hover:underline" to={`/projects/${projectIdNum}/test-cases/${item.test_case?.project_seq || item.test_case_id}`}>
+                          {item.test_case?.title || t('testCaseIdValue', { id: String(item.test_case_id) })}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{t(`debtType_${item.debt_type}` as any)}</TableCell>
+                      <TableCell><Badge className={severityClass[item.severity]}>{t(item.severity)}</Badge></TableCell>
+                      <TableCell>{t(`debtAction_${item.suggested_action}` as any)}</TableCell>
+                      <TableCell className="max-w-md text-muted-foreground">{item.details || t('noDetails')}</TableCell>
+                      <TableCell>{item.auto_detected ? t('autoDetected') : t('manual')}</TableCell>
+                      <TableCell className="text-right">
+                        {!item.resolved_at && canWrite ? (
+                          <Button variant="outline" size="sm" onClick={() => resolveItem(item)}>{t('resolve')}</Button>
+                        ) : item.resolved_at ? (
+                          <Badge variant="secondary">{t('resolved')}</Badge>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {total > PAGE_SIZE && (
+                <div className="flex items-center justify-between border-t pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} {t('of')} {total}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => p - 1)}
+                      disabled={page === 0}
+                    >
+                      <ChevronLeft className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                      {t('previous')}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => p + 1)}
+                      disabled={(page + 1) * PAGE_SIZE >= total}
+                    >
+                      {t('next')}
+                      <ChevronRight className={`h-4 w-4 ${isRTL ? 'mr-1' : 'ml-1'}`} />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
