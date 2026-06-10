@@ -1,12 +1,10 @@
-from sqlalchemy import Boolean, DateTime, Integer, JSON, Column, MetaData, create_engine, event, inspect, text
+from sqlalchemy import MetaData, create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import operators
 from sqlalchemy.sql.expression import UnaryExpression
 from .config import settings
-import uuid
 
 
 # --- Cross-dialect SQL compatibility ---------------------------------------
@@ -162,101 +160,6 @@ NAMING_CONVENTION = {
 Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
 
-def _add_column_if_missing(table_name: str, column: Column) -> bool:
-    """Add one nullable column to an existing table when schema drift is detected."""
-    with engine.begin() as connection:
-        inspector = inspect(connection)
-        if not inspector.has_table(table_name):
-            return False
-
-        existing_columns = {existing_column["name"] for existing_column in inspector.get_columns(table_name)}
-        if column.name in existing_columns:
-            return False
-
-        preparer = connection.dialect.identifier_preparer
-        column_type = column.type.compile(dialect=connection.dialect)
-        nullable = "" if column.nullable else " NOT NULL"
-        connection.execute(
-            text(
-                f"ALTER TABLE {preparer.quote(table_name)} "
-                f"ADD COLUMN {preparer.quote(column.name)} {column_type}{nullable}"
-            )
-        )
-        return True
-
-
-def _repair_known_schema_drift() -> None:
-    repaired_columns = []
-    for column in (
-        Column("result_snapshot", JSON(), nullable=True),
-        Column("failing_step_snapshot", JSON(), nullable=True),
-        Column("snapshot_created_at", DateTime(timezone=True), nullable=True),
-    ):
-        if _add_column_if_missing("test_result_defect_links", column):
-            repaired_columns.append(column.name)
-
-    if repaired_columns:
-        print(f"✅ Missing database columns added: test_result_defect_links.{', '.join(repaired_columns)}")
-
-    chat_repaired_columns = []
-    for column in (
-        # Keep these nullable at the physical schema-repair layer so SQLite can
-        # add them to existing tables with rows. ORM defaults/backfills handle
-        # runtime values, and the Alembic migration remains the canonical schema.
-        Column("pinned", Boolean(), nullable=True),
-        Column("share_expires_at", DateTime(timezone=True), nullable=True),
-        Column("share_allowed_user_ids", JSON(), nullable=True),
-    ):
-        if _add_column_if_missing("requirement_chat_conversations", column):
-            chat_repaired_columns.append(column.name)
-
-    if chat_repaired_columns:
-        with engine.begin() as connection:
-            if "pinned" in chat_repaired_columns:
-                connection.execute(
-                    text("UPDATE requirement_chat_conversations SET pinned = 0 WHERE pinned IS NULL")
-                )
-        print(f"✅ Missing database columns added: requirement_chat_conversations.{', '.join(chat_repaired_columns)}")
-
-    # Requirement foldering: the requirement_folders table is created by
-    # create_all (it's a new table), but the folder_id FK on the existing
-    # requirements table needs an explicit ALTER for already-provisioned DBs.
-    if _add_column_if_missing("requirements", Column("folder_id", Integer(), nullable=True)):
-        print("✅ Missing database column added: requirements.folder_id")
-
-    # Doc Hub: these tables/columns may be present from older development
-    # builds, so repair additive columns without rebuilding the database.
-    from sqlalchemy import String as _String
-    for table_name in ("doc_spaces", "doc_folders", "docs"):
-        if _add_column_if_missing(table_name, Column("uuid", _String(36), nullable=True)):
-            with engine.begin() as connection:
-                rows = connection.execute(text(f"SELECT id FROM {table_name} WHERE uuid IS NULL")).fetchall()
-                for row in rows:
-                    connection.execute(
-                        text(f"UPDATE {table_name} SET uuid = :uuid WHERE id = :id"),
-                        {"uuid": str(uuid.uuid4()), "id": row.id},
-                    )
-            print(f"✅ Missing database column added: {table_name}.uuid")
-
-    doc_share_repaired = []
-    for column in (
-        Column("public_id", _String(64), nullable=True),
-        Column("share_scope", _String(20), nullable=True),
-        Column("share_expires_at", DateTime(timezone=True), nullable=True),
-        Column("view_count", Integer(), nullable=True),
-        Column("last_viewed_at", DateTime(timezone=True), nullable=True),
-    ):
-        if _add_column_if_missing("docs", column):
-            doc_share_repaired.append(column.name)
-    if doc_share_repaired:
-        with engine.begin() as connection:
-            if "share_scope" in doc_share_repaired:
-                connection.execute(text("UPDATE docs SET share_scope = 'private' WHERE share_scope IS NULL"))
-            if "view_count" in doc_share_repaired:
-                connection.execute(text("UPDATE docs SET view_count = 0 WHERE view_count IS NULL"))
-        print(f"✅ Missing database columns added: docs.{', '.join(doc_share_repaired)}")
-
-
 def get_db():
     db = SessionLocal()
     try:
@@ -265,73 +168,74 @@ def get_db():
         db.close()
 
 
-def _stamp_alembic_head_if_unmanaged() -> None:
-    """Stamp alembic_version to head when the schema was bootstrapped by
-    create_all rather than by migrations (i.e. no migration history yet).
+def _build_alembic_config():
+    """Alembic Config pointing at this backend's migrations and the app's database.
 
-    Without this, a fresh create_all leaves alembic_version empty, so a later
-    `alembic upgrade head` would replay every migration against an already
-    complete schema. Best-effort: never block startup if alembic isn't usable.
+    Built without alembic.ini on purpose: the ini's only extra payload is a
+    logging section, and loading it here would let env.py's fileConfig()
+    reconfigure the running app's logging during startup.
     """
-    try:
-        from pathlib import Path
-        from alembic.config import Config
-        from alembic.script import ScriptDirectory
+    from pathlib import Path
+    from alembic.config import Config
 
-        backend_dir = Path(__file__).resolve().parent.parent
-        cfg = Config(str(backend_dir / "alembic.ini"))
-        cfg.set_main_option("script_location", str(backend_dir / "alembic"))
-        head = ScriptDirectory.from_config(cfg).get_current_head()
-        if not head:
-            return
+    backend_dir = Path(__file__).resolve().parent.parent
+    cfg = Config()
+    cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    cfg.attributes["database_url"] = settings.database_url
+    return cfg
 
-        with engine.begin() as connection:
-            if not inspect(connection).has_table("alembic_version"):
-                connection.execute(
-                    text(
-                        "CREATE TABLE alembic_version ("
-                        "version_num VARCHAR(255) NOT NULL, "
-                        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-                    )
-                )
-            already = connection.execute(text("SELECT version_num FROM alembic_version")).first()
-            if already is None:
-                connection.execute(
-                    text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
-                    {"rev": head},
-                )
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"⚠️  Could not stamp alembic_version to head: {exc}")
+
+def _unmanaged_schema_tables() -> list:
+    """Application tables present in a database that has no Alembic revision.
+
+    Empty list means the database is either fresh (no tables) or already under
+    migration control — both states `alembic upgrade head` handles correctly.
+    """
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+        app_tables = tables - {"alembic_version"}
+        if not app_tables:
+            return []
+        if "alembic_version" not in tables:
+            return sorted(app_tables)
+        stamped = connection.execute(text("SELECT version_num FROM alembic_version")).first()
+        return [] if stamped is not None else sorted(app_tables)
 
 
 def init_db():
-    """Create or repair the database schema. Safe to run on every startup."""
+    """Bring the database schema to the current Alembic head.
+
+    Alembic is the single schema authority: a fresh database is built by the
+    bootstrap migration and carried forward by the migration chain; an existing
+    database gets pending migrations applied; a database already at head is a
+    no-op. There is deliberately no create_all/stamp/raw-SQL fallback here — a
+    failed or skipped migration must surface as a startup error to be fixed via
+    ``migrate.py``, not be papered over at runtime.
+
+    Safe to run on every startup. Raises on an unstamped non-empty database
+    rather than guessing which revision its schema corresponds to.
+    """
+    from alembic import command
+
     # Provision the database itself for server backends (no-op for SQLite).
     ensure_database_exists(settings.database_url)
 
-    # Import all models to ensure they're registered with Base.metadata
-    from . import models
-    from . import models_versioning
+    # Import all models so Base.metadata is complete when the bootstrap
+    # migration (which builds the schema from metadata) runs.
+    from . import models  # noqa: F401
+    from . import models_versioning  # noqa: F401
 
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    expected_tables = set(Base.metadata.tables.keys())
-    missing_tables = expected_tables - existing_tables
+    unmanaged = _unmanaged_schema_tables()
+    if unmanaged:
+        raise RuntimeError(
+            "Database contains application tables but no Alembic revision "
+            f"(e.g. {', '.join(unmanaged[:5])}). Refusing to guess its schema "
+            "state. If the schema is current, run "
+            "'python migrate.py stamp --revision head'; otherwise restore the "
+            "database (including alembic_version) from backup and run "
+            "'python migrate.py upgrade'."
+        )
 
-    # Always call create_all: it is idempotent (checkfirst skips existing
-    # tables) and is the authoritative safety net. This self-heals a database
-    # that has an alembic_version row but is missing tables — a state where
-    # `alembic upgrade head` is a silent no-op (partially restored DB, a stamp
-    # without a real upgrade, etc.) and the app would otherwise crash with
-    # "table doesn't exist".
-    Base.metadata.create_all(bind=engine)
-    if missing_tables:
-        if existing_tables - {"alembic_version"}:
-            print(f"✅ Missing database tables created: {', '.join(sorted(missing_tables))}")
-        else:
-            print("✅ Database tables created successfully")
-        # We just materialized the schema outside of Alembic — record it as head
-        # so migrations stay coherent.
-        _stamp_alembic_head_if_unmanaged()
-
-    _repair_known_schema_drift()
+    command.upgrade(_build_alembic_config(), "head")

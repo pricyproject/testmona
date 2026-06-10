@@ -10,3 +10,11 @@ from .model_modules.integrations_audit import *
 from .model_modules.docs import *
 
 __all__ = [name for name in globals() if not name.startswith("_")]
+
+# Auto-allocate per-project ``project_seq`` on insert for every project-scoped,
+# URL/badge-bearing entity, and keep the denormalised ``TestCase.project_id``
+# in sync with its suite (see services/sequence_service.py). Registration must
+# live here, after every model module is imported.
+from .services.sequence_service import register_sequence_listeners as _register_sequence_listeners
+
+_register_sequence_listeners()

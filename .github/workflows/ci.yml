@@ -62,7 +62,7 @@ jobs:
         run: |
           rm -f /tmp/testmona-ci.sqlite /tmp/testmona-test-ci.sqlite
           python migrate.py lint
-          python migrate.py upgrade --no-backup --no-backfill
+          python migrate.py upgrade --no-backup
           python migrate.py preflight
 
       - name: Validate OpenAPI schema
@@ -176,5 +176,5 @@ jobs:
       - name: Validate MariaDB migrations
         run: |
           python migrate.py lint
-          python migrate.py upgrade --no-backup --no-backfill
+          python migrate.py upgrade --no-backup
           python migrate.py preflight

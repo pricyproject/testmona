@@ -25,11 +25,9 @@ class Notification(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
+    # The matching User.notifications side is declared on the User class itself
+    # (core_testing.py) — never monkey-patch mapped classes after definition.
     user = relationship("User", back_populates="notifications")
-
-
-# Add notifications relationship to User model
-User.notifications = relationship("Notification", back_populates="user")
 
 
 # Analytics and Reporting Models

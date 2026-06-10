@@ -57,7 +57,6 @@ def _build_entities() -> Dict[str, EntitySpec]:
         TestPlan,
         TestResult,
         TestRun,
-        TestSuite,
     )
 
     def defect_scope(q: Query, project_id: int) -> Query:
@@ -94,11 +93,13 @@ def _build_entities() -> Dict[str, EntitySpec]:
         }
 
     def testcase_scope(q: Query, project_id: int) -> Query:
-        # TestCase has no project_id column — it's reached through its suite.
-        return (
-            q.join(TestSuite, TestCase.test_suite_id == TestSuite.id)
-            .filter(TestSuite.project_id == project_id, TestCase.is_deleted.is_(False))
-        )
+        # Scope on the denormalised TestCase.project_id (backfilled by the
+        # add_test_case_project_id migration and kept in sync with the suite by
+        # the sequence-service insert/update listeners). Using the same column
+        # everywhere — instead of re-deriving the project through a TestSuite
+        # join here — means TQL can never disagree with the rest of the app
+        # about which project a case belongs to.
+        return q.filter(TestCase.project_id == project_id, TestCase.is_deleted.is_(False))
 
     def testcase_row(tc: TestCase) -> dict:
         return {
