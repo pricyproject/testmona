@@ -1,14 +1,71 @@
+import re
 from functools import wraps
 from fastapi import HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from .models import User, Role, Project, ProjectAssignment
-from typing import List, Optional
+from typing import List, Optional, Pattern, Tuple
 
 
 PROJECT_PERMISSION_ALIASES = {
     "view": "read",
 }
+
+
+# HTTP methods that never mutate state — always allowed for any authenticated user.
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+
+def _m_re(method: str, pattern: str) -> Tuple[str, Pattern]:
+    return (method.upper(), re.compile(pattern))
+
+
+# Self-service writes a read-only ``viewer`` is still allowed to perform. Matched with
+# ``re.search`` against ``request.url.path`` so an optional reverse-proxy "/api" prefix
+# does not break matching. Anything not listed here is blocked for viewers.
+_VIEWER_WRITE_ALLOWLIST: List[Tuple[str, Pattern]] = [
+    # account & session
+    _m_re("POST", r"/(token|refresh|logout)$"),
+    _m_re("POST", r"/users/me/change-password$"),
+    _m_re("POST", r"/users/me/2fa/(setup|enable|disable|recovery-codes)$"),
+    _m_re("POST", r"/users/me/avatar$"),
+    _m_re("PUT", r"/users/me$"),
+    _m_re("PUT", r"/users/me/notification-preferences$"),
+    _m_re("PUT", r"/users/me/onboarding-checklist/.+$"),
+    # own notifications
+    _m_re("PUT", r"/notifications/\d+(/mark-unread)?$"),
+    _m_re("POST", r"/notifications/mark-all-read$"),
+    _m_re("POST", r"/notifications/bulk-update$"),
+    _m_re("DELETE", r"/notifications/(all|cleanup|bulk-delete|\d+)$"),
+    # personal saved views / searches
+    _m_re("POST", r"/saved-filters$"),
+    _m_re("PUT", r"/saved-filters/\d+$"),
+    _m_re("DELETE", r"/saved-filters/\d+$"),
+    _m_re("POST", r"/advanced-search/saved$"),
+]
+
+
+def enforce_viewer_read_only(user: object, method: str, path: str) -> None:
+    """Global read-only gate for the ``viewer`` role.
+
+    No-op for superusers and any non-viewer role; viewers may issue safe (read) methods
+    and the self-service writes in ``_VIEWER_WRITE_ALLOWLIST``. Everything else raises 403.
+    This is defense-in-depth on top of the per-route ``has_permission`` checks: it covers
+    every authenticated route because every one resolves through ``auth.get_current_user``.
+    """
+    if getattr(user, "is_superuser", False):
+        return
+    if normalize_role(getattr(user, "role", None)) != Role.VIEWER:
+        return
+    if method.upper() in SAFE_METHODS:
+        return
+    for allowed_method, pattern in _VIEWER_WRITE_ALLOWLIST:
+        if allowed_method == method.upper() and pattern.search(path):
+            return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Viewer role is read-only",
+    )
 
 
 ROLE_PERMISSIONS = {

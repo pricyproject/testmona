@@ -133,10 +133,12 @@ async def get_current_user(
     # API tokens (``tmona_*``) are accepted alongside JWTs so CI/CD and other
     # scripted callers can authenticate without spinning up a login flow.
     from .services.api_token_service import looks_like_api_token, get_user_for_token
+    from . import rbac
     if looks_like_api_token(token):
         api_user = get_user_for_token(db, token)
         if api_user is None:
             raise credentials_exception
+        rbac.enforce_viewer_read_only(api_user, request.method, request.url.path)
         return api_user
 
     try:
@@ -151,6 +153,7 @@ async def get_current_user(
         raise credentials_exception
     if not _token_session_is_current(payload, user):
         raise credentials_exception
+    rbac.enforce_viewer_read_only(user, request.method, request.url.path)
     return user
 
 
@@ -188,7 +191,9 @@ async def get_current_user_check_password_change(
             status_code=403,
             detail="Password change required. Please change your password before accessing this resource."
         )
-    
+
+    from . import rbac
+    rbac.enforce_viewer_read_only(user, request.method, request.url.path)
     return user
 
 
