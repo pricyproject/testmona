@@ -55,7 +55,7 @@ def register_user_routes(app):
         is_available = db_user is None or db_user.id == current_user.id
         return {"available": is_available}
 
-    @app.post("/users/me/change-password")
+    @app.post("/users/me/change-password", response_model=schemas.MessageResponse)
     async def change_password(
         password_data: dict,
         db: Session = Depends(get_db),
@@ -101,14 +101,14 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for password change: {e}")
+            logger.warning(f"Failed to create audit trail for password change: {e}")
         
         # Auto-complete onboarding task if it exists
         try:
             from ..crud import update_onboarding_task
             update_onboarding_task(db, current_user.id, "change_password", True)
         except Exception as e:
-            print(f"Failed to update onboarding task: {e}")
+            logger.warning(f"Failed to update onboarding task: {e}")
         
         return {"message": "Password changed successfully"}
 
@@ -295,11 +295,11 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for avatar upload: {e}")
+            logger.warning(f"Failed to create audit trail for avatar upload: {e}")
         
         return {"avatar_url": current_user.avatar_url}
 
-    @app.delete("/users/me")
+    @app.delete("/users/me", response_model=schemas.MessageResponse)
     async def delete_account(
         confirmation: dict,
         db: Session = Depends(get_db),
@@ -345,7 +345,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for account deletion: {e}")
+            logger.warning(f"Failed to create audit trail for account deletion: {e}")
         
         return {"message": "Account deleted successfully"}
 
@@ -432,7 +432,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for profile update: {e}")
+            logger.warning(f"Failed to create audit trail for profile update: {e}")
         
         return db_user
 
@@ -466,13 +466,13 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for user creation: {e}")
+            logger.warning(f"Failed to create audit trail for user creation: {e}")
         
         # Initialize onboarding checklist for new user
         try:
             crud.initialize_onboarding_checklist(db, new_user.id)
         except Exception as e:
-            print(f"Failed to initialize onboarding checklist: {e}")
+            logger.warning(f"Failed to initialize onboarding checklist: {e}")
         
         return new_user
 
@@ -576,7 +576,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for user update: {e}")
+            logger.warning(f"Failed to create audit trail for user update: {e}")
         
         return db_user
 
@@ -620,7 +620,7 @@ def register_user_routes(app):
 
         return {"enabled": False, "user_id": db_user.id}
 
-    @app.delete("/users/{user_id}")
+    @app.delete("/users/{user_id}", response_model=schemas.MessageResponse)
     def delete_user(
         user_id: int,
         db: Session = Depends(get_db),
@@ -660,7 +660,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for user deletion: {e}")
+            logger.warning(f"Failed to create audit trail for user deletion: {e}")
         
         return {"message": "User deleted successfully"}
 
@@ -698,7 +698,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for invitation creation: {e}")
+            logger.warning(f"Failed to create audit trail for invitation creation: {e}")
         
         return db_invitation
 
@@ -794,13 +794,13 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for invitation acceptance: {e}")
+            logger.warning(f"Failed to create audit trail for invitation acceptance: {e}")
         
         # Mark invitation as used
         crud.delete_user_invitation(db, invitation_id=invitation.id)
         return {"message": "Invitation accepted successfully", "user_id": new_user.id}
 
-    @app.delete("/invitations/{invitation_id}")
+    @app.delete("/invitations/{invitation_id}", response_model=schemas.MessageResponse)
     def delete_invitation(
         invitation_id: int,
         db: Session = Depends(get_db),
@@ -833,7 +833,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for invitation deletion: {e}")
+            logger.warning(f"Failed to create audit trail for invitation deletion: {e}")
         
         return {"message": "Invitation deleted successfully"}
 
@@ -888,7 +888,7 @@ def register_user_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for notification preferences update: {e}")
+            logger.warning(f"Failed to create audit trail for notification preferences update: {e}")
         
         return {
             "do_not_disturb": user.do_not_disturb,
@@ -920,23 +920,18 @@ def register_user_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         """Get onboarding checklist for current user"""
-        try:
-            checklist = crud.get_onboarding_checklist(db, current_user.id)
-            return [
-                {
-                    "id": item.id,
-                    "task_key": item.task_key,
-                    "task_name": item.task_name,
-                    "description": item.description,
-                    "is_completed": item.is_completed,
-                    "completed_at": item.completed_at.isoformat() if item.completed_at else None
-                }
-                for item in checklist
-            ]
-        except Exception as e:
-            # If checklist doesn't exist or table missing, return empty array
-            print(f"Failed to get onboarding checklist: {e}")
-            return []
+        checklist = crud.get_onboarding_checklist(db, current_user.id)
+        return [
+            {
+                "id": item.id,
+                "task_key": item.task_key,
+                "task_name": item.task_name,
+                "description": item.description,
+                "is_completed": item.is_completed,
+                "completed_at": item.completed_at.isoformat() if item.completed_at else None
+            }
+            for item in checklist
+        ]
 
     @app.put("/users/me/onboarding-checklist/{task_key}")
     def update_onboarding_task(
@@ -964,5 +959,5 @@ def register_user_routes(app):
         except HTTPException:
             raise
         except Exception as e:
-            print(f"Failed to update onboarding task: {e}")
+            logger.warning(f"Failed to update onboarding task: {e}")
             raise HTTPException(status_code=500, detail="Failed to update onboarding task")

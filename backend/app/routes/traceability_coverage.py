@@ -20,6 +20,9 @@ from ..services.analytics_shared import (
     get_linked_requirement_test_case_ids,
     add_legacy_reference_links,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def register_traceability_coverage_routes(app):
@@ -227,7 +230,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for traceability entry creation: {e}")
+            logger.warning(f"Failed to create audit trail for traceability entry creation: {e}")
         
         return db_entry
 
@@ -241,11 +244,7 @@ def register_traceability_coverage_routes(app):
         if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        try:
-            return get_traceability_matrix_entries(db, requirement_id=requirement_id, test_case_id=test_case_id)
-        except Exception as e:
-            print(f"Error in read_traceability_matrix: {e}")
-            return []
+        return get_traceability_matrix_entries(db, requirement_id=requirement_id, test_case_id=test_case_id)
 
     @app.put("/traceability-matrix/{entry_id}", response_model=schemas.TraceabilityMatrix)
     def update_traceability_entry(
@@ -280,11 +279,11 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for traceability entry update: {e}")
+            logger.warning(f"Failed to create audit trail for traceability entry update: {e}")
 
         return db_entry
 
-    @app.delete("/traceability-matrix/{entry_id}")
+    @app.delete("/traceability-matrix/{entry_id}", response_model=schemas.MessageResponse)
     def delete_traceability_entry(
         entry_id: int,
         db: Session = Depends(get_db),
@@ -322,7 +321,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for traceability entry deletion: {e}")
+            logger.warning(f"Failed to create audit trail for traceability entry deletion: {e}")
 
         return {"message": "Traceability entry deleted successfully"}
 
@@ -354,7 +353,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for coverage report creation: {e}")
+            logger.warning(f"Failed to create audit trail for coverage report creation: {e}")
 
         return db_report
 
@@ -419,11 +418,11 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for coverage report update: {e}")
+            logger.warning(f"Failed to create audit trail for coverage report update: {e}")
 
         return db_report
 
-    @app.delete("/coverage-reports/{report_id}")
+    @app.delete("/coverage-reports/{report_id}", response_model=schemas.MessageResponse)
     def delete_coverage_report_endpoint(
         report_id: int,
         db: Session = Depends(get_db),
@@ -458,7 +457,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for coverage report deletion: {e}")
+            logger.warning(f"Failed to create audit trail for coverage report deletion: {e}")
 
         return {"message": "Coverage report deleted successfully"}
 
@@ -490,7 +489,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for Jira integration creation: {e}")
+            logger.warning(f"Failed to create audit trail for Jira integration creation: {e}")
         
         return db_integration
 
@@ -554,11 +553,11 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for Jira integration update: {e}")
+            logger.warning(f"Failed to create audit trail for Jira integration update: {e}")
 
         return db_integration
 
-    @app.delete("/jira-integrations/{integration_id}")
+    @app.delete("/jira-integrations/{integration_id}", response_model=schemas.MessageResponse)
     def delete_jira_integration(
         integration_id: int,
         db: Session = Depends(get_db),
@@ -593,7 +592,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for Jira integration deletion: {e}")
+            logger.warning(f"Failed to create audit trail for Jira integration deletion: {e}")
 
         return {"message": "Jira integration deleted successfully"}
 
@@ -650,7 +649,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for Jira issue creation: {e}")
+            logger.warning(f"Failed to create audit trail for Jira issue creation: {e}")
 
         return db_issue
 
@@ -732,7 +731,7 @@ def register_traceability_coverage_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for Jira issue update: {e}")
+            logger.warning(f"Failed to create audit trail for Jira issue update: {e}")
 
         return db_issue
 
@@ -746,11 +745,7 @@ def register_traceability_coverage_routes(app):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        try:
-            return get_traceability_matrix(db, project_id=project_id)
-        except Exception as e:
-            print(f"Error in get_project_traceability_matrix: {e}")
-            return []
+        return get_traceability_matrix(db, project_id=project_id)
 
     @app.get("/traceability-matrix-entries/", response_model=List[schemas.TraceabilityMatrix])
     def read_all_traceability_entries(
@@ -762,11 +757,7 @@ def register_traceability_coverage_routes(app):
         if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        try:
-            return get_traceability_matrix_entries(db, skip=skip, limit=limit)
-        except Exception as e:
-            print(f"Error in read_all_traceability_entries: {e}")
-            return []
+        return get_traceability_matrix_entries(db, skip=skip, limit=limit)
 
     @app.post("/traceability-matrix-entries/", response_model=schemas.TraceabilityMatrix)
     def create_traceability_entry_v2(

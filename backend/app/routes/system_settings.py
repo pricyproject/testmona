@@ -379,7 +379,7 @@ def register_system_settings_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for audit config update: {e}")
+            logger.warning(f"Failed to create audit trail for audit config update: {e}")
         
         return schemas.AuditTrailConfig(**current_config)
 
@@ -439,7 +439,7 @@ def register_system_settings_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for audit config reset: {e}")
+            logger.warning(f"Failed to create audit trail for audit config reset: {e}")
         
         return schemas.AuditTrailConfig(**default_config)
 
@@ -487,7 +487,7 @@ def register_system_settings_routes(app):
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
-                print(f"Failed to create audit trail for audit deletion: {e}")
+                logger.warning(f"Failed to create audit trail for audit deletion: {e}")
             
             return {"message": f"Successfully deleted {count} audit trail records"}
         except Exception as e:
@@ -541,11 +541,11 @@ def register_system_settings_routes(app):
                 )
                 audit_service.create_audit_trail(audit_data)
             except Exception as audit_error:
-                print(f"Failed to create audit trail for signup change: {audit_error}")
+                logger.warning(f"Failed to create audit trail for signup change: {audit_error}")
         
         return db_setting
 
-    @app.delete("/system/settings/{key}")
+    @app.delete("/system/settings/{key}", response_model=schemas.MessageResponse)
     def delete_system_setting(
         key: str,
         db: Session = Depends(get_db),
@@ -587,7 +587,7 @@ def register_system_settings_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for system setting deletion: {e}")
+            logger.warning(f"Failed to create audit trail for system setting deletion: {e}")
         
         return {"message": "System setting deleted successfully"}
 
@@ -647,7 +647,7 @@ def register_system_settings_routes(app):
                 "limit": limit
             }
         except Exception as e:
-            print(f"Failed to get signup history: {e}")
+            logger.warning(f"Failed to get signup history: {e}")
             return {"history": [], "total": 0, "skip": skip, "limit": limit}
 
     # Global Parameters Endpoints
@@ -694,7 +694,7 @@ def register_system_settings_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for global parameter creation: {e}")
+            logger.warning(f"Failed to create audit trail for global parameter creation: {e}")
         
         return db_parameter
 
@@ -716,11 +716,7 @@ def register_system_settings_routes(app):
             if not rbac.has_permission(current_user, "read", project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        try:
-            return crud.get_global_parameters(db, project_id=project_id, skip=skip, limit=limit)
-        except Exception as e:
-            print(f"Error in read_global_parameters: {e}")
-            return []
+        return crud.get_global_parameters(db, project_id=project_id, skip=skip, limit=limit)
 
     @app.get("/global-parameters/{param_id}", response_model=schemas.GlobalParameter)
     def read_global_parameter(
@@ -787,11 +783,11 @@ def register_system_settings_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for global parameter update: {e}")
+            logger.warning(f"Failed to create audit trail for global parameter update: {e}")
         
         return db_parameter
 
-    @app.delete("/global-parameters/{param_id}")
+    @app.delete("/global-parameters/{param_id}", response_model=schemas.MessageResponse)
     def delete_global_parameter(
         param_id: int,
         db: Session = Depends(get_db),
@@ -832,6 +828,6 @@ def register_system_settings_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for global parameter deletion: {e}")
+            logger.warning(f"Failed to create audit trail for global parameter deletion: {e}")
         
         return {"message": "Global parameter deleted successfully"}
