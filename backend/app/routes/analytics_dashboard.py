@@ -29,6 +29,9 @@ from ..crud import (
     generate_dashboard_analytics
 )
 from ..services.analytics_shared import normalize_result_status, build_coverage_report
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 REPORT_SECTIONS = {"kpis", "summary", "recent_activity", "trends", "team_performance", "upcoming"}
@@ -360,7 +363,7 @@ def _build_shareable_report_content(
             content["upcoming"] = _upcoming_items(db, project_id)
         content["data_available"] = True
     except Exception as exc:
-        print(f"Failed to build shareable report content for project {project_id}: {exc}")
+        logger.warning(f"Failed to build shareable report content for project {project_id}: {exc}")
         content["data_available"] = False
         content["error"] = "Analytics data could not be generated for this report."
     return content
@@ -562,7 +565,7 @@ def register_analytics_dashboard_routes(app):
         try:
             return generate_dashboard_analytics(db, project_id, time_range)
         except Exception as e:
-            print(f"Error in get_dashboard_analytics_get: {e}")
+            logger.warning(f"Error in get_dashboard_analytics_get: {e}")
             raise HTTPException(status_code=500, detail="Failed to generate analytics")
 
     @app.get("/analytics/time-series")
@@ -879,7 +882,7 @@ def register_analytics_dashboard_routes(app):
         except HTTPException:
             raise
         except Exception as exc:
-            print(f"Error in get_dashboard_analytics: {exc}")
+            logger.warning(f"Error in get_dashboard_analytics: {exc}")
             raise HTTPException(status_code=500, detail="Failed to generate dashboard analytics")
 
     @app.get("/dashboard/statistics")
@@ -903,98 +906,102 @@ def register_analytics_dashboard_routes(app):
                     raise HTTPException(status_code=403, detail="Insufficient permissions")
                 projects = [project]
             else:
-                # Get all projects user has access to
-                projects = db.query(models.Project).all()
-            
+                # Cap to 500 projects to prevent unbounded scans
+                projects = db.query(models.Project).limit(500).all()
+
             projects = [p for p in projects if p and rbac.has_permission(current_user, "read", p.id, db)]
-            
-            # Initialize counters
-            total_test_cases = 0
-            total_test_suites = 0
-            total_test_runs = 0
-            total_requirements = 0
-            total_defects = 0
-            total_milestones = 0
-            total_test_plans = 0
             total_projects = len(projects)
-            
-            # Test execution results
-            total_passed = 0
-            total_failed = 0
-            total_blocked = 0
-            total_skipped = 0
-            total_not_started = 0
-            
-            for project in projects:
-                # Count test cases
-                active_test_cases_query = db.query(models.TestCase).join(models.TestSuite).filter(
-                    models.TestSuite.project_id == project.id,
-                    models.TestCase.is_deleted == False
+            project_ids = [p.id for p in projects]
+
+            from sqlalchemy import func as _func
+
+            if not project_ids:
+                total_test_cases = total_test_suites = total_test_runs = 0
+                total_requirements = total_defects = total_milestones = total_test_plans = 0
+                total_passed = total_failed = total_blocked = total_skipped = total_not_started = 0
+            else:
+                # Batch-fetch all active test case IDs across all projects in one query
+                tc_rows = (
+                    db.query(models.TestCase.id)
+                    .join(models.TestSuite)
+                    .filter(
+                        models.TestSuite.project_id.in_(project_ids),
+                        (models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted == False),
+                    )
+                    .all()
                 )
-                test_case_ids = [row[0] for row in active_test_cases_query.with_entities(models.TestCase.id).all()]
-                total_test_cases += len(test_case_ids)
-                
-                # Count test suites
-                total_test_suites += db.query(models.TestSuite).filter(
-                    models.TestSuite.project_id == project.id
-                ).count()
-                
-                # Count test runs
-                total_test_runs += db.query(models.TestRun).filter(
-                    models.TestRun.project_id == project.id
-                ).count()
-                
-                # Count requirements
-                total_requirements += db.query(models.Requirement).filter(
-                    models.Requirement.project_id == project.id
-                ).count()
-                
-                # Count defects
-                total_defects += db.query(models.Defect).filter(
-                    models.Defect.project_id == project.id
-                ).count()
-                
-                # Count milestones (handle potential schema issues)
+                all_test_case_ids = [row[0] for row in tc_rows]
+                total_test_cases = len(all_test_case_ids)
+
+                # Aggregate counts with single queries
+                total_test_suites = (
+                    db.query(_func.count(models.TestSuite.id))
+                    .filter(models.TestSuite.project_id.in_(project_ids))
+                    .scalar() or 0
+                )
+                total_test_runs = (
+                    db.query(_func.count(models.TestRun.id))
+                    .filter(models.TestRun.project_id.in_(project_ids))
+                    .scalar() or 0
+                )
+                total_requirements = (
+                    db.query(_func.count(models.Requirement.id))
+                    .filter(models.Requirement.project_id.in_(project_ids))
+                    .scalar() or 0
+                )
+                total_defects = (
+                    db.query(_func.count(models.Defect.id))
+                    .filter(models.Defect.project_id.in_(project_ids))
+                    .scalar() or 0
+                )
                 try:
-                    total_milestones += db.query(models.Milestone).filter(
-                        models.Milestone.project_id == project.id
-                    ).count()
+                    total_milestones = (
+                        db.query(_func.count(models.Milestone.id))
+                        .filter(models.Milestone.project_id.in_(project_ids))
+                        .scalar() or 0
+                    )
                 except Exception as e:
-                    # If milestone query fails due to schema issues, skip it
-                    print(f"Error counting milestones for project {project.id}: {e}")
-                    total_milestones += 0
-                
-                # Count test plans
-                total_test_plans += db.query(models.TestPlan).filter(
-                    models.TestPlan.project_id == project.id
-                ).count()
-                
-                # Count test execution results
-                for test_case_id in test_case_ids:
-                    latest_result = db.query(models.TestResult).filter(
-                        models.TestResult.test_case_id == test_case_id
-                    ).order_by(
-                        models.TestResult.executed_at.desc(),
-                        models.TestResult.created_at.desc(),
-                        models.TestResult.id.desc()
-                    ).first()
-                    
-                    if latest_result:
-                        normalized_status = (latest_result.status or "").lower()
-                        if normalized_status in {"pass", "passed"}:
+                    logger.warning("Error counting milestones: %s", e)
+                    total_milestones = 0
+                total_test_plans = (
+                    db.query(_func.count(models.TestPlan.id))
+                    .filter(models.TestPlan.project_id.in_(project_ids))
+                    .scalar() or 0
+                )
+
+                # Latest result per test case — single batch query instead of per-row loop
+                total_passed = total_failed = total_blocked = total_skipped = total_not_started = 0
+                if all_test_case_ids:
+                    latest_id_subq = (
+                        db.query(
+                            models.TestResult.test_case_id,
+                            _func.max(models.TestResult.id).label("max_id"),
+                        )
+                        .filter(models.TestResult.test_case_id.in_(all_test_case_ids))
+                        .group_by(models.TestResult.test_case_id)
+                        .subquery()
+                    )
+                    latest_statuses = (
+                        db.query(models.TestResult.status)
+                        .join(latest_id_subq, models.TestResult.id == latest_id_subq.c.max_id)
+                        .all()
+                    )
+                    for (status,) in latest_statuses:
+                        normalized = (status or "").lower()
+                        if normalized in {"pass", "passed"}:
                             total_passed += 1
-                        elif normalized_status in {"fail", "failed"}:
+                        elif normalized in {"fail", "failed"}:
                             total_failed += 1
-                        elif normalized_status in {"block", "blocked"}:
+                        elif normalized in {"block", "blocked"}:
                             total_blocked += 1
-                        elif normalized_status in {"skip", "skipped"}:
+                        elif normalized in {"skip", "skipped"}:
                             total_skipped += 1
-                        elif normalized_status == "not_started":
-                            total_not_started += 1
                         else:
                             total_not_started += 1
-                    else:
-                        total_not_started += 1
+                    # Cases with no result at all
+                    total_not_started += total_test_cases - len(latest_statuses)
+                else:
+                    total_not_started = 0
             
             # Calculate pass rate
             total_executed = total_passed + total_failed + total_blocked + total_skipped
@@ -1023,7 +1030,7 @@ def register_analytics_dashboard_routes(app):
         except HTTPException:
             raise
         except Exception as e:
-            print(f"Error in get_dashboard_statistics: {e}")
+            logger.warning(f"Error in get_dashboard_statistics: {e}")
             raise HTTPException(status_code=500, detail="Failed to load dashboard statistics")
 
     @app.get("/analytics/kpi/{project_id}")
@@ -1067,7 +1074,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for KPI data creation: {e}")
+            logger.warning(f"Failed to create audit trail for KPI data creation: {e}")
         
         return db_kpi
 
@@ -1153,7 +1160,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for test step result creation: {e}")
+            logger.warning(f"Failed to create audit trail for test step result creation: {e}")
         
         return db_step
 
@@ -1243,7 +1250,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for shareable report creation: {e}")
+            logger.warning(f"Failed to create audit trail for shareable report creation: {e}")
         
         return db_report
 
@@ -1310,7 +1317,7 @@ def register_analytics_dashboard_routes(app):
         try:
             record_shareable_report_view(db, report)
         except Exception as exc:
-            print(f"Failed to record view for shareable report {report.id}: {exc}")
+            logger.warning(f"Failed to record view for shareable report {report.id}: {exc}")
             db.rollback()
         try:
             from ..services.audit_service import get_audit_service
@@ -1326,7 +1333,7 @@ def register_analytics_dashboard_routes(app):
                 description=f"Shareable report downloaded: {report.title}",
             ))
         except Exception as exc:
-            print(f"Failed to write audit for shareable report download: {exc}")
+            logger.warning(f"Failed to write audit for shareable report download: {exc}")
 
         payload = _shareable_report_payload(db, report, include_token=True)
         if format == "csv":
@@ -1377,7 +1384,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for shareable report update: {e}")
+            logger.warning(f"Failed to create audit trail for shareable report update: {e}")
 
         return db_report
 
@@ -1461,7 +1468,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for root cause analysis creation: {e}")
+            logger.warning(f"Failed to create audit trail for root cause analysis creation: {e}")
         
         return db_analysis
 
@@ -1513,11 +1520,11 @@ def register_analytics_dashboard_routes(app):
                 description=f"Root cause analysis updated: {updated.analysis_title or 'Untitled'}",
             ))
         except Exception as e:
-            print(f"Failed to create audit trail for root cause analysis update: {e}")
+            logger.warning(f"Failed to create audit trail for root cause analysis update: {e}")
 
         return updated
 
-    @app.delete("/analytics/root-cause-analysis/{analysis_id}")
+    @app.delete("/analytics/root-cause-analysis/{analysis_id}", response_model=schemas.MessageResponse)
     def delete_root_cause_analysis_endpoint(
         analysis_id: int,
         db: Session = Depends(get_db),
@@ -1547,7 +1554,7 @@ def register_analytics_dashboard_routes(app):
                 description=f"Root cause analysis deleted: {analysis_title or 'Untitled'}",
             ))
         except Exception as e:
-            print(f"Failed to create audit trail for root cause analysis deletion: {e}")
+            logger.warning(f"Failed to create audit trail for root cause analysis deletion: {e}")
 
         return {"message": "Root cause analysis deleted successfully"}
 
@@ -1579,7 +1586,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for dashboard widget creation: {e}")
+            logger.warning(f"Failed to create audit trail for dashboard widget creation: {e}")
         
         return db_widget
 
@@ -1626,7 +1633,7 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for dashboard widget update: {e}")
+            logger.warning(f"Failed to create audit trail for dashboard widget update: {e}")
 
         return db_widget
 
@@ -1740,7 +1747,7 @@ def register_analytics_dashboard_routes(app):
             'summary': summary,
         }
 
-    @app.delete("/analytics/dashboard-widgets/{widget_id}")
+    @app.delete("/analytics/dashboard-widgets/{widget_id}", response_model=schemas.MessageResponse)
     def delete_dashboard_widget_endpoint(
         widget_id: int,
         db: Session = Depends(get_db),
@@ -1776,6 +1783,6 @@ def register_analytics_dashboard_routes(app):
             )
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
-            print(f"Failed to create audit trail for dashboard widget deletion: {e}")
+            logger.warning(f"Failed to create audit trail for dashboard widget deletion: {e}")
 
         return {"message": "Dashboard widget deleted successfully"}
