@@ -120,6 +120,31 @@ class RootCauseAnalysis(Base):
     assignee = relationship("User", foreign_keys=[assigned_to])
 
 
+class TestDebtItem(Base):
+    __tablename__ = "test_debt_items"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    debt_type = Column(String(40), nullable=False)
+    severity = Column(String(20), nullable=False, default="medium", server_default="medium")
+    suggested_action = Column(String(40), nullable=False)
+    details = Column(Text)
+    auto_detected = Column(Boolean, default=True, server_default="1", nullable=False)
+    resolved_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project")
+    test_case = relationship("TestCase", back_populates="debt_items")
+
+    __table_args__ = (
+        UniqueConstraint("test_case_id", "debt_type", name="uq_test_debt_items_case_type"),
+        Index("ix_test_debt_items_project_status", "project_id", "resolved_at"),
+        Index("ix_test_debt_items_project_type", "project_id", "debt_type"),
+    )
+
+
 class DashboardWidget(Base):
     __tablename__ = "dashboard_widgets"
 

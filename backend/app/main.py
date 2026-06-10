@@ -73,6 +73,7 @@ from .routes.project_ai_chat import register_project_ai_chat_routes
 from .routes.docs import register_docs_routes
 from .routes.advanced_search import register_advanced_search_routes
 from .routes.resolvers import register_resolver_routes
+from .routes.test_asset_health import register_test_asset_health_routes
 
 register_common_routes(app)
 register_auth_routes(app)
@@ -100,6 +101,7 @@ register_project_ai_chat_routes(app)
 register_docs_routes(app)
 register_advanced_search_routes(app)
 register_resolver_routes(app)
+register_test_asset_health_routes(app)
 
 
 @app.on_event("startup")

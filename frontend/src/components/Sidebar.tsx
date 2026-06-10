@@ -27,6 +27,7 @@ import {
   KeyRound,
   BookOpen,
   ScanSearch,
+  HeartPulse,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
@@ -158,6 +159,7 @@ export function Sidebar({
           { name: t('defects'), href: `/projects/${projectId}/defects`, icon: Bug, feature: 'defects' },
           { name: t('advancedSearch'), href: `/projects/${projectId}/advanced-search`, icon: ScanSearch, feature: 'advanced_search' },
           { name: t('reports'), href: `/projects/${projectId}/reports`, icon: BarChart3, feature: 'reports' },
+          { name: t('testAssetHealth'), href: `/projects/${projectId}/test-asset-health`, icon: HeartPulse, feature: 'test_asset_health' },
         ]
       },
       {

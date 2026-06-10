@@ -47,6 +47,7 @@ const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunRe
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
 const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetail');
 const AdvancedSearch = lazyPage(() => import('@/pages/AdvancedSearch'), 'AdvancedSearch');
+const TestAssetHealth = lazyPage(() => import('@/pages/TestAssetHealth'), 'TestAssetHealth');
 const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
 const SharedReportViewer = lazyPage(() => import('@/pages/SharedReportViewer'), 'SharedReportViewer');
 const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
@@ -396,6 +397,13 @@ function AppWithRouter() {
           <ProjectGuard>
             <FeatureGuard feature="advanced_search">
               <AdvancedSearch />
+            </FeatureGuard>
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/test-asset-health" element={
+          <ProjectGuard>
+            <FeatureGuard feature="test_asset_health">
+              <TestAssetHealth />
             </FeatureGuard>
           </ProjectGuard>
         } />

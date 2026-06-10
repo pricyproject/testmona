@@ -256,6 +256,48 @@ export interface TestCaseWithCustomFields extends TestCase {
   custom_field_values: CustomFieldValue[];
 }
 
+export type TestDebtType = 'stale' | 'duplicate' | 'orphan' | 'always_pass' | 'never_run' | 'no_requirement_link';
+export type TestDebtSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type TestDebtAction = 'update' | 'merge' | 'archive' | 'link_req' | 'review';
+
+export interface TestDebtItem {
+  id: number;
+  project_id: number;
+  test_case_id: number;
+  debt_type: TestDebtType;
+  severity: TestDebtSeverity;
+  suggested_action: TestDebtAction;
+  details?: string | null;
+  auto_detected: boolean;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  test_case?: {
+    id: number;
+    project_seq?: number | null;
+    title: string;
+    priority?: string | null;
+    status?: string | null;
+    updated_at?: string | null;
+  } | null;
+}
+
+export interface TestAssetHealthSummary {
+  total_cases: number;
+  active_debt_items: number;
+  resolved_debt_items: number;
+  by_debt_type: Record<string, number>;
+  by_severity: Record<string, number>;
+}
+
+export interface TestAssetDebtDetectionResult {
+  created: number;
+  updated: number;
+  auto_resolved: number;
+  active_debt_items: number;
+  summary: TestAssetHealthSummary;
+}
+
 export interface CustomFieldDefinitionWithValues extends CustomFieldDefinition {
   values: CustomFieldValue[];
 }

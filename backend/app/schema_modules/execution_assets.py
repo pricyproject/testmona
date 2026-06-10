@@ -30,6 +30,131 @@ from .defects import *
 from .planning import *
 from .notifications_analytics import *
 
+
+TEST_DEBT_TYPES = {"stale", "duplicate", "orphan", "always_pass", "never_run", "no_requirement_link"}
+TEST_DEBT_SEVERITIES = {"low", "medium", "high", "critical"}
+TEST_DEBT_ACTIONS = {"update", "merge", "archive", "link_req", "review"}
+
+
+class TestDebtItemBase(BaseModel):
+    test_case_id: int = Field(..., ge=1)
+    debt_type: str = Field(..., min_length=1, max_length=40)
+    severity: str = Field("medium", min_length=1, max_length=20)
+    suggested_action: str = Field(..., min_length=1, max_length=40)
+    details: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator("debt_type")
+    @classmethod
+    def validate_debt_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in TEST_DEBT_TYPES:
+            raise ValueError("Unsupported debt type")
+        return normalized
+
+    @field_validator("severity")
+    @classmethod
+    def validate_severity(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in TEST_DEBT_SEVERITIES:
+            raise ValueError("Unsupported severity")
+        return normalized
+
+    @field_validator("suggested_action")
+    @classmethod
+    def validate_suggested_action(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in TEST_DEBT_ACTIONS:
+            raise ValueError("Unsupported suggested action")
+        return normalized
+
+    @field_validator("details")
+    @classmethod
+    def validate_details(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class TestDebtItemCreate(TestDebtItemBase):
+    pass
+
+
+class TestDebtItemUpdate(BaseModel):
+    severity: Optional[str] = Field(None, min_length=1, max_length=20)
+    suggested_action: Optional[str] = Field(None, min_length=1, max_length=40)
+    details: Optional[str] = Field(None, max_length=2000)
+    resolved_at: Optional[datetime] = None
+
+    @field_validator("severity")
+    @classmethod
+    def validate_update_severity(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in TEST_DEBT_SEVERITIES:
+            raise ValueError("Unsupported severity")
+        return normalized
+
+    @field_validator("suggested_action")
+    @classmethod
+    def validate_update_suggested_action(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in TEST_DEBT_ACTIONS:
+            raise ValueError("Unsupported suggested action")
+        return normalized
+
+    @field_validator("details")
+    @classmethod
+    def validate_update_details(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class TestDebtItemTestCase(BaseModel):
+    id: int
+    project_seq: Optional[int] = None
+    title: str
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TestDebtItem(TestDebtItemBase):
+    id: int
+    project_id: int
+    auto_detected: bool
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    test_case: Optional[TestDebtItemTestCase] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TestAssetHealthSummary(BaseModel):
+    total_cases: int
+    active_debt_items: int
+    resolved_debt_items: int
+    by_debt_type: Dict[str, int]
+    by_severity: Dict[str, int]
+
+
+class TestAssetDebtDetectionResult(BaseModel):
+    created: int
+    updated: int
+    auto_resolved: int
+    active_debt_items: int
+    summary: TestAssetHealthSummary
+
 class SharedStepBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=500)

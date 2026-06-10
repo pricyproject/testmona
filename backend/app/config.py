@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     auth_cookie_samesite: str = "lax"
     test_database_url: str = "sqlite:///./test_test.db"
     webhook_allow_private_urls: bool = False
+    test_asset_stale_days: int = 180
+    test_asset_always_pass_min_results: int = 5
+    test_asset_duplicate_grace_days: int = 14
     
     @field_validator('secret_key', mode='before')
     @classmethod

@@ -107,6 +107,7 @@ class TestCase(Base):
     test_suite = relationship("TestSuite", back_populates="test_cases")
     section = relationship("TestCaseSection", back_populates="test_cases")
     test_results = relationship("TestResult", back_populates="test_case")
+    debt_items = relationship("TestDebtItem", back_populates="test_case", cascade="all, delete-orphan")
     custom_field_values = relationship("CustomFieldValue", back_populates="test_case")
     revisions = relationship("TestCaseRevision", back_populates="test_case")
     versions = relationship("TestCaseVersion", back_populates="test_case")

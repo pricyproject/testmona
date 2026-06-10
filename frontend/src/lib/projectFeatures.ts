@@ -9,6 +9,7 @@ import {
   Bug,
   ScanSearch,
   BarChart3,
+  HeartPulse,
   Sparkles,
   Database,
   Layers,
@@ -38,6 +39,7 @@ export type ProjectFeatureKey =
   | 'defects'
   | 'advanced_search'
   | 'reports'
+  | 'test_asset_health'
   | 'ask_ai'
   | 'custom_fields'
   | 'shared_steps'
@@ -69,6 +71,7 @@ export const PROJECT_FEATURES: ProjectFeatureMeta[] = [
   { key: 'defects', labelKey: 'defects', descriptionKey: 'featureDescDefects', icon: Bug, groupKey: 'management' },
   { key: 'advanced_search', labelKey: 'advancedSearch', descriptionKey: 'featureDescAdvancedSearch', icon: ScanSearch, groupKey: 'management' },
   { key: 'reports', labelKey: 'reports', descriptionKey: 'featureDescReports', icon: BarChart3, groupKey: 'management' },
+  { key: 'test_asset_health', labelKey: 'testAssetHealth', descriptionKey: 'featureDescTestAssetHealth', icon: HeartPulse, groupKey: 'management' },
   { key: 'custom_fields', labelKey: 'customFields', descriptionKey: 'featureDescCustomFields', icon: Database, groupKey: 'configuration' },
   { key: 'shared_steps', labelKey: 'sharedSteps', descriptionKey: 'featureDescSharedSteps', icon: Layers, groupKey: 'configuration' },
   { key: 'global_parameters', labelKey: 'globalParameters', descriptionKey: 'featureDescGlobalParameters', icon: Wrench, groupKey: 'configuration' },

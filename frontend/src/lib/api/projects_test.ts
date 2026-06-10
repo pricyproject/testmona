@@ -1,4 +1,4 @@
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, TestAssetDebtDetectionResult, TestAssetHealthSummary, TestDebtItem, TestDebtAction, TestDebtSeverity, TestDebtType, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
 import { api, resolveProjectSeq, seqAPI, getApiErrorMessage } from "./client";
 
 // Projects API
@@ -125,6 +125,50 @@ export const sectionsAPI = {
   },
   getSectionDetails: async (sectionId: number) => {
     const response = await api.get(`/sections/${sectionId}/details`);
+    return response.data;
+  },
+};
+
+export const testAssetHealthAPI = {
+  getSummary: async (projectId: number): Promise<TestAssetHealthSummary> => {
+    const response = await api.get(`/projects/${projectId}/test-asset-health/summary`);
+    return response.data;
+  },
+  listDebtItems: async (
+    projectId: number,
+    filters: { debt_type?: TestDebtType | 'all'; severity?: TestDebtSeverity | 'all'; resolved?: 'active' | 'resolved' | 'all'; skip?: number; limit?: number } = {},
+  ): Promise<TestDebtItem[]> => {
+    const params = new URLSearchParams({
+      skip: String(filters.skip ?? 0),
+      limit: String(filters.limit ?? 100),
+      resolved: filters.resolved || 'active',
+    });
+    if (filters.debt_type && filters.debt_type !== 'all') params.append('debt_type', filters.debt_type);
+    if (filters.severity && filters.severity !== 'all') params.append('severity', filters.severity);
+    const response = await api.get(`/projects/${projectId}/test-asset-health/debt-items?${params}`);
+    return response.data;
+  },
+  detect: async (projectId: number): Promise<TestAssetDebtDetectionResult> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/detect`);
+    return response.data;
+  },
+  resolve: async (projectId: number, itemId: number): Promise<TestDebtItem> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items/${itemId}/resolve`);
+    return response.data;
+  },
+  update: async (
+    projectId: number,
+    itemId: number,
+    payload: Partial<{ severity: TestDebtSeverity; suggested_action: TestDebtAction; details: string | null; resolved_at: string | null }>,
+  ): Promise<TestDebtItem> => {
+    const response = await api.patch(`/projects/${projectId}/test-asset-health/debt-items/${itemId}`, payload);
+    return response.data;
+  },
+  create: async (
+    projectId: number,
+    payload: { test_case_id: number; debt_type: TestDebtType; severity: TestDebtSeverity; suggested_action: TestDebtAction; details?: string | null },
+  ): Promise<TestDebtItem> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items`, payload);
     return response.data;
   },
 };

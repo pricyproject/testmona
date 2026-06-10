@@ -29,6 +29,7 @@ PROJECT_FEATURES = (
     "defects",
     "advanced_search",
     "reports",
+    "test_asset_health",
     "ask_ai",
     "custom_fields",
     "shared_steps",
