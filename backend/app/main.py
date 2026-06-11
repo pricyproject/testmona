@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .database import init_db
 from .import_export import router as import_export_router
 from .api.audit import router as audit_router
 from .api.versioning_simple import router as versioning_router
@@ -17,7 +16,8 @@ from .middleware import RateLimitMiddleware, RequestMetadataMiddleware, Security
 # API (``GET /docs`` and friends) can own it.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    # Migrations are run by docker-entrypoint.sh (or `python migrate.py upgrade`)
+    # before the process starts. Running them here again would race across replicas.
     from .setup_security import announce_setup_token
     from .database import SessionLocal
     db = SessionLocal()
