@@ -94,6 +94,12 @@ function AdminRoute({ children }: { children: ReactNode }) {
   return isAdminUser(user) ? <>{children}</> : <Navigate to="/projects" replace />;
 }
 
+function LoginRedirect() {
+  const location = useLocation();
+  const next = encodeURIComponent(location.pathname + location.search);
+  return <Navigate to={`/login?next=${next}`} replace />;
+}
+
 function PageFallback() {
   return (
     <div className="min-h-[40vh] bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -149,7 +155,7 @@ function UnauthenticatedApp() {
         <Route path="/accept-invite/:token" element={<AcceptInvite />} />
         {/* Setup already completed — never expose the wizard again. */}
         <Route path="/setup" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<LoginRedirect />} />
       </Routes>
     </Suspense>
   );

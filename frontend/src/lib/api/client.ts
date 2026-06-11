@@ -139,7 +139,8 @@ api.interceptors.response.use(
         });
 
         if (window.location.pathname !== "/login") {
-          window.location.href = "/login";
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.href = `/login?next=${next}`;
         }
         return Promise.reject(refreshError);
       } finally {
@@ -158,7 +159,8 @@ api.interceptors.response.use(
         user: null,
       });
       if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = `/login?next=${next}`;
       }
     }
 

@@ -5,6 +5,8 @@ Common routes for health checks and enum definitions.
 from typing import Optional
 
 from fastapi import Depends, Query
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas, models, auth
@@ -13,12 +15,30 @@ from ..database import get_db
 
 def register_common_routes(app):
     """Register common routes with the FastAPI app."""
-    
+
     # Health Check
     @app.get("/health")
-    def health_check():
-        """Health check endpoint"""
-        return {"status": "healthy", "message": "Service is running"}
+    def health_check(db: Session = Depends(get_db)):
+        """Health check endpoint — verifies DB connectivity and migration state."""
+        try:
+            db.execute(text("SELECT 1"))
+        except Exception as exc:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unhealthy", "db": str(exc)},
+            )
+
+        try:
+            row = db.execute(text("SELECT version_num FROM alembic_version")).first()
+            migration_version = row[0] if row else None
+        except Exception:
+            migration_version = None
+
+        return {
+            "status": "healthy",
+            "db": "ok",
+            "migration_version": migration_version,
+        }
 
     # Enum Endpoints
     @app.get("/enums/priorities")
