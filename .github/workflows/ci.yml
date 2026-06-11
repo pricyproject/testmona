@@ -82,13 +82,8 @@ jobs:
               raise SystemExit("OpenAPI schema is missing an info.title")
           PY
 
-      - name: Run backend tests when present
-        run: |
-          if [ -d test ] && find test -name 'test_*.py' -print -quit | grep -q .; then
-            python -m pytest test
-          else
-            echo "No backend test files found in backend/test; skipping pytest."
-          fi
+      - name: Run backend tests
+        run: python -m pytest ../tests/backend/ -q --tb=short
 
   frontend:
     name: Frontend quality
@@ -116,6 +111,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Run frontend tests
+        run: npm test
 
       - name: Build
         run: npm run build
