@@ -27,6 +27,13 @@ from .custom_fields import *
 from .integrations_settings import *
 from .requirements import *
 
+_DEFECT_SANITIZE_SKIP = {
+    "defect_id",
+    "external_issue_id",
+    "external_issue_url",
+    "external_sync_status",
+}
+
 def _sanitize_defect_strings(data):
     """Idempotently escape HTML in user-supplied string fields.
 
