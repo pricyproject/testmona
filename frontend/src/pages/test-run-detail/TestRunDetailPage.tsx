@@ -72,7 +72,7 @@ export function TestRunDetail() {
   // The URL carries the per-project sequence; resolve it to the global test-run id.
   const { id: runGlobalId, loading: runIdLoading } = useResolvedEntityId(projectId, 'test-runs', id);
   const navigate = useNavigate();
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const currentUser = useAuthStore((state) => state.user);
   const shouldLoadUsers = Boolean(currentUser?.is_superuser) || !isViewerRole(currentUser?.role);
   const { toast } = useToast();
@@ -252,7 +252,7 @@ export function TestRunDetail() {
       const dayKey = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
       let bucket = dayBuckets.get(dayKey);
       if (!bucket) {
-        bucket = { time: day.getTime(), label: day.toLocaleDateString(), passed: 0, total: 0 };
+        bucket = { time: day.getTime(), label: day.toLocaleDateString(language), passed: 0, total: 0 };
         dayBuckets.set(dayKey, bucket);
       }
       bucket.total += 1;
@@ -797,10 +797,10 @@ export function TestRunDetail() {
   const { pieData, sectionData, trendData } = prepareChartData();
   const runDescription = testRun?.description?.trim() || t('noDescriptionProvided');
   const formattedCreatedDate = testRun?.created_at
-    ? new Date(testRun.created_at).toLocaleDateString()
+    ? new Date(testRun.created_at).toLocaleDateString(language)
     : t('notAvailableShort');
   const formattedUpdatedDate = testRun?.updated_at
-    ? new Date(testRun.updated_at).toLocaleDateString()
+    ? new Date(testRun.updated_at).toLocaleDateString(language)
     : t('notAvailableShort');
   const formattedRunStatus = testRun?.status
     ? formatStatusLabel(testRun.status)
@@ -1092,7 +1092,7 @@ export function TestRunDetail() {
     if (hrs < 24) return t('hoursAgoShort', { count: hrs });
     const days = Math.round(hrs / 24);
     if (days < 30) return t('daysAgoShort', { count: days });
-    return new Date(dateStr).toLocaleDateString();
+    return new Date(dateStr).toLocaleDateString(language);
   };
 
   // Handle View Reports and Export Results
@@ -1341,9 +1341,9 @@ export function TestRunDetail() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-4 rtl:space-x-reverse">
           <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${projectId}/test-runs`)}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
+            <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
             {t('backToTestRuns')}
           </Button>
         </div>
@@ -1363,9 +1363,9 @@ export function TestRunDetail() {
   if (error || !testRun) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-4 rtl:space-x-reverse">
           <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${projectId}/test-runs`)}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
+            <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
             {t('backToTestRuns')}
           </Button>
         </div>
@@ -1560,14 +1560,14 @@ export function TestRunDetail() {
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             <span>
-              Created: {testRun.created_at ? new Date(testRun.created_at).toLocaleDateString() : 'N/A'}
+              Created: {testRun.created_at ? new Date(testRun.created_at).toLocaleDateString(language) : 'N/A'}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             <span>
               {testRun.completed_at 
-                ? `Completed: ${new Date(testRun.completed_at).toLocaleDateString()}`
+                ? `Completed: ${new Date(testRun.completed_at).toLocaleDateString(language)}`
                 : 'Not completed'
               }
             </span>
@@ -1576,7 +1576,7 @@ export function TestRunDetail() {
             <div className="flex items-center gap-2">
               <RefreshCw className="h-4 w-4" />
               <span>
-                Last updated: {new Date(testRun.updated_at).toLocaleDateString()}
+                Last updated: {new Date(testRun.updated_at).toLocaleDateString(language)}
               </span>
             </div>
           )}
@@ -2491,7 +2491,7 @@ export function TestRunDetail() {
                   onClick={handleAddTestCases}
                   disabled={selectedTestCasesToAdd.length === 0}
                 >
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   Add {selectedTestCasesToAdd.length} Test Case(s)
                 </Button>
               </div>
