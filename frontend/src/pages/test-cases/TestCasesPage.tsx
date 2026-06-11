@@ -485,7 +485,7 @@ export function TestCases() {
     };
 
     loadEnums();
-  }, []);
+  }, [projectId]);
 
   // Function to create a new test type inline
   const handleCreateTestType = async () => {
