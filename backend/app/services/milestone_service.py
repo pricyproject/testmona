@@ -216,6 +216,92 @@ def enrich_milestones(db: Session, milestones: Iterable[Milestone]) -> List[Mile
     return [enrich_milestone(db, milestone) for milestone in milestones]
 
 
+def recompute_milestone_progress(db: Session, milestone: Milestone, *, commit: bool = True) -> bool:
+    """Recalculate and persist a milestone's stored progress from its underlying
+    test execution, and auto-advance a PLANNED milestone to IN_PROGRESS once
+    execution starts.
+
+    This is what keeps milestone progress live: callers invoke it from every
+    execution mutation path (recording/editing/deleting results, updating or
+    deleting runs, re-linking plans) so the stored ``progress_percentage`` and
+    ``status`` always reflect reality instead of a value a user typed once.
+
+    COMPLETED and CANCELLED milestones are left untouched on purpose: a late
+    edit to a result must not silently reopen or regress a milestone someone has
+    deliberately closed. Returns ``True`` when something actually changed.
+    """
+    if milestone is None or milestone.status in {MilestoneStatus.COMPLETED, MilestoneStatus.CANCELLED}:
+        return False
+
+    # enrich computes the per-status counts in one pass. We derive progress
+    # directly from those counts rather than from execution_progress: that field
+    # falls back to the *stored* value when a milestone has no results, which
+    # would make progress sticky (e.g. a milestone keeps 100% after its only run
+    # is unlinked). Computing straight from results means "no execution -> 0%",
+    # while a milestone that is never linked to a run never reaches this code and
+    # keeps whatever progress was set by hand.
+    enrich_milestone(db, milestone)
+    total = getattr(milestone, "result_count", 0) or 0
+    executed = total - (getattr(milestone, "not_started_count", 0) or 0)
+    new_progress = _percentage(executed, total)
+
+    changed = False
+    if new_progress != int(milestone.progress_percentage or 0):
+        milestone.progress_percentage = new_progress
+        changed = True
+    # First executed result flips a planned milestone to in-progress so its
+    # status stops lying while testing is underway.
+    if milestone.status == MilestoneStatus.PLANNED and executed > 0:
+        milestone.status = MilestoneStatus.IN_PROGRESS
+        changed = True
+
+    if changed and commit:
+        from ..crud_modules.projects import safe_commit
+
+        safe_commit(db)
+    return changed
+
+
+def _milestone_ids_for_test_run(db: Session, test_run: TestRun) -> set:
+    """Resolve every milestone a run rolls up into: the directly linked one and
+    the one inherited through its test plan."""
+    ids: set = set()
+    if test_run is None:
+        return ids
+    direct_id = getattr(test_run, "milestone_id", None)
+    if direct_id:
+        ids.add(direct_id)
+    plan_id = getattr(test_run, "test_plan_id", None)
+    if plan_id:
+        plan = db.query(TestPlan.milestone_id).filter(TestPlan.id == plan_id).first()
+        if plan and plan[0]:
+            ids.add(plan[0])
+    return ids
+
+
+def recompute_milestones_for_test_run(db: Session, test_run: TestRun, *, commit: bool = True) -> None:
+    """Refresh stored progress for whichever milestone(s) the given run feeds.
+
+    Safe to call from any execution path; a run with no milestone linkage is a
+    no-op. Never raises — progress upkeep must not break the execution write it
+    is reacting to.
+    """
+    try:
+        ids = _milestone_ids_for_test_run(db, test_run)
+        if not ids:
+            return
+        milestones = db.query(Milestone).filter(Milestone.id.in_(ids)).all()
+        changed = False
+        for milestone in milestones:
+            changed = recompute_milestone_progress(db, milestone, commit=False) or changed
+        if changed and commit:
+            from ..crud_modules.projects import safe_commit
+
+            safe_commit(db)
+    except Exception:
+        logger.exception("Failed to recompute milestone progress for test run %s", getattr(test_run, "id", None))
+
+
 def get_project_milestone_stats(db: Session, project_id: int) -> dict:
     milestones = db.query(Milestone).filter(Milestone.project_id == project_id).all()
     enriched = enrich_milestones(db, milestones)

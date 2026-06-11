@@ -395,10 +395,22 @@ def update_test_run(db: Session, test_run_id: int, test_run: TestRunUpdate):
     db_test_run = db.query(TestRun).filter(TestRun.id == test_run_id).first()
     if db_test_run:
         prior_status = _normalize_run_status(db_test_run.status)
+        prior_milestone_id = db_test_run.milestone_id
+        prior_test_plan_id = db_test_run.test_plan_id
         for key, value in test_run.model_dump(exclude_unset=True).items():
             setattr(db_test_run, key, value)
         safe_commit(db)
         db.refresh(db_test_run)
+        # Refresh both the new and any previous milestone so progress follows a
+        # run when it is re-linked to a different milestone/plan (the old one
+        # loses the run's contribution, the new one gains it).
+        affected = {
+            db_test_run.milestone_id,
+            prior_milestone_id,
+            _milestone_id_for_plan(db, db_test_run.test_plan_id),
+            _milestone_id_for_plan(db, prior_test_plan_id),
+        }
+        _refresh_milestones_by_ids(db, affected)
         # Emit ``test_run.completed`` exactly once per transition into the
         # completed state. Failures are swallowed inside emit_event so we
         # never block the update path on webhook delivery.
@@ -436,8 +448,13 @@ def update_test_run(db: Session, test_run_id: int, test_run: TestRunUpdate):
 def delete_test_run(db: Session, test_run_id: int):
     db_test_run = db.query(TestRun).filter(TestRun.id == test_run_id).first()
     if db_test_run:
+        affected = {
+            db_test_run.milestone_id,
+            _milestone_id_for_plan(db, db_test_run.test_plan_id),
+        }
         db.delete(db_test_run)
         safe_commit(db)
+        _refresh_milestones_by_ids(db, affected)
     return db_test_run
 
 
@@ -472,6 +489,38 @@ def get_test_results(db: Session, test_run_id: Optional[int] = None, test_case_i
     return query.offset(skip).limit(limit).all()
 
 
+def _refresh_milestone_progress_for_run(db: Session, test_run_id):
+    """Keep the milestone(s) behind a run's progress in sync after an execution
+    write. Lazy import avoids a module-load cycle (service <- crud)."""
+    if not test_run_id:
+        return
+    from ..services.milestone_service import recompute_milestones_for_test_run
+    test_run = db.query(TestRun).filter(TestRun.id == test_run_id).first()
+    recompute_milestones_for_test_run(db, test_run)
+
+
+def _refresh_milestones_by_ids(db: Session, milestone_ids):
+    """Recompute stored progress for an explicit set of milestone ids. Used when
+    a run is re-linked and we must refresh both the milestone it left and the one
+    it joined."""
+    ids = {mid for mid in milestone_ids if mid}
+    if not ids:
+        return
+    from ..services.milestone_service import recompute_milestone_progress
+    changed = False
+    for milestone in db.query(Milestone).filter(Milestone.id.in_(ids)).all():
+        changed = recompute_milestone_progress(db, milestone, commit=False) or changed
+    if changed:
+        safe_commit(db)
+
+
+def _milestone_id_for_plan(db: Session, test_plan_id):
+    if not test_plan_id:
+        return None
+    row = db.query(TestPlan.milestone_id).filter(TestPlan.id == test_plan_id).first()
+    return row[0] if row else None
+
+
 def create_test_result(db: Session, test_result: TestResultCreate):
     test_result_data = test_result.model_dump()
     db_test_result = TestResult(**test_result_data)
@@ -479,6 +528,7 @@ def create_test_result(db: Session, test_result: TestResultCreate):
     db.add(db_test_result)
     safe_commit(db)
     db.refresh(db_test_result)
+    _refresh_milestone_progress_for_run(db, db_test_result.test_run_id)
     return db_test_result
 
 
@@ -495,12 +545,18 @@ def update_test_result(db: Session, test_result_id: int, test_result: TestResult
         apply_test_result_execution_timing(db_test_result, test_result_data)
         safe_commit(db)
         db.refresh(db_test_result)
+        # Only the status drives milestone progress; skip the recompute for the
+        # timing/state-only updates (pause, resume, add-time) sharing this path.
+        if 'status' in test_result_data:
+            _refresh_milestone_progress_for_run(db, db_test_result.test_run_id)
     return db_test_result
 
 
 def delete_test_result(db: Session, test_result_id: int):
     db_test_result = db.query(TestResult).filter(TestResult.id == test_result_id).first()
     if db_test_result:
+        run_id = db_test_result.test_run_id
         db.delete(db_test_result)
         safe_commit(db)
+        _refresh_milestone_progress_for_run(db, run_id)
     return db_test_result

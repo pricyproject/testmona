@@ -343,6 +343,10 @@ def register_run_routes(app):
                 auto_create=bool(auto_create),
             )
             crud.safe_commit(db)
+            # A CI import bulk-writes results outside the per-result crud path,
+            # so refresh the milestone progress for this run explicitly.
+            from ..services.milestone_service import recompute_milestones_for_test_run
+            recompute_milestones_for_test_run(db, db_test_run)
         except Exception:
             db.rollback()
             raise
