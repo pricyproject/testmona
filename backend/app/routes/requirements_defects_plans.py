@@ -178,6 +178,54 @@ def _validate_defect_links(
             )
 
 
+def notify_defect_assignee(
+    db: Session,
+    defect: "models.Defect",
+    assigned_by: Optional[schemas.User],
+    previous_assigned_to: Optional[int] = None,
+) -> None:
+    """Send an in-app notification when a defect is newly assigned to a user.
+
+    Mirrors ``_notify_test_run_assignee`` so a defect assignee learns about work
+    the same way a test-run assignee does. No-op when the assignee is unchanged,
+    on self-assignment, or when the defect is unassigned. Notification delivery
+    never blocks the write path.
+    """
+    assignee_id = defect.assigned_to
+    if not assignee_id or assignee_id == previous_assigned_to:
+        return
+    if assigned_by is not None and assignee_id == assigned_by.id:
+        return
+    try:
+        assignee = db.query(models.User).filter(
+            models.User.id == assignee_id, models.User.is_active == True
+        ).first()
+        if not assignee:
+            return
+        actor = (assigned_by.full_name or assigned_by.username) if assigned_by else "Someone"
+        label = defect.defect_id or defect.title or f"#{defect.id}"
+        crud.create_notification(
+            db=db,
+            notification=schemas.NotificationCreate(
+                user_id=assignee.id,
+                title="Defect assigned",
+                message=f"{actor} assigned defect {label} to you.",
+                type=models.NotificationType.INFO,
+                related_entity_type="defect",
+                related_entity_id=defect.id,
+            ),
+        )
+        logger.info(
+            "Created defect assignment notification",
+            extra={"defect_id": defect.id, "assignee_id": assignee.id},
+        )
+    except Exception:
+        logger.exception(
+            "Failed to create defect assignment notification",
+            extra={"defect_id": getattr(defect, "id", None), "assignee_id": assignee_id},
+        )
+
+
 def _linked_requirement_test_plan_ids(db: Session, requirement_id: int) -> set[int]:
     rows = db.query(models.requirement_test_plan_links.c.test_plan_id).filter(
         models.requirement_test_plan_links.c.requirement_id == requirement_id,
@@ -1551,7 +1599,10 @@ def register_requirements_defects_plans_routes(app):
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             logger.warning(f"Failed to create audit trail for defect creation: {e}")
-        
+
+        # Tell the assignee they have a new defect (no-op when self/unassigned).
+        notify_defect_assignee(db, db_defect, current_user)
+
         return db_defect
 
     @app.get("/defects", response_model=List[schemas.Defect],
@@ -1691,6 +1742,9 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", db_defect.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        # Captured before the update so we only notify on an actual re-assignment.
+        prior_assigned_to = db_defect.assigned_to
+
         update_data = defect.model_dump(exclude_unset=True)
         if "defect_id" in update_data and not str(update_data["defect_id"] or "").strip():
             raise HTTPException(status_code=400, detail="Defect ID is required")
@@ -1740,7 +1794,10 @@ def register_requirements_defects_plans_routes(app):
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             logger.warning(f"Failed to create audit trail for defect update: {e}")
-        
+
+        # Notify only when this update handed the defect to a new assignee.
+        notify_defect_assignee(db, db_defect, current_user, previous_assigned_to=prior_assigned_to)
+
         return db_defect
 
     @app.delete("/defects/{defect_id}", response_model=schemas.MessageResponse)

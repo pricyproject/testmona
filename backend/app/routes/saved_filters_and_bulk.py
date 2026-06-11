@@ -13,6 +13,7 @@ from .. import crud, models, rbac, schemas
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
+from .requirements_defects_plans import notify_defect_assignee
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +369,9 @@ def register_saved_filters_and_bulk_routes(app) -> None:
         skipped: List[int] = []
         write_cache: dict[int, bool] = {}
         assignee_project_cache: dict[int, bool] = {}
+        # (defect, prior_assigned_to) for defects handed to a new assignee — they
+        # are notified after the commit so a failed write never sends a stray alert.
+        newly_assigned: List[tuple] = []
 
         for defect_id in ids:
             defect = defect_by_id.get(defect_id)
@@ -391,7 +395,9 @@ def register_saved_filters_and_bulk_routes(app) -> None:
                 if not ok:
                     skipped.append(defect_id)
                     continue
+                prior_assigned_to = defect.assigned_to
                 defect.assigned_to = assignee_user.id
+                newly_assigned.append((defect, prior_assigned_to))
             elif payload.clear_assignee:
                 defect.assigned_to = None
 
@@ -410,6 +416,8 @@ def register_saved_filters_and_bulk_routes(app) -> None:
 
         if updated:
             safe_commit(db)
+            for defect, prior_assigned_to in newly_assigned:
+                notify_defect_assignee(db, defect, current_user, previous_assigned_to=prior_assigned_to)
         return schemas.BulkUpdateResult(updated=updated, skipped_ids=skipped)
 
     # --------------------------- Bulk: requirements ---------------------------
