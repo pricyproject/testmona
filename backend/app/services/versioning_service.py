@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import difflib
 
 from ..models import TestCase
@@ -174,7 +174,7 @@ class VersioningService:
             raise ValueError("Version must be approved before publishing")
         
         version.status = VersionStatus.PUBLISHED
-        version.published_at = datetime.utcnow()
+        version.published_at = datetime.now(UTC)
         
         # Update the actual test case with this version's data
         test_case = self.db.query(TestCase).filter(
@@ -374,7 +374,7 @@ class VersioningService:
             lock_type=lock_type,
             lock_reason=reason,
             locked_by=locked_by,
-            expires_at=datetime.utcnow() + timedelta(hours=expires_hours)
+            expires_at=datetime.now(UTC) + timedelta(hours=expires_hours)
         )
         
         self.db.add(lock)
@@ -397,7 +397,7 @@ class VersioningService:
         locks = query.all()
         for lock in locks:
             lock.is_active = False
-            lock.released_at = datetime.utcnow()
+            lock.released_at = datetime.now(UTC)
         
         self.db.commit()
     

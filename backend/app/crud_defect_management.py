@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
 from sqlalchemy.exc import IntegrityError
 from app import models, schemas
-from datetime import datetime
+from datetime import datetime, UTC
 import requests
 import json
 import re
@@ -236,7 +236,7 @@ def update_defect_management(
             # Update the field
             setattr(db_defect, field_name, new_value)
     
-    db_defect.updated_at = datetime.utcnow()
+    db_defect.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(db_defect)
 
@@ -303,7 +303,7 @@ def update_defect_comment(
         for field, value in update_data.items():
             setattr(db_comment, field, value)
         
-        db_comment.updated_at = datetime.utcnow()
+        db_comment.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(db_comment)
     
@@ -428,7 +428,7 @@ def update_issue_tracker_integration(
         for field, value in update_data.items():
             setattr(db_integration, field, value)
         
-        db_integration.updated_at = datetime.utcnow()
+        db_integration.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(db_integration)
     
@@ -652,7 +652,7 @@ def sync_with_jira(
                 defect.external_issue_id = external_issue_id
                 defect.external_issue_url = external_issue_url
                 defect.external_sync_status = "synced"
-                defect.external_last_sync = datetime.utcnow()
+                defect.external_last_sync = datetime.now(UTC)
                 
                 return schemas.DefectSyncResponse(
                     success=True,
@@ -685,7 +685,7 @@ def sync_with_jira(
             
             if response.status_code == 204:
                 defect.external_sync_status = "synced"
-                defect.external_last_sync = datetime.utcnow()
+                defect.external_last_sync = datetime.now(UTC)
                 
                 return schemas.DefectSyncResponse(
                     success=True,
@@ -753,7 +753,7 @@ def sync_with_github(
                 defect.external_issue_id = external_issue_id
                 defect.external_issue_url = external_issue_url
                 defect.external_sync_status = "synced"
-                defect.external_last_sync = datetime.utcnow()
+                defect.external_last_sync = datetime.now(UTC)
                 
                 return schemas.DefectSyncResponse(
                     success=True,
@@ -783,7 +783,7 @@ def sync_with_github(
             
             if response.status_code == 200:
                 defect.external_sync_status = "synced"
-                defect.external_last_sync = datetime.utcnow()
+                defect.external_last_sync = datetime.now(UTC)
                 
                 return schemas.DefectSyncResponse(
                     success=True,
@@ -847,7 +847,7 @@ def update_defect_template(
         for field, value in update_data.items():
             setattr(db_template, field, value)
         
-        db_template.updated_at = datetime.utcnow()
+        db_template.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(db_template)
     

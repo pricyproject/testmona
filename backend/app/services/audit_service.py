@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, desc, func, cast, String
 from typing import Optional, List, Dict, Any, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from fastapi import Depends
 import json
 import logging
@@ -183,8 +183,8 @@ class AuditService:
 
     def get_user_activity_summary(self, user_id: int, days: int = 30) -> ActivitySummary:
         """Get activity summary for a specific user"""
-        date_from = datetime.utcnow() - timedelta(days=days)
-        date_to = datetime.utcnow()
+        date_from = datetime.now(UTC) - timedelta(days=days)
+        date_to = datetime.now(UTC)
 
         # Get all audit trails for the user in the date range
         audit_trails = self.db.query(AuditTrail).filter(
@@ -241,8 +241,8 @@ class AuditService:
 
     def get_project_activity_summary(self, project_id: int, days: int = 30) -> ActivitySummary:
         """Get activity summary for a specific project"""
-        date_from = datetime.utcnow() - timedelta(days=days)
-        date_to = datetime.utcnow()
+        date_from = datetime.now(UTC) - timedelta(days=days)
+        date_to = datetime.now(UTC)
 
         # Get all audit trails for the project in the date range
         audit_trails = self.db.query(AuditTrail).filter(

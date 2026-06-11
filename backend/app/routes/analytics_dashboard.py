@@ -5,7 +5,7 @@ Analytics, dashboard, KPI data, test step results, and shareable reports routes.
 from fastapi import Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import csv
 import io
 import json
@@ -588,7 +588,7 @@ def register_analytics_dashboard_routes(app):
         from ..models import Defect, TestCase, TestResult, TestRun, TestSuite
 
         days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90}[time_range]
-        end_dt = datetime.utcnow()
+        end_dt = datetime.now(UTC)
         start_dt = end_dt - timedelta(days=days)
         test_suite_ids = [row.id for row in db.query(TestSuite.id).filter(TestSuite.project_id == project_id).all()]
         total_test_cases = (
@@ -1648,7 +1648,7 @@ def register_analytics_dashboard_routes(app):
     ):
         """Get project-scoped test case activity over time."""
         from sqlalchemy import func
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, UTC
         from ..models import TestCase, TestResult, TestSuite, TestRun, AuditTrail, AuditAction, EntityType
         
         if granularity != "day":
@@ -1657,7 +1657,7 @@ def register_analytics_dashboard_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         try:
-            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else datetime.utcnow()
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else datetime.now(UTC)
             start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00')) if start_date else end_dt - timedelta(days=30)
         except ValueError:
             raise HTTPException(status_code=400, detail="start_date and end_date must be valid ISO 8601 datetimes")

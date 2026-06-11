@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Optional
 import hashlib
 from jose import JWTError, jwt
@@ -71,9 +71,9 @@ def authenticate_user(db: Session, username_or_email: str, password: str):
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+        expire = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
@@ -88,9 +88,9 @@ def _token_session_is_current(payload: dict, user: User) -> bool:
 def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None, db: Session = None, user_id: int = None, device_info: str = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days)
+        expire = datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)
     to_encode.update({"exp": expire, "type": "refresh"})
     
     # Generate refresh token
@@ -226,14 +226,14 @@ def verify_refresh_token(refresh_token: str, db: Session) -> Optional[User]:
     db_token = db.query(RefreshToken).filter(
         RefreshToken.token_hash == token_hash,
         RefreshToken.is_revoked == False,
-        RefreshToken.expires_at > datetime.utcnow()
+        RefreshToken.expires_at > datetime.now(UTC)
     ).first()
     
     if not db_token:
         return None
     
     # Update last used timestamp
-    db_token.last_used_at = datetime.utcnow()
+    db_token.last_used_at = datetime.now(UTC)
     db.commit()
     
     # Get user
@@ -252,7 +252,7 @@ def revoke_refresh_token(refresh_token: str, db: Session) -> bool:
     
     if db_token:
         db_token.is_revoked = True
-        db_token.revoked_at = datetime.utcnow()
+        db_token.revoked_at = datetime.now(UTC)
         db.commit()
         return True
     return False
@@ -265,7 +265,7 @@ def revoke_all_user_refresh_tokens(user_id: int, db: Session) -> bool:
         RefreshToken.is_revoked == False
     ).update({
         RefreshToken.is_revoked: True,
-        RefreshToken.revoked_at: datetime.utcnow()
+        RefreshToken.revoked_at: datetime.now(UTC)
     })
     db.commit()
     return True
@@ -275,11 +275,11 @@ def cleanup_expired_refresh_tokens(db: Session) -> int:
     """Clean up expired and revoked refresh tokens"""
     # Delete expired tokens
     expired_count = db.query(RefreshToken).filter(
-        RefreshToken.expires_at < datetime.utcnow()
+        RefreshToken.expires_at < datetime.now(UTC)
     ).delete()
     
     # Delete revoked tokens older than 30 days
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
     revoked_count = db.query(RefreshToken).filter(
         RefreshToken.is_revoked == True,
         RefreshToken.revoked_at < thirty_days_ago

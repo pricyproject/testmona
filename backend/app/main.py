@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -14,11 +15,27 @@ from .middleware import RateLimitMiddleware, RequestMetadataMiddleware, Security
 
 # Swagger UI / ReDoc are relocated off the bare ``/docs`` path so the Doc Hub
 # API (``GET /docs`` and friends) can own it.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    from .setup_security import announce_setup_token
+    from .database import SessionLocal
+    db = SessionLocal()
+    try:
+        announce_setup_token(db)
+    finally:
+        db.close()
+    from .token_cleanup import start_token_cleanup
+    start_token_cleanup()
+    yield
+
+
 app = FastAPI(
     **get_openapi_config(),
     docs_url="/api-docs",
     redoc_url="/api-redoc",
     swagger_ui_oauth2_redirect_url="/api-docs/oauth2-redirect",
+    lifespan=lifespan,
 )
 
 # Capture request IP/user-agent for service-layer audit logging.
@@ -104,21 +121,3 @@ register_resolver_routes(app)
 register_test_asset_health_routes(app)
 
 
-@app.on_event("startup")
-def startup_event():
-    """Initialize database on startup"""
-    init_db()
-
-    # On a fresh instance, surface the first-run setup token so the operator can
-    # create the admin securely (no-op once an account exists).
-    from .setup_security import announce_setup_token
-    from .database import SessionLocal
-    db = SessionLocal()
-    try:
-        announce_setup_token(db)
-    finally:
-        db.close()
-
-    # Start token cleanup job after database is ready
-    from .token_cleanup import start_token_cleanup
-    start_token_cleanup()
