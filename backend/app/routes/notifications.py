@@ -73,6 +73,37 @@ def register_notifications_routes(app):
         deleted_count = crud.delete_all_notifications(db, user_id=current_user.id)
         return {"message": f"Deleted {deleted_count} notifications", "deleted_count": deleted_count}
 
+    @app.delete("/notifications/cleanup")
+    def cleanup_old_notifications(
+        days_old: int = 30,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Delete old read notifications for the current user"""
+        # Validate days_old parameter
+        if days_old < 1:
+            raise HTTPException(status_code=400, detail="days_old must be at least 1")
+        if days_old > 365:
+            raise HTTPException(status_code=400, detail="days_old cannot exceed 365 days")
+
+        deleted_count = crud.delete_old_notifications(db, user_id=current_user.id, days_old=days_old)
+        return {"message": f"Deleted {deleted_count} old notifications", "deleted_count": deleted_count}
+
+    @app.delete("/notifications/bulk-delete")
+    def bulk_delete_notifications(
+        request: schemas.BulkNotificationDelete,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Bulk delete notifications"""
+        if not request.notification_ids:
+            raise HTTPException(status_code=400, detail="notification_ids list is required")
+        if len(request.notification_ids) > 100:
+            raise HTTPException(status_code=400, detail="Cannot delete more than 100 notifications at once")
+
+        deleted_count = crud.bulk_delete_notifications(db, user_id=current_user.id, notification_ids=request.notification_ids)
+        return {"message": f"Deleted {deleted_count} notifications", "deleted_count": deleted_count}
+
     @app.delete("/notifications/{notification_id}")
     def delete_notification(
         notification_id: int,
@@ -82,7 +113,7 @@ def register_notifications_routes(app):
         # Validate notification_id
         if notification_id < 1:
             raise HTTPException(status_code=400, detail="Invalid notification ID")
-        
+
         db_notification = crud.get_notification(db, notification_id=notification_id)
         if db_notification is None:
             raise HTTPException(status_code=404, detail="Notification not found")
@@ -128,22 +159,6 @@ def register_notifications_routes(app):
         count = crud.mark_all_notifications_as_read(db, user_id=current_user.id)
         return {"message": "All notifications marked as read", "marked_count": count}
 
-    @app.delete("/notifications/cleanup")
-    def cleanup_old_notifications(
-        days_old: int = 30,
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        """Delete old read notifications for the current user"""
-        # Validate days_old parameter
-        if days_old < 1:
-            raise HTTPException(status_code=400, detail="days_old must be at least 1")
-        if days_old > 365:
-            raise HTTPException(status_code=400, detail="days_old cannot exceed 365 days")
-        
-        deleted_count = crud.delete_old_notifications(db, user_id=current_user.id, days_old=days_old)
-        return {"message": f"Deleted {deleted_count} old notifications", "deleted_count": deleted_count}
-
     @app.get("/notifications/", response_model=List[schemas.Notification])
     def read_notifications(
         skip: int = 0,
@@ -185,21 +200,6 @@ def register_notifications_routes(app):
         
         updated_count = crud.bulk_update_notifications(db, user_id=current_user.id, notification_ids=request.notification_ids, is_read=request.is_read)
         return {"message": f"Updated {updated_count} notifications", "updated_count": updated_count}
-
-    @app.delete("/notifications/bulk-delete")
-    def bulk_delete_notifications(
-        request: schemas.BulkNotificationDelete,
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        """Bulk delete notifications"""
-        if not request.notification_ids:
-            raise HTTPException(status_code=400, detail="notification_ids list is required")
-        if len(request.notification_ids) > 100:
-            raise HTTPException(status_code=400, detail="Cannot delete more than 100 notifications at once")
-        
-        deleted_count = crud.bulk_delete_notifications(db, user_id=current_user.id, notification_ids=request.notification_ids)
-        return {"message": f"Deleted {deleted_count} notifications", "deleted_count": deleted_count}
 
     @app.get("/notification-settings/", response_model=schemas.NotificationSettings)
     def get_notification_settings(

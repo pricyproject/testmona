@@ -259,6 +259,65 @@ def register_system_settings_routes(app):
             # If the value is invalid, return default
             return schemas.AuditTrailConfig(enabled=True, entity_settings={})
 
+    @app.get("/system/settings/signup-history")
+    def get_signup_history(
+        skip: int = 0,
+        limit: int = 50,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user)
+    ):
+        """Get audit trail history for signup_enabled changes"""
+        # Only admins can view signup history
+        from ..models import Role
+        if isinstance(current_user.role, str):
+            is_admin = current_user.role.lower() == Role.ADMIN.value
+        else:
+            is_admin = current_user.role == Role.ADMIN
+
+        if not is_admin and not current_user.is_superuser:
+            raise HTTPException(status_code=403, detail="Not authorized to view signup history")
+
+        # Validate limit
+        if limit > 100:
+            limit = 100
+
+        try:
+            from ..services.audit_service import get_audit_service
+            from ..models import AuditTrail
+
+            audit_service = get_audit_service(db)
+
+            # Get audit trails for system_settings entity type with signup_enabled in description
+            query = db.query(AuditTrail).filter(
+                AuditTrail.entity_type == "system_settings",
+                AuditTrail.description.like("%signup%")
+            ).order_by(AuditTrail.created_at.desc())
+
+            total = query.count()
+            audit_trails = query.offset(skip).limit(limit).all()
+
+            history = []
+            for trail in audit_trails:
+                from ..models import User
+                user = db.query(User).filter(User.id == trail.user_id).first()
+                history.append({
+                    "id": trail.id,
+                    "description": trail.description,
+                    "created_at": trail.created_at.isoformat() if trail.created_at else None,
+                    "user": user.username if user else "Unknown",
+                    "action": trail.action.value if hasattr(trail.action, 'value') else str(trail.action)
+                })
+
+            return {
+                "history": history,
+                "total": total,
+                "skip": skip,
+                "limit": limit
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get signup history: {e}")
+            return {"history": [], "total": 0, "skip": skip, "limit": limit}
+
     @app.get("/system/settings/{key}", response_model=schemas.SystemSettings)
     def get_system_setting(key: str, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
         setting = crud.get_system_setting(db, key=key)
@@ -590,65 +649,6 @@ def register_system_settings_routes(app):
             logger.warning(f"Failed to create audit trail for system setting deletion: {e}")
         
         return {"message": "System setting deleted successfully"}
-
-    @app.get("/system/settings/signup-history")
-    def get_signup_history(
-        skip: int = 0,
-        limit: int = 50,
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        """Get audit trail history for signup_enabled changes"""
-        # Only admins can view signup history
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to view signup history")
-        
-        # Validate limit
-        if limit > 100:
-            limit = 100
-        
-        try:
-            from ..services.audit_service import get_audit_service
-            from ..models import AuditTrail
-            
-            audit_service = get_audit_service(db)
-            
-            # Get audit trails for system_settings entity type with signup_enabled in description
-            query = db.query(AuditTrail).filter(
-                AuditTrail.entity_type == "system_settings",
-                AuditTrail.description.like("%signup%")
-            ).order_by(AuditTrail.created_at.desc())
-            
-            total = query.count()
-            audit_trails = query.offset(skip).limit(limit).all()
-            
-            history = []
-            for trail in audit_trails:
-                from ..models import User
-                user = db.query(User).filter(User.id == trail.user_id).first()
-                history.append({
-                    "id": trail.id,
-                    "description": trail.description,
-                    "created_at": trail.created_at.isoformat() if trail.created_at else None,
-                    "user": user.username if user else "Unknown",
-                    "action": trail.action.value if hasattr(trail.action, 'value') else str(trail.action)
-                })
-            
-            return {
-                "history": history,
-                "total": total,
-                "skip": skip,
-                "limit": limit
-            }
-        except Exception as e:
-            logger.warning(f"Failed to get signup history: {e}")
-            return {"history": [], "total": 0, "skip": skip, "limit": limit}
 
     # Global Parameters Endpoints
     @app.post("/global-parameters/", response_model=schemas.GlobalParameter,
