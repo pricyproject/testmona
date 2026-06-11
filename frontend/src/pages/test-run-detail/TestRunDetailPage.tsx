@@ -62,29 +62,10 @@ import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { useToast } from '@/hooks/use-toast';
-import { TestResult } from '@/types/index';
+import { TestResult, TestRun, User as UserRecord } from '@/types/index';
 import { formatDurationSeconds } from '@/utils/timeFormat';
 import { useAuthStore } from '@/stores/authStore';
 import { isViewerRole } from '@/utils/roles';
-
-interface TestRun {
-  id: string;
-  name: string;
-  description?: string;
-  status: 'in-progress' | 'completed' | 'failed' | 'cancelled';
-  createdAt: string;
-  completedAt?: string;
-  totalTests: number;
-  passedTests: number;
-  failedTests: number;
-  blockedTests: number;
-  skippedTests: number;
-  inProgressTests: number;
-  testResults: TestResult[];
-  environment?: string;
-  testSuite?: string;
-  executedBy?: string;
-}
 
 export function TestRunDetail() {
   const { id, projectId } = useParams<{ id: string; projectId: string }>();
@@ -95,10 +76,10 @@ export function TestRunDetail() {
   const currentUser = useAuthStore((state) => state.user);
   const shouldLoadUsers = Boolean(currentUser?.is_superuser) || !isViewerRole(currentUser?.role);
   const { toast } = useToast();
-  const [testRun, setTestRun] = useState<any>(null);
-  const [testResults, setTestResults] = useState<any[]>([]);
+  const [testRun, setTestRun] = useState<TestRun | null>(null);
+  const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [defectCoverage, setDefectCoverage] = useState<any>(null);
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -572,7 +553,10 @@ export function TestRunDetail() {
     let cancelled = false;
     environmentsAPI.getAll(parseInt(projectId))
       .then((data) => { if (!cancelled) setEnvironments(Array.isArray(data) ? data : []); })
-      .catch((err) => { console.error('Failed to load environments:', err); });
+      .catch((err) => {
+        console.error('Failed to load environments:', err);
+        if (!cancelled) toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToSetEnvironment')), variant: 'destructive' });
+      });
     return () => { cancelled = true; };
   }, [projectId]);
 
@@ -590,6 +574,7 @@ export function TestRunDetail() {
           setAvailableTestCases(available);
         } catch (err) {
           console.error('Failed to load available test cases:', err);
+          toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestCasesForSelection')), variant: 'destructive' });
         }
       }
     };
@@ -651,20 +636,20 @@ export function TestRunDetail() {
   const formatStatusLabel = (status: string) => {
     const normalizedStatus = status.toLowerCase();
     const labels: Record<string, string> = {
-      not_started: 'Not Started',
-      pass: 'Pass',
-      passed: 'Passed',
-      fail: 'Fail',
-      failed: 'Failed',
-      block: 'Block',
-      blocked: 'Blocked',
-      skip: 'Skip',
-      skipped: 'Skipped',
-      pending: 'Pending',
-      in_progress: 'In Progress',
-      running: 'Running',
-      completed: 'Completed',
-      cancelled: 'Cancelled',
+      not_started: t('statusNotStarted'),
+      pass: t('statusPassed'),
+      passed: t('statusPassed'),
+      fail: t('statusFailed'),
+      failed: t('statusFailed'),
+      block: t('statusBlocked'),
+      blocked: t('statusBlocked'),
+      skip: t('statusSkipped'),
+      skipped: t('statusSkipped'),
+      pending: t('statusPending'),
+      in_progress: t('statusInProgress'),
+      running: t('testRunStatusRunning'),
+      completed: t('statusCompleted'),
+      cancelled: t('cancelled'),
     };
     return labels[normalizedStatus] || status.replace(/[-_]/g, ' ');
   };
@@ -855,20 +840,20 @@ export function TestRunDetail() {
       setSelectedTestCasesToAdd([]);
     } catch (err) {
       console.error('Failed to add test cases:', err);
-      setError('Failed to add test cases');
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestCasesForSelection')), variant: 'destructive' });
     }
   };
 
   const handleRemoveTestCases = async () => {
     if (selectedTestCasesForRemoval.length === 0) return;
-    
+
     try {
       const deletePromises = selectedTestCasesForRemoval.map(resultId =>
         testResultsAPI.delete(resultId)
       );
-      
+
       await Promise.all(deletePromises);
-      
+
       // Reload test results
       const updatedTestResults = await testResultsAPI.getAll(parseInt(id!));
       const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
@@ -876,11 +861,11 @@ export function TestRunDetail() {
       if (updatedTestRun) {
         setTestRun(updatedTestRun);
       }
-      
+
       setSelectedTestCasesForRemoval([]);
     } catch (err) {
       console.error('Failed to remove test cases:', err);
-      setError('Failed to remove test cases');
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUpdateResult')), variant: 'destructive' });
     }
   };
 
@@ -914,16 +899,16 @@ export function TestRunDetail() {
   };
 
   // Handle inline editing
-  const [editingResult, setEditingResult] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState<{ [key: string]: any }>({});
+  const [editingResult, setEditingResult] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<Record<number, any>>({});
 
-  const handleEdit = (resultId: string, field: string, value: any) => {
+  const handleEdit = (resultId: number, field: string, value: any) => {
     setEditingResult(resultId);
     setEditValues(prev => ({ ...prev, [resultId]: { ...prev[resultId], [field]: value } }));
   };
 
-  const handleSave = async (resultId: string) => {
-    const result = testResults.find((item) => String(item.id) === String(resultId));
+  const handleSave = async (resultId: number) => {
+    const result = testResults.find((item) => item.id === resultId);
     const pendingValues = editValues[resultId];
 
     if (!result || !pendingValues) {
@@ -936,7 +921,7 @@ export function TestRunDetail() {
         ...getTimedResultPayload(result, pendingValues),
         executed_by: pendingValues.executed_by ? parseInt(pendingValues.executed_by, 10) : result.executed_by,
       };
-      const updatedResult = await testResultsAPI.update(Number(resultId), payload);
+      const updatedResult = await testResultsAPI.update(resultId, payload);
       const updatedTestResults = testResults.map((item) =>
         String(item.id) === String(resultId) ? { ...item, ...updatedResult } : item
       );
@@ -944,9 +929,7 @@ export function TestRunDetail() {
       const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
       setTestResults(updatedTestResults);
       if (updatedTestRun) {
-        setTestRun({ ...updatedTestRun, testResults: updatedTestResults });
-      } else if (testRun?.testResults) {
-        setTestRun({ ...testRun, testResults: updatedTestResults });
+        setTestRun(updatedTestRun);
       }
       bumpDerived();
       setEditValues((prev) => {
@@ -956,20 +939,18 @@ export function TestRunDetail() {
       });
     } catch (err) {
       console.error('Failed to update test result:', err);
-      setError('Failed to update test result');
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUpdateResult')), variant: 'destructive' });
     } finally {
       setEditingResult(null);
     }
   };
 
   // Apply a batch of updated results to local state and re-derive run status
-  const commitResults = async (updatedTestResults: any[]) => {
+  const commitResults = async (updatedTestResults: TestResult[]) => {
     const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
     setTestResults(updatedTestResults);
     if (updatedTestRun) {
-      setTestRun({ ...updatedTestRun, testResults: updatedTestResults });
-    } else if (testRun?.testResults) {
-      setTestRun({ ...testRun, testResults: updatedTestResults });
+      setTestRun(updatedTestRun);
     }
     // Backend-computed rollups (coverage, flakiness) depend on this change
     bumpDerived();
@@ -1172,7 +1153,7 @@ export function TestRunDetail() {
       statusLabel(result.status),
       getResultExecutorName(result),
       result.executed_at || '',
-      result.execution_time != null && result.execution_time !== ''
+      result.execution_time != null
         ? formatDurationSeconds(result.execution_time, t)
         : '',
       result.comments || '',
@@ -1202,7 +1183,7 @@ export function TestRunDetail() {
     });
   };
 
-  const handleCancel = (resultId: string) => {
+  const handleCancel = (resultId: number) => {
     setEditingResult(null);
     setEditValues(prev => {
       const newValues = { ...prev };
@@ -1319,7 +1300,7 @@ export function TestRunDetail() {
       setTestRun((prev: any) => ({ ...prev, ...updatedRun }));
     } catch (error) {
       console.error('Failed to assign test run:', error);
-      setError(t('failedToAssignTestRun'));
+      toast({ title: t('error'), description: getApiErrorMessage(error, t('failedToAssignTestRun')), variant: 'destructive' });
       // Revert the optimistic change if the server rejected it.
       setTestRun((prev: any) => (prev ? { ...prev, assigned_to: prevAssignedTo } : prev));
     } finally {
@@ -1363,7 +1344,7 @@ export function TestRunDetail() {
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${projectId}/test-runs`)}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Test Runs
+            {t('backToTestRuns')}
           </Button>
         </div>
         <div className="animate-pulse">
@@ -1385,7 +1366,7 @@ export function TestRunDetail() {
         <div className="flex items-center space-x-4">
           <Button variant="ghost" size="sm" onClick={() => navigate(`/projects/${projectId}/test-runs`)}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Test Runs
+            {t('backToTestRuns')}
           </Button>
         </div>
         <div className="text-center py-12">
@@ -1606,15 +1587,15 @@ export function TestRunDetail() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Status</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('statusLabel')}</CardTitle>
             {getStatusIcon(testRun.status)}
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formattedRunStatus}</div>
             <p className="text-xs text-gray-500">
-              {testRun.status === 'completed' 
-                ? `Completed at ${testRun.completed_at ? new Date(testRun.completed_at).toLocaleString() : 'N/A'}`
-                : `Started at ${testRun.created_at ? new Date(testRun.created_at).toLocaleString() : 'N/A'}`
+              {testRun.status === 'completed'
+                ? t('completedOn', { date: testRun.completed_at ? new Date(testRun.completed_at).toLocaleString() : t('notAvailableShort') })
+                : `${t('started')}: ${testRun.created_at ? new Date(testRun.created_at).toLocaleString() : t('notAvailableShort')}`
               }
             </p>
           </CardContent>
@@ -1622,20 +1603,20 @@ export function TestRunDetail() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pass Rate</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('passRate')}</CardTitle>
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{passRate}%</div>
             <p className="text-xs text-gray-500">
-              {passedTests} of {totalTests} passed
+              {passedTests} {t('of')} {totalTests} {t('passed')}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Tests</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('totalTests')}</CardTitle>
             <BarChart3 className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
@@ -1643,23 +1624,23 @@ export function TestRunDetail() {
             <div className="text-xs text-gray-500 space-y-1 mt-1">
               <div className="flex items-center gap-1">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span>{passedTests} passed</span>
+                <span>{passedTests} {t('passed')}</span>
               </div>
               <div className="flex items-center gap-1">
                 <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                <span>{failedTests} failed</span>
+                <span>{failedTests} {t('failed')}</span>
               </div>
               <div className="flex items-center gap-1">
                 <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                <span>{blockedTests} blocked</span>
+                <span>{blockedTests} {t('blocked')}</span>
               </div>
               <div className="flex items-center gap-1">
                 <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
-                <span>{skippedTests} skipped</span>
+                <span>{skippedTests} {t('skipped')}</span>
               </div>
               <div className="flex items-center gap-1">
                 <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-                <span>{notStartedTests} not tested</span>
+                <span>{notStartedTests} {t('notStarted')}</span>
               </div>
             </div>
           </CardContent>
