@@ -81,7 +81,7 @@ export const useNetworkStatus = () => {
   }, [updateNetworkStatus]);
 
   // Check backend connectivity
-  const checkBackendConnectivity = useCallback(async (backendUrl: string = '/api/health'): Promise<boolean> => {
+  const checkBackendConnectivity = useCallback(async (backendUrl: string = '/health'): Promise<boolean> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
