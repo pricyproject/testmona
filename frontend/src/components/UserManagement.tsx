@@ -73,7 +73,7 @@ const isInvitationExpired = (expiresAt: string) => {
 };
 
 export function UserManagement() {
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
   const { user: currentUser } = useAuthStore();
   const [users, setUsers] = useState<User[]>([]);
@@ -422,7 +422,7 @@ export function UserManagement() {
                         {user.two_factor_enabled ? t('enabled') : t('disabled')}
                       </Badge>
                     </TableCell>
-                    <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell>{new Date(user.created_at).toLocaleDateString(language)}</TableCell>
                     <TableCell className="text-end">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -495,7 +495,7 @@ export function UserManagement() {
                       <TableCell>
                         <Badge variant="secondary">{getRoleLabel(invitation.role)}</Badge>
                       </TableCell>
-                      <TableCell>{new Date(invitation.expires_at).toLocaleDateString()}</TableCell>
+                      <TableCell>{new Date(invitation.expires_at).toLocaleDateString(language)}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="outline">{t('pending')}</Badge>

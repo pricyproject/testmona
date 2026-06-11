@@ -47,7 +47,7 @@ import { ProjectImportPreview } from '@/components/ProjectImportPreview';
 export function Projects() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { appName } = useAppName(false);
   const { selectedProject, setSelectedProject, projects: storeProjects, setProjects: setStoreProjects } = useProjectStore();
   const { user } = useAuthStore();
@@ -1518,7 +1518,7 @@ export function Projects() {
                 {/* Footer: created date + management actions */}
                 <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
                   <span className="truncate text-[11px] text-muted-foreground">
-                    {t('created')}: {new Date(project.created_at).toLocaleDateString()}
+                    {t('created')}: {new Date(project.created_at).toLocaleDateString(language)}
                   </span>
                   <div className="flex shrink-0 items-center gap-1">
                     <Button
@@ -1784,7 +1784,7 @@ export function Projects() {
                             {getProjectStatusLabel(project.status)}
                           </Badge>
                           <Badge variant="outline" className="border-border bg-background/60 px-2 py-0 text-[11px] text-muted-foreground">
-                            {t('created')}: {new Date(project.created_at).toLocaleDateString()}
+                            {t('created')}: {new Date(project.created_at).toLocaleDateString(language)}
                           </Badge>
                         </div>
                       </CardHeader>

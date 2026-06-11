@@ -236,7 +236,7 @@ export function Defects() {
   const { projectId, defectId: routeDefectId } = useParams();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { canWrite } = usePermissions();
   const { appName } = useAppName(false);
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
@@ -2248,7 +2248,7 @@ export function Defects() {
                           </button>
                         )}
                         <span className="ml-auto text-gray-400 dark:text-gray-500">
-                          {new Date(defect.created_at).toLocaleDateString()}
+                          {new Date(defect.created_at).toLocaleDateString(language)}
                         </span>
                       </div>
                     </div>
