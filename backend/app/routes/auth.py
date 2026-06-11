@@ -274,12 +274,15 @@ def register_auth_routes(app):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
+        # Revoke the consumed token before issuing replacements
+        auth.revoke_refresh_token(refresh_token, db)
+
         # Create new access token
         access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
         access_token = auth.create_access_token(
             data={"sub": user.username, "sv": user.session_version}, expires_delta=access_token_expires
         )
-        
+
         # Create new refresh token (rotation)
         refresh_token_expires = timedelta(days=settings.refresh_token_expire_days)
         new_refresh_token = auth.create_refresh_token(

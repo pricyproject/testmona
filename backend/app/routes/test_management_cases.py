@@ -9,7 +9,7 @@ import re
 from .. import crud, schemas, auth, rbac, models
 from ..feature_guard import require_project_feature
 from ..database import get_db
-from ..auth import get_current_active_user, get_current_user
+from ..auth import get_current_active_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
 from .test_management_helpers import *
 
@@ -638,7 +638,7 @@ def register_case_routes(app):
     def get_test_case_revisions(
         test_case_id: int,
         db: Session = Depends(get_db),
-        current_user: models.User = Depends(get_current_user)
+        current_user: models.User = Depends(get_current_active_user)
     ):
         """Get revision history for a test case (admin and manager only, scoped to project access)"""
         from sqlalchemy.orm import joinedload

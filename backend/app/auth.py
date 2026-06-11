@@ -63,6 +63,8 @@ def authenticate_user(db: Session, username_or_email: str, password: str):
     
     if not user:
         return False
+    if not user.is_active:
+        return False
     if not verify_password(password, user.hashed_password):
         return False
     return user
@@ -101,9 +103,9 @@ def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None, 
         # Hash the token for storage
         token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
         
-        # Create refresh token record
+        # Store only the hash — never persist the raw token value
         db_refresh_token = RefreshToken(
-            token=refresh_token,
+            token=token_hash,
             token_hash=token_hash,
             user_id=user_id,
             expires_at=expire,

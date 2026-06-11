@@ -9,7 +9,7 @@ import re
 from .. import crud, schemas, auth, rbac, models
 from ..feature_guard import require_project_feature
 from ..database import get_db
-from ..auth import get_current_active_user, get_current_user
+from ..auth import get_current_active_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
 from .test_management_helpers import *
 
@@ -464,7 +464,7 @@ def register_result_routes(app):
 
     @app.get("/user/preferences/items-per-page")
     def get_items_per_page_preference(
-        current_user: models.User = Depends(get_current_user),
+        current_user: models.User = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
         # Get user's preference for items per page, default to 10
@@ -474,7 +474,7 @@ def register_result_routes(app):
     @app.put("/user/preferences/items-per-page")
     def update_items_per_page_preference(
         request: dict,
-        current_user: models.User = Depends(get_current_user),
+        current_user: models.User = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
         # Update user's preference for items per page
