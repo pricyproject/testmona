@@ -181,6 +181,7 @@ export interface TestResult {
   test_case?: {
     id: number;
     title: string;
+    test_type?: string;
     section?: {
       id: number;
       name: string;
@@ -197,6 +198,8 @@ export interface TestResult {
   executed_at: string;
   created_at: string;
   updated_at?: string;
+  retest_needed?: boolean;
+  defect_links?: Array<{ id: number; link_type: string; defect?: { id: number; defect_id?: string; title?: string } }>;
 }
 
 export interface User {
