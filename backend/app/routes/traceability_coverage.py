@@ -3,8 +3,9 @@ Traceability matrix, coverage reports, and Jira integration routes.
 """
 
 from fastapi import Depends, HTTPException, Query
+from sqlalchemy import and_, func, literal, or_, select
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from .. import crud, schemas, auth, rbac, models
 from ..database import get_db
@@ -17,8 +18,6 @@ from ..crud import (
 from ..services.analytics_shared import (
     normalize_result_status,
     enum_value,
-    get_linked_requirement_test_case_ids,
-    add_legacy_reference_links,
 )
 import logging
 
@@ -48,56 +47,223 @@ def register_traceability_coverage_routes(app):
 
         from ..models import Defect, DefectStatus, Requirement, TestCase, TestResult, TestSuite, TraceabilityMatrix
 
-        requirements = db.query(Requirement).filter(Requirement.project_id == project_id).all()
-        requirement_ids = [requirement.id for requirement in requirements]
-        test_suite_ids = [row.id for row in db.query(TestSuite.id).filter(TestSuite.project_id == project_id).all()]
-        project_test_case_ids = [
-            row.id for row in db.query(TestCase.id).filter(
-                TestCase.test_suite_id.in_(test_suite_ids),
-                TestCase.is_deleted == False,
-            ).all()
-        ] if test_suite_ids else []
+        link_table = models.requirement_test_case_links
 
-        traceability_entries = []
-        if requirement_ids and project_test_case_ids:
-            traceability_entries = db.query(TraceabilityMatrix).filter(
-                TraceabilityMatrix.requirement_id.in_(requirement_ids),
-                TraceabilityMatrix.test_case_id.in_(project_test_case_ids),
-            ).all()
+        def legacy_reference_match(requirement_model: Any, test_case_model: Any) -> Any:
+            requirement_key = func.lower(func.coalesce(requirement_model.requirement_id, ""))
+            test_case_reference = func.lower(func.coalesce(test_case_model.reference, ""))
+            for delimiter in (",", ";", "|", "(", ")", "[", "]", "{", "}", '"', "'", "."):
+                test_case_reference = func.replace(test_case_reference, delimiter, " ")
+            padded_reference = literal(" ") + test_case_reference + literal(" ")
+            return and_(
+                requirement_key != "",
+                padded_reference.like(literal("% ") + requirement_key + literal(" %")),
+            )
+
+        def linked_requirement_exists(test_case_condition: Any = None) -> Any:
+            test_case_scope = [
+                TestSuite.project_id == project_id,
+                TestCase.test_suite_id == TestSuite.id,
+                TestCase.is_deleted.is_(False),
+            ]
+            if test_case_condition is not None:
+                test_case_scope.append(test_case_condition)
+
+            traceability_exists = select(literal(1)).select_from(TraceabilityMatrix).join(
+                TestCase,
+                TraceabilityMatrix.test_case_id == TestCase.id,
+            ).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).where(
+                TraceabilityMatrix.requirement_id == Requirement.id,
+                *test_case_scope,
+            ).exists()
+            association_exists = select(literal(1)).select_from(link_table).join(
+                TestCase,
+                link_table.c.test_case_id == TestCase.id,
+            ).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).where(
+                link_table.c.requirement_id == Requirement.id,
+                *test_case_scope,
+            ).exists()
+            legacy_exists = select(literal(1)).select_from(TestCase).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).where(
+                legacy_reference_match(Requirement, TestCase),
+                *test_case_scope,
+            ).exists()
+            return or_(traceability_exists, association_exists, legacy_exists)
+
+        total_requirements = db.query(func.count(Requirement.id)).filter(
+            Requirement.project_id == project_id,
+        ).scalar() or 0
+        covered_requirements = db.query(func.count(Requirement.id)).filter(
+            Requirement.project_id == project_id,
+            linked_requirement_exists(),
+        ).scalar() or 0
+
+        requirements_query = db.query(Requirement).filter(Requirement.project_id == project_id)
+        if priority:
+            normalized_priority = priority.strip().lower()
+            priority_enum = next((item for item in models.Priority if item.value == normalized_priority), None)
+            requirements_query = requirements_query.filter(
+                Requirement.priority == priority_enum if priority_enum else Requirement.id.is_(None)
+            )
+        if coverage_status:
+            cs = coverage_status.strip().lower()
+            if cs == "covered":
+                requirements_query = requirements_query.filter(linked_requirement_exists())
+            elif cs == "uncovered":
+                requirements_query = requirements_query.filter(~linked_requirement_exists())
+        if test_status:
+            ts = normalize_result_status(test_status.strip().lower())
+            status_aliases = {
+                "passed": {"pass", "passed"},
+                "failed": {"fail", "failed"},
+                "blocked": {"block", "blocked"},
+                "skipped": {"skip", "skipped"},
+                "not_started": {"not_started"},
+            }
+            latest_result_rank = select(
+                TestResult.test_case_id.label("test_case_id"),
+                func.lower(func.trim(TestResult.status)).label("status"),
+                func.row_number().over(
+                    partition_by=TestResult.test_case_id,
+                    order_by=(TestResult.executed_at.desc(), TestResult.created_at.desc(), TestResult.id.desc()),
+                ).label("result_rank"),
+            ).select_from(TestResult).join(
+                TestCase,
+                TestResult.test_case_id == TestCase.id,
+            ).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).where(
+                TestSuite.project_id == project_id,
+                TestCase.is_deleted.is_(False),
+            ).subquery()
+            matching_status_test_cases = select(latest_result_rank.c.test_case_id).where(
+                latest_result_rank.c.result_rank == 1,
+                latest_result_rank.c.status.in_(status_aliases.get(ts, {ts})),
+            )
+            test_case_status_condition = TestCase.id.in_(matching_status_test_cases)
+            if ts == "not_started":
+                test_case_status_condition = or_(
+                    test_case_status_condition,
+                    ~select(literal(1)).select_from(TestResult).where(
+                        TestResult.test_case_id == TestCase.id,
+                    ).exists(),
+                )
+            requirements_query = requirements_query.filter(linked_requirement_exists(test_case_status_condition))
+        if search:
+            q = search.strip().lower()
+            if q:
+                escaped_query = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                like_query = f"%{escaped_query}%"
+                requirements_query = requirements_query.filter(
+                    or_(
+                        func.lower(func.coalesce(Requirement.title, "")).like(like_query, escape="\\"),
+                        func.lower(func.coalesce(Requirement.requirement_id, "")).like(like_query, escape="\\"),
+                    )
+                )
+
+        matched_requirements = requirements_query.count()
+        requirements = requirements_query.order_by(Requirement.id).offset(skip).limit(limit).all()
+        requirement_ids = [requirement.id for requirement in requirements]
 
         entries_by_requirement = {}
-        for entry in traceability_entries:
-            entries_by_requirement.setdefault(entry.requirement_id, {})[entry.test_case_id] = entry
+        linked_test_case_ids = {requirement_id: set() for requirement_id in requirement_ids}
+        if requirement_ids:
+            traceability_entries = db.query(TraceabilityMatrix).join(
+                TestCase,
+                TraceabilityMatrix.test_case_id == TestCase.id,
+            ).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).filter(
+                TraceabilityMatrix.requirement_id.in_(requirement_ids),
+                TestSuite.project_id == project_id,
+                TestCase.is_deleted.is_(False),
+            ).all()
+            for entry in traceability_entries:
+                entries_by_requirement.setdefault(entry.requirement_id, {})[entry.test_case_id] = entry
+                linked_test_case_ids.setdefault(entry.requirement_id, set()).add(entry.test_case_id)
 
-        linked_test_case_ids = get_linked_requirement_test_case_ids(db, requirement_ids, project_test_case_ids)
+            association_rows = db.query(
+                link_table.c.requirement_id,
+                link_table.c.test_case_id,
+            ).join(
+                TestCase,
+                link_table.c.test_case_id == TestCase.id,
+            ).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).filter(
+                link_table.c.requirement_id.in_(requirement_ids),
+                TestSuite.project_id == project_id,
+                TestCase.is_deleted.is_(False),
+            ).all()
+            for requirement_id, test_case_id in association_rows:
+                linked_test_case_ids.setdefault(requirement_id, set()).add(test_case_id)
+
+            legacy_rows = db.query(Requirement.id, TestCase.id).select_from(Requirement).join(
+                TestCase,
+                legacy_reference_match(Requirement, TestCase),
+            ).join(
+                TestSuite,
+                TestCase.test_suite_id == TestSuite.id,
+            ).filter(
+                Requirement.id.in_(requirement_ids),
+                TestSuite.project_id == project_id,
+                TestCase.is_deleted.is_(False),
+            ).all()
+            for requirement_id, test_case_id in legacy_rows:
+                linked_test_case_ids.setdefault(requirement_id, set()).add(test_case_id)
+
+        page_test_case_ids = sorted({
+            test_case_id
+            for linked_ids in linked_test_case_ids.values()
+            for test_case_id in linked_ids
+        })
         project_test_cases_by_id = {}
-        if project_test_case_ids:
+        latest_results_by_tc = {}
+        if page_test_case_ids:
             project_test_cases_by_id = {
                 test_case.id: test_case
-                for test_case in db.query(TestCase).filter(TestCase.id.in_(project_test_case_ids)).all()
+                for test_case in db.query(TestCase).filter(TestCase.id.in_(page_test_case_ids)).all()
             }
-        add_legacy_reference_links(linked_test_case_ids, requirements, list(project_test_cases_by_id.values()))
+            latest_result_ids = select(
+                TestResult.id.label("id"),
+                func.row_number().over(
+                    partition_by=TestResult.test_case_id,
+                    order_by=(TestResult.executed_at.desc(), TestResult.created_at.desc(), TestResult.id.desc()),
+                ).label("result_rank"),
+            ).where(TestResult.test_case_id.in_(page_test_case_ids)).subquery()
+            latest_results = db.query(TestResult).join(
+                latest_result_ids,
+                TestResult.id == latest_result_ids.c.id,
+            ).filter(latest_result_ids.c.result_rank == 1).all()
+            latest_results_by_tc = {result.test_case_id: result for result in latest_results}
 
-        # Open defects grouped by test_case_id — one batch query so the matrix
-        # stays O(reqs × tcs) instead of O(reqs × tcs × defect_lookups).
+        # Open defects grouped by test_case_id for the current page only.
         open_defect_statuses = (DefectStatus.OPEN, DefectStatus.IN_PROGRESS, DefectStatus.REOPENED)
         open_defects_by_tc: dict[int, list] = {}
-        if project_test_case_ids:
+        if page_test_case_ids:
             open_defect_rows = db.query(Defect).filter(
                 Defect.project_id == project_id,
-                Defect.test_case_id.in_(project_test_case_ids),
+                Defect.test_case_id.in_(page_test_case_ids),
                 Defect.status.in_(open_defect_statuses),
             ).all()
             for defect in open_defect_rows:
                 open_defects_by_tc.setdefault(defect.test_case_id, []).append(defect)
 
         detailed_requirements = []
-        covered_requirements = 0
         for requirement in requirements:
             entries = entries_by_requirement.get(requirement.id, {})
             linked_ids = linked_test_case_ids.get(requirement.id, set())
-            if linked_ids:
-                covered_requirements += 1
 
             test_cases = []
             for test_case_id in sorted(linked_ids):
@@ -105,9 +271,7 @@ def register_traceability_coverage_routes(app):
                 if not test_case:
                     continue
                 entry = entries.get(test_case_id)
-                latest_result = db.query(TestResult).filter(
-                    TestResult.test_case_id == test_case.id
-                ).order_by(TestResult.executed_at.desc()).first()
+                latest_result = latest_results_by_tc.get(test_case.id)
                 status = normalize_result_status(latest_result.status) if latest_result else "not_started"
                 tc_open_defects = open_defects_by_tc.get(test_case.id, [])
                 test_cases.append({
@@ -149,40 +313,6 @@ def register_traceability_coverage_routes(app):
                 "test_cases": test_cases,
             })
 
-        total_requirements = len(requirements)
-
-        # Apply filters (server-side so the UI stays fast on big projects).
-        filtered = detailed_requirements
-        if priority:
-            normalized_priority = priority.strip().lower()
-            filtered = [
-                r for r in filtered
-                if str(r["requirement_priority"] or "").strip().lower() == normalized_priority
-            ]
-        if coverage_status:
-            cs = coverage_status.strip().lower()
-            if cs == "covered":
-                filtered = [r for r in filtered if r["total_test_cases"] > 0]
-            elif cs == "uncovered":
-                filtered = [r for r in filtered if r["total_test_cases"] == 0]
-        if test_status:
-            ts = test_status.strip().lower()
-            filtered = [
-                r for r in filtered
-                if any(tc["status"] == ts for tc in r["test_cases"])
-            ]
-        if search:
-            q = search.strip().lower()
-            if q:
-                filtered = [
-                    r for r in filtered
-                    if q in str(r["requirement_title"] or "").lower()
-                    or q in str(r["requirement_key"] or "").lower()
-                ]
-
-        matched_requirements = len(filtered)
-        page = filtered[skip:skip + limit]
-
         return {
             "project_id": project_id,
             "total_requirements": total_requirements,
@@ -192,7 +322,7 @@ def register_traceability_coverage_routes(app):
             "matched_requirements": matched_requirements,
             "skip": skip,
             "limit": limit,
-            "requirements": page,
+            "requirements": detailed_requirements,
         }
 
     # Traceability Matrix Endpoints
