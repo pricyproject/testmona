@@ -135,14 +135,11 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Global Password Change Dialog */}
       {showPasswordDialog && (
-        <>
-          {console.log('Rendering PasswordChangeDialog, showPasswordDialog:', showPasswordDialog)}
-          <PasswordChangeDialog
-            isOpen={showPasswordDialog}
-            onClose={() => setShowPasswordDialog(false)}
-            onSubmit={handlePasswordChange}
-          />
-        </>
+        <PasswordChangeDialog
+          isOpen={showPasswordDialog}
+          onClose={() => setShowPasswordDialog(false)}
+          onSubmit={handlePasswordChange}
+        />
       )}
     </div>
   );
