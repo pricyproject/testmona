@@ -111,9 +111,6 @@ wheels/
 *.egg
 MANIFEST
 
-# Test files (keep structure but ignore execution artifacts)
-test_*.py
-!test_*.py.bak
 
 # Alembic (keep structure but ignore version files)
 alembic/versions/*.py
