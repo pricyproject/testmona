@@ -66,12 +66,7 @@ export function Login() {
         setTwoFactorCode('');
         return;
       }
-      const forcePasswordChange = Boolean(loginResult);
-      if (forcePasswordChange) {
-        navigate('/change-password');
-      } else {
-        navigate(resolveSafeRedirect(searchParams.get('next')) || '/dashboard');
-      }
+      navigate(resolveSafeRedirect(searchParams.get('next')) || '/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loginFailed'));
       if (requiresTwoFactor) {
