@@ -249,3 +249,34 @@ def test_cross_project_isolation_requirements(seeded_db):
     keys = [r["key"] for r in res["results"]]
     assert "REQ-11" in keys
     assert "REQ-10" not in keys
+
+
+# ---------------------------------------------------------------------------
+# NULL / empty-string semantics (requires full round-trip)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _have_lark(), reason="lark not installed")
+def test_is_empty_counts_empty_string_and_ne_keeps_null_rows():
+    """Forms submit unset text inputs as "" — IS EMPTY must treat '' like NULL,
+    and != must agree with NOT IN about rows whose field is unset."""
+    from app import models
+
+    db = _fresh_db()
+    db.add(models.User(id=1, username="u", email="u@x.com", hashed_password="x", full_name="U"))
+    db.add(models.Project(id=1, name="P1", owner_id=1))
+    db.add(models.Defect(id=1, title="tagged", defect_id="DEF-1", project_id=1,
+                         reported_by=1, tags="security", environment="staging"))
+    db.add(models.Defect(id=2, title="blank tags", defect_id="DEF-2", project_id=1,
+                         reported_by=1, tags="", environment=None))
+    db.add(models.Defect(id=3, title="null tags", defect_id="DEF-3", project_id=1,
+                         reported_by=1, tags=None, environment="prod"))
+    db.commit()
+
+    def keys(tql):
+        return sorted(r["key"] for r in execute_search(db, "defects", 1, tql, CTX)["results"])
+
+    assert keys("tags IS EMPTY") == ["DEF-2", "DEF-3"]
+    assert keys("tags IS NOT EMPTY") == ["DEF-1"]
+    # != and NOT IN must agree: the unset-environment row "is not staging".
+    assert keys("environment != staging") == ["DEF-2", "DEF-3"]
+    assert keys("environment NOT IN (staging)") == ["DEF-2", "DEF-3"]

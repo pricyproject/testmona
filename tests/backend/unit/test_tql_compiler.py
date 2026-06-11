@@ -120,13 +120,19 @@ def test_contains_escapes_backslashes_before_like_wildcards():
 # ---------------------------------------------------------------------------
 
 def test_is_not_empty():
+    # Text columns store unset values as '' as often as NULL (forms submit empty
+    # inputs as ""), so NOT EMPTY must exclude both.
     node = nodes.EmptyCheck("resolution", negate=True)
-    assert _compile(node) == "defects.resolution IS NOT NULL"
+    out = _compile(node)
+    assert "defects.resolution IS NOT NULL" in out
+    assert "trim(defects.resolution) != ''" in out
 
 
 def test_is_empty():
     node = nodes.EmptyCheck("resolution", negate=False)
-    assert _compile(node) == "defects.resolution IS NULL"
+    out = _compile(node)
+    assert "defects.resolution IS NULL" in out
+    assert "trim(defects.resolution) = ''" in out
 
 
 def test_is_empty_and_not_empty_compile_for_nullable_fields():
@@ -183,6 +189,15 @@ def test_tag_ne_matches_null_rows():
     node = nodes.Comparison("tags", "ne", nodes.StringVal("security"))
     out = _sql(_compile_node(node, REQUIREMENT_REGISTRY, CTX))
     assert "tags IS NULL" in out
+
+
+def test_scalar_ne_matches_null_rows():
+    # `environment != staging` must agree with `environment NOT IN (staging)`:
+    # a row with no environment set "is not staging".
+    node = nodes.Comparison("environment", "ne", nodes.StringVal("staging"))
+    out = _compile(node)
+    assert "environment IS NULL" in out
+    assert "!=" in out
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +381,10 @@ def test_is_empty_parses_end_to_end_across_entities():
 def test_is_is_not_are_equality_synonyms():
     from app.services.tql import REQUIREMENT_REGISTRY
     assert _sql(compile_tql("status IS approved", REQUIREMENT_REGISTRY, CTX).where) == "requirements.status = 'APPROVED'"
-    assert _sql(compile_tql("status IS NOT approved", REQUIREMENT_REGISTRY, CTX).where) == "requirements.status != 'APPROVED'"
+    # IS NOT compiles like != — NULL-safe, so unset fields satisfy the negation.
+    not_sql = _sql(compile_tql("status IS NOT approved", REQUIREMENT_REGISTRY, CTX).where)
+    assert "requirements.status != 'APPROVED'" in not_sql
+    assert "requirements.status IS NULL" in not_sql
     assert _sql(compile_tql("creator IS currentUser()", REQUIREMENT_REGISTRY, EvalContext(current_user_id=7)).where) == "requirements.created_by = 7"
     assert _sql(compile_tql("creator IS EMPTY", REQUIREMENT_REGISTRY, CTX).where) == "requirements.created_by IS NULL"
     assert _sql(compile_tql("creator IS NOT EMPTY", REQUIREMENT_REGISTRY, CTX).where) == "requirements.created_by IS NOT NULL"

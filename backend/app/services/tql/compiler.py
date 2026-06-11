@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from sqlalchemy import and_, func, literal, not_, or_
+from sqlalchemy import Enum as SAEnum, String as SAString, and_, func, literal, not_, or_
 from sqlalchemy.sql.elements import ColumnElement
 
 from . import nodes
@@ -56,14 +56,22 @@ def _like_pattern(value: str) -> str:
 
 
 def _negate(column, clause: ColumnElement) -> ColumnElement:
-    """Negate a membership/contains clause while keeping NULL rows.
+    """Negate a comparison/membership/contains clause while keeping NULL rows.
 
     SQL three-valued logic makes ``NOT (col LIKE ...)`` evaluate to NULL — and
     thus exclude the row — whenever ``col`` is NULL. But a row whose field is
-    unset *should* satisfy "does not contain X" / "is not one of X". So an unset
-    column is treated as a match for the negation.
+    unset *should* satisfy "is not X" / "does not contain X" / "is not one of X".
+    So an unset column is treated as a match for the negation.
     """
     return or_(column.is_(None), not_(clause))
+
+
+def _is_textual(column) -> bool:
+    """True when the column stores free text (Enum columns don't count, even
+    though SQLAlchemy's Enum type subclasses String — on PostgreSQL comparing an
+    enum column to ``''`` would not even be valid SQL)."""
+    coltype = getattr(column, "type", None)
+    return isinstance(coltype, SAString) and not isinstance(coltype, SAEnum)
 
 
 def _multivalue_member(column, raw: str) -> ColumnElement:
@@ -130,7 +138,8 @@ def _compile_comparison(node: nodes.Comparison, registry: dict, ctx: EvalContext
     if node.op == "eq":
         return column == value
     if node.op == "ne":
-        return column != value
+        # NULL-safe, matching NOT IN / !~: an unset field "is not X".
+        return _negate(column, column == value)
     if node.op == "gt":
         return column > value
     if node.op == "lt":
@@ -159,8 +168,14 @@ def _compile_in(node: nodes.InList, registry: dict, ctx: EvalContext) -> ColumnE
 
 def _compile_empty(node: nodes.EmptyCheck, registry: dict) -> ColumnElement:
     spec = _field(node.field, registry)
-    clause = spec.column.is_(None)
-    return spec.column.isnot(None) if node.negate else clause
+    column = spec.column
+    # Text columns hold unset values as '' (or whitespace) as often as NULL —
+    # forms submit empty inputs as "" — so EMPTY must cover both spellings.
+    if _is_textual(column):
+        if node.negate:
+            return and_(column.isnot(None), func.trim(column) != "")
+        return or_(column.is_(None), func.trim(column) == "")
+    return column.isnot(None) if node.negate else column.is_(None)
 
 
 def _compile_order(key: nodes.OrderKey, registry: dict) -> ColumnElement:
