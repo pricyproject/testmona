@@ -190,6 +190,186 @@ def create_defect_management(
             raise
 
 
+# Defect statuses that represent a closed/done state on the external tracker.
+CLOSING_DEFECT_STATUSES = {
+    models.DefectStatus.FIXED,
+    models.DefectStatus.CLOSED,
+    models.DefectStatus.REJECTED,
+}
+
+# Defect status -> Jira transition target name.
+JIRA_STATUS_MAPPING = {
+    models.DefectStatus.OPEN: "Open",
+    models.DefectStatus.IN_PROGRESS: "In Progress",
+    models.DefectStatus.FIXED: "Done",
+    models.DefectStatus.CLOSED: "Done",
+    models.DefectStatus.REJECTED: "Done",
+    models.DefectStatus.REOPENED: "Reopened",
+}
+
+
+def _infer_tracker_type(defect: models.Defect) -> Optional[str]:
+    """Infer the external tracker type from the defect's external issue URL."""
+    url = (defect.external_issue_url or "").lower()
+    if "github" in url:
+        return "github"
+    if "/browse/" in url or "jira" in url or "atlassian" in url:
+        return "jira"
+    return None
+
+
+def _select_integration_for_defect(db: Session, defect: models.Defect):
+    """Pick the integration that owns this defect's external issue.
+
+    A project can have several integrations (e.g. Jira + GitHub). The defect
+    doesn't store which one created its external issue, so match by the tracker
+    type inferred from ``external_issue_url``; fall back to the sole integration
+    when there's only one.
+    """
+    integrations = db.query(models.IssueTrackerIntegration).filter(
+        models.IssueTrackerIntegration.project_id == defect.project_id
+    ).all()
+    if not integrations:
+        return None
+    if len(integrations) == 1:
+        return integrations[0]
+
+    inferred = _infer_tracker_type(defect)
+    if inferred:
+        match = next(
+            (i for i in integrations if (i.tracker_type or "").lower() == inferred),
+            None,
+        )
+        if match:
+            return match
+    # Ambiguous: don't risk pushing a Jira key to GitHub (or vice versa).
+    logger.warning(
+        f"Could not determine integration for defect {defect.id}; "
+        f"skipping auto-sync ({len(integrations)} integrations, no URL match)"
+    )
+    return None
+
+
+def _sync_jira_status(defect: models.Defect, integration: models.IssueTrackerIntegration, status: str) -> bool:
+    """Sync defect status to Jira. Returns True when the defect was mutated."""
+    try:
+        if not is_safe_url(integration.api_url):
+            raise ValueError("Invalid or unsafe URL configuration")
+
+        headers = {
+            "Authorization": f"Bearer {integration.api_token}",
+            "Content-Type": "application/json"
+        }
+
+        # Get available transitions
+        transitions_response = requests.get(
+            f"{integration.api_url}/rest/api/3/issue/{defect.external_issue_id}/transitions",
+            headers=headers,
+            timeout=10
+        )
+
+        if transitions_response.status_code != 200:
+            logger.warning(f"Could not fetch transitions for Jira issue {defect.external_issue_id}")
+            return False
+
+        transitions = transitions_response.json().get("transitions", [])
+        target_transition = next((t for t in transitions if t.get("to", {}).get("name") == status), None)
+
+        if not target_transition:
+            logger.warning(f"No transition found to status {status} for Jira issue {defect.external_issue_id}")
+            return False
+
+        # Perform the transition
+        response = requests.post(
+            f"{integration.api_url}/rest/api/3/issue/{defect.external_issue_id}/transitions",
+            headers=headers,
+            json={"transition": {"id": target_transition.get("id")}},
+            timeout=30
+        )
+
+        if response.status_code in (200, 204):
+            defect.external_sync_status = "synced"
+            defect.external_last_sync = datetime.now(UTC)
+            logger.info(f"Synced Jira issue {defect.external_issue_id} status to {status}")
+            return True
+
+        logger.warning(f"Failed to sync Jira status: {response.text}")
+        return False
+
+    except Exception as e:
+        logger.error(f"Error syncing Jira status: {e}")
+        return False
+
+
+def _sync_github_status(defect: models.Defect, integration: models.IssueTrackerIntegration, defect_status) -> bool:
+    """Sync defect status to GitHub. Returns True when the defect was mutated.
+
+    GitHub issues only have open/closed states, so map the defect status to one
+    of those rather than to a free-form status name.
+    """
+    try:
+        if not is_safe_url(integration.api_url):
+            raise ValueError("Invalid or unsafe URL configuration")
+
+        headers = {
+            "Authorization": f"token {integration.api_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+
+        github_state = "closed" if defect_status in CLOSING_DEFECT_STATUSES else "open"
+
+        # Update the GitHub issue
+        response = requests.patch(
+            f"{integration.api_url}/issues/{defect.external_issue_id}",
+            headers=headers,
+            json={"state": github_state},
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            defect.external_sync_status = "synced"
+            defect.external_last_sync = datetime.now(UTC)
+            logger.info(f"Synced GitHub issue {defect.external_issue_id} status to {github_state}")
+            return True
+
+        logger.warning(f"Failed to sync GitHub status: {response.text}")
+        return False
+
+    except Exception as e:
+        logger.error(f"Error syncing GitHub status: {e}")
+        return False
+
+
+def _sync_defect_status_to_external(db: Session, defect: models.Defect):
+    """Auto-sync defect status to external issue tracker when status changes locally."""
+    if not defect.external_issue_id:
+        return
+
+    try:
+        integration = _select_integration_for_defect(db, defect)
+        if not integration:
+            return
+
+        external_status = JIRA_STATUS_MAPPING.get(
+            defect.status,
+            str(defect.status.value if hasattr(defect.status, "value") else defect.status),
+        )
+
+        synced = False
+        if integration.tracker_type.lower() == "jira":
+            synced = _sync_jira_status(defect, integration, external_status)
+        elif integration.tracker_type.lower() == "github":
+            synced = _sync_github_status(defect, integration, defect.status)
+
+        # Persist the synced flag/timestamp written by the sync helpers — the
+        # caller already committed the status change before reaching here.
+        if synced:
+            db.commit()
+
+    except Exception as e:
+        logger.error(f"Failed to sync defect {defect.id} status to external tracker: {e}")
+
+
 def update_defect_management(
     db: Session,
     defect_id: int,
@@ -200,7 +380,7 @@ def update_defect_management(
     db_defect = db.query(models.Defect).filter(models.Defect.id == defect_id).first()
     if not db_defect:
         return None
-    
+
     # Track changes for history
     update_data = defect_update.model_dump(exclude_unset=True)
     status_changed = False
@@ -208,7 +388,7 @@ def update_defect_management(
         old_value = getattr(db_defect, field_name)
         if field_name == "status" and old_value != new_value:
             status_changed = True
-        
+
         # Only track if value actually changed
         if old_value != new_value:
             # Convert enum values to strings for storage
@@ -216,12 +396,12 @@ def update_defect_management(
                 old_value_str = old_value.value
             else:
                 old_value_str = str(old_value) if old_value is not None else None
-                
+
             if hasattr(new_value, 'value'):
                 new_value_str = new_value.value
             else:
                 new_value_str = str(new_value) if new_value is not None else None
-            
+
             # Create history entry
             history = models.DefectHistory(
                 defect_id=defect_id,
@@ -232,10 +412,10 @@ def update_defect_management(
                 change_reason=f"Updated {field_name}"
             )
             db.add(history)
-            
+
             # Update the field
             setattr(db_defect, field_name, new_value)
-    
+
     db_defect.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(db_defect)
@@ -245,6 +425,8 @@ def update_defect_management(
     if status_changed:
         from app import crud
         crud.flag_linked_results_for_retest(db, defect_id)
+        # Auto-sync defect status to external issue tracker
+        _sync_defect_status_to_external(db, db_defect)
 
     return db_defect
 
