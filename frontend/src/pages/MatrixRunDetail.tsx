@@ -62,7 +62,7 @@ export function MatrixRunDetail() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-400">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-slate-400" dir={isRTL ? 'rtl' : 'ltr'}>
         <Loader2 className="h-8 w-8 animate-spin" />
         <p className="text-sm">{t('loading')}</p>
       </div>
@@ -71,7 +71,7 @@ export function MatrixRunDetail() {
 
   if (loadError || !matrixRun) {
     return (
-      <div className="space-y-4 py-12 text-center">
+      <div className="space-y-4 py-12 text-center" dir={isRTL ? 'rtl' : 'ltr'}>
         <AlertTriangle className="mx-auto h-12 w-12 text-red-500" />
         <h2 className="text-2xl font-bold">{loadError ?? t('matrixRunNotFound')}</h2>
         <Button variant="outline" onClick={() => navigate(`/projects/${currentProjectId}/matrix-runs`)}>
@@ -98,7 +98,7 @@ export function MatrixRunDetail() {
   };
 
   return (
-    <div className={`space-y-6 ${isRTL ? 'rtl' : 'ltr'}`}>
+    <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <Button

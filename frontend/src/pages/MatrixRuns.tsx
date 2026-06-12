@@ -45,6 +45,24 @@ const statusBadgeClass = (status: string) => {
   return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
 };
 
+const environmentTypeTranslationKeys: Record<string, string> = {
+  development: 'environmentTypeDevelopment',
+  staging: 'environmentTypeStaging',
+  production: 'environmentTypeProduction',
+  custom: 'environmentTypeCustom',
+};
+
+interface TestSuiteOption {
+  id: number;
+  name: string;
+}
+
+interface EnvironmentOption {
+  id: number;
+  name: string;
+  environment_type: string;
+}
+
 export function MatrixRuns() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
@@ -61,8 +79,8 @@ export function MatrixRuns() {
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [testSuites, setTestSuites] = useState<any[]>([]);
-  const [environments, setEnvironments] = useState<any[]>([]);
+  const [testSuites, setTestSuites] = useState<TestSuiteOption[]>([]);
+  const [environments, setEnvironments] = useState<EnvironmentOption[]>([]);
   const [selectedSuiteId, setSelectedSuiteId] = useState('');
   const [suiteCases, setSuiteCases] = useState<TestCase[]>([]);
   const [isLoadingCases, setIsLoadingCases] = useState(false);
@@ -151,6 +169,8 @@ export function MatrixRuns() {
 
   const canSubmit = name.trim() !== '' && selectedCaseIds.length > 0 && selectedEnvIds.length > 0;
 
+  const getEnvironmentTypeLabel = (type: string) => t(environmentTypeTranslationKeys[type] || 'environmentTypeCustom');
+
   const handleCreate = async () => {
     if (!currentProjectId || !canSubmit) return;
     try {
@@ -190,7 +210,7 @@ export function MatrixRuns() {
   };
 
   return (
-    <div className={`space-y-6 ${isRTL ? 'rtl' : 'ltr'}`}>
+    <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">{t('matrixRunsTitle')}</h1>
@@ -205,9 +225,9 @@ export function MatrixRuns() {
               </Button>
             </DialogTrigger>
           )}
-          <DialogContent isRTL={isRTL} className={`max-h-[92vh] overflow-y-auto sm:max-w-[760px] ${isRTL ? 'rtl' : 'ltr'}`}>
+          <DialogContent isRTL={isRTL} className="max-h-[92vh] overflow-y-auto sm:max-w-[760px]">
             <DialogHeader>
-              <div className="flex items-start gap-3">
+              <div className="flex items-start gap-3 text-start">
                 <div className="rounded-2xl bg-blue-600 p-3 text-white shadow-lg shadow-blue-600/20">
                   <Grid3X3 className="h-5 w-5" />
                 </div>
@@ -311,7 +331,9 @@ export function MatrixRuns() {
                           onCheckedChange={() => toggleEnv(env.id)}
                         />
                         <span className="truncate text-sm font-medium">{env.name}</span>
-                        <Badge variant="secondary" className="ms-auto shrink-0 text-xs">{env.environment_type}</Badge>
+                        <Badge variant="secondary" className="ms-auto shrink-0 text-xs">
+                          {getEnvironmentTypeLabel(env.environment_type)}
+                        </Badge>
                       </label>
                     ))}
                   </div>
@@ -382,6 +404,8 @@ export function MatrixRuns() {
                     type="button"
                     variant="ghost"
                     size="sm"
+                    aria-label={t('deleteMatrixRun')}
+                    title={t('deleteMatrixRun')}
                     className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -398,7 +422,7 @@ export function MatrixRuns() {
       )}
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
-        <AlertDialogContent>
+        <AlertDialogContent isRTL={isRTL}>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('deleteMatrixRun')}</AlertDialogTitle>
             <AlertDialogDescription>
