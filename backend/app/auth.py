@@ -160,42 +160,17 @@ async def get_current_user(
 
 
 async def get_current_user_check_password_change(
-    request: Request,
-    token: Optional[str] = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    """Dependency that checks if user needs to change password and raises exception if true"""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    token = token or request.cookies.get("access_token")
-    if not token:
-        raise credentials_exception
+    """Like :func:`get_current_user`, but also enforces the forced-password-change gate.
 
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    user = get_user(db, username=username)
-    if user is None:
-        raise credentials_exception
-    if not _token_session_is_current(payload, user):
-        raise credentials_exception
-    
-    # Check if user needs to change password
-    if user.force_password_change:
-        raise HTTPException(
-            status_code=403,
-            detail="Password change required. Please change your password before accessing this resource."
-        )
-
-    from . import rbac
-    rbac.enforce_viewer_read_only(user, request.method, request.url.path)
+    User resolution is delegated entirely to :func:`get_current_user`, so every
+    credential type — JWT cookie, bearer JWT, and ``tmona_*`` API token — and the
+    viewer read-only guard are handled in exactly one place. This previously
+    re-implemented the whole decode/validate body and, critically, omitted the
+    API-token branch, so password-change enforcement diverged for token auth.
+    """
+    check_password_change_required(user)
     return user
 
 
