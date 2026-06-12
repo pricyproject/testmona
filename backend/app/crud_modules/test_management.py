@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import re
 from .. import schemas
+from ..retry_utils import seq_conflict_retry
 from ..services.execution_timing import apply_test_result_execution_timing
 from ..services.user_lifecycle import (
     create_user_invitation,
@@ -602,42 +603,37 @@ def _auto_create_defect_for_failed_result(db: Session, test_result: TestResult, 
         # Get project_id from test run
         project_id = test_run.project_id
 
-        # Find the next defect number for this project
-        all_defects = db.query(Defect).filter(
-            Defect.project_id == project_id
-        ).all()
+        # Numbering is owned centrally by the project_seq before_insert listener
+        # (services/sequence_service.py), which derives defect_id as
+        # P{project_id}-DEF-{seq:03d}. Don't recompute it here: a second, manual
+        # max-scan (the old full-table SELECT-all) is a divergent source of truth
+        # that can disagree with the URL/badge number. We leave defect_id unset
+        # and let the listener allocate it.
+        #
+        # MAX(project_seq)+1 can still race two concurrent failed-result inserts
+        # into a unique-index (project_id, project_seq) collision — surfaced as an
+        # IntegrityError on commit. Retry the whole build+commit so a fresh
+        # instance re-runs allocation and picks the next free number.
+        @seq_conflict_retry()
+        def _insert_defect() -> Defect:
+            new_defect = Defect(
+                title=defect_title,
+                description=defect_description,
+                status=DefectStatus.OPEN,
+                severity=DefectSeverity.MEDIUM,
+                priority=DefectPriority.MEDIUM,
+                project_id=project_id,
+                test_case_id=test_case.id,
+                test_run_id=test_run.id,
+                reported_by=test_result.executed_by or 1,  # executor or fallback to user 1
+                actual_result=test_result.actual_result,
+            )
+            db.add(new_defect)
+            safe_commit(db)
+            db.refresh(new_defect)
+            return new_defect
 
-        max_defect_number = 0
-        for existing_defect in all_defects:
-            if existing_defect.defect_id:
-                import re
-                match = re.search(r'(?:P\d+-)?DEF-(\d+)', existing_defect.defect_id)
-                if match:
-                    defect_number = int(match.group(1))
-                    if defect_number > max_defect_number:
-                        max_defect_number = defect_number
-
-        # Generate defect_id
-        defect_id = f"P{project_id}-DEF-{max_defect_number + 1:03d}"
-
-        # Create the defect
-        new_defect = Defect(
-            title=defect_title,
-            description=defect_description,
-            defect_id=defect_id,
-            status=DefectStatus.OPEN,
-            severity=DefectSeverity.MEDIUM,
-            priority=DefectPriority.MEDIUM,
-            project_id=project_id,
-            test_case_id=test_case.id,
-            test_run_id=test_run.id,
-            reported_by=test_result.executed_by or 1,  # Use executor or fallback to user 1
-            actual_result=test_result.actual_result,
-        )
-
-        db.add(new_defect)
-        safe_commit(db)
-        db.refresh(new_defect)
+        new_defect = _insert_defect()
 
         # Create a link between the test result and the new defect
         defect_link = TestResultDefectLink(
