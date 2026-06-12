@@ -32,7 +32,15 @@ class Settings(BaseSettings):
     test_asset_stale_days: int = 180
     test_asset_always_pass_min_results: int = 5
     test_asset_duplicate_grace_days: int = 14
-    
+
+    # Logging. ``log_level`` is a standard level name (DEBUG/INFO/WARNING/...).
+    # ``log_format`` selects the renderer: ``json`` for ingestion-friendly
+    # one-line-per-event output, ``console`` for human-readable colour output.
+    # When left empty it auto-selects: JSON in production-like environments,
+    # console otherwise (see app/logging_config.py).
+    log_level: str = "INFO"
+    log_format: Optional[str] = None
+
     @field_validator('secret_key', mode='before')
     @classmethod
     def generate_secret_key(cls, v, info: ValidationInfo):

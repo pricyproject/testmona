@@ -3,6 +3,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+from .logging_config import configure_logging
+
+# Configure structured (JSON in production) logging before anything else logs,
+# so uvicorn and every module-level logger share one ingestion-friendly pipeline.
+configure_logging()
+
 from .import_export import router as import_export_router
 from .api.audit import router as audit_router
 from .api.versioning_simple import router as versioning_router
