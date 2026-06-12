@@ -388,6 +388,7 @@ class TestRun(TestRunBase):
     project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     project_id: int
     test_plan_id: Optional[int] = None
+    matrix_run_id: Optional[int] = None
     milestone_id: Optional[int] = None
     environment_id: Optional[int] = None
     started_at: Optional[datetime] = None
@@ -411,6 +412,74 @@ class TestRun(TestRunBase):
     class Config:
         from_attributes = True
         use_enum_values = True
+
+
+class MatrixRunCreate(BaseModel):
+    """Create one test run per environment, all seeded with the same cases."""
+    project_id: int
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    environment_ids: List[int] = Field(..., min_length=1)
+    test_case_ids: List[int] = Field(..., min_length=1)
+    test_plan_id: Optional[int] = None
+    milestone_id: Optional[int] = None
+    assigned_to: Optional[int] = None
+    priority: Optional[str] = "medium"
+    estimated_duration: Optional[int] = None
+
+
+class MatrixRunEnvironmentColumn(BaseModel):
+    """One pivot column: the child run executing the matrix on one environment."""
+    test_run_id: int
+    test_run_seq: Optional[int] = None
+    environment_id: Optional[int] = None
+    environment_name: str
+    status: str
+    total_tests: int = 0
+    executed_tests: int = 0
+    passed_tests: int = 0
+    failed_tests: int = 0
+    blocked_tests: int = 0
+    skipped_tests: int = 0
+    not_started_tests: int = 0
+    progress_percent: int = 0
+
+
+class MatrixRun(BaseModel):
+    id: int
+    project_id: int
+    project_seq: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    status: str = "pending"
+    case_count: int = 0
+    progress_percent: int = 0
+    environments: List[MatrixRunEnvironmentColumn] = []
+
+    class Config:
+        from_attributes = True
+
+
+class MatrixRunCell(BaseModel):
+    """Latest outcome of one case on one environment's run."""
+    test_result_id: Optional[int] = None
+    status: str = "not_started"
+
+
+class MatrixRunRow(BaseModel):
+    test_case_id: int
+    test_case_seq: Optional[int] = None
+    title: str
+    priority: Optional[str] = None
+    # Keyed by str(test_run_id) — JSON object keys are strings.
+    results: Dict[str, MatrixRunCell] = {}
+
+
+class MatrixRunDetail(MatrixRun):
+    rows: List[MatrixRunRow] = []
 
 
 class TestSuiteRunCreate(BaseModel):

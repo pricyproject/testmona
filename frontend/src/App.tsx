@@ -44,6 +44,8 @@ const TestPlanDetail = lazyPage(() => import('@/pages/TestPlanDetail'), 'TestPla
 const TestRuns = lazyPage(() => import('@/pages/TestRuns'), 'TestRuns');
 const TestRunDetail = lazyPage(() => import('@/pages/TestRunDetail'), 'TestRunDetail');
 const TestRunReport = lazyPage(() => import('@/pages/TestRunReport'), 'TestRunReport');
+const MatrixRuns = lazyPage(() => import('@/pages/MatrixRuns'), 'MatrixRuns');
+const MatrixRunDetail = lazyPage(() => import('@/pages/MatrixRunDetail'), 'MatrixRunDetail');
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
 const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetail');
 const AdvancedSearch = lazyPage(() => import('@/pages/AdvancedSearch'), 'AdvancedSearch');
@@ -326,6 +328,20 @@ function AppWithRouter() {
         <Route path="/projects/:projectId/test-runs/:testRunId/test-cases/:testCaseId" element={
           <ProjectGuard>
             <TestCaseExecution />
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/matrix-runs" element={
+          <ProjectGuard>
+            <FeatureGuard feature="test_runs">
+              <MatrixRuns />
+            </FeatureGuard>
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/matrix-runs/:matrixRunId" element={
+          <ProjectGuard>
+            <FeatureGuard feature="test_runs">
+              <MatrixRunDetail />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         {/* Sections were folded into TestSuiteDetail (?section=<id>); keep these

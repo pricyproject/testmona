@@ -181,6 +181,7 @@ def register_sequence_listeners() -> None:
         models.TestDataset: None,
         models.TestSuite: None,
         models.TestRun: None,
+        models.MatrixRun: None,
         models.RequirementFolder: None,
         models.TestPlan: None,
         models.Milestone: None,

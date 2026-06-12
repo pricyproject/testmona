@@ -174,6 +174,55 @@ export interface TestRun {
   project_name?: string;
 }
 
+export interface MatrixRunEnvironmentColumn {
+  test_run_id: number;
+  test_run_seq?: number | null;
+  environment_id?: number | null;
+  environment_name: string;
+  status: string;
+  total_tests: number;
+  executed_tests: number;
+  passed_tests: number;
+  failed_tests: number;
+  blocked_tests: number;
+  skipped_tests: number;
+  not_started_tests: number;
+  progress_percent: number;
+}
+
+export interface MatrixRunCell {
+  test_result_id?: number | null;
+  status: string;
+}
+
+export interface MatrixRunRow {
+  test_case_id: number;
+  test_case_seq?: number | null;
+  title: string;
+  priority?: string | null;
+  /** Keyed by String(test_run_id) of the environment column. */
+  results: Record<string, MatrixRunCell>;
+}
+
+export interface MatrixRun {
+  id: number;
+  project_id: number;
+  project_seq?: number | null;
+  name: string;
+  description?: string | null;
+  created_by?: number | null;
+  created_at: string;
+  updated_at?: string | null;
+  status: 'pending' | 'in_progress' | 'completed';
+  case_count: number;
+  progress_percent: number;
+  environments: MatrixRunEnvironmentColumn[];
+}
+
+export interface MatrixRunDetail extends MatrixRun {
+  rows: MatrixRunRow[];
+}
+
 export interface TestResult {
   id: number;
   test_case_id: number;

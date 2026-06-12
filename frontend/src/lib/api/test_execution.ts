@@ -154,6 +154,48 @@ export const testRunsAPI = {
   },
 };
 
+// Environment Matrix Runs API — same case selection executed across N environments
+export const matrixRunsAPI = {
+  getAll: async (projectId: number, skip = 0, limit = 100, search?: string) => {
+    const params = new URLSearchParams({
+      project_id: projectId.toString(),
+      skip: skip.toString(),
+      limit: limit.toString(),
+    });
+    if (search?.trim()) params.append('search', search.trim());
+    const response = await api.get(`/matrix-runs?${params}`);
+    return response.data;
+  },
+  getById: async (id: number) => {
+    const response = await api.get(`/matrix-runs/${id}`);
+    return response.data;
+  },
+  getBySeq: async (projectId: number, seq: number) => {
+    const id = await resolveProjectSeq(projectId, 'matrix-runs', seq);
+    const response = await api.get(`/matrix-runs/${id}`);
+    return response.data;
+  },
+  create: async (matrixRun: {
+    project_id: number;
+    name: string;
+    description?: string;
+    environment_ids: number[];
+    test_case_ids: number[];
+    test_plan_id?: number;
+    milestone_id?: number;
+    assigned_to?: number;
+    priority?: string;
+    estimated_duration?: number;
+  }) => {
+    const response = await api.post('/matrix-runs', matrixRun);
+    return response.data;
+  },
+  delete: async (id: number) => {
+    const response = await api.delete(`/matrix-runs/${id}`);
+    return response.data;
+  },
+};
+
 // Test Execution Settings API
 export const executionSettingsAPI = {
   get: async (projectId?: number) => {

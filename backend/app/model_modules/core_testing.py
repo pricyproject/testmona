@@ -184,6 +184,31 @@ class RecycleBin(Base):
     deleter = relationship("User")
 
 
+class MatrixRun(Base):
+    """A group of test runs executing the same case selection across N environments.
+
+    Each child TestRun keeps its own environment_id/results; the matrix row only
+    carries the shared identity so results can be pivoted case x environment.
+    """
+    __tablename__ = "matrix_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, index=True)
+    description = Column(Text)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
+    __table_args__ = (
+        Index("uq_matrix_runs_project_seq", "project_id", "project_seq", unique=True),
+    )
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project")
+    creator = relationship("User", foreign_keys=[created_by])
+    test_runs = relationship("TestRun", back_populates="matrix_run")
+
+
 class TestRun(Base):
     __tablename__ = "test_runs"
 
@@ -193,6 +218,7 @@ class TestRun(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_seq = Column(Integer, nullable=True, index=True)  # per-project sequence for URLs/badges
     test_plan_id = Column(Integer, ForeignKey("test_plans.id"))
+    matrix_run_id = Column(Integer, ForeignKey("matrix_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     __table_args__ = (
         Index("uq_test_runs_project_seq", "project_id", "project_seq", unique=True),
     )
@@ -216,6 +242,7 @@ class TestRun(Base):
     test_plan = relationship("TestPlan", back_populates="test_runs")
     test_results = relationship("TestResult", back_populates="test_run")
     schedule = relationship("TestSchedule", back_populates="test_runs")
+    matrix_run = relationship("MatrixRun", back_populates="test_runs")
     environment = relationship("ExecutionEnvironment", back_populates="test_runs")
     execution_engine = relationship("ExecutionEngine")
     assignee = relationship("User", foreign_keys=[assigned_to])

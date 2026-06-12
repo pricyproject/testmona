@@ -42,6 +42,7 @@ import {
   CircleDot,
   Ban,
   PauseCircle,
+  Grid3X3,
 } from 'lucide-react';
 import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testResultsAPI, environmentsAPI, enumsAPI } from '@/lib/api';
 import { TestRun, TestCase } from '@/types';
@@ -750,6 +751,15 @@ export function TestRuns() {
           <h1 className="text-3xl font-bold">{t('testRunsTitle')}</h1>
           <p className="text-gray-600">{t('testRunsDescription')}</p>
         </div>
+        <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => navigate(`/projects/${currentProjectId}/matrix-runs`)}
+        >
+          <Grid3X3 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+          {t('matrixRunsTitle')}
+        </Button>
         <Dialog open={isCreateDialogOpen} onOpenChange={handleDialogClose}>
           {canWrite && (
             <DialogTrigger asChild>
@@ -1225,6 +1235,7 @@ export function TestRuns() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <Card className="border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-950">

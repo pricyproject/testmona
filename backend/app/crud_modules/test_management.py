@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
+import logging
 import re
 from .. import schemas
 from ..services.execution_timing import apply_test_result_execution_timing
@@ -52,6 +53,9 @@ from ..schemas import (
 )
 
 from .projects import *
+
+logger = logging.getLogger(__name__)
+
 
 def get_test_suite(db: Session, test_suite_id: int):
     return db.query(TestSuite).filter(TestSuite.id == test_suite_id).first()
@@ -452,6 +456,36 @@ def delete_test_run(db: Session, test_run_id: int):
             db_test_run.milestone_id,
             _milestone_id_for_plan(db, db_test_run.test_plan_id),
         }
+        # Remove dependent rows first: test_results.test_run_id is NOT NULL, so
+        # the ORM's default null-out cascade would fail the moment a run has
+        # results; MariaDB additionally enforces the FKs on the other tables.
+        from ..models import (
+            CoverageReport,
+            CustomFieldValue,
+            Defect,
+            ExecutionLog,
+            JiraIssue,
+            TestExecution,
+            TestResultDefectLink,
+            TestRunEnvironment,
+            TestStepResult,
+        )
+
+        result_ids = select(TestResult.id).where(TestResult.test_run_id == test_run_id)
+        for model in (TestResultDefectLink, TestStepResult):
+            db.query(model).filter(model.test_result_id.in_(result_ids)).delete(
+                synchronize_session=False
+            )
+        db.query(JiraIssue).filter(JiraIssue.test_result_id.in_(result_ids)).update(
+            {JiraIssue.test_result_id: None}, synchronize_session=False
+        )
+        for model in (ExecutionLog, TestExecution, TestRunEnvironment, TestResult):
+            db.query(model).filter(model.test_run_id == test_run_id).delete(synchronize_session=False)
+        for model in (Defect, CoverageReport, CustomFieldValue):
+            db.query(model).filter(model.test_run_id == test_run_id).update(
+                {model.test_run_id: None}, synchronize_session=False
+            )
+
         db.delete(db_test_run)
         safe_commit(db)
         _refresh_milestones_by_ids(db, affected)
@@ -551,7 +585,7 @@ def _auto_create_defect_for_failed_result(db: Session, test_result: TestResult, 
             return
 
         # Generate defect title and description
-        case_name = test_case.name or f"Test Case {test_case.id}"
+        case_name = test_case.title or f"Test Case {test_case.id}"
         defect_title = f"Failed: {case_name}"
         defect_description = f"Test case '{case_name}' failed in test run '{test_run.name}'.\n\nActual Result:\n{test_result.actual_result or 'No details provided'}"
 

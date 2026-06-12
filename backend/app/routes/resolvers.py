@@ -23,6 +23,7 @@ _SEQ_MODELS = {
     "requirements": models.Requirement,
     "test-suites": models.TestSuite,
     "test-runs": models.TestRun,
+    "matrix-runs": models.MatrixRun,
     "test-plans": models.TestPlan,
     "defects": models.Defect,
     "milestones": models.Milestone,
