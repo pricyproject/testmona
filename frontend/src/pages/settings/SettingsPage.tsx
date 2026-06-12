@@ -1047,8 +1047,8 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
           is_active: template.is_active,
           created_at: template.created_at
         })));
-      } catch (error) {
-        console.log('Shared step templates not available, will show empty state');
+      } catch {
+        // Shared step templates not available — fall back to the empty state.
       }
 
       // Load settings (these will be fetched when needed)
@@ -1064,11 +1064,9 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
         if (notificationSettings) setNotificationSettings(notificationSettings);
         if (automationSettings) setAutomationSettings(automationSettings);
         if (userNotificationPrefs) setUserNotificationPrefs(userNotificationPrefs);
-      } catch (error) {
-        console.log('Settings not yet created, will use defaults');
+      } catch {
+        // Settings not yet created — defaults are used.
       }
-      
-      console.log('Test management settings loaded successfully from API');
     } catch (error) {
       console.error('Failed to load test management settings:', error);
       setTestManagementError(t('failedToLoadTestManagementSettings'));
@@ -1756,7 +1754,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     try {
       // Simulate API call to clear cache
 	      await new Promise(resolve => setTimeout(resolve, 500));
-	      console.log('System cache cleared');
 	      showSuccessToast(t('systemCacheCleared'));
 	    } catch (error) {
 	      console.error('Failed to clear system cache:', error);
@@ -2181,7 +2178,6 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
       
 	      await Promise.all(promises);
 
-	      console.log('Test management settings saved successfully!');
 	      showSuccessToast(t('testManagementSettingsSaved'));
 	    } catch (error) {
 	      console.error('Failed to save test management settings:', error);

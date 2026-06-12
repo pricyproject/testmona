@@ -1,4 +1,4 @@
-export { api, resolveProjectSeq, seqAPI, getApiErrorMessage } from "./api/client";
+export { api, resolveProjectSeq, seqAPI, getApiErrorMessage, resetPasswordChangePrompt } from "./api/client";
 export * from "./api/system_ai";
 export * from "./api/auth";
 export * from "./api/projects_test";

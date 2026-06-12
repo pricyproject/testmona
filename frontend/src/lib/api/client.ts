@@ -50,8 +50,18 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
   return error instanceof Error ? error.message : fallback;
 };
 
-(api as any)._refreshing = false;
-(api as any)._refreshPromise = null;
+// Single-flight refresh coordination + a one-shot password-change prompt.
+// Kept as module-scoped state rather than monkey-patched properties on the
+// axios instance.
+let isRefreshing = false;
+let refreshPromise: Promise<{ access_token?: string; refresh_token?: string }> | null = null;
+let passwordChangeDialogShown = false;
+
+// Re-arm the password-change prompt after the user has changed their password,
+// so a later forced-change can surface the dialog again.
+export function resetPasswordChangePrompt(): void {
+  passwordChangeDialogShown = false;
+}
 
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
@@ -74,9 +84,8 @@ api.interceptors.response.use(
 
     if (error.response?.status === 403 &&
         error.response?.data?.detail?.includes("Password change required")) {
-      if (!(api as any)._passwordChangeDialogShown) {
-        console.log('Password change required - dispatching event');
-        (api as any)._passwordChangeDialogShown = true;
+      if (!passwordChangeDialogShown) {
+        passwordChangeDialogShown = true;
         window.dispatchEvent(new CustomEvent('passwordChangeRequired'));
       }
       return Promise.reject(error);
@@ -92,9 +101,9 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
-      if ((api as any)._refreshing && (api as any)._refreshPromise) {
+      if (isRefreshing && refreshPromise) {
         try {
-          await (api as any)._refreshPromise;
+          await refreshPromise;
           const token = useAuthStore.getState().token;
           if (token) {
             originalRequest.headers.Authorization = `Bearer ${token}`;
@@ -108,12 +117,12 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        (api as any)._refreshing = true;
+        isRefreshing = true;
         const refreshToken = useAuthStore.getState().refreshToken;
-        (api as any)._refreshPromise = api.post("/refresh", refreshToken ? {
+        refreshPromise = api.post("/refresh", refreshToken ? {
           refresh_token: refreshToken,
         } : {}).then((response) => response.data);
-        const response = await (api as any)._refreshPromise;
+        const response = await refreshPromise;
 
         useAuthStore.setState({
           token: response.access_token,
@@ -144,8 +153,8 @@ api.interceptors.response.use(
         }
         return Promise.reject(refreshError);
       } finally {
-        (api as any)._refreshing = false;
-        (api as any)._refreshPromise = null;
+        isRefreshing = false;
+        refreshPromise = null;
       }
     }
 

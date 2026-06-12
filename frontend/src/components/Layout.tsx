@@ -5,7 +5,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { PasswordChangeDialog } from '@/components/Profile/PasswordChangeDialog';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuthStore } from '@/stores/authStore';
-import { api } from '@/lib/api';
+import { api, resetPasswordChangePrompt } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 
@@ -38,7 +38,6 @@ export function Layout({ children }: LayoutProps) {
   // Global listener for password change required event
   React.useEffect(() => {
     const handlePasswordChangeRequired = () => {
-      console.log('Password change required event received - showing dialog');
       setShowPasswordDialog(true);
     };
 
@@ -72,8 +71,8 @@ export function Layout({ children }: LayoutProps) {
         new_password: newPassword
       });
       setShowPasswordDialog(false);
-      // Reset the flag so dialog can show again if needed in future
-      (api as any)._passwordChangeDialogShown = false;
+      // Re-arm the prompt so the dialog can show again if needed in future
+      resetPasswordChangePrompt();
       // Refresh the page or redirect to ensure fresh state
       window.location.reload();
     } catch (error) {

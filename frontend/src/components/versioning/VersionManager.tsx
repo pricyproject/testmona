@@ -34,9 +34,8 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
   const [comparison, setComparison] = useState<VersionComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleVersionSelect = (version: TestCaseVersion) => {
-    // Could open a modal to view version details
-    console.log('Selected version:', version);
+  const handleVersionSelect = (_version: TestCaseVersion) => {
+    // Placeholder: a future enhancement could open a modal to view version details.
   };
 
   const handleCompareVersions = async (fromVersion: TestCaseVersion, toVersion: TestCaseVersion) => {

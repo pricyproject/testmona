@@ -132,8 +132,7 @@ export function Projects() {
         maxRetries: 3,
         retryDelay: 1000,
         timeout: 30000,
-        onRetry: (attempt, error) => {
-          console.log(`Retrying archived projects fetch (attempt ${attempt}):`, error);
+        onRetry: (attempt) => {
           setRetryCount(attempt);
         },
       }
@@ -164,8 +163,7 @@ export function Projects() {
           maxRetries: 3,
           retryDelay: 1000,
           timeout: 30000,
-          onRetry: (attempt, error) => {
-            console.log(`Retrying projects fetch (attempt ${attempt}):`, error);
+          onRetry: (attempt) => {
             setIsRetrying(true);
             setRetryCount(attempt);
           },
@@ -213,7 +211,6 @@ export function Projects() {
   // Process queued requests when connection is restored
   useEffect(() => {
     if (isOnline && wasOffline && queueSize > 0) {
-      console.log('Connection restored, processing queued requests');
       processQueuedRequests();
     }
   }, [isOnline, wasOffline, queueSize, processQueuedRequests]);
@@ -252,8 +249,7 @@ export function Projects() {
         {
           maxRetries: 3,
           retryDelay: 1000,
-          onRetry: (attempt, error) => {
-            console.log(`Retrying project creation (attempt ${attempt}):`, error);
+          onRetry: (attempt) => {
             setRetryCount(attempt);
           },
         }
@@ -389,8 +385,7 @@ export function Projects() {
       {
         maxRetries: 3,
         retryDelay: 1000,
-        onRetry: (attempt, error) => {
-          console.log(`Retrying project deletion (attempt ${attempt}):`, error);
+        onRetry: (attempt) => {
           setRetryCount(attempt);
         },
       }
@@ -449,8 +444,7 @@ export function Projects() {
       {
         maxRetries: 3,
         retryDelay: 1000,
-        onRetry: (attempt, error) => {
-          console.log(`Retrying project update (attempt ${attempt}):`, error);
+        onRetry: (attempt) => {
           setRetryCount(attempt);
         },
       }
@@ -662,8 +656,7 @@ export function Projects() {
       {
         maxRetries: 3,
         retryDelay: 1000,
-        onRetry: (attempt, error) => {
-          console.log(`Retrying status change (attempt ${attempt}):`, error);
+        onRetry: (attempt) => {
           setRetryCount(attempt);
         },
       }
@@ -725,8 +718,7 @@ export function Projects() {
       {
         maxRetries: 3,
         retryDelay: 1000,
-        onRetry: (attempt, error) => {
-          console.log(`Retrying project clone (attempt ${attempt}):`, error);
+        onRetry: (attempt) => {
           setRetryCount(attempt);
         },
       }
