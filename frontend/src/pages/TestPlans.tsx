@@ -62,7 +62,14 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { milestonesAPI, requirementsAPI, testPlansAPI } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { testPlansAPI } from '@/lib/api';
+import {
+  testPlanKeys,
+  useTestPlansList,
+  useTestPlanMilestones,
+  useTestPlanReqOptions,
+} from '@/hooks/queries/testPlans';
 
 type TestPlanStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'blocked' | 'completed';
 type ExecutionStatus = 'not_started' | 'in_progress' | 'blocked' | 'failed' | 'passed';
@@ -194,9 +201,6 @@ export function TestPlans() {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }, [projectId]);
 
-  const [testPlans, setTestPlans] = useState<TestPlan[]>([]);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -229,13 +233,9 @@ export function TestPlans() {
   const deepLinkEditHandled = useRef(false);
 
   // Requirement scope linking inside the create/edit modal (parity with the detail page)
-  const [reqOptions, setReqOptions] = useState<{ id: number; requirement_id: string; title: string; status?: string | null }[]>([]);
-  const [reqOptionsLoading, setReqOptionsLoading] = useState(false);
   const [selectedReqIds, setSelectedReqIds] = useState<number[]>([]);
   const [initialReqIds, setInitialReqIds] = useState<number[]>([]);
   const [reqSearch, setReqSearch] = useState('');
-
-  const loadRequestId = useRef(0);
 
   const sameIdSet = (a: number[], b: number[]) => {
     if (a.length !== b.length) return false;
@@ -245,60 +245,40 @@ export function TestPlans() {
   const reqDirty = !sameIdSet(selectedReqIds, initialReqIds);
   const isDirty = !formsEqual(form, initialForm) || reqDirty;
 
-  const loadData = useCallback(async () => {
+  const queryClient = useQueryClient();
+  const listFilters = { sortBy, sortOrder, statusFilter, searchQuery, milestoneFilter };
+  const testPlansQuery = useTestPlansList(numericProjectId, listFilters, numericProjectId != null);
+  const milestonesQuery = useTestPlanMilestones(numericProjectId, numericProjectId != null);
+  const testPlans: TestPlan[] = testPlansQuery.data ?? [];
+  const milestones: Milestone[] = milestonesQuery.data ?? [];
+  const isLoading = numericProjectId != null && testPlansQuery.isLoading;
+
+  // Requirement options for the create/edit scope picker (fetched while a dialog is open).
+  const reqOptionsQuery = useTestPlanReqOptions(numericProjectId, numericProjectId != null && (isCreateOpen || isEditOpen));
+  const reqOptions = reqOptionsQuery.data ?? [];
+  const reqOptionsLoading = reqOptionsQuery.isLoading;
+
+  const invalidatePlans = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: testPlanKeys.listRoot(numericProjectId) }),
+    [queryClient, numericProjectId],
+  );
+
+  // Map list-load failures to the same status-specific messages as before.
+  useEffect(() => {
     if (!numericProjectId) {
       setError(t('invalidProjectId'));
-      setIsLoading(false);
-      setTestPlans([]);
-      setMilestones([]);
       return;
     }
-
-    const requestId = ++loadRequestId.current;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const [plans, milestoneList] = await Promise.all([
-        testPlansAPI.getAll(numericProjectId, {
-          sortBy,
-          sortOrder,
-          status: statusFilter !== 'all' ? statusFilter : undefined,
-          search: searchQuery.trim() || undefined,
-          milestoneId:
-            milestoneFilter !== 'all' && milestoneFilter !== 'none' ? Number(milestoneFilter) : undefined,
-          limit: 500,
-        }),
-        milestonesAPI.getAll(numericProjectId, 0, 500),
-      ]);
-
-      if (requestId !== loadRequestId.current) return;
-
-      const planList: TestPlan[] = Array.isArray(plans) ? plans : [];
-      const milestoneListClean: Milestone[] = Array.isArray(milestoneList) ? milestoneList : [];
-
-      setTestPlans(planList);
-      setMilestones(milestoneListClean);
-    } catch (err: any) {
-      if (requestId !== loadRequestId.current) return;
-      const status = err?.response?.status;
+    if (testPlansQuery.isError) {
+      const status = (testPlansQuery.error as any)?.response?.status;
       if (status === 401) setError(t('authenticationRequired'));
       else if (status === 403) setError(t('permissionDeniedViewTestPlans'));
       else if (status === 404) setError(t('projectNotFound'));
       else setError(t('failedToLoadTestPlans'));
-      setTestPlans([]);
-    } finally {
-      if (requestId === loadRequestId.current) {
-        setIsLoading(false);
-      }
+    } else if (testPlansQuery.isSuccess) {
+      setError(null);
     }
-  }, [numericProjectId, sortBy, sortOrder, statusFilter, searchQuery, milestoneFilter, t]);
-
-  useEffect(() => {
-    loadData();
-    return () => {
-      loadRequestId.current++;
-    };
-  }, [loadData]);
+  }, [numericProjectId, testPlansQuery.status, testPlansQuery.isError, testPlansQuery.isSuccess, testPlansQuery.error, t]);
 
   // Apply the milestone deep-link, but only if that milestone actually exists in this project
   useEffect(() => {
@@ -404,23 +384,6 @@ export function TestPlans() {
     setReqSearch('');
   };
 
-  // Load the project's requirements once for the in-modal scope picker.
-  const loadReqOptions = async () => {
-    if (!numericProjectId || reqOptions.length > 0) return;
-    setReqOptionsLoading(true);
-    try {
-      const data = await requirementsAPI.getAll(numericProjectId, 0, 500);
-      const list = Array.isArray(data) ? data : [];
-      setReqOptions(
-        list.map((r: any) => ({ id: r.id, requirement_id: r.requirement_id, title: r.title, status: r.status })),
-      );
-    } catch {
-      setReqOptions([]);
-    } finally {
-      setReqOptionsLoading(false);
-    }
-  };
-
   const syncPlanRequirements = async (planId: number) => {
     const toLink = selectedReqIds.filter((id) => !initialReqIds.includes(id));
     const toUnlink = initialReqIds.filter((id) => !selectedReqIds.includes(id));
@@ -463,7 +426,7 @@ export function TestPlans() {
       showSuccess(linkWarning ? t('testPlanCreatedRequirementsFailed') : t('testPlanCreatedSuccessfully'));
       setIsCreateOpen(false);
       resetForm();
-      await loadData();
+      await invalidatePlans();
     } catch (err: any) {
       const status = err?.response?.status;
       const apiMsg = extractApiError(err);
@@ -494,7 +457,7 @@ export function TestPlans() {
       setIsEditOpen(false);
       setSelectedPlan(null);
       resetForm();
-      await loadData();
+      await invalidatePlans();
     } catch (err: any) {
       const status = err?.response?.status;
       const apiMsg = extractApiError(err);
@@ -517,7 +480,7 @@ export function TestPlans() {
       showSuccess(t('testPlanDeletedSuccessfully'));
       setDeleteTarget(null);
       setCurrentPage(1);
-      await loadData();
+      await invalidatePlans();
     } catch (err: any) {
       const status = err?.response?.status;
       const apiMsg = extractApiError(err);
@@ -546,7 +509,7 @@ export function TestPlans() {
     setSelectedReqIds([]);
     setInitialReqIds([]);
     setReqSearch('');
-    void loadReqOptions();
+    
     setIsCreateOpen(true);
   };
 
@@ -583,7 +546,7 @@ export function TestPlans() {
   const openEdit = (plan: TestPlan) => {
     setSelectedPlan(plan);
     setReqSearch('');
-    void loadReqOptions();
+    
     // Seed the requirement selection from the plan's currently-linked requirements.
     testPlansAPI
       .getRequirements(plan.id, { linked: true, limit: 500 })
@@ -693,7 +656,7 @@ export function TestPlans() {
       await Promise.all(selectedPlanIds.map((id) => testPlansAPI.update(id, { milestone_id })));
       showSuccess(t('testPlansMovedSuccessfully', { count: selectedPlanIds.length }));
       clearSelection();
-      await loadData();
+      await invalidatePlans();
     } catch (err: any) {
       const apiMsg = extractApiError(err);
       setError(apiMsg || t('failedToUpdateTestPlan'));

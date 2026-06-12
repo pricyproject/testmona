@@ -35,7 +35,14 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { defectsAPI, getApiErrorMessage, projectAssignmentsAPI, requirementsAPI, testResultsAPI } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api';
+import {
+  useDefectDetail,
+  useDefectEditRequirements,
+  useDefectProjectMembers,
+  useUpdateDefect,
+  useUpdateDefectSnapshot,
+} from '@/hooks/queries/defectDetail';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 
@@ -121,92 +128,61 @@ export function DefectDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
-  const [detail, setDetail] = useState<DefectDetailResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [updatingLinkId, setUpdatingLinkId] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<DefectEditForm>(() => buildEditForm(null));
-  const [requirements, setRequirements] = useState<any[]>([]);
-  const [members, setMembers] = useState<{ id: number; name: string }[]>([]);
 
   // The URL carries the per-project sequence; resolve it to the global defect id.
   const { id: numericDefectId, loading: defectIdLoading } = useResolvedEntityId(projectId, 'defects', defectId);
+  const numericProjectId = Number(projectId);
+  const projectIdValid = Number.isInteger(numericProjectId) && numericProjectId > 0;
+  const defectIdValid = Number.isInteger(numericDefectId) && numericDefectId > 0;
 
-  const loadDetail = async (signal?: AbortSignal, showSpinner = true) => {
-    if (defectIdLoading) return;  // wait for the seq -> id resolution
-    if (!Number.isInteger(numericDefectId) || numericDefectId <= 0) {
-      setError(t('defectNotFound'));
-      setLoading(false);
-      return;
-    }
+  const detailQuery = useDefectDetail(numericDefectId, !defectIdLoading && defectIdValid);
+  const updateDefect = useUpdateDefect(numericDefectId);
+  const updateSnapshotMutation = useUpdateDefectSnapshot(numericDefectId);
+  const isSaving = updateDefect.isPending;
 
-    if (showSpinner) setLoading(true);
-    setError(null);
-    try {
-      const response = await defectsAPI.getDetail(numericDefectId, signal);
-      if (String(response?.defect?.project_id) !== String(projectId)) {
-        setError(t('defectNotFound'));
-        setDetail(null);
-        return;
-      }
-      setDetail(response);
-      if (!isEditing) setEditForm(buildEditForm(response.defect));
-    } catch (err) {
-      if (signal?.aborted) return;
-      console.error('Failed to load defect detail:', err);
-      setError(getApiErrorMessage(err, t('failedToLoadDefectDetail')));
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  };
+  const requirementsQuery = useDefectEditRequirements(numericProjectId, projectIdValid);
+  const membersQuery = useDefectProjectMembers(numericProjectId, projectIdValid);
+  const requirements: any[] = requirementsQuery.data ?? [];
+  const members: { id: number; name: string }[] = membersQuery.data ?? [];
 
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadDetail(controller.signal);
-    return () => controller.abort();
-  }, [numericDefectId, defectIdLoading, projectId]);
-
-  useEffect(() => {
-    const numericProjectId = Number(projectId);
-    if (!Number.isInteger(numericProjectId) || numericProjectId <= 0) {
-      setRequirements([]);
-      return;
-    }
-
-    let isMounted = true;
-    requirementsAPI.getAll(numericProjectId, 0, 500)
-      .then((items) => {
-        if (isMounted) setRequirements(Array.isArray(items) ? items : []);
-      })
-      .catch((err) => {
-        if (!isMounted) return;
-        console.error('Failed to load requirements for defect edit:', err);
-        setRequirements([]);
-        toast({
-          title: t('error'),
-          description: getApiErrorMessage(err, t('failedToLoadRequirements')),
-          variant: 'destructive',
-        });
-      });
-
-    projectAssignmentsAPI.listMembers(numericProjectId)
-      .then((rows) => {
-        if (!isMounted) return;
-        setMembers((Array.isArray(rows) ? rows : []).map((m: any) => ({
-          id: m.user_id,
-          name: m.full_name || m.username || m.email || `User ${m.user_id}`,
-        })));
-      })
-      .catch(() => { if (isMounted) setMembers([]); });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [projectId, t, toast]);
+  // A defect whose project doesn't match the URL must read as "not found".
+  const detail: DefectDetailResponse | null =
+    detailQuery.data && String(detailQuery.data.defect?.project_id) === String(projectId)
+      ? detailQuery.data
+      : null;
+  const projectMismatch = Boolean(detailQuery.data && !detail);
+  const loading = defectIdLoading || (defectIdValid && detailQuery.isLoading);
+  const error: string | null =
+    !defectIdLoading && !defectIdValid
+      ? t('defectNotFound')
+      : projectMismatch
+        ? t('defectNotFound')
+        : detailQuery.isError
+          ? getApiErrorMessage(detailQuery.error, t('failedToLoadDefectDetail'))
+          : null;
 
   const defect = detail?.defect;
+
+  // Sync the edit form from the loaded defect, but never clobber in-progress edits.
+  useEffect(() => {
+    if (defect && !isEditing) {
+      setEditForm(buildEditForm(defect));
+    }
+  }, [defect, isEditing]);
+
+  // Surface a requirements-load failure (the others fail silently as before).
+  useEffect(() => {
+    if (requirementsQuery.isError) {
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(requirementsQuery.error, t('failedToLoadRequirements')),
+        variant: 'destructive',
+      });
+    }
+  }, [requirementsQuery.isError, requirementsQuery.error, t, toast]);
   const tags = useMemo(() => splitTags(defect?.tags), [defect?.tags]);
 
   const startEditing = () => {
@@ -258,9 +234,8 @@ export function DefectDetail() {
       return;
     }
 
-    setIsSaving(true);
     try {
-      const updatedDefect = await defectsAPI.update(numericDefectId, {
+      const updatedDefect = await updateDefect.mutateAsync({
         defect_id: trimmedId,
         title: trimmedTitle,
         description: editForm.description.trim(),
@@ -276,10 +251,8 @@ export function DefectDetail() {
         external_issue_url: externalUrl || null,
         requirement_id: selectedRequirementId,
       });
-      setDetail((prev) => prev ? { ...prev, defect: updatedDefect } : prev);
       setEditForm(buildEditForm(updatedDefect));
       setIsEditing(false);
-      await loadDetail(undefined, false);
       toast({ title: t('success'), description: t('defectUpdatedSuccessfully') });
     } catch (err) {
       console.error('Failed to save defect:', err);
@@ -288,16 +261,13 @@ export function DefectDetail() {
         description: getApiErrorMessage(err, t('failedToUpdateDefect')),
         variant: 'destructive',
       });
-    } finally {
-      setIsSaving(false);
     }
   };
 
   // Quick inline edit: patch a single field (or few) without the full edit form.
   const patchDefect = async (partial: Record<string, unknown>): Promise<boolean> => {
     try {
-      await defectsAPI.update(numericDefectId, partial);
-      await loadDetail(undefined, false);
+      await updateDefect.mutateAsync(partial);
       toast({ title: t('success'), description: t('defectUpdatedSuccessfully') });
       return true;
     } catch (err) {
@@ -316,10 +286,11 @@ export function DefectDetail() {
 
     setUpdatingLinkId(link.id);
     try {
-      await testResultsAPI.updateDefectLinkSnapshot(link.test_result_id, link.id, {
-        clear_failing_step: clearFailingStep,
+      await updateSnapshotMutation.mutateAsync({
+        testResultId: link.test_result_id,
+        linkId: link.id,
+        clearFailingStep,
       });
-      await loadDetail();
       toast({ title: t('success'), description: t('snapshotCorrectedSuccessfully') });
     } catch (err) {
       console.error('Failed to update defect snapshot:', err);

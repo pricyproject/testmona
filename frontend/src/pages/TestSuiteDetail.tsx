@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { sectionsAPI, testCasesAPI, testSuitesAPI } from '@/lib/api';
+import { useTestSuiteDetail, useTestSuiteSections } from '@/hooks/queries/testSuiteDetail';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { TestCase, TestSuite } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -212,7 +213,6 @@ export function TestSuiteDetail() {
 
   const [testSuite, setTestSuite] = useState<TestSuite | null>(null);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Edit dialog state
@@ -245,7 +245,6 @@ export function TestSuiteDetail() {
 
   // Sections (folded in from former SectionManagement page)
   const [sections, setSections] = useState<SectionTreeNode[]>([]);
-  const [sectionsLoading, setSectionsLoading] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set());
   const [isSectionFormOpen, setIsSectionFormOpen] = useState(false);
   const [editingSection, setEditingSection] = useState<SectionTreeNode | null>(null);
@@ -290,8 +289,6 @@ export function TestSuiteDetail() {
     [searchParams, setSearchParams],
   );
 
-  const loadRequestId = useRef(0);
-  const sectionsRequestId = useRef(0);
   const searchTimeoutRef = useRef<number | null>(null);
 
   // Debounce raw input → committed search query
@@ -311,80 +308,64 @@ export function TestSuiteDetail() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, priorityFilter, selectedSectionId, isUnsectionedSelected]);
 
-  const loadTestSuite = useCallback(async () => {
-    if (suiteIdLoading) return;  // wait for the seq -> id resolution
+  const detailEnabled = !suiteIdLoading && !!numericSuiteId && !!numericProjectId;
+  const detailQuery = useTestSuiteDetail(numericProjectId, numericSuiteId, detailEnabled);
+  const sectionsQuery = useTestSuiteSections(numericProjectId, numericSuiteId, !!numericProjectId && !!numericSuiteId);
+
+  // Fetch via react-query, then seed local state so the page's existing
+  // optimistic mutations (inline edit + rollback, bulk-delete filtering) keep
+  // working unchanged. Manual reloads below become query refetches.
+  const loadTestSuite = useCallback(() => detailQuery.refetch(), [detailQuery]);
+  const loadSections = useCallback(() => sectionsQuery.refetch(), [sectionsQuery]);
+
+  useEffect(() => {
+    if (detailQuery.data) {
+      setTestSuite(detailQuery.data.suite);
+      setTestCases(normalizeTestCasesResponse(detailQuery.data.testCasesRaw));
+    }
+  }, [detailQuery.data]);
+
+  useEffect(() => {
+    if (suiteIdLoading) return;
     if (!numericSuiteId || !numericProjectId) {
       setError(t('testSuiteNotFound') || 'Invalid suite or project ID');
-      setLoading(false);
       return;
     }
-    const requestId = ++loadRequestId.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const [suiteData, testCasesData] = await Promise.all([
-        testSuitesAPI.getById(numericSuiteId),
-        testCasesAPI
-          .getAll(numericProjectId, numericSuiteId, undefined, 'id', 'asc', 0, 500)
-          .then((cases) => normalizeTestCasesResponse(cases))
-          .catch(() => [] as TestCase[]),
-      ]);
-      if (requestId !== loadRequestId.current) return;
-      setTestSuite(suiteData);
-      setTestCases(testCasesData);
-    } catch (err: any) {
-      if (requestId !== loadRequestId.current) return;
-      const status = err?.response?.status;
+    if (detailQuery.isError) {
+      const status = (detailQuery.error as any)?.response?.status;
       if (status === 404) setError(t('testSuiteNotFound'));
       else if (status === 403) setError(t('permissionDeniedViewTestSuite'));
       else if (status === 401) setError(t('authenticationRequired') || t('failedToLoadTestSuiteDetail'));
       else setError(t('failedToLoadTestSuiteDetail'));
-    } finally {
-      if (requestId === loadRequestId.current) setLoading(false);
+    } else if (detailQuery.isSuccess) {
+      setError(null);
     }
-  }, [numericProjectId, numericSuiteId, suiteIdLoading, t]);
+  }, [suiteIdLoading, numericSuiteId, numericProjectId, detailQuery.status, detailQuery.isError, detailQuery.isSuccess, detailQuery.error, t]);
 
-  useEffect(() => {
-    loadTestSuite();
-    return () => {
-      loadRequestId.current++;
-    };
-  }, [loadTestSuite]);
+  const loading = (detailEnabled && detailQuery.isLoading) || (suiteIdLoading && !!numericSuiteId);
 
   const [sectionsError, setSectionsError] = useState<string | null>(null);
+  const sectionsLoading = sectionsQuery.isFetching;
 
-  const loadSections = useCallback(async () => {
-    if (!numericProjectId || !numericSuiteId) return;
-    const reqId = ++sectionsRequestId.current;
-    setSectionsLoading(true);
-    setSectionsError(null);
-    try {
-      const data = await sectionsAPI.getProjectSectionHierarchy(numericProjectId);
-      if (reqId !== sectionsRequestId.current) return;
-      const suiteEntry = (data?.hierarchy || []).find(
-        (entry: any) => entry.test_suite?.id === numericSuiteId,
-      );
-      setSections(suiteEntry?.sections || []);
-    } catch (err: any) {
-      if (reqId !== sectionsRequestId.current) return;
-      const status = err?.response?.status;
+  useEffect(() => {
+    if (sectionsQuery.data) {
+      setSections(sectionsQuery.data);
+    }
+  }, [sectionsQuery.data]);
+
+  useEffect(() => {
+    if (sectionsQuery.isError) {
+      const status = (sectionsQuery.error as any)?.response?.status;
       const message =
         status === 403
           ? t('permissionDeniedViewSections') || t('failedToSaveSection')
           : t('failedToLoadSections') || t('failedToSaveSection');
       setSectionsError(message);
       setSections([]);
-    } finally {
-      if (reqId === sectionsRequestId.current) setSectionsLoading(false);
+    } else if (sectionsQuery.isSuccess) {
+      setSectionsError(null);
     }
-  }, [numericProjectId, numericSuiteId, t]);
-
-  useEffect(() => {
-    loadSections();
-    return () => {
-      sectionsRequestId.current++;
-    };
-  }, [loadSections]);
+  }, [sectionsQuery.status, sectionsQuery.isError, sectionsQuery.isSuccess, sectionsQuery.error, t]);
 
   // Auto-expand the path to the selected section so it's visible on load / deep-link.
   useEffect(() => {

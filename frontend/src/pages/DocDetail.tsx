@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -53,7 +53,18 @@ import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { DocShareDialog } from '@/components/docs/DocShareDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useQueryClient } from '@tanstack/react-query';
 import { docsAPI } from '@/lib/api';
+import {
+  docDetailKeys,
+  useDocDetail,
+  useDocFeedback,
+  useUpdateDoc,
+  useDeleteDoc,
+  useSubmitDocFeedback,
+  useClearDocFeedback,
+  useResolveDocFeedback,
+} from '@/hooks/queries/docDetail';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { formatServerDateTime } from '@/utils/datetime';
@@ -82,13 +93,6 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const parsedProjectId = parsePositiveIntegerParam(projectId);
   const basePath = parsedProjectId ? `/projects/${parsedProjectId}/docs` : '/docs';
 
-  const [doc, setDoc] = useState<Doc | null>(null);
-  const [space, setSpace] = useState<DocSpace | null>(null);
-  const [links, setLinks] = useState<DocRequirementLink[]>([]);
-  const [stats, setStats] = useState<DocStats | null>(null);
-  const [feedback, setFeedback] = useState<DocFeedbackSummary | null>(null);
-  const [feedbackItems, setFeedbackItems] = useState<DocFeedback[]>([]);
-  const [loading, setLoading] = useState(true);
   // `/…/revisions` deep-links the revisions tab; other tabs ride a `?tab=` param
   // so navigating between them (which remounts this route) keeps the selection.
   const queryTab = searchParams.get('tab');
@@ -99,49 +103,49 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [impactOpen, setImpactOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const [savingTitle, setSavingTitle] = useState(false);
-  const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackDialogType, setFeedbackDialogType] = useState<DocFeedbackType | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
   const [feedbackSection, setFeedbackSection] = useState('');
   const [feedbackIncludeResolved, setFeedbackIncludeResolved] = useState(false);
-  const [feedbackListLoading, setFeedbackListLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    if (projectId && docIdLoading) return;  // wait for the seq -> id resolution
-    if (!parsedDocId) {
-      setDoc(null);
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      const data = await docsAPI.get(parsedDocId);
-      setDoc(data);
-      setFeedbackIncludeResolved(false);
-      const [sp, lk, st, fb, fbItems] = await Promise.all([
-        docsAPI.getSpace(data.space_id).catch(() => null),
-        docsAPI.listRequirementLinks(data.id).catch(() => []),
-        data.can_view_stats ? docsAPI.getStats(data.id).catch(() => null) : Promise.resolve(null),
-        docsAPI.getFeedback(data.id).catch(() => null),
-        data.can_edit ? docsAPI.listFeedback(data.id, false).catch(() => []) : Promise.resolve([]),
-      ]);
-      setSpace(sp);
-      setLinks(lk);
-      setStats(st);
-      setFeedback(fb);
-      setFeedbackItems(fbItems as DocFeedback[]);
-    } catch {
+  const queryClient = useQueryClient();
+  const docEnabled = !(projectId && docIdLoading) && !!parsedDocId;
+  const docQuery = useDocDetail(parsedDocId, docEnabled);
+  const doc: Doc | null = docQuery.data?.doc ?? null;
+  const space: DocSpace | null = docQuery.data?.space ?? null;
+  const links: DocRequirementLink[] = docQuery.data?.links ?? [];
+  const stats: DocStats | null = docQuery.data?.stats ?? null;
+  const loading = (!!projectId && docIdLoading) || (docEnabled && docQuery.isLoading);
+
+  const canEditDoc = Boolean(doc?.can_edit);
+  const feedbackQuery = useDocFeedback(parsedDocId, canEditDoc, feedbackIncludeResolved, !!doc);
+  const feedback: DocFeedbackSummary | null = feedbackQuery.data?.summary ?? null;
+  const feedbackItems: DocFeedback[] = feedbackQuery.data?.items ?? [];
+  const feedbackListLoading = feedbackQuery.isFetching;
+
+  const updateDoc = useUpdateDoc(parsedDocId);
+  const deleteDocMutation = useDeleteDoc(parsedDocId);
+  const submitFeedbackMutation = useSubmitDocFeedback(parsedDocId);
+  const clearFeedbackMutation = useClearDocFeedback(parsedDocId);
+  const resolveFeedbackMutation = useResolveDocFeedback(parsedDocId);
+  const savingTitle = updateDoc.isPending;
+  const deleting = deleteDocMutation.isPending;
+  const feedbackSaving = submitFeedbackMutation.isPending || clearFeedbackMutation.isPending;
+
+  // Surface a load failure as a toast (mirrors the previous imperative load).
+  useEffect(() => {
+    if (docQuery.isError) {
       toast({ title: t('error'), description: t('docLoadFailed'), variant: 'destructive' });
-    } finally {
-      setLoading(false);
     }
-  }, [parsedDocId, docIdLoading, projectId, t, toast]);
+  }, [docQuery.isError, t, toast]);
 
-  useEffect(() => { load(); }, [load]);
+  // Full refresh of the document bundle, used by child sections after they
+  // mutate version history / links / related docs.
+  const reloadDoc = () => {
+    queryClient.invalidateQueries({ queryKey: docDetailKeys.detail(parsedDocId) });
+  };
 
   const html = useMemo(
     () => (doc ? sanitizeHtml(markdownToHtml(doc.content_markdown || '')) : ''),
@@ -174,14 +178,10 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     const next = titleDraft.trim();
     if (!next || next === doc.title) { setEditingTitle(false); return; }
     try {
-      setSavingTitle(true);
-      const updated = await docsAPI.update(doc.id, { title: next });
-      setDoc(updated);
+      await updateDoc.mutateAsync({ title: next });
       setEditingTitle(false);
     } catch (e: any) {
       toast({ title: t('error'), description: e?.response?.data?.detail || t('docSaveFailed'), variant: 'destructive' });
-    } finally {
-      setSavingTitle(false);
     }
   };
 
@@ -201,76 +201,43 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const handleDelete = async () => {
     if (!doc) return;
     try {
-      setDeleting(true);
-      await docsAPI.remove(doc.id);
+      await deleteDocMutation.mutateAsync();
       toast({ title: t('success'), description: t('docDeleted') });
       navigate(basePath);
     } catch {
       toast({ title: t('error'), description: t('docDeleteFailed'), variant: 'destructive' });
-    } finally {
-      setDeleting(false);
     }
   };
 
-  const refreshFeedback = async (includeResolved = feedbackIncludeResolved): Promise<boolean> => {
-    if (!doc) return false;
-    try {
-      setFeedbackListLoading(true);
-      const [summary, items] = await Promise.all([
-        docsAPI.getFeedback(doc.id),
-        doc.can_edit ? docsAPI.listFeedback(doc.id, includeResolved) : Promise.resolve([]),
-      ]);
-      setFeedback(summary);
-      setFeedbackItems(items as DocFeedback[]);
-      return true;
-    } catch {
-      toast({ title: t('error'), description: t('docFeedbackLoadFailed'), variant: 'destructive' });
-      return false;
-    } finally {
-      setFeedbackListLoading(false);
-    }
-  };
-
-  const toggleResolvedFeedback = async () => {
+  // Toggling include-resolved just flips the flag; the feedback query is keyed on
+  // it and refetches automatically.
+  const toggleResolvedFeedback = () => {
     if (feedbackListLoading) return;
-    const next = !feedbackIncludeResolved;
-    setFeedbackIncludeResolved(next);
-    const ok = await refreshFeedback(next);
-    if (!ok) setFeedbackIncludeResolved(!next);
+    setFeedbackIncludeResolved((prev) => !prev);
   };
 
   const submitFeedback = async (feedbackType: DocFeedbackType, comment?: string, sectionText?: string): Promise<boolean> => {
     if (!doc || feedbackSaving) return false;
     try {
-      setFeedbackSaving(true);
-      const summary = await docsAPI.submitFeedback(doc.id, {
+      await submitFeedbackMutation.mutateAsync({
         feedback_type: feedbackType,
         comment: comment?.trim() || null,
         section_text: sectionText?.trim() || null,
       });
-      setFeedback(summary);
-      if (doc.can_edit) await refreshFeedback();
       toast({ title: t('success'), description: t('docFeedbackSaved') });
       return true;
     } catch (e: any) {
       toast({ title: t('error'), description: e?.response?.data?.detail || t('docFeedbackFailed'), variant: 'destructive' });
       return false;
-    } finally {
-      setFeedbackSaving(false);
     }
   };
 
   const clearMyFeedback = async () => {
     if (!doc || feedbackSaving) return;
     try {
-      setFeedbackSaving(true);
-      const summary = await docsAPI.deleteFeedback(doc.id);
-      setFeedback(summary);
-      if (doc.can_edit) await refreshFeedback();
+      await clearFeedbackMutation.mutateAsync();
     } catch {
       toast({ title: t('error'), description: t('docFeedbackFailed'), variant: 'destructive' });
-    } finally {
-      setFeedbackSaving(false);
     }
   };
 
@@ -289,13 +256,9 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const resolveFeedback = async (item: DocFeedback, resolved: boolean) => {
     if (!doc || feedbackListLoading) return;
     try {
-      setFeedbackListLoading(true);
-      await docsAPI.resolveFeedback(doc.id, item.id, resolved);
-      await refreshFeedback();
+      await resolveFeedbackMutation.mutateAsync({ feedbackId: item.id, resolved });
     } catch {
       toast({ title: t('error'), description: t('docFeedbackResolveFailed'), variant: 'destructive' });
-    } finally {
-      setFeedbackListLoading(false);
     }
   };
 
@@ -554,7 +517,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         </TabsContent>
 
         <TabsContent value="revisions" className="mt-4">
-          <DocVersionHistory docId={doc.id} canEdit={doc.can_edit} canClear={doc.can_delete} onRestored={load} />
+          <DocVersionHistory docId={doc.id} canEdit={doc.can_edit} canClear={doc.can_delete} onRestored={reloadDoc} />
         </TabsContent>
 
         <TabsContent value="links" className="mt-4">
@@ -563,7 +526,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             projectId={doc.project_id}
             canEdit={doc.can_edit}
             links={links}
-            onChanged={load}
+            onChanged={reloadDoc}
           />
         </TabsContent>
 
@@ -601,14 +564,14 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         )}
       </Tabs>
 
-      <DocRelatedSection docId={doc.id} canEdit={doc.can_edit} onMerged={load} />
+      <DocRelatedSection docId={doc.id} canEdit={doc.can_edit} onMerged={reloadDoc} />
 
       {convertOpen && (
         <ConvertDocDialog
           doc={doc}
           open={convertOpen}
           onOpenChange={setConvertOpen}
-          onConverted={() => { setTab('links'); load(); }}
+          onConverted={() => { setTab('links'); reloadDoc(); }}
         />
       )}
 
@@ -638,7 +601,11 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           projectId={doc.project_id}
           open={shareOpen}
           onOpenChange={setShareOpen}
-          onScopeChange={(scope) => setDoc((prev) => (prev ? { ...prev, share_scope: scope } : prev))}
+          onScopeChange={(scope) =>
+            queryClient.setQueryData(docDetailKeys.detail(parsedDocId), (prev: any) =>
+              prev?.doc ? { ...prev, doc: { ...prev.doc, share_scope: scope } } : prev,
+            )
+          }
         />
       )}
 

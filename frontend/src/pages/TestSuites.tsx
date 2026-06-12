@@ -45,7 +45,12 @@ import {
   TestTube,
   Trash2,
 } from 'lucide-react';
-import { testSuitesAPI, testCasesAPI, sectionsAPI } from '@/lib/api';
+import {
+  useTestSuites,
+  useTestSuiteSelectionData,
+  useCreateTestSuite,
+  useDeleteTestSuite,
+} from '@/hooks/queries/testSuites';
 import { TestSuite, TestCase } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -89,11 +94,6 @@ export function TestSuites() {
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   
-  // Data states
-  const [testSuites, setTestSuites] = useState<TestSuite[]>([]);
-  const [testCases, setTestCases] = useState<TestCase[]>([]);
-  const [sections, setSections] = useState<SectionNode[]>([]);
-
   // Selection states
   const [selectedTestCases, setSelectedTestCases] = useState<number[]>([]);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all']));
@@ -103,10 +103,6 @@ export function TestSuites() {
   const [suiteSearchQuery, setSuiteSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  // Loading states
-  const [isLoading, setIsLoading] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isLoadingTestCases, setIsLoadingTestCases] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Pagination for test cases
@@ -115,60 +111,35 @@ export function TestSuites() {
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<TestSuite | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  const loadRequestId = useRef(0);
-  const dialogLoadRequestId = useRef(0);
 
   const currentProjectId = useMemo(() => {
     const parsedProjectId = Number(projectId);
     return projectId && Number.isInteger(parsedProjectId) && parsedProjectId > 0 ? parsedProjectId : null;
   }, [projectId]);
 
+  const testSuitesQuery = useTestSuites(currentProjectId);
+  const testSuites: TestSuite[] = testSuitesQuery.data ?? [];
+  const isLoading = currentProjectId != null && testSuitesQuery.isLoading;
+
+  const selectionQuery = useTestSuiteSelectionData(currentProjectId, isDialogOpen);
+  const testCases: TestCase[] = selectionQuery.data?.testCases ?? [];
+  const sections: SectionNode[] = selectionQuery.data?.sections ?? [];
+  const isLoadingTestCases = selectionQuery.isLoading;
+
+  const createTestSuite = useCreateTestSuite(currentProjectId);
+  const deleteTestSuite = useDeleteTestSuite(currentProjectId);
+  const isCreating = createTestSuite.isPending;
+  const isDeleting = deleteTestSuite.isPending;
+
+  // Surface list-load failures (status-specific) in the error banner + a toast,
+  // and the no-project state, mirroring the previous imperative loader.
   useEffect(() => {
-    loadData();
-    return () => {
-      // Invalidate any in-flight request when the project changes / page unmounts
-      loadRequestId.current++;
-    };
-
-  }, [currentProjectId]);
-
-  // Load test cases when dialog opens. Reloads each open so a newly-created or moved
-  // case shows up; the previous version cached the list forever once seen.
-  useEffect(() => {
-    if (!isDialogOpen) return;
-    loadTestCasesForSelection();
-    const timer = window.setTimeout(() => nameInputRef.current?.focus(), 80);
-    return () => window.clearTimeout(timer);
-
-  }, [isDialogOpen, currentProjectId]);
-
-  // Track unsaved changes
-  useEffect(() => {
-    setHasUnsavedChanges(
-      suiteName.trim() !== '' || suiteDescription.trim() !== '' || selectedTestCases.length > 0,
-    );
-  }, [suiteName, suiteDescription, selectedTestCases]);
-
-  const loadData = async () => {
     if (!currentProjectId) {
-      setTestSuites([]);
       setError(t('noProjectSelected'));
-      setIsLoading(false);
       return;
     }
-
-    const requestId = ++loadRequestId.current;
-    try {
-      setIsLoading(true);
-      setError(null);
-      const testSuitesData = await testSuitesAPI.getAll(currentProjectId, 0, 500);
-      if (requestId !== loadRequestId.current) return;
-      setTestSuites(Array.isArray(testSuitesData) ? testSuitesData : []);
-    } catch (err: any) {
-      if (requestId !== loadRequestId.current) return;
-      const status = err?.response?.status;
+    if (testSuitesQuery.isError) {
+      const status = (testSuitesQuery.error as any)?.response?.status;
       const message =
         status === 401
           ? t('authenticationRequired') || t('failedToLoadTestSuitesError')
@@ -178,63 +149,36 @@ export function TestSuites() {
           ? t('projectNotFound') || t('failedToLoadTestSuitesError')
           : t('failedToLoadTestSuitesError');
       setError(message);
-      setTestSuites([]);
       toast({ title: t('error'), description: message, variant: 'destructive' });
-    } finally {
-      if (requestId === loadRequestId.current) setIsLoading(false);
+    } else if (testSuitesQuery.isSuccess) {
+      setError(null);
     }
-  };
+  }, [currentProjectId, testSuitesQuery.status, testSuitesQuery.isError, testSuitesQuery.isSuccess, testSuitesQuery.error, t, toast]);
 
-  const loadTestCasesForSelection = async () => {
-    if (!currentProjectId) {
-      setTestCases([]);
-      setSections([]);
-      return;
-    }
-
-    const requestId = ++dialogLoadRequestId.current;
-    try {
-      setIsLoadingTestCases(true);
-      const [testCasesData, hierarchyData] = await Promise.all([
-        testCasesAPI.getAll(currentProjectId).catch(() => []),
-        sectionsAPI.getProjectSectionHierarchy(currentProjectId).catch(() => null),
-      ]);
-      if (requestId !== dialogLoadRequestId.current) return;
-
-      setTestCases(Array.isArray(testCasesData) ? testCasesData : []);
-
-      // Flatten every section in the project, retaining the suite id so the
-      // grouping in the UI can filter by section_id (not by suite name).
-      const flatSections: SectionNode[] = [];
-      const walk = (nodes: any[], suiteId: number) => {
-        nodes.forEach((node) => {
-          flatSections.push({
-            id: node.id,
-            name: node.name,
-            test_suite_id: suiteId,
-            test_case_count: node.test_case_count,
-            subsections: node.subsections,
-          });
-          if (Array.isArray(node.subsections) && node.subsections.length > 0) {
-            walk(node.subsections, suiteId);
-          }
-        });
-      };
-      (hierarchyData?.hierarchy || []).forEach((suiteData: any) => {
-        walk(suiteData.sections || [], suiteData.test_suite?.id);
-      });
-      setSections(flatSections);
-    } catch (err) {
-      if (requestId !== dialogLoadRequestId.current) return;
+  // Surface the test-case selection load failure (dialog picker).
+  useEffect(() => {
+    if (selectionQuery.isError) {
       toast({
         title: t('warning'),
         description: t('failedToLoadTestCasesForSelectionError'),
         variant: 'destructive',
       });
-    } finally {
-      if (requestId === dialogLoadRequestId.current) setIsLoadingTestCases(false);
     }
-  };
+  }, [selectionQuery.isError, t, toast]);
+
+  // Focus the name input shortly after the dialog opens.
+  useEffect(() => {
+    if (!isDialogOpen) return;
+    const timer = window.setTimeout(() => nameInputRef.current?.focus(), 80);
+    return () => window.clearTimeout(timer);
+  }, [isDialogOpen]);
+
+  // Track unsaved changes
+  useEffect(() => {
+    setHasUnsavedChanges(
+      suiteName.trim() !== '' || suiteDescription.trim() !== '' || selectedTestCases.length > 0,
+    );
+  }, [suiteName, suiteDescription, selectedTestCases]);
 
   // Helper functions for test case selection
   const toggleSectionExpansion = (sectionId: string) => {
@@ -368,12 +312,11 @@ export function TestSuites() {
     }
 
     try {
-      setIsCreating(true);
       setError(null);
 
       const trimmedName = suiteName.trim();
       const trimmedDescription = suiteDescription.trim();
-      const newTestSuite = await testSuitesAPI.create({
+      const newTestSuite = await createTestSuite.mutateAsync({
         name: trimmedName,
         description: trimmedDescription || undefined,
         project_id: currentProjectId,
@@ -409,45 +352,31 @@ export function TestSuites() {
           : apiMessage || t('failedToCreateTestSuiteRetryError');
       setError(message);
       toast({ title: t('error'), description: message, variant: 'destructive' });
-    } finally {
-      setIsCreating(false);
     }
   };
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const target = deleteTarget;
-    setIsDeleting(true);
     try {
-      await testSuitesAPI.delete(target.id);
-      setTestSuites((prev) => prev.filter((s) => s.id !== target.id));
+      await deleteTestSuite.mutateAsync(target.id);
       toast({
         title: t('success'),
         description: t('deletedTestSuite', { name: target.name }),
       });
       setDeleteTarget(null);
     } catch (err: any) {
-      const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
       const apiMessage = typeof detail === 'string' ? detail : null;
-      const message =
-        status === 409
-          ? apiMessage || t('failedToDeleteTestSuite')
-          : status === 403
-          ? apiMessage || t('failedToDeleteTestSuite')
-          : status === 404
-          ? t('failedToDeleteTestSuite')
-          : apiMessage || t('failedToDeleteTestSuite');
+      const message = apiMessage || t('failedToDeleteTestSuite');
       toast({ title: t('error'), description: message, variant: 'destructive' });
       setDeleteTarget(null);
-    } finally {
-      setIsDeleting(false);
     }
   };
 
   const handleDuplicateSuite = async (suite: TestSuite) => {
     try {
-      await testSuitesAPI.create({
+      await createTestSuite.mutateAsync({
         name: t('suiteCopy', { name: suite.name }),
         description: suite.description,
         project_id: suite.project_id,
@@ -456,7 +385,6 @@ export function TestSuites() {
         title: t('success'),
         description: t('testSuiteDuplicatedSuccessfully'),
       });
-      await loadData();
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
       const apiMessage = typeof detail === 'string' ? detail : null;
