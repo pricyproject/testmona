@@ -2,8 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
-import { sharedStepsAPI } from '@/lib/api';
 import { SharedStep, SharedStepCreate } from '@/types';
+import {
+  useSharedSteps,
+  useCreateSharedStep,
+  useUpdateSharedStep,
+  useDeleteSharedStep,
+} from '@/hooks/queries/sharedSteps';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -76,16 +81,12 @@ export function SharedSteps() {
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
   const { canWrite } = usePermissions();
-  const [sharedSteps, setSharedSteps] = useState<SharedStep[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedStep, setSelectedStep] = useState<SharedStep | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [deletingStepId, setDeletingStepId] = useState<number | null>(null);
   const [duplicatingStepId, setDuplicatingStepId] = useState<number | null>(null);
   const [pendingCloseDialog, setPendingCloseDialog] = useState<'create' | 'edit' | null>(null);
@@ -129,40 +130,23 @@ export function SharedSteps() {
 
   const hasUnsavedChanges = useMemo(() => isFormDirty(), [isFormDirty]);
 
-  const loadSharedSteps = useCallback(async (signal?: AbortSignal) => {
-    if (!isProjectIdValid) {
-      setError(t('invalidProjectId'));
-      setSharedSteps([]);
-      return;
-    }
+  const sharedStepsQuery = useSharedSteps(numericProjectId, isProjectIdValid);
+  const sharedSteps = sharedStepsQuery.data ?? [];
+  const loading = sharedStepsQuery.isLoading;
+  const createSharedStep = useCreateSharedStep(numericProjectId);
+  const updateSharedStep = useUpdateSharedStep(numericProjectId);
+  const deleteSharedStep = useDeleteSharedStep(numericProjectId);
+  const isCreating = createSharedStep.isPending;
+  const isUpdating = updateSharedStep.isPending;
 
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await sharedStepsAPI.getAll(numericProjectId, 0, 100, signal);
-      setSharedSteps(data);
-    } catch (loadError) {
-      if (signal?.aborted) return;
-      console.error('Failed to load shared steps:', loadError);
-      setSharedSteps([]);
-      setError(getErrorMessage(loadError, t('failedToLoadSharedSteps')));
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [isProjectIdValid, numericProjectId, t]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => {
-      loadSharedSteps(controller.signal);
-    }, 0);
-    return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
-    };
-  }, [loadSharedSteps]);
+  // A mutation error (local) takes precedence; otherwise surface invalid-project
+  // or list-load failures.
+  const displayError = error
+    ?? (!isProjectIdValid
+      ? t('invalidProjectId')
+      : sharedStepsQuery.isError
+        ? getErrorMessage(sharedStepsQuery.error, t('failedToLoadSharedSteps'))
+        : null);
 
   useEffect(() => {
     if (isCreateDialogOpen && stepNameInputRef.current) {
@@ -187,17 +171,13 @@ export function SharedSteps() {
     }
 
     try {
-      setIsCreating(true);
       setError(null);
-      await sharedStepsAPI.create(normalizeSharedStepPayload(formData, numericProjectId));
+      await createSharedStep.mutateAsync(normalizeSharedStepPayload(formData, numericProjectId));
       resetForm();
       setIsCreateDialogOpen(false);
-      await loadSharedSteps();
     } catch (createError) {
       console.error('Failed to create shared step:', createError);
       setError(getErrorMessage(createError, t('failedToCreateSharedStep')));
-    } finally {
-      setIsCreating(false);
     }
   };
 
@@ -213,24 +193,23 @@ export function SharedSteps() {
     }
 
     try {
-      setIsUpdating(true);
       setError(null);
       const payload = normalizeSharedStepPayload(formData, numericProjectId);
-      await sharedStepsAPI.update(selectedStep.id, {
-        name: payload.name,
-        description: payload.description,
-        action: payload.action,
-        expected_result: payload.expected_result,
+      await updateSharedStep.mutateAsync({
+        id: selectedStep.id,
+        payload: {
+          name: payload.name,
+          description: payload.description,
+          action: payload.action,
+          expected_result: payload.expected_result,
+        },
       });
       resetForm();
       setIsEditDialogOpen(false);
       setSelectedStep(null);
-      await loadSharedSteps();
     } catch (updateError) {
       console.error('Failed to update shared step:', updateError);
       setError(getErrorMessage(updateError, t('failedToUpdateSharedStep')));
-    } finally {
-      setIsUpdating(false);
     }
   };
 
@@ -240,8 +219,7 @@ export function SharedSteps() {
     try {
       setDeletingStepId(stepId);
       setError(null);
-      await sharedStepsAPI.delete(stepId);
-      await loadSharedSteps();
+      await deleteSharedStep.mutateAsync(stepId);
     } catch (deleteError) {
       console.error('Failed to delete shared step:', deleteError);
       setError(getErrorMessage(deleteError, t('failedToDeleteSharedStep')));
@@ -259,14 +237,13 @@ export function SharedSteps() {
       const copyName = step.name.length + copySuffix.length <= NAME_MAX_LENGTH
         ? `${step.name}${copySuffix}`
         : fallbackCopyName.slice(0, NAME_MAX_LENGTH);
-      await sharedStepsAPI.create({
+      await createSharedStep.mutateAsync({
         name: copyName,
         description: step.description || null,
         action: step.action,
         expected_result: step.expected_result,
         project_id: step.project_id,
       });
-      await loadSharedSteps();
     } catch (duplicateError) {
       console.error('Failed to duplicate shared step:', duplicateError);
       setError(getErrorMessage(duplicateError, t('failedToDuplicateSharedStep')));
@@ -491,10 +468,10 @@ export function SharedSteps() {
         </Dialog>
       </div>
 
-      {error && (
+      {displayError && (
         <div role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span>{displayError}</span>
         </div>
       )}
 

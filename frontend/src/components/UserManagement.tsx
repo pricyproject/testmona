@@ -1,11 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-import { api, usersAPI } from '@/lib/api';
+import {
+  useManagedUsers,
+  useManagedInvitations,
+  useManagedProjects,
+  useCreateUser,
+  useUpdateUser,
+  useDeleteUser,
+  useResetUserTwoFactor,
+  useInviteUser,
+  useDeleteInvitation,
+} from '@/hooks/queries/userManagement';
 import {
   Dialog,
   DialogContent,
@@ -76,11 +86,22 @@ export function UserManagement() {
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
   const { user: currentUser } = useAuthStore();
-  const [users, setUsers] = useState<User[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  
+  const isAdmin = isAdminUser(currentUser);
+  const usersQuery = useManagedUsers(isAdmin);
+  const invitationsQuery = useManagedInvitations(isAdmin);
+  const projectsQuery = useManagedProjects(isAdmin);
+  const users: User[] = usersQuery.data ?? [];
+  const invitations: Invitation[] = invitationsQuery.data ?? [];
+  const projects: Project[] = projectsQuery.data ?? [];
+
+  const createUser = useCreateUser();
+  const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
+  const resetUserTwoFactor = useResetUserTwoFactor();
+  const inviteUser = useInviteUser();
+  const deleteInvitationMutation = useDeleteInvitation();
+
+
   // Invite dialog state
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -119,40 +140,6 @@ export function UserManagement() {
     return roleLabels[normalizedRole] || normalizedRole;
   };
 
-  useEffect(() => {
-    if (isAdminUser(currentUser)) {
-      loadData();
-    } else {
-      setLoading(false);
-    }
-  }, [currentUser]);
-
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      // Load users
-      const usersResponse = await api.get('/users');
-      setUsers(usersResponse.data);
-
-      // Load invitations
-      const invitationsResponse = await api.get('/invitations');
-      setInvitations(invitationsResponse.data);
-
-      // Load projects
-      const projectsResponse = await api.get('/projects/');
-      setProjects(projectsResponse.data);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      toast({
-        title: t('error'),
-        description: t('failedToLoadUsersAndInvitations'),
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleCreateUser = async () => {
     if (!createUsername || !createEmail || !createPassword) {
       toast({
@@ -164,7 +151,7 @@ export function UserManagement() {
     }
 
     try {
-      const response = await api.post('/users', {
+      await createUser.mutateAsync({
         username: createUsername,
         email: createEmail,
         full_name: createFullName,
@@ -172,9 +159,7 @@ export function UserManagement() {
         role: normalizeRole(createRole),
         is_active: createIsActive,
       });
-      const newUser = response.data;
-      setUsers([...users, newUser]);
-      
+
       toast({
         title: t('success'),
         description: t('userCreatedSuccessfully', { username: createUsername }),
@@ -209,14 +194,12 @@ export function UserManagement() {
     }
 
     try {
-      const response = await api.post('/invitations', {
+      await inviteUser.mutateAsync({
         email: inviteEmail,
         role: normalizeRole(inviteRole),
         project_ids: selectedProjects,
       });
-      const newInvitation = response.data;
-      setInvitations([...invitations, newInvitation]);
-      
+
       toast({
         title: t('success'),
         description: t('invitationSentCopyLink', { email: inviteEmail }),
@@ -246,9 +229,8 @@ export function UserManagement() {
     if (!userToDelete) return;
 
     try {
-      await api.delete(`/users/${userToDelete.id}`);
+      await deleteUser.mutateAsync(userToDelete.id);
 
-      setUsers(users.filter(u => u.id !== userToDelete.id));
       toast({
         title: t('success'),
         description: t('userDeletedSuccessfully'),
@@ -279,18 +261,19 @@ export function UserManagement() {
     if (!editingUser) return;
 
     try {
-      const response = await api.put(`/users/${editingUser.id}`, {
-        role: normalizeRole(editRole),
-        is_active: editIsActive,
+      await updateUser.mutateAsync({
+        id: editingUser.id,
+        payload: {
+          role: normalizeRole(editRole),
+          is_active: editIsActive,
+        },
       });
-      const updatedUser = response.data;
-      setUsers(users.map(u => u.id === updatedUser.id ? updatedUser : u));
-      
+
       toast({
         title: t('success'),
         description: t('userUpdatedSuccessfully'),
       });
-      
+
       setEditDialogOpen(false);
       setEditingUser(null);
     } catch (error: any) {
@@ -310,8 +293,7 @@ export function UserManagement() {
     }
 
     try {
-      await usersAPI.resetTwoFactor(user.id);
-      setUsers(users.map((item) => item.id === user.id ? { ...item, two_factor_enabled: false } : item));
+      await resetUserTwoFactor.mutateAsync(user.id);
       toast({
         title: t('success'),
         description: t('reset2FASuccess', { username: user.username || user.email }),
@@ -328,9 +310,8 @@ export function UserManagement() {
 
   const handleDeleteInvitation = async (invitationId: number) => {
     try {
-      await api.delete(`/invitations/${invitationId}`);
+      await deleteInvitationMutation.mutateAsync(invitationId);
 
-      setInvitations(invitations.filter(i => i.id !== invitationId));
       toast({
         title: t('success'),
         description: t('invitationDeletedSuccessfully'),

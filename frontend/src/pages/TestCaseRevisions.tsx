@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { 
-  ArrowLeft, ArrowRight, History, User, Calendar, GitCompare, 
+import {
+  ArrowLeft, ArrowRight, History, User, Calendar, GitCompare,
   Eye, EyeOff, RotateCcw
 } from 'lucide-react';
-import { testCasesAPI, api, getApiErrorMessage } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
+import { useTestCaseRevisions, useRestoreRevision } from '@/hooks/queries/testCaseRevisions';
 
 interface Revision {
   id: number;
@@ -109,63 +110,41 @@ export function TestCaseRevisions() {
   // The URL carries the per-project sequence; resolve it to the global test-case id.
   const { id: testCaseId, loading: testCaseIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const routeProjectId = useMemo(() => parsePositiveId(projectId), [projectId]);
-  const [revisions, setRevisions] = useState<Revision[]>([]);
-  const [currentTestCase, setCurrentTestCase] = useState<TestCase | null>(null);
   const [selectedRevisions, setSelectedRevisions] = useState<number[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<Revision | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [showDifferences, setShowDifferences] = useState(false);
   const [restoringRevisionNumber, setRestoringRevisionNumber] = useState<number | null>(null);
   const BackIcon = isRTL ? ArrowRight : ArrowLeft;
 
-  const loadRevisions = useCallback(async () => {
-    if (testCaseIdLoading) return;  // wait for the seq -> id resolution
-    setLoading(true);
-    setError(null);
+  const revisionsQuery = useTestCaseRevisions(testCaseId, !testCaseIdLoading && !!testCaseId);
+  const restoreRevision = useRestoreRevision(testCaseId);
 
-    if (!testCaseId) {
-      setCurrentTestCase(null);
-      setRevisions([]);
-      setError(t('invalidTestCaseId'));
-      setLoading(false);
-      return;
-    }
+  const currentTestCase: TestCase | null = revisionsQuery.data?.testCase ?? null;
+  // A test case whose suite belongs to another project must not surface here.
+  const projectMismatch = Boolean(
+    routeProjectId &&
+    currentTestCase?.test_suite?.project_id &&
+    Number(currentTestCase.test_suite.project_id) !== routeProjectId,
+  );
+  const revisions: Revision[] = projectMismatch ? [] : (revisionsQuery.data?.revisions ?? []);
+  const loading = testCaseIdLoading || (!!testCaseId && revisionsQuery.isLoading);
+  const error: string | null =
+    !testCaseIdLoading && !testCaseId
+      ? t('invalidTestCaseId')
+      : projectMismatch
+        ? t('invalidProjectId')
+        : revisionsQuery.isError
+          ? getApiErrorMessage(revisionsQuery.error, t('failedToLoadTestCase'))
+          : null;
 
-    try {
-      const [testCaseData, revisionsData] = await Promise.all([
-        testCasesAPI.getById(testCaseId),
-        api.get(`/test-cases/${testCaseId}/revisions`),
-      ]);
-
-      if (
-        routeProjectId &&
-        testCaseData?.test_suite?.project_id &&
-        Number(testCaseData.test_suite.project_id) !== routeProjectId
-      ) {
-        setCurrentTestCase(testCaseData);
-        setRevisions([]);
-        setError(t('invalidProjectId'));
-        return;
-      }
-
-      setCurrentTestCase(testCaseData);
-      setRevisions(Array.isArray(revisionsData.data) ? revisionsData.data : []);
+  // Reset the selected revision / diff view whenever a fresh load lands
+  // (initial load and after a restore refetch), matching the previous behaviour.
+  useEffect(() => {
+    if (revisionsQuery.data) {
       setSelectedRevision(null);
       setShowDifferences(false);
-    } catch (fetchError: unknown) {
-      console.error('Failed to fetch revisions:', fetchError);
-      setCurrentTestCase(null);
-      setRevisions([]);
-      setError(getApiErrorMessage(fetchError, t('failedToLoadTestCase')));
-    } finally {
-      setLoading(false);
     }
-  }, [routeProjectId, t, testCaseId, testCaseIdLoading]);
-
-  useEffect(() => {
-    void loadRevisions();
-  }, [loadRevisions]);
+  }, [revisionsQuery.data]);
 
   const handleBack = () => {
     const targetTestCaseId = testCaseId ?? id;
@@ -214,9 +193,8 @@ export function TestCaseRevisions() {
 
     setRestoringRevisionNumber(revision.revision_number);
     try {
-      await api.post(`/test-cases/${testCaseId}/revisions/${revision.revision_number}/restore`);
+      await restoreRevision.mutateAsync(revision.revision_number);
       toast({ title: t('success'), description: t('revisionRestored') });
-      await loadRevisions();
     } catch (restoreError: unknown) {
       toast({
         title: t('error'),
