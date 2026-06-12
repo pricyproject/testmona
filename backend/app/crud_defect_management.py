@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
@@ -9,6 +10,9 @@ import json
 import re
 from urllib.parse import urlparse
 import ipaddress
+
+
+logger = logging.getLogger(__name__)
 
 
 def is_safe_url(url: str) -> bool:
