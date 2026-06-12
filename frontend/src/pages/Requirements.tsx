@@ -47,6 +47,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter, requirementFoldersAPI } from '@/lib/api';
+import { useRequirementsList, useRequirementFolders } from '@/hooks/queries/requirements';
 import { entitySeq } from '@/lib/utils';
 import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus, RequirementFolder } from '@/types';
 import { RequirementChatPanel } from '@/components/requirements/RequirementChatPanel';
@@ -73,8 +74,13 @@ export function Requirements() {
   const { t, isRTL } = useTranslation();
   const { user } = useAuthStore();
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
-  const [requirements, setRequirements] = useState<Requirement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const numericProjectId = projectId ? parseInt(projectId) : null;
+  const requirementsQuery = useRequirementsList(numericProjectId, linkedMilestoneId, numericProjectId != null);
+  const foldersQuery = useRequirementFolders(numericProjectId, numericProjectId != null);
+  const requirements: Requirement[] = requirementsQuery.data?.requirements ?? [];
+  const coverageMap: Record<number, RequirementCoverageItem> = requirementsQuery.data?.coverageMap ?? {};
+  const folders: RequirementFolder[] = foldersQuery.data ?? [];
+  const loading = numericProjectId != null && requirementsQuery.isLoading;
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<number | null>(null);
@@ -102,7 +108,6 @@ export function Requirements() {
   });
 
   // ── Folders / categories ────────────────────────────────────────────────
-  const [folders, setFolders] = useState<RequirementFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<'all' | 'unfiled' | number>('all');
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [folderDialogMode, setFolderDialogMode] = useState<'create' | 'edit'>('create');
@@ -111,8 +116,6 @@ export function Requirements() {
   const [folderSaving, setFolderSaving] = useState(false);
   const [reqFolderId, setReqFolderId] = useState<string>('none');
 
-  // Coverage badges
-  const [coverageMap, setCoverageMap] = useState<Record<number, RequirementCoverageItem>>({});
   // Sorting
   const [sortBy, setSortBy] = useState<'requirement_id' | 'title' | 'status' | 'priority' | 'created_at' | 'coverage'>('requirement_id');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -324,54 +327,27 @@ export function Requirements() {
     setCompareFromId(snapshot.id);
   };
 
+  // Requirements + coverage and folders are fetched via react-query (above).
+  // These wrappers let the existing mutation handlers trigger a refetch.
   const loadRequirements = useCallback(async () => {
-    if (!projectId) return;
-    
-    try {
-      setLoading(true);
-      // Fetch a high limit so projects with >100 requirements are not silently truncated.
-      // Coverage is fetched in parallel and is best-effort — a failure there must
-      // not block the list from rendering.
-      const [data, coverage] = await Promise.all([
-        requirementsAPI.getAll(parseInt(projectId), 0, 1000, {
-          milestoneId: linkedMilestoneId,
-        }),
-        requirementsAPI.coverage(parseInt(projectId)).catch(() => ({ items: [] })),
-      ]);
-      setRequirements(data);
-      const map: Record<number, RequirementCoverageItem> = {};
-      for (const item of coverage.items) map[item.requirement_id] = item;
-      setCoverageMap(map);
-    } catch (error) {
-      console.error('Error loading requirements:', error);
+    await requirementsQuery.refetch();
+  }, [requirementsQuery]);
+
+  // Surface a list-load failure as a toast (parity with the previous loader).
+  useEffect(() => {
+    if (requirementsQuery.isError) {
       toast({
         title: t('error'),
         description: t('failedToLoadRequirements'),
         variant: 'destructive',
       });
-    } finally {
-      setLoading(false);
     }
-  }, [projectId, linkedMilestoneId, t, toast]);
-
-  // Load requirements
-  useEffect(() => {
-    Promise.resolve().then(loadRequirements);
-  }, [loadRequirements]);
+  }, [requirementsQuery.isError, t, toast]);
 
   // ── Folders: load, tree helpers, CRUD ───────────────────────────────────
   const loadFolders = useCallback(async () => {
-    if (!projectId) return;
-    try {
-      setFolders(await requirementFoldersAPI.list(parseInt(projectId)));
-    } catch {
-      // Foldering is non-blocking; ignore load failures.
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    loadFolders();
-  }, [loadFolders]);
+    await foldersQuery.refetch();
+  }, [foldersQuery]);
 
   // If the active folder filter no longer exists (deleted elsewhere), fall back
   // to "all" so the list never gets stuck showing an empty, unfilterable view.

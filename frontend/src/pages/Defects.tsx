@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useQuery } from '@tanstack/react-query';
 import { defectsAPI, enumsAPI, getApiErrorMessage, projectAssignmentsAPI, requirementsAPI, testCasesAPI, testResultsAPI } from '@/lib/api';
+import { useDefectsList } from '@/hooks/queries/defects';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SavedFilters } from '@/components/SavedFilters';
 import { BulkEditDefectsDialog } from '@/components/BulkEditDefectsDialog';
@@ -241,10 +243,70 @@ export function Defects() {
   const { appName } = useAppName(false);
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   
+  const numericProjectId = projectId ? parseInt(projectId) : null;
   const [defects, setDefects] = useState<any[]>([]);
-  const [testCases, setTestCases] = useState<any[]>([]);
-  const [requirements, setRequirements] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+
+  const defectsQuery = useDefectsList(numericProjectId, linkedMilestoneId, numericProjectId != null);
+  const isLoading = numericProjectId != null && defectsQuery.isLoading;
+  const loadDefects = () => defectsQuery.refetch();
+
+  // Seed the fetched defect list into local state so the page's optimistic
+  // create/update/delete mutations keep working unchanged; manual reloads below
+  // become query refetches.
+  useEffect(() => {
+    if (defectsQuery.data) setDefects(defectsQuery.data);
+  }, [defectsQuery.data]);
+
+  // Secondary reference data for the create/edit + bulk-edit forms.
+  const formDataQuery = useQuery({
+    queryKey: ['defects', 'formData', numericProjectId],
+    queryFn: async () => {
+      const pid = numericProjectId as number;
+      const testCasesData = await loadAllProjectTestCases(pid);
+      let priorityColors: PriorityColorOption[] = [];
+      try {
+        const prioritiesData = await enumsAPI.getPriorities(pid);
+        priorityColors = (Array.isArray(prioritiesData) ? prioritiesData : [])
+          .map((priority: any) => ({
+            value: String(priority.name || '').trim().toLowerCase(),
+            label: String(priority.name || '').trim(),
+            color: isSafeHexColor(priority.color) ? priority.color : undefined,
+          }))
+          .filter((priority) => priority.value && priority.label);
+      } catch (priorityError) {
+        console.warn('Failed to load priority colors for defect form:', priorityError);
+      }
+      let requirementsList: any[] = [];
+      try {
+        const requirementsData = await loadAllProjectRequirements(pid);
+        requirementsList = Array.isArray(requirementsData) ? requirementsData : [];
+      } catch (requirementsError) {
+        console.warn('Failed to load requirements for defect linking:', requirementsError);
+      }
+      let members: Array<{ id: number; name: string }> = [];
+      try {
+        const rows = await projectAssignmentsAPI.listMembers(pid);
+        members = (rows as Array<any>).map((m) => ({
+          id: m.user_id,
+          name: m.full_name || m.username || m.email || `User ${m.user_id}`,
+        }));
+      } catch (memberError) {
+        console.warn('Failed to load project members for bulk edit:', memberError);
+      }
+      return {
+        testCases: Array.isArray(testCasesData) ? testCasesData : [],
+        requirements: requirementsList,
+        priorityColors,
+        members,
+      };
+    },
+    enabled: numericProjectId != null,
+  });
+  const testCases = formDataQuery.data?.testCases ?? [];
+  const requirements = formDataQuery.data?.requirements ?? [];
+  const projectMembers = formDataQuery.data?.members ?? [];
+  const priorityColorOptions = formDataQuery.data?.priorityColors ?? [];
+
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
@@ -260,7 +322,6 @@ export function Defects() {
   const [correctingSnapshotIds, setCorrectingSnapshotIds] = useState<Set<number>>(new Set());
   const [selectedDefectIds, setSelectedDefectIds] = useState<number[]>([]);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
-  const [projectMembers, setProjectMembers] = useState<Array<{ id: number; name: string }>>([]);
 
   const toggleDefectSelection = (defectId: number) => {
     setSelectedDefectIds((prev) =>
@@ -442,7 +503,6 @@ export function Defects() {
   const [defectTestCaseId, setDefectTestCaseId] = useState('none');
   const [defectRequirementId, setDefectRequirementId] = useState('none');
   const [defectTouchedFields, setDefectTouchedFields] = useState<Record<string, boolean>>({});
-  const [priorityColorOptions, setPriorityColorOptions] = useState<PriorityColorOption[]>([]);
 
   // Draft state
   const [draftStatus, setDraftStatus] = useState<'idle' | 'saved' | 'restored'>('idle');
@@ -536,109 +596,11 @@ export function Defects() {
     }
   }, [projectId, t, toast]);
 
-  const loadDefects = async () => {
-    if (!projectId) return;
-
-    try {
-      setIsLoading(true);
-      const defectsData = await defectsAPI.getAll(parseInt(projectId), 0, 500, {
-        milestoneId: linkedMilestoneId,
-      });
-      setDefects(defectsData);
-    } catch (error) {
-      console.error('Failed to load defects:', error);
-      toast({
-        title: t('error'),
-        description: t('failedToLoadDefects'),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Load defects and test cases
+  // Defects + form reference data are fetched via react-query above; integrations
+  // keep their own self-contained loader.
   useEffect(() => {
-    const loadData = async () => {
-      if (!projectId) return;
-
-      try {
-        setIsLoading(true);
-        
-        // Load defects
-        const defectsData = await defectsAPI.getAll(parseInt(projectId), 0, 500, {
-          milestoneId: linkedMilestoneId,
-        });
-        setDefects(defectsData);
-        
-        // Load test cases for dropdown
-        const numericProjectId = parseInt(projectId);
-        const testCasesData = await loadAllProjectTestCases(numericProjectId);
-        setTestCases(testCasesData);
-
-        try {
-          const prioritiesData = await enumsAPI.getPriorities(numericProjectId);
-          setPriorityColorOptions(
-            (Array.isArray(prioritiesData) ? prioritiesData : [])
-              .map((priority: any) => ({
-                value: String(priority.name || '').trim().toLowerCase(),
-                label: String(priority.name || '').trim(),
-                color: isSafeHexColor(priority.color) ? priority.color : undefined,
-              }))
-              .filter((priority) => priority.value && priority.label),
-          );
-        } catch (priorityError) {
-          console.warn('Failed to load priority colors for defect form:', priorityError);
-          setPriorityColorOptions([]);
-        }
-
-        // Load requirements for defect traceability links. Keep the defect
-        // list usable even if this secondary relationship data fails.
-        try {
-          const requirementsData = await loadAllProjectRequirements(numericProjectId);
-          setRequirements(Array.isArray(requirementsData) ? requirementsData : []);
-        } catch (requirementsError) {
-          console.warn('Failed to load requirements for defect linking:', requirementsError);
-          setRequirements([]);
-          toast({
-            title: t('error'),
-            description: getApiErrorMessage(requirementsError, t('failedToLoadRequirements')),
-            variant: 'destructive',
-          });
-        }
-
-        // Load project members so the bulk-edit assignee dropdown can show
-        // real users instead of relying on whatever ids happen to appear on
-        // existing defects.
-        try {
-          const members = await projectAssignmentsAPI.listMembers(parseInt(projectId));
-          setProjectMembers(
-            (members as Array<any>).map((m) => ({
-              id: m.user_id,
-              name: m.full_name || m.username || m.email || `User ${m.user_id}`,
-            })),
-          );
-        } catch (memberError) {
-          console.warn('Failed to load project members for bulk edit:', memberError);
-        }
-        
-        // Load integrations
-        fetchIntegrations();
-        
-      } catch (error) {
-        console.error('Failed to load data:', error);
-        toast({
-          title: t('error'),
-          description: t('failedToLoadData'),
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadData();
-  }, [projectId, linkedMilestoneId, fetchIntegrations, t, toast]);
+    fetchIntegrations();
+  }, [fetchIntegrations]);
 
   useEffect(() => {
     if (!routeDefectId || defects.length === 0) return;
