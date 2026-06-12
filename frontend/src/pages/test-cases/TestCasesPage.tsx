@@ -88,6 +88,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { customFieldsAPI } from '@/lib/api';
+import { useProjectTestCases } from '@/hooks/queries/testCasesPage';
 import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
 import { Section } from '@/types/testCases';
 import { ImportPreview } from '@/components/ImportPreview';
@@ -269,7 +270,6 @@ export function TestCases() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(false);
 
   // Bulk actions state
   const [selectedTestCases, setSelectedTestCases] = useState<number[]>([]);
@@ -360,8 +360,12 @@ export function TestCases() {
   const [selectedTestSuite, setSelectedTestSuite] = useState<string>('all');
   const [testTypes, setTestTypes] = useState<string[]>([]);
 
-  // API data state
+  // API data state. The list is fetched via react-query and seeded into local
+  // state so the page's optimistic mutations (delete/update/reorder) keep
+  // working; reloads after mutations become query refetches.
   const [apiTestCases, setApiTestCases] = useState<TestCase[]>([]);
+  const testCasesQuery = useProjectTestCases(currentProjectId, sortField, sortDirection, !!currentProjectId);
+  const loading = !!currentProjectId && testCasesQuery.isFetching;
   const mockSectionsRef = useRef<Section[]>([]);
 
   useEffect(() => {
@@ -682,10 +686,25 @@ export function TestCases() {
     }
   }, [isDialogOpen, isModalOpening]);
 
-  // Load test cases when project / sort changes; client-side filter handles selection.
+  // Seed fetched cases into local state + derive counts/types (the query keyed
+  // on project + sort handles refetching when those change).
   useEffect(() => {
-    loadTestCases();
-  }, [currentProjectId, sortField, sortDirection]);
+    if (!currentProjectId) {
+      setApiTestCases([]);
+      setTotalCount(0);
+      return;
+    }
+    if (testCasesQuery.data) {
+      const fetched = testCasesQuery.data.testCases;
+      setApiTestCases(fetched);
+      setTotalCount(testCasesQuery.data.count);
+      const types = Array.from(new Set([
+        ...testTypeOptions.map((option) => option.value),
+        ...extractTestTypes(fetched),
+      ])).sort();
+      setTestTypes(types);
+    }
+  }, [currentProjectId, testCasesQuery.data]);
 
   // Helper function to get all section IDs including children (recursive)
   const getAllSectionIds = (sectionId: string, sections: Section[]): number[] => {
@@ -711,43 +730,9 @@ export function TestCases() {
     return ids;
   };
 
+  // Reload = refetch the react-query list (the seed effect re-applies the data).
   const loadTestCases = async () => {
-    if (!currentProjectId) {
-      setApiTestCases([]);
-      setTotalCount(0);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Load ALL cases for the project; selection is applied client-side.
-      const [testCases, count] = await Promise.all([
-        testCasesAPI.getAll(
-          currentProjectId,
-          undefined,
-          undefined,
-          sortField,
-          sortDirection
-        ),
-        testCasesAPI.getCount(currentProjectId),
-      ]);
-
-      setApiTestCases(testCases);
-      setTotalCount(count.count);
-
-      const types = Array.from(new Set([
-        ...testTypeOptions.map((option) => option.value),
-        ...extractTestTypes(testCases),
-      ])).sort();
-      setTestTypes(types);
-    } catch (error) {
-      console.error('Failed to load test cases:', error);
-      setApiTestCases([]);
-      setTotalCount(0);
-    } finally {
-      setLoading(false);
-    }
+    await testCasesQuery.refetch();
   };
 
   // Extract unique test types from loaded test cases
