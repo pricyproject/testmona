@@ -56,6 +56,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useQuery } from '@tanstack/react-query';
 import { milestonesAPI, testPlansAPI } from '@/lib/api';
 import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -108,9 +109,21 @@ export function Milestones() {
   const { canWrite } = usePermissions();
   const currentProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
 
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [stats, setStats] = useState<MilestoneStats>(emptyStats);
-  const [isLoading, setIsLoading] = useState(true);
+  const milestonesQuery = useQuery({
+    queryKey: ['milestones', 'list', currentProjectId],
+    queryFn: async () => {
+      const [milestoneData, statsData] = await Promise.all([
+        loadAllMilestones(currentProjectId as number),
+        milestonesAPI.getStats(currentProjectId as number).catch(() => null),
+      ]);
+      const items = Array.isArray(milestoneData) ? milestoneData : [];
+      return { items, stats: statsData || calculateStats(items) };
+    },
+    enabled: currentProjectId != null && !Number.isNaN(currentProjectId),
+  });
+  const milestones: Milestone[] = milestonesQuery.data?.items ?? [];
+  const stats: MilestoneStats = milestonesQuery.data?.stats ?? emptyStats;
+  const isLoading = currentProjectId != null && !Number.isNaN(currentProjectId) && milestonesQuery.isLoading;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -122,58 +135,26 @@ export function Milestones() {
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [form, setForm] = useState<MilestoneFormState>(defaultForm);
   const [formError, setFormError] = useState<string | null>(null);
-  const loadRequestId = useRef(0);
-
   const loadMilestones = async () => {
-    if (!currentProjectId || Number.isNaN(currentProjectId)) {
-      setError(t('invalidProjectId'));
-      setMilestones([]);
-      setStats(emptyStats);
-      setIsLoading(false);
-      return;
-    }
-
-    const requestId = ++loadRequestId.current;
-    try {
-      setIsLoading(true);
-      setError(null);
-      const [milestoneData, statsData] = await Promise.all([
-        loadAllMilestones(currentProjectId),
-        milestonesAPI.getStats(currentProjectId).catch(() => null),
-      ]);
-
-      if (requestId !== loadRequestId.current) return;
-
-      const items = Array.isArray(milestoneData) ? milestoneData : [];
-      setMilestones(items);
-      setStats(statsData || calculateStats(items));
-    } catch (err: any) {
-      if (requestId !== loadRequestId.current) return;
-      console.error('Failed to load milestones:', err);
-      if (err.response?.status === 403) {
-        setError(t('permissionDeniedViewMilestones'));
-      } else if (err.response?.status === 404) {
-        setError(t('projectNotFound'));
-      } else {
-        setError(t('failedToLoadMilestones'));
-      }
-      setMilestones([]);
-      setStats(emptyStats);
-    } finally {
-      if (requestId === loadRequestId.current) {
-        setIsLoading(false);
-      }
-    }
+    await milestonesQuery.refetch();
   };
 
+  // Map list-load failures to the same status-specific messages, and the
+  // invalid-project case (parity with the previous imperative loader).
   useEffect(() => {
-    loadMilestones();
-    return () => {
-      // Invalidate any in-flight requests when project changes / unmount
-      loadRequestId.current++;
-    };
-
-  }, [currentProjectId]);
+    if (currentProjectId == null || Number.isNaN(currentProjectId)) {
+      setError(t('invalidProjectId'));
+      return;
+    }
+    if (milestonesQuery.isError) {
+      const status = (milestonesQuery.error as any)?.response?.status;
+      if (status === 403) setError(t('permissionDeniedViewMilestones'));
+      else if (status === 404) setError(t('projectNotFound'));
+      else setError(t('failedToLoadMilestones'));
+    } else if (milestonesQuery.isSuccess) {
+      setError(null);
+    }
+  }, [currentProjectId, milestonesQuery.status, milestonesQuery.isError, milestonesQuery.isSuccess, milestonesQuery.error, t]);
 
   const hasActiveFilters =
     searchQuery.trim() !== '' || statusFilter !== 'all' || healthFilter !== 'all';

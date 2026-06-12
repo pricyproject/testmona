@@ -18,7 +18,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
-import { getApiErrorMessage, requirementsAPI, projectAssignmentsAPI } from '@/lib/api';
+import { getApiErrorMessage, requirementsAPI } from '@/lib/api';
+import { useRequirementComments, useRequirementCommentMembers } from '@/hooks/queries/requirementComments';
 import type { RequirementComment } from '@/types';
 
 interface MemberOption {
@@ -249,9 +250,11 @@ export function RequirementComments({ requirementId, projectId, canComment }: Pr
   const { toast } = useToast();
   const currentUser = useAuthStore((s) => s.user);
 
-  const [comments, setComments] = useState<RequirementComment[]>([]);
-  const [members, setMembers] = useState<MemberOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const commentsQuery = useRequirementComments(requirementId, !!requirementId);
+  const membersQuery = useRequirementCommentMembers(projectId, !!projectId);
+  const comments: RequirementComment[] = commentsQuery.data ?? [];
+  const members: MemberOption[] = membersQuery.data ?? [];
+  const loading = commentsQuery.isLoading;
   const [body, setBody] = useState('');
   const [submittingTarget, setSubmittingTarget] = useState<'new' | number | null>(null);
   const [replyTo, setReplyTo] = useState<number | null>(null);
@@ -260,39 +263,15 @@ export function RequirementComments({ requirementId, projectId, canComment }: Pr
   const [showResolved, setShowResolved] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setComments(await requirementsAPI.listComments(requirementId));
-    } catch {
-      toast({ title: t('error'), description: t('commentsLoadFailed'), variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  }, [requirementId, t, toast]);
+    await commentsQuery.refetch();
+  }, [commentsQuery]);
 
-  useEffect(() => { load(); }, [load]);
-
-  // Project members power @mention autocomplete (best-effort).
+  // Surface a comments-load failure (parity with the previous loader).
   useEffect(() => {
-    let active = true;
-    projectAssignmentsAPI
-      .listMembers(projectId)
-      .then((rows: any[]) => {
-        if (!active) return;
-        const seen = new Set<number>();
-        const projectMembers = rows.reduce<MemberOption[]>((acc, r) => {
-          if (Number(r.project_id) !== projectId || !r.user_id || !r.username || seen.has(r.user_id)) {
-            return acc;
-          }
-          seen.add(r.user_id);
-          acc.push({ user_id: r.user_id, username: r.username, full_name: r.full_name });
-          return acc;
-        }, []);
-        setMembers(projectMembers);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [projectId]);
+    if (commentsQuery.isError) {
+      toast({ title: t('error'), description: t('commentsLoadFailed'), variant: 'destructive' });
+    }
+  }, [commentsQuery.isError, t, toast]);
 
   const memberUsernames = useMemo(
     () => new Set(members.map((m) => m.username.toLowerCase())),
