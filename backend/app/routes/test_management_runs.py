@@ -240,7 +240,11 @@ def register_run_routes(app):
 
         if "assigned_to" in changed_fields and db_test_run.assigned_to != old_assignee_id:
             _notify_test_run_assignee(db, db_test_run, current_user, assignee)
-        
+
+        # Notify milestone owner when test run completes
+        if changed_fields.get("status") == "completed":
+            _notify_milestone_owner(db, db_test_run, current_user)
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service

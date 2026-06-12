@@ -256,6 +256,36 @@ def _notify_test_run_assignee(db: Session, test_run: TestRun, assigned_by: User,
         logger.exception("Failed to create test run assignment notification", extra={"test_run_id": test_run.id, "assignee_id": assignee.id})
 
 
+def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User) -> None:
+    """Notify the milestone owner when a test run completes."""
+    if not test_run.milestone_id:
+        return
+
+    try:
+        milestone = db.query(models.Milestone).filter(models.Milestone.id == test_run.milestone_id).first()
+        if not milestone or not milestone.owner_id:
+            return
+
+        owner = db.query(models.User).filter(models.User.id == milestone.owner_id).first()
+        if not owner:
+            return
+
+        crud.create_notification(
+            db=db,
+            notification=schemas.NotificationCreate(
+                user_id=owner.id,
+                title="Test run completed",
+                message=f"{completed_by.full_name or completed_by.username} completed test run {test_run.name} for milestone {milestone.name}.",
+                type=models.NotificationType.INFO,
+                related_entity_type="test_run",
+                related_entity_id=test_run.id,
+            ),
+        )
+        logger.info("Created milestone owner notification", extra={"test_run_id": test_run.id, "milestone_id": milestone.id, "owner_id": owner.id})
+    except Exception:
+        logger.exception("Failed to create milestone owner notification", extra={"test_run_id": test_run.id, "milestone_id": test_run.milestone_id})
+
+
 __all__ = [
     "COMPLETED_RESULT_STATUSES",
     "_attach_test_run_progress",
