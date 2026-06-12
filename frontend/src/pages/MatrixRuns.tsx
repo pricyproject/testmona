@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,10 +34,17 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Grid3X3, Loader2, Plus, Trash2 } from 'lucide-react';
-import { matrixRunsAPI, testCasesAPI, testSuitesAPI, environmentsAPI, getApiErrorMessage } from '@/lib/api';
-import { MatrixRun, TestCase } from '@/types';
+import { getApiErrorMessage } from '@/lib/api';
+import { MatrixRun } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import {
+  useMatrixRuns,
+  useMatrixCreateOptions,
+  useSuiteCases,
+  useCreateMatrixRun,
+  useDeleteMatrixRun,
+} from '@/hooks/queries/matrixRuns';
 
 const statusBadgeClass = (status: string) => {
   if (status === 'completed') return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
@@ -70,79 +77,50 @@ export function MatrixRuns() {
   const { canWrite } = usePermissions();
   const currentProjectId = projectId ? parseInt(projectId) : null;
 
-  const [matrixRuns, setMatrixRuns] = useState<MatrixRun[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Create dialog state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [testSuites, setTestSuites] = useState<TestSuiteOption[]>([]);
-  const [environments, setEnvironments] = useState<EnvironmentOption[]>([]);
   const [selectedSuiteId, setSelectedSuiteId] = useState('');
-  const [suiteCases, setSuiteCases] = useState<TestCase[]>([]);
-  const [isLoadingCases, setIsLoadingCases] = useState(false);
   const [selectedCaseIds, setSelectedCaseIds] = useState<number[]>([]);
   const [selectedEnvIds, setSelectedEnvIds] = useState<number[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<MatrixRun | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadMatrixRuns = useCallback(async () => {
-    if (!currentProjectId) return;
-    try {
-      setIsLoading(true);
-      setError(null);
-      setMatrixRuns(await matrixRunsAPI.getAll(currentProjectId));
-    } catch (err) {
-      console.error('Failed to load matrix runs:', err);
-      setError(t('failedToLoadMatrixRuns'));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentProjectId, t]);
+  const matrixRunsQuery = useMatrixRuns(currentProjectId);
+  const matrixRuns = matrixRunsQuery.data ?? [];
+  const isLoading = matrixRunsQuery.isLoading;
 
+  const { suites: suitesQuery, environments: environmentsQuery } = useMatrixCreateOptions(
+    currentProjectId,
+    isCreateOpen,
+  );
+  const testSuites = suitesQuery.data ?? [];
+  const environments = environmentsQuery.data ?? [];
+
+  const suiteCasesQuery = useSuiteCases(currentProjectId, selectedSuiteId ? parseInt(selectedSuiteId) : null);
+  const suiteCases = suiteCasesQuery.data ?? [];
+  const isLoadingCases = suiteCasesQuery.isLoading;
+
+  const createMatrixRun = useCreateMatrixRun(currentProjectId);
+  const deleteMatrixRun = useDeleteMatrixRun(currentProjectId);
+  const isCreating = createMatrixRun.isPending;
+  const isDeleting = deleteMatrixRun.isPending;
+
+  // Pre-select every case in the chosen suite ("same suite across N envs");
+  // clear selection when no suite is chosen.
   useEffect(() => {
-    void loadMatrixRuns();
-  }, [loadMatrixRuns]);
-
-  useEffect(() => {
-    if (!isCreateOpen || !currentProjectId) return;
-    Promise.all([
-      testSuitesAPI.getAll(currentProjectId).catch(() => []),
-      environmentsAPI.getAll(currentProjectId).catch(() => []),
-    ]).then(([suites, envs]) => {
-      setTestSuites(suites);
-      setEnvironments(envs);
-    });
-  }, [isCreateOpen, currentProjectId]);
-
-  // Selecting a suite loads its cases, all pre-selected ("same suite across N envs").
-  useEffect(() => {
-    if (!selectedSuiteId || !currentProjectId) {
-      setSuiteCases([]);
+    if (!selectedSuiteId) {
       setSelectedCaseIds([]);
       return;
     }
-    let cancelled = false;
-    setIsLoadingCases(true);
-    testCasesAPI.getAll(currentProjectId, parseInt(selectedSuiteId), undefined, 'id', 'asc', 0, 500)
-      .then((cases: TestCase[]) => {
-        if (cancelled) return;
-        setSuiteCases(cases);
-        setSelectedCaseIds(cases.map((testCase) => testCase.id));
-      })
-      .catch(() => {
-        if (!cancelled) setSuiteCases([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingCases(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedSuiteId, currentProjectId]);
+    if (suiteCasesQuery.data) {
+      setSelectedCaseIds(suiteCasesQuery.data.map((testCase) => testCase.id));
+    }
+  }, [selectedSuiteId, suiteCasesQuery.data]);
+
+  const displayError = error ?? (matrixRunsQuery.isError ? t('failedToLoadMatrixRuns') : null);
 
   const allCasesSelected = suiteCases.length > 0 && selectedCaseIds.length === suiteCases.length;
 
@@ -162,7 +140,6 @@ export function MatrixRuns() {
     setName('');
     setDescription('');
     setSelectedSuiteId('');
-    setSuiteCases([]);
     setSelectedCaseIds([]);
     setSelectedEnvIds([]);
   };
@@ -173,10 +150,9 @@ export function MatrixRuns() {
 
   const handleCreate = async () => {
     if (!currentProjectId || !canSubmit) return;
+    setError(null);
     try {
-      setIsCreating(true);
-      setError(null);
-      const created = await matrixRunsAPI.create({
+      const created = await createMatrixRun.mutateAsync({
         project_id: currentProjectId,
         name: name.trim(),
         description: description.trim() || undefined,
@@ -189,23 +165,17 @@ export function MatrixRuns() {
     } catch (err) {
       console.error('Failed to create matrix run:', err);
       setError(getApiErrorMessage(err, t('failedToCreateMatrixRun')));
-    } finally {
-      setIsCreating(false);
     }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      setIsDeleting(true);
-      await matrixRunsAPI.delete(deleteTarget.id);
-      setMatrixRuns((prev) => prev.filter((run) => run.id !== deleteTarget.id));
+      await deleteMatrixRun.mutateAsync(deleteTarget.id);
       setDeleteTarget(null);
     } catch (err) {
       console.error('Failed to delete matrix run:', err);
       setError(getApiErrorMessage(err, t('failedToDeleteMatrixRun')));
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -352,10 +322,10 @@ export function MatrixRuns() {
         </Dialog>
       </div>
 
-      {error && (
+      {displayError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
           <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span>{displayError}</span>
         </div>
       )}
 

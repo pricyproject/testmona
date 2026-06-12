@@ -1,7 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useForm, Controller } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import {
+  useEnvironments,
+  useCreateEnvironment,
+  useUpdateEnvironment,
+  useDeleteEnvironment,
+} from '@/hooks/queries/environments';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,13 +43,28 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Server, Settings, Trash2, Copy, PlayCircle } from 'lucide-react';
-import { environmentsAPI } from '@/lib/api';
 
 const environmentTypeTranslationKeys: Record<string, string> = {
   development: 'environmentTypeDevelopment',
   staging: 'environmentTypeStaging',
   production: 'environmentTypeProduction',
   custom: 'environmentTypeCustom',
+};
+
+interface EnvironmentFormValues {
+  name: string;
+  description: string;
+  environment_type: string;
+  url: string;
+  database_url: string;
+}
+
+const defaultEnvironmentValues: EnvironmentFormValues = {
+  name: '',
+  description: '',
+  environment_type: 'development',
+  url: '',
+  database_url: '',
 };
 
 export function Environments() {
@@ -54,141 +76,85 @@ export function Environments() {
   const currentProjectId =
     projectId && Number.isInteger(routeProjectId) && routeProjectId > 0 ? routeProjectId : null;
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const envNameInputRef = useRef<HTMLInputElement>(null);
-  const [environments, setEnvironments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [envName, setEnvName] = useState('');
-  const [envDescription, setEnvDescription] = useState('');
-  const [envType, setEnvType] = useState('development');
-  const [envUrl, setEnvUrl] = useState('');
-  const [envDbUrl, setEnvDbUrl] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [environmentToDelete, setEnvironmentToDelete] = useState<{id: number, name: string} | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editingEnvironment, setEditingEnvironment] = useState<any>(null);
-  const [originalFormData, setOriginalFormData] = useState<any>(null);
 
+  const { data: environments = [], isLoading: loading } = useEnvironments(currentProjectId);
+  const createEnvironment = useCreateEnvironment(currentProjectId);
+  const updateEnvironment = useUpdateEnvironment(currentProjectId);
+  const deleteEnvironment = useDeleteEnvironment(currentProjectId);
+  const isSaving = createEnvironment.isPending || updateEnvironment.isPending;
+
+  const { register, handleSubmit, control, reset, setValue, setFocus, watch, formState } =
+    useForm<EnvironmentFormValues>({ defaultValues: defaultEnvironmentValues });
+  // formState.isDirty replaces the hand-rolled "hasUnsavedChanges" tracking:
+  // it is true once the user diverges from the form's baseline (empty for a new
+  // environment, the loaded values for an edit).
+  const { isDirty } = formState;
+  const envName = watch('name');
+  const envDescription = watch('description');
+
+  // Auto-focus the name input when the dialog opens.
   useEffect(() => {
-    loadEnvironments();
-  }, [currentProjectId]);
-
-  // Auto-focus on name input when dialog opens
-  useEffect(() => {
-    if (isDialogOpen && envNameInputRef.current) {
-      setTimeout(() => envNameInputRef.current?.focus(), 100);
+    if (isDialogOpen) {
+      const timer = setTimeout(() => setFocus('name'), 100);
+      return () => clearTimeout(timer);
     }
-  }, [isDialogOpen]);
+  }, [isDialogOpen, setFocus]);
 
-  // Track unsaved changes
-  useEffect(() => {
-    if (isEditing && originalFormData) {
-      // Compare with original data when editing
-      setHasUnsavedChanges(
-        envName !== originalFormData.name ||
-        envDescription !== originalFormData.description ||
-        envType !== originalFormData.environment_type ||
-        envUrl !== originalFormData.url ||
-        envDbUrl !== originalFormData.database_url
-      );
-    } else {
-      // For new environment, check if any field has content
-      setHasUnsavedChanges(
-        envName.trim() !== '' ||
-        envDescription.trim() !== '' ||
-        envUrl.trim() !== '' ||
-        envDbUrl.trim() !== ''
-      );
-    }
-  }, [envName, envDescription, envType, envUrl, envDbUrl, isEditing, originalFormData]);
-
-  const loadEnvironments = async () => {
-    if (!currentProjectId) {
-      setEnvironments([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const data = await environmentsAPI.getAll(currentProjectId);
-      setEnvironments(data);
-    } catch (error) {
-      console.error('Failed to load environments:', error);
-    } finally {
-      setLoading(false);
-    }
+  const resetFormState = () => {
+    reset(defaultEnvironmentValues);
+    setIsEditing(false);
+    setEditingEnvironment(null);
   };
 
-  const handleCreateEnvironment = async () => {
+  const onSubmit = (values: EnvironmentFormValues) => {
     if (!currentProjectId) {
       console.error('Cannot save environment without a selected project');
       return;
     }
 
-    try {
-      setIsCreating(true);
-      const environmentData = {
-        name: envName,
-        description: envDescription,
-        environment_type: envType,
-        project_id: currentProjectId,
-        config_data: {
-          url: envUrl,
-          database_url: envDbUrl,
-          credentials: { username: '', password: '' }
-        },
-        build_info: {
-          version: '1.0.0',
-          commit_hash: '',
-          build_date: new Date().toISOString()
-        },
-        is_active: true
-      };
+    const environmentData = {
+      name: values.name,
+      description: values.description,
+      environment_type: values.environment_type,
+      project_id: currentProjectId,
+      config_data: {
+        url: values.url,
+        database_url: values.database_url,
+        credentials: { username: '', password: '' }
+      },
+      build_info: {
+        version: '1.0.0',
+        commit_hash: '',
+        build_date: new Date().toISOString()
+      },
+      is_active: true
+    };
 
-      if (isEditing && editingEnvironment) {
-        // Update existing environment
-        const updatedEnvironment = await environmentsAPI.update(editingEnvironment.id, environmentData);
-        setEnvironments(environments.map(env => env.id === editingEnvironment.id ? updatedEnvironment : env));
-      } else {
-        // Create new environment
-        const createdEnvironment = await environmentsAPI.create(environmentData);
-        setEnvironments([...environments, createdEnvironment]);
-      }
-
-      setEnvName('');
-      setEnvDescription('');
-      setEnvType('development');
-      setEnvUrl('');
-      setEnvDbUrl('');
-      setHasUnsavedChanges(false);
+    const onSuccess = () => {
+      resetFormState();
       setIsDialogOpen(false);
-      setIsEditing(false);
-      setEditingEnvironment(null);
-    } catch (error) {
-      console.error('Failed to save environment:', error);
-    } finally {
-      setIsCreating(false);
+    };
+    const onError = (error: unknown) => console.error('Failed to save environment:', error);
+
+    if (isEditing && editingEnvironment) {
+      updateEnvironment.mutate({ id: editingEnvironment.id, environment: environmentData }, { onSuccess, onError });
+    } else {
+      createEnvironment.mutate(environmentData, { onSuccess, onError });
     }
   };
 
   const handleDialogClose = (open: boolean) => {
-    if (!open && hasUnsavedChanges) {
+    if (!open && isDirty) {
       setShowUnsavedDialog(true);
     } else {
       setIsDialogOpen(open);
       if (!open) {
-        setEnvName('');
-        setEnvDescription('');
-        setEnvType('development');
-        setEnvUrl('');
-        setEnvDbUrl('');
-        setHasUnsavedChanges(false);
-        setIsEditing(false);
-        setEditingEnvironment(null);
-        setOriginalFormData(null);
+        resetFormState();
       }
     }
   };
@@ -196,15 +162,7 @@ export function Environments() {
   const handleUnsavedConfirm = (discard: boolean) => {
     setShowUnsavedDialog(false);
     if (discard) {
-      setEnvName('');
-      setEnvDescription('');
-      setEnvType('development');
-      setEnvUrl('');
-      setEnvDbUrl('');
-      setHasUnsavedChanges(false);
-      setIsEditing(false);
-      setEditingEnvironment(null);
-      setOriginalFormData(null);
+      resetFormState();
       setIsDialogOpen(false);
     }
   };
@@ -212,7 +170,7 @@ export function Environments() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.ctrlKey && e.key === 'Enter') {
       e.preventDefault();
-      handleCreateEnvironment();
+      handleSubmit(onSubmit)();
     }
   };
 
@@ -222,19 +180,15 @@ export function Environments() {
     setDeleteDialogOpen(true);
   };
 
-  const confirmDeleteEnvironment = async () => {
+  const confirmDeleteEnvironment = () => {
     if (!environmentToDelete) return;
-    
-    try {
-      await environmentsAPI.delete(environmentToDelete.id);
-      setEnvironments(environments.filter(env => env.id !== environmentToDelete.id));
-      setDeleteDialogOpen(false);
-      setEnvironmentToDelete(null);
-    } catch (error) {
-      console.error('Failed to delete environment:', error);
-      setDeleteDialogOpen(false);
-      setEnvironmentToDelete(null);
-    }
+    deleteEnvironment.mutate(environmentToDelete.id, {
+      onError: (error) => console.error('Failed to delete environment:', error),
+      onSettled: () => {
+        setDeleteDialogOpen(false);
+        setEnvironmentToDelete(null);
+      },
+    });
   };
 
   const cancelDelete = () => {
@@ -252,32 +206,33 @@ export function Environments() {
   };
 
   const handleCloneEnvironment = (environment: any) => {
-    // Pre-fill the form with cloned environment data
-    setEnvName(t('environmentCloneName', { name: environment.name }));
-    setEnvDescription(environment.description || '');
-    setEnvType(environment.environment_type || 'development');
-    setEnvUrl(environment.config_data?.url || '');
-    setEnvDbUrl(environment.config_data?.database_url || '');
+    // Pre-fill the form with cloned environment data. Start from a clean
+    // baseline and set each field as dirty so closing without saving still
+    // warns about the unsaved clone.
+    reset(defaultEnvironmentValues);
+    setIsEditing(false);
+    setEditingEnvironment(null);
+    const dirty = { shouldDirty: true };
+    setValue('name', t('environmentCloneName', { name: environment.name }), dirty);
+    setValue('description', environment.description || '', dirty);
+    setValue('environment_type', environment.environment_type || 'development', dirty);
+    setValue('url', environment.config_data?.url || '', dirty);
+    setValue('database_url', environment.config_data?.database_url || '', dirty);
     setIsDialogOpen(true);
   };
 
   const handleEditEnvironment = (environment: any) => {
-    // Pre-fill the form with environment data for editing
-    setEnvName(environment.name);
-    setEnvDescription(environment.description || '');
-    setEnvType(environment.environment_type || 'development');
-    setEnvUrl(environment.config_data?.url || '');
-    setEnvDbUrl(environment.config_data?.database_url || '');
-    setIsEditing(true);
-    setEditingEnvironment(environment);
-    // Save original data for comparison
-    setOriginalFormData({
+    // Load the environment into the form as the new pristine baseline, so
+    // isDirty only becomes true once the user actually changes a field.
+    reset({
       name: environment.name,
       description: environment.description || '',
       environment_type: environment.environment_type || 'development',
       url: environment.config_data?.url || '',
-      database_url: environment.config_data?.database_url || ''
+      database_url: environment.config_data?.database_url || '',
     });
+    setIsEditing(true);
+    setEditingEnvironment(environment);
     setIsDialogOpen(true);
   };
 
@@ -323,17 +278,15 @@ export function Environments() {
                 </Label>
                 <div className="col-span-3 space-y-1">
                   <Input
-                    ref={envNameInputRef}
                     id="envName"
-                    value={envName}
-                    onChange={(e) => setEnvName(e.target.value)}
-                    className={envName.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
+                    className={(envName ?? '').trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
                     placeholder={t('enterEnvironmentName')}
                     maxLength={100}
+                    {...register('name', { required: true })}
                   />
                   <div className="flex justify-between gap-3 text-xs text-gray-500">
                     <span>{t('enterEnvironmentName')}</span>
-                    <span dir="ltr">{envName.length}/100</span>
+                    <span dir="ltr">{(envName ?? '').length}/100</span>
                   </div>
                 </div>
               </div>
@@ -344,15 +297,14 @@ export function Environments() {
                 <div className="col-span-3 space-y-1">
                   <Textarea
                     id="envDescription"
-                    value={envDescription}
-                    onChange={(e) => setEnvDescription(e.target.value)}
                     placeholder={t('describeEnvironment')}
                     rows={2}
                     maxLength={500}
+                    {...register('description')}
                   />
                   <div className="flex justify-between gap-3 text-xs text-gray-500">
                     <span>{t('describeEnvironment')}</span>
-                    <span dir="ltr">{envDescription.length}/500</span>
+                    <span dir="ltr">{(envDescription ?? '').length}/500</span>
                   </div>
                 </div>
               </div>
@@ -360,17 +312,23 @@ export function Environments() {
                 <Label htmlFor="envType" className="text-right rtl:text-left">
                   {t('type')}
                 </Label>
-                <Select value={envType} onValueChange={setEnvType}>
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="development">{t('development')}</SelectItem>
-                    <SelectItem value="staging">{t('staging')}</SelectItem>
-                    <SelectItem value="production">{t('production')}</SelectItem>
-                    <SelectItem value="custom">{t('custom')}</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="environment_type"
+                  control={control}
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="col-span-3">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="development">{t('development')}</SelectItem>
+                        <SelectItem value="staging">{t('staging')}</SelectItem>
+                        <SelectItem value="production">{t('production')}</SelectItem>
+                        <SelectItem value="custom">{t('custom')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="envUrl" className="text-right rtl:text-left">
@@ -378,10 +336,9 @@ export function Environments() {
                 </Label>
                 <Input
                   id="envUrl"
-                  value={envUrl}
-                  onChange={(e) => setEnvUrl(e.target.value)}
                   className="col-span-3"
                   placeholder="https://api.example.com"
+                  {...register('url')}
                 />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
@@ -390,10 +347,9 @@ export function Environments() {
                 </Label>
                 <Input
                   id="envDbUrl"
-                  value={envDbUrl}
-                  onChange={(e) => setEnvDbUrl(e.target.value)}
                   className="col-span-3"
                   placeholder="postgresql://localhost:5432/testdb"
+                  {...register('database_url')}
                 />
               </div>
             </div>
@@ -409,11 +365,11 @@ export function Environments() {
               </Button>
               <Button
                 type="submit"
-                onClick={handleCreateEnvironment}
-                disabled={!envName.trim() || isCreating}
+                onClick={handleSubmit(onSubmit)}
+                disabled={!(envName ?? '').trim() || isSaving}
                 className="transition-all duration-200"
               >
-                {isCreating ? t('creating') : (isEditing ? t('updateEnvironment') : t('createEnvironment'))}
+                {isSaving ? t('creating') : (isEditing ? t('updateEnvironment') : t('createEnvironment'))}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,59 +20,62 @@ interface AccountDeleteDialogProps {
   onSubmit: (password: string) => void | Promise<void>;
 }
 
+interface AccountDeleteFormValues {
+  password: string;
+  confirmText: string;
+}
+
 export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDeleteDialogProps) {
   const { t, isRTL } = useTranslation();
-  const [password, setPassword] = useState('');
-  const [confirmText, setConfirmText] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState(1); // 1: warning, 2: confirmation
-  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { register, handleSubmit, reset, setValue, watch, formState } = useForm<AccountDeleteFormValues>({
+    defaultValues: { password: '', confirmText: '' },
+  });
+  const isSubmitting = formState.isSubmitting;
+  const password = watch('password');
+  const confirmText = watch('confirmText');
 
   useEffect(() => {
     if (!isOpen) {
-      setPassword('');
-      setConfirmText('');
+      reset();
       setShowPassword(false);
       setError('');
       setStep(1);
-      setIsSubmitting(false);
     }
-  }, [isOpen]);
+  }, [isOpen, reset]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = async (values: AccountDeleteFormValues) => {
     setError('');
 
     if (step === 1) {
-      if (confirmText !== 'DELETE') {
+      if (values.confirmText !== 'DELETE') {
         setError(t('pleaseTypeDelete'));
         return;
       }
       // Clear the step-1 phrase so the step-2 field doesn't start pre-filled
       // with "DELETE" (which doesn't match the "DELETE MY ACCOUNT" it expects).
-      setConfirmText('');
+      setValue('confirmText', '');
       setStep(2);
       return;
     }
 
-    if (!password) {
+    if (!values.password) {
       setError(t('passwordRequired'));
       return;
     }
 
-    if (confirmText !== 'DELETE MY ACCOUNT') {
+    if (values.confirmText !== 'DELETE MY ACCOUNT') {
       setError(t('pleaseTypeDeleteMyAccount'));
       return;
     }
 
     try {
-      setIsSubmitting(true);
-      await onSubmit(password);
+      await onSubmit(values.password);
     } catch (error: any) {
       setError(error?.response?.data?.detail || error?.message || t('failedToDeleteAccount'));
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -85,7 +89,7 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
           </DialogTitle>
         </DialogHeader>
         {step === 1 && (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit(submit)} className="space-y-4">
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
@@ -98,10 +102,9 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                 {t('typeDeleteToContinue')}
               </p>
               <Input
-                value={confirmText}
-                onChange={(e) => setConfirmText(e.target.value)}
                 placeholder={t('typeDelete')}
                 className="text-center"
+                {...register('confirmText')}
               />
               {error && (
                 <div className="text-sm text-red-500" role="alert">{error}</div>
@@ -128,7 +131,7 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
         )}
 
         {step === 2 && (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit(submit)} className="space-y-4">
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
@@ -142,9 +145,8 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
                   placeholder={t('enterPassword')}
+                  {...register('password')}
                 />
                 <button
                   type="button"
@@ -161,10 +163,9 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
               <Label htmlFor="confirm">{t('typeDeleteMyAccount')}</Label>
               <Input
                 id="confirm"
-                value={confirmText}
-                onChange={(e) => setConfirmText(e.target.value)}
                 placeholder={t('deleteMyAccountConfirmationText')}
                 className="text-center"
+                {...register('confirmText')}
               />
             </div>
 
@@ -188,7 +189,7 @@ export function AccountDeleteDialog({ isOpen, onClose, onSubmit }: AccountDelete
                 variant="outline"
                 onClick={() => {
                   setStep(1);
-                  setConfirmText('');
+                  setValue('confirmText', '');
                 }}
                 disabled={isSubmitting}
               >

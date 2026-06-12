@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, UserPlus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -8,8 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAppName } from '@/hooks/useAppName';
 import { useTranslation } from '@/hooks/useTranslation';
-import { getApiErrorMessage, invitationsAPI } from '@/lib/api';
-import type { InvitationDetails } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api';
+import { useInvitation, useAcceptInvitation } from '@/hooks/queries/invitations';
+
+interface AcceptInviteFormValues {
+  username: string;
+  fullName: string;
+  password: string;
+  confirmPassword: string;
+}
 
 export function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
@@ -17,43 +25,27 @@ export function AcceptInvite() {
   const { appName, appLogoUrl } = useAppName(false);
   const { t, isRTL } = useTranslation();
 
-  const [invitation, setInvitation] = useState<InvitationDetails | null>(null);
-  const [username, setUsername] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const { data: invitation, isLoading, error: loadError } = useInvitation(token);
+  const acceptInvitation = useAcceptInvitation(token);
+  const isSubmitting = acceptInvitation.isPending;
+
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [accepted, setAccepted] = useState(false);
 
-  useEffect(() => {
-    const loadInvitation = async () => {
-      if (!token) {
-        setError(t('invalidInvitationLink'));
-        setIsLoading(false);
-        return;
-      }
+  const { register, handleSubmit } = useForm<AcceptInviteFormValues>({
+    defaultValues: { username: '', fullName: '', password: '', confirmPassword: '' },
+  });
 
-      setIsLoading(true);
-      setError('');
+  // Load-time error (bad/expired token or fetch failure) is surfaced separately
+  // from form-submit errors.
+  const loadErrorMessage = !token
+    ? t('invalidInvitationLink')
+    : loadError
+      ? getApiErrorMessage(loadError, t('failedToLoadInvitation'))
+      : '';
 
-      try {
-        const invitationDetails = await invitationsAPI.getByToken(token);
-        setInvitation(invitationDetails);
-      } catch (err) {
-        setError(getApiErrorMessage(err, t('failedToLoadInvitation')));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadInvitation();
-  }, [token, t]);
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const onSubmit = async (values: AcceptInviteFormValues) => {
     setError('');
 
     if (!token) {
@@ -61,35 +53,32 @@ export function AcceptInvite() {
       return;
     }
 
-    if (!username.trim() || !password || !confirmPassword) {
+    const username = values.username.trim();
+    if (!username || !values.password || !values.confirmPassword) {
       setError(t('allFieldsRequired'));
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (values.password !== values.confirmPassword) {
       setError(t('passwordsDoNotMatch'));
       return;
     }
 
-    if (password.length < 6) {
+    if (values.password.length < 6) {
       setError(t('passwordMinLength', { min: 6 }));
       return;
     }
 
-    setIsSubmitting(true);
-
     try {
-      await invitationsAPI.accept(token, {
+      await acceptInvitation.mutateAsync({
         token,
-        username: username.trim(),
-        password,
-        full_name: fullName.trim() || undefined,
+        username,
+        password: values.password,
+        full_name: values.fullName.trim() || undefined,
       });
       setAccepted(true);
     } catch (err) {
       setError(getApiErrorMessage(err, t('failedToAcceptInvitation')));
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -122,7 +111,7 @@ export function AcceptInvite() {
         <div className="space-y-6 text-center">
           <AlertCircle className="mx-auto h-12 w-12 text-red-600" />
           <Alert variant="destructive">
-            <AlertDescription>{error || t('failedToLoadInvitation')}</AlertDescription>
+            <AlertDescription>{loadErrorMessage || t('failedToLoadInvitation')}</AlertDescription>
           </Alert>
           <Button variant="outline" className="w-full" onClick={() => navigate('/login')}>
             {t('backToSignIn')}
@@ -132,7 +121,7 @@ export function AcceptInvite() {
     }
 
     return (
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -149,12 +138,10 @@ export function AcceptInvite() {
           <Input
             id="username"
             type="text"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
             placeholder={t('enterUsername')}
-            required
             disabled={isSubmitting}
             className="mt-1"
+            {...register('username')}
           />
         </div>
 
@@ -163,11 +150,10 @@ export function AcceptInvite() {
           <Input
             id="fullName"
             type="text"
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
             placeholder={t('enterFullName')}
             disabled={isSubmitting}
             className="mt-1"
+            {...register('fullName')}
           />
         </div>
 
@@ -177,12 +163,10 @@ export function AcceptInvite() {
             <Input
               id="password"
               type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
               placeholder={t('enterPassword')}
-              required
               disabled={isSubmitting}
               className={isRTL ? 'pl-10' : 'pr-10'}
+              {...register('password')}
             />
             <Button
               type="button"
@@ -208,12 +192,10 @@ export function AcceptInvite() {
             <Input
               id="confirmPassword"
               type={showPassword ? 'text' : 'password'}
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
               placeholder={t('confirmPassword')}
-              required
               disabled={isSubmitting}
               className={isRTL ? 'pl-10' : 'pr-10'}
+              {...register('confirmPassword')}
             />
             <Button
               type="button"

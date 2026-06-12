@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -51,17 +52,31 @@ function passwordScore(password: string): 0 | 1 | 2 {
   return 1;
 }
 
+interface SetupFormValues {
+  username: string;
+  email: string;
+  fullName: string;
+  password: string;
+  confirmPassword: string;
+  setupToken: string;
+}
+
 export function Setup() {
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [setupToken, setSetupToken] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+
+  const { register, handleSubmit, watch, formState } = useForm<SetupFormValues>({
+    defaultValues: { username: '', email: '', fullName: '', password: '', confirmPassword: '', setupToken: '' },
+  });
+  const isLoading = formState.isSubmitting;
+  // Watch the fields that drive the live strength meter / match indicators and
+  // the submit-enabled state.
+  const username = watch('username');
+  const email = watch('email');
+  const password = watch('password');
+  const confirmPassword = watch('confirmPassword');
+  const setupToken = watch('setupToken');
 
   const { appName, appLogoUrl } = useAppName(false);
   const { t, isRTL, language } = useTranslation();
@@ -93,39 +108,40 @@ export function Setup() {
     meetsPolicy(password) &&
     password === confirmPassword;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (values: SetupFormValues) => {
     setError('');
 
-    if (!username.trim() || !email.trim() || !password || !confirmPassword || !setupToken.trim()) {
+    const trimmedUsername = values.username.trim();
+    const trimmedEmail = values.email.trim();
+    const trimmedFullName = values.fullName.trim();
+    const trimmedToken = values.setupToken.trim();
+
+    if (!trimmedUsername || !trimmedEmail || !values.password || !values.confirmPassword || !trimmedToken) {
       setError(t('allFieldsRequired'));
       return;
     }
-    if (password !== confirmPassword) {
+    if (values.password !== values.confirmPassword) {
       setError(t('passwordsDoNotMatch'));
       return;
     }
-    if (!meetsPolicy(password)) {
+    if (!meetsPolicy(values.password)) {
       setError(t('passwordPolicyHint'));
       return;
     }
 
-    setIsLoading(true);
-
     // Step 1: create the first account (token-gated). A failure here is a real
     // error to show (bad token, weak password, taken username, ...).
     try {
-      await authAPI.completeSetup(username.trim(), email.trim(), fullName.trim(), password, setupToken.trim());
+      await authAPI.completeSetup(trimmedUsername, trimmedEmail, trimmedFullName, values.password, trimmedToken);
     } catch (err) {
       setError(getApiErrorMessage(err, t('registrationFailed')));
-      setIsLoading(false);
       return;
     }
 
     // Step 2: the account now exists. Try to log straight in; if that hiccups,
     // don't show a scary error — the admin was created, just send them to login.
     try {
-      await login(email.trim(), password);
+      await login(trimmedEmail, values.password);
       navigate('/', { replace: true });
     } catch {
       navigate('/login?registered=true', { replace: true });
@@ -188,7 +204,7 @@ export function Setup() {
             <p className="text-sm text-muted-foreground">{t('setupSubtitle')}</p>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
@@ -205,15 +221,13 @@ export function Setup() {
                   <Input
                     id="setupToken"
                     type="text"
-                    value={setupToken}
-                    onChange={(e) => setSetupToken(e.target.value)}
                     placeholder={t('setupTokenPlaceholder')}
-                    required
                     autoFocus
                     autoComplete="off"
                     spellCheck={false}
                     disabled={isLoading}
                     className={cn(padStart, 'font-mono text-sm')}
+                    {...register('setupToken')}
                   />
                 </div>
                 <p className="mt-1.5 text-xs text-muted-foreground">{t('setupTokenHint')}</p>
@@ -229,13 +243,11 @@ export function Setup() {
                   <Input
                     id="username"
                     type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
                     placeholder={t('enterUsername')}
-                    required
                     autoComplete="username"
                     disabled={isLoading}
                     className={padStart}
+                    {...register('username')}
                   />
                 </div>
               </div>
@@ -253,12 +265,11 @@ export function Setup() {
                   <Input
                     id="fullName"
                     type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
                     placeholder={t('enterFullName')}
                     autoComplete="name"
                     disabled={isLoading}
                     className={padStart}
+                    {...register('fullName')}
                   />
                 </div>
               </div>
@@ -273,13 +284,11 @@ export function Setup() {
                   <Input
                     id="email"
                     type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
                     placeholder={t('enterEmail')}
-                    required
                     autoComplete="email"
                     disabled={isLoading}
                     className={padStart}
+                    {...register('email')}
                   />
                 </div>
               </div>
@@ -294,13 +303,11 @@ export function Setup() {
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
                     placeholder={t('enterPassword')}
-                    required
                     autoComplete="new-password"
                     disabled={isLoading}
                     className={cn(padStart, padEnd)}
+                    {...register('password')}
                   />
                   <button
                     type="button"
@@ -359,10 +366,7 @@ export function Setup() {
                   <Input
                     id="confirmPassword"
                     type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder={t('confirmPassword')}
-                    required
                     autoComplete="new-password"
                     disabled={isLoading}
                     className={cn(
@@ -371,6 +375,7 @@ export function Setup() {
                       passwordsMismatch && 'border-red-500 focus-visible:ring-red-500',
                       passwordsMatch && 'border-green-500/60',
                     )}
+                    {...register('confirmPassword')}
                   />
                   <button
                     type="button"

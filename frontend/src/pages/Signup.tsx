@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,25 +11,35 @@ import { useAppName } from '@/hooks/useAppName';
 import { authAPI, getApiErrorMessage } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
 
+interface SignupFormValues {
+  username: string;
+  email: string;
+  fullName: string;
+  password: string;
+  confirmPassword: string;
+}
+
 export function Signup() {
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const { appName, appLogoUrl } = useAppName(false);
   const { t, isRTL } = useTranslation();
-  
+
+  const { register, handleSubmit, formState } = useForm<SignupFormValues>({
+    defaultValues: { username: '', email: '', fullName: '', password: '', confirmPassword: '' },
+  });
+  const isLoading = formState.isSubmitting;
+
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (values: SignupFormValues) => {
     setError('');
+    const username = values.username.trim();
+    const email = values.email.trim();
+    const fullName = values.fullName.trim();
+    const { password, confirmPassword } = values;
 
-    if (!username.trim() || !email.trim() || !password || !confirmPassword) {
+    if (!username || !email || !password || !confirmPassword) {
       setError(t('allFieldsRequired'));
       return;
     }
@@ -43,15 +54,11 @@ export function Signup() {
       return;
     }
 
-    setIsLoading(true);
-
     try {
-      await authAPI.signup(username.trim(), email.trim(), fullName.trim(), password);
+      await authAPI.signup(username, email, fullName, password);
       navigate('/login?registered=true');
     } catch (err) {
       setError(getApiErrorMessage(err, t('registrationFailed')));
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -71,7 +78,7 @@ export function Signup() {
             <CardTitle className="text-center">{t('signUp')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
@@ -83,12 +90,10 @@ export function Signup() {
                 <Input
                   id="username"
                   type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
                   placeholder={t('enterUsername')}
-                  required
                   disabled={isLoading}
                   className="mt-1"
+                  {...register('username')}
                 />
               </div>
 
@@ -97,11 +102,10 @@ export function Signup() {
                 <Input
                   id="fullName"
                   type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
                   placeholder={t('enterFullName')}
                   disabled={isLoading}
                   className="mt-1"
+                  {...register('fullName')}
                 />
               </div>
 
@@ -110,12 +114,10 @@ export function Signup() {
                 <Input
                   id="email"
                   type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
                   placeholder={t('enterEmail')}
-                  required
                   disabled={isLoading}
                   className="mt-1"
+                  {...register('email')}
                 />
               </div>
 
@@ -125,12 +127,10 @@ export function Signup() {
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
                     placeholder={t('enterPassword')}
-                    required
                     disabled={isLoading}
                     className={isRTL ? 'pl-10' : 'pr-10'}
+                    {...register('password')}
                   />
                   <button
                     type="button"
@@ -150,12 +150,10 @@ export function Signup() {
                   <Input
                     id="confirmPassword"
                     type={showPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder={t('confirmPassword')}
-                    required
                     disabled={isLoading}
                     className={isRTL ? 'pl-10' : 'pr-10'}
+                    {...register('confirmPassword')}
                   />
                   <button
                     type="button"

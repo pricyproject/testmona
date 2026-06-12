@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,67 +20,64 @@ interface PasswordChangeDialogProps {
   onSubmit: (oldPassword: string, newPassword: string) => void | Promise<void>;
 }
 
+interface PasswordChangeFormValues {
+  oldPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export function PasswordChangeDialog({ isOpen, onClose, onSubmit }: PasswordChangeDialogProps) {
   const { t, isRTL } = useTranslation();
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showOldPassword, setShowOldPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { register, handleSubmit, reset, formState } = useForm<PasswordChangeFormValues>({
+    defaultValues: { oldPassword: '', newPassword: '', confirmPassword: '' },
+  });
+  const isSubmitting = formState.isSubmitting;
 
   useEffect(() => {
     if (!isOpen) {
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      reset();
       setShowOldPassword(false);
       setShowNewPassword(false);
       setShowConfirmPassword(false);
       setError('');
-      setIsSubmitting(false);
     }
-  }, [isOpen]);
+  }, [isOpen, reset]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Validation kept inline (single error banner, ordered messages) — RHF runs
+  // this only after its own field rules pass, and tracks isSubmitting for us.
+  const submit = async ({ oldPassword, newPassword, confirmPassword }: PasswordChangeFormValues) => {
     setError('');
 
-    // Validation
     if (!oldPassword) {
       setError(t('oldPasswordRequired'));
       return;
     }
-
     if (!newPassword) {
       setError(t('newPasswordRequired'));
       return;
     }
-
     if (newPassword.length < 8) {
       setError(t('newPasswordMinLength'));
       return;
     }
-
     if (newPassword === oldPassword) {
       setError(t('newPasswordDifferent'));
       return;
     }
-
     if (newPassword !== confirmPassword) {
       setError(t('passwordsDoNotMatch'));
       return;
     }
 
     try {
-      setIsSubmitting(true);
       await onSubmit(oldPassword, newPassword);
     } catch (error: any) {
       setError(error?.response?.data?.detail || error?.message || t('failedToChangePassword'));
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -93,16 +91,15 @@ export function PasswordChangeDialog({ isOpen, onClose, onSubmit }: PasswordChan
           </DialogTitle>
           <DialogDescription>{t('enterNewPassword')}</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit(submit)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="old-password">{t('oldPassword')}</Label>
             <div className="relative">
               <Input
                 id="old-password"
                 type={showOldPassword ? 'text' : 'password'}
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
                 placeholder={t('enterOldPassword')}
+                {...register('oldPassword')}
               />
               <button
                 type="button"
@@ -121,9 +118,8 @@ export function PasswordChangeDialog({ isOpen, onClose, onSubmit }: PasswordChan
               <Input
                 id="new-password"
                 type={showNewPassword ? 'text' : 'password'}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
                 placeholder={t('enterNewPassword')}
+                {...register('newPassword')}
               />
               <button
                 type="button"
@@ -142,9 +138,8 @@ export function PasswordChangeDialog({ isOpen, onClose, onSubmit }: PasswordChan
               <Input
                 id="confirm-password"
                 type={showConfirmPassword ? 'text' : 'password'}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder={t('confirmNewPassword')}
+                {...register('confirmPassword')}
               />
               <button
                 type="button"

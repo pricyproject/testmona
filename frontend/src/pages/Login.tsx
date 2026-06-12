@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,16 +14,23 @@ import { resolveSafeRedirect } from '@/utils/safeRedirect';
 
 const normalizeTwoFactorInput = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
 
+interface LoginFormValues {
+  usernameOrEmail: string;
+  password: string;
+  twoFactorCode: string;
+}
+
 export function Login() {
-  const [usernameOrEmail, setUsernameOrEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [twoFactorCode, setTwoFactorCode] = useState('');
   const [requiresTwoFactor, setRequiresTwoFactor] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [signupEnabled, setSignupEnabled] = useState(true);
-  const twoFactorInputRef = useRef<HTMLInputElement | null>(null);
+
+  const { register, handleSubmit, setValue, setFocus, watch, formState } = useForm<LoginFormValues>({
+    defaultValues: { usernameOrEmail: '', password: '', twoFactorCode: '' },
+  });
+  const isLoading = formState.isSubmitting;
+  const usernameOrEmail = watch('usernameOrEmail');
 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -30,15 +38,18 @@ export function Login() {
   const { t, isRTL } = useTranslation();
   const { appName, appLogoUrl } = useAppName(false);
 
+  // Normalise the 2FA code as the user types (uppercase, alphanumeric, max 16).
+  const twoFactorField = register('twoFactorCode', { required: requiresTwoFactor });
+
   useEffect(() => {
     checkSignupEnabled();
   }, []);
 
   useEffect(() => {
     if (requiresTwoFactor) {
-      window.setTimeout(() => twoFactorInputRef.current?.focus(), 0);
+      window.setTimeout(() => setFocus('twoFactorCode'), 0);
     }
-  }, [requiresTwoFactor]);
+  }, [requiresTwoFactor, setFocus]);
 
   const checkSignupEnabled = async () => {
     try {
@@ -54,32 +65,31 @@ export function Login() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (values: LoginFormValues) => {
     setError('');
-    setIsLoading(true);
-
     try {
-      const loginResult = await login(usernameOrEmail, password, requiresTwoFactor ? twoFactorCode : undefined);
+      const loginResult = await login(
+        values.usernameOrEmail,
+        values.password,
+        requiresTwoFactor ? values.twoFactorCode : undefined,
+      );
       if (loginResult === 'requires_2fa') {
         setRequiresTwoFactor(true);
-        setTwoFactorCode('');
+        setValue('twoFactorCode', '');
         return;
       }
       navigate(resolveSafeRedirect(searchParams.get('next')) || '/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('loginFailed'));
       if (requiresTwoFactor) {
-        setTwoFactorCode('');
+        setValue('twoFactorCode', '');
       }
-    } finally {
-      setIsLoading(false);
     }
   };
 
   const handleBackToCredentials = () => {
     setRequiresTwoFactor(false);
-    setTwoFactorCode('');
+    setValue('twoFactorCode', '');
     setError('');
   };
 
@@ -99,7 +109,7 @@ export function Login() {
             <CardTitle className="text-center">{requiresTwoFactor ? t('twoFactorChallengeTitle') : t('welcomeBack')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
@@ -114,12 +124,10 @@ export function Login() {
                       <Input
                         id="username-or-email"
                         type="text"
-                        value={usernameOrEmail}
-                        onChange={(e) => setUsernameOrEmail(e.target.value)}
                         placeholder={t('enterEmailOrUsername')}
-                        required
                         disabled={isLoading}
                         autoComplete="username"
+                        {...register('usernameOrEmail', { required: true })}
                       />
                     </div>
 
@@ -129,13 +137,11 @@ export function Login() {
                         <Input
                           id="password"
                           type={showPassword ? 'text' : 'password'}
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
                           placeholder={t('enterPassword')}
-                          required
                           disabled={isLoading}
                           autoComplete="current-password"
                           className={isRTL ? 'pl-10' : 'pr-10'}
+                          {...register('password', { required: true })}
                         />
                         <Button
                           type="button"
@@ -170,18 +176,19 @@ export function Login() {
                     <div>
                       <Label htmlFor="two-factor-code">{t('twoFactorCode')}</Label>
                       <Input
-                        ref={twoFactorInputRef}
                         id="two-factor-code"
                         type="text"
                         inputMode="text"
                         autoComplete="one-time-code"
-                        value={twoFactorCode}
-                        onChange={(e) => setTwoFactorCode(normalizeTwoFactorInput(e.target.value))}
                         placeholder={t('enterTwoFactorOrRecoveryCode')}
-                        required
                         disabled={isLoading}
                         className="text-center tracking-[0.2em]"
                         dir="ltr"
+                        {...twoFactorField}
+                        onChange={(e) => {
+                          e.target.value = normalizeTwoFactorInput(e.target.value);
+                          twoFactorField.onChange(e);
+                        }}
                       />
                       <p className="mt-1 text-sm text-muted-foreground">{t('twoFactorLoginRequired')}</p>
                     </div>
