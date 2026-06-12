@@ -63,7 +63,7 @@ SQLite is the zero-config default. To use **MariaDB/MySQL** (or PostgreSQL), set
 # MariaDB / MySQL (driver: PyMySQL, already in requirements)
 DATABASE_URL="mysql+pymysql://user:password@localhost:3306/test_management?charset=utf8mb4"
 # PostgreSQL
-DATABASE_URL="postgresql+psycopg://user:password@localhost:5432/test_management"
+DATABASE_URL="postgresql+psycopg2://user:password@localhost:5432/test_management"
 ```
 
 ## Docker
