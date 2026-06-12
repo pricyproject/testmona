@@ -55,6 +55,31 @@ def _max_seq_for_project(connection, table, project_id) -> int:
     return int(value or 0)
 
 
+def _lock_project_for_seq(connection, project_id) -> None:
+    """Serialise per-project seq allocation across concurrent transactions.
+
+    ``MAX(project_seq)+1`` is racy *between* transactions: two concurrent inserts
+    into the same project both read the same max and collide on the unique
+    ``(project_id, project_seq)`` index — surfacing as a raw 500 IntegrityError
+    under concurrent CSV import / CI ingestion / AI generation. Taking a row lock
+    on the owning ``projects`` row before reading the max forces those
+    transactions to serialise their allocation, so each sees the other's
+    committed rows and ``MAX+1`` is always correct. The lock is held only until
+    the surrounding transaction ends.
+
+    No-op on SQLite (which omits ``FOR UPDATE`` and already serialises writers at
+    the database level) and when there is no owning project.
+    """
+    if project_id is None:
+        return
+    from .. import models
+
+    projects = models.Project.__table__
+    connection.execute(
+        select(projects.c.id).where(projects.c.id == project_id).with_for_update()
+    ).first()
+
+
 def _allocate_seq(connection, target, project_id) -> int:
     """Next per-project seq, including siblings already queued in this same flush.
 
@@ -63,9 +88,13 @@ def _allocate_seq(connection, target, project_id) -> int:
     any INSERT lands, so they'd read the same DB max and collide on the unique
     ``(project_id, project_seq)`` index. We therefore also consider pending session
     rows that were processed earlier in this flush and already carry a seq.
+
+    Cross-transaction races are handled separately by ``_lock_project_for_seq``,
+    which serialises allocation between concurrent transactions on server backends.
     """
     from sqlalchemy.orm import object_session
 
+    _lock_project_for_seq(connection, project_id)
     next_seq = _max_seq_for_project(connection, target.__table__, project_id)
     session = object_session(target)
     if session is not None:
