@@ -338,8 +338,18 @@ export interface TestAssetHealthSummary {
   total_cases: number;
   active_debt_items: number;
   resolved_debt_items: number;
+  affected_cases: number;
+  healthy_cases: number;
+  health_score: number;
   by_debt_type: Record<string, number>;
   by_severity: Record<string, number>;
+  by_action: Record<string, number>;
+  last_detected_at?: string | null;
+}
+
+export interface TestDebtBulkResolveResult {
+  resolved: number;
+  summary: TestAssetHealthSummary;
 }
 
 export interface TestAssetDebtDetectionResult {

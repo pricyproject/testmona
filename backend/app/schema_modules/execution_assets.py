@@ -144,8 +144,13 @@ class TestAssetHealthSummary(BaseModel):
     total_cases: int
     active_debt_items: int
     resolved_debt_items: int
+    affected_cases: int = 0
+    healthy_cases: int = 0
+    health_score: int = 100
     by_debt_type: Dict[str, int]
     by_severity: Dict[str, int]
+    by_action: Dict[str, int] = {}
+    last_detected_at: Optional[datetime] = None
 
 
 class TestAssetDebtDetectionResult(BaseModel):
@@ -153,6 +158,15 @@ class TestAssetDebtDetectionResult(BaseModel):
     updated: int
     auto_resolved: int
     active_debt_items: int
+    summary: TestAssetHealthSummary
+
+
+class TestDebtBulkResolve(BaseModel):
+    item_ids: List[int] = Field(..., min_length=1, max_length=500)
+
+
+class TestDebtBulkResolveResult(BaseModel):
+    resolved: int
     summary: TestAssetHealthSummary
 
 class SharedStepBase(BaseModel):

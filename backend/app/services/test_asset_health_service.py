@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Optional
 
-from sqlalchemy import case, func, or_
+from sqlalchemy import case, distinct, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -32,6 +32,27 @@ DEBT_CONFIG = {
 }
 
 REFERENCE_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9]*-\d+$", flags=re.IGNORECASE)
+
+# Relative weights used to turn a raw debt count into a severity-aware
+# "health score". A single critical item hurts the score far more than a
+# handful of low ones, which keeps the headline number honest.
+SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1}
+_MAX_SEVERITY_WEIGHT = max(SEVERITY_WEIGHTS.values())
+
+
+def _compute_health_score(total_cases: int, by_severity: Dict[str, int]) -> int:
+    """Return a 0-100 score: 100 means a pristine library, 0 means everything rotten.
+
+    The penalty is the severity-weighted active-debt total normalised against the
+    worst plausible case (every test case carrying a critical item), so the score
+    scales sensibly whether a project has 10 cases or 10,000.
+    """
+    if total_cases <= 0:
+        return 100
+    penalty = sum(SEVERITY_WEIGHTS.get(sev, 1) * count for sev, count in by_severity.items())
+    worst = total_cases * _MAX_SEVERITY_WEIGHT
+    score = 100.0 * (1.0 - penalty / worst) if worst else 100.0
+    return max(0, min(100, round(score)))
 
 
 @dataclass(frozen=True)
@@ -131,30 +152,62 @@ def list_test_debt_items(
 
 def get_health_summary(db: Session, project_id: int) -> dict:
     total_cases = _active_case_query(db, project_id).count()
-    active_rows = db.query(TestDebtItem.debt_type, TestDebtItem.severity, func.count(TestDebtItem.id)).filter(
+
+    # One grouped pass yields every active-debt breakdown we need
+    # (by type, severity, and suggested action) instead of three round-trips.
+    active_rows = db.query(
+        TestDebtItem.debt_type,
+        TestDebtItem.severity,
+        TestDebtItem.suggested_action,
+        func.count(TestDebtItem.id),
+    ).filter(
         TestDebtItem.project_id == project_id,
         TestDebtItem.resolved_at.is_(None),
-    ).group_by(TestDebtItem.debt_type, TestDebtItem.severity).all()
+    ).group_by(
+        TestDebtItem.debt_type,
+        TestDebtItem.severity,
+        TestDebtItem.suggested_action,
+    ).all()
+
+    affected_cases = db.query(func.count(distinct(TestDebtItem.test_case_id))).filter(
+        TestDebtItem.project_id == project_id,
+        TestDebtItem.resolved_at.is_(None),
+    ).scalar() or 0
+
     resolved_count = db.query(func.count(TestDebtItem.id)).filter(
         TestDebtItem.project_id == project_id,
         TestDebtItem.resolved_at.is_not(None),
     ).scalar() or 0
 
+    last_detected_at = db.query(
+        func.max(func.coalesce(TestDebtItem.updated_at, TestDebtItem.created_at))
+    ).filter(
+        TestDebtItem.project_id == project_id,
+        TestDebtItem.auto_detected.is_(True),
+    ).scalar()
+
     by_debt_type: Dict[str, int] = {}
     by_severity: Dict[str, int] = {}
+    by_action: Dict[str, int] = {}
     active_count = 0
-    for debt_type, severity, count in active_rows:
+    for debt_type, severity, suggested_action, count in active_rows:
         count_value = int(count or 0)
         active_count += count_value
         by_debt_type[debt_type] = by_debt_type.get(debt_type, 0) + count_value
         by_severity[severity] = by_severity.get(severity, 0) + count_value
+        by_action[suggested_action] = by_action.get(suggested_action, 0) + count_value
 
     return {
         "total_cases": total_cases,
         "active_debt_items": active_count,
         "resolved_debt_items": int(resolved_count),
+        "affected_cases": int(affected_cases),
+        "healthy_cases": max(0, total_cases - int(affected_cases)),
+        "health_score": _compute_health_score(total_cases, by_severity),
         "by_debt_type": by_debt_type,
         "by_severity": by_severity,
+        "by_action": by_action,
+        "last_detected_at": _as_aware(last_detected_at),
     }
 
 
@@ -195,6 +248,24 @@ def resolve_test_debt_item(db: Session, item: TestDebtItem) -> TestDebtItem:
     db.commit()
     db.refresh(item)
     return item
+
+
+def bulk_resolve_test_debt_items(db: Session, project_id: int, item_ids: Iterable[int]) -> int:
+    """Resolve many active debt items in a single statement and return the count touched."""
+    ids = {int(item_id) for item_id in item_ids}
+    if not ids:
+        return 0
+    resolved = (
+        db.query(TestDebtItem)
+        .filter(
+            TestDebtItem.project_id == project_id,
+            TestDebtItem.id.in_(ids),
+            TestDebtItem.resolved_at.is_(None),
+        )
+        .update({TestDebtItem.resolved_at: _utc_now()}, synchronize_session=False)
+    )
+    db.commit()
+    return int(resolved or 0)
 
 
 def _detect_duplicate_cases(cases: Iterable[TestCase], now: datetime) -> list[DebtCandidate]:
@@ -374,7 +445,15 @@ def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: boo
             raise
         logger.warning("Retrying test asset debt detection after concurrent write", extra={"project_id": project_id})
         return detect_test_asset_debt(db, project_id, retry_on_integrity=False)
-    logger.info("Detected test asset debt", extra={"project_id": project_id, "created": created, "updated": updated, "auto_resolved": auto_resolved})
+    logger.info(
+        "Detected test asset debt",
+        extra={
+            "project_id": project_id,
+            "debt_created": created,
+            "debt_updated": updated,
+            "debt_auto_resolved": auto_resolved,
+        },
+    )
     summary = get_health_summary(db, project_id)
     return {
         "created": created,

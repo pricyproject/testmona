@@ -123,6 +123,21 @@ def register_test_asset_health_routes(app):
         return health_service.resolve_test_debt_item(db, item)
 
     @app.post(
+        "/projects/{project_id}/test-asset-health/debt-items/bulk-resolve",
+        response_model=schemas.TestDebtBulkResolveResult,
+        dependencies=dependencies,
+    )
+    def bulk_resolve_test_debt_items(
+        project_id: int,
+        payload: schemas.TestDebtBulkResolve,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _ensure_project_access(db, current_user, project_id, "write")
+        resolved = health_service.bulk_resolve_test_debt_items(db, project_id, payload.item_ids)
+        return {"resolved": resolved, "summary": health_service.get_health_summary(db, project_id)}
+
+    @app.post(
         "/projects/{project_id}/test-asset-health/detect",
         response_model=schemas.TestAssetDebtDetectionResult,
         dependencies=dependencies,
