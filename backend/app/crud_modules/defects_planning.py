@@ -6,6 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import re
 from .. import schemas
+from ..retry_utils import seq_conflict_retry
 from ..services.execution_timing import apply_test_result_execution_timing
 from ..services.user_lifecycle import (
     create_user_invitation,
@@ -105,6 +106,7 @@ def get_defects(
     return query.order_by(Defect.created_at.desc()).offset(skip).limit(limit).all()
 
 
+@seq_conflict_retry()
 def create_defect(db: Session, defect: DefectCreate):
     db_defect = Defect(**defect.model_dump())
     db.add(db_defect)

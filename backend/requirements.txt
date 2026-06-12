@@ -25,3 +25,4 @@ PyYAML==6.0.2
 lark==1.2.2
 json-repair==0.60.1  # tolerant fallback for malformed JSON returned by LLMs
 structlog==25.4.0  # structured logging; JSON output for log ingestion (see app/logging_config.py)
+tenacity==9.1.2  # retry/backoff for external-tracker calls + project_seq allocation (see app/retry_utils.py)

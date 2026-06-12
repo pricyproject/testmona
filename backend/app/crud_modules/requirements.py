@@ -6,6 +6,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import re
 from .. import schemas
+from ..retry_utils import seq_conflict_retry
 from ..services.execution_timing import apply_test_result_execution_timing
 from ..services.user_lifecycle import (
     create_user_invitation,
@@ -385,6 +386,7 @@ def delete_chat_conversation(db: Session, conversation_id: int):
     return conversation
 
 
+@seq_conflict_retry()
 def create_requirement(db: Session, requirement: RequirementCreate):
     # Validate estimated_effort
     if requirement.estimated_effort is not None and requirement.estimated_effort < 0:

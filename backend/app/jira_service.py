@@ -2,6 +2,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from typing import Dict, List, Optional, Any
 from .models import JiraIntegration
+from .retry_utils import RetryableTrackerError, tracker_retry
 import base64
 import json
 import re
@@ -78,15 +79,34 @@ class JiraService:
             "Content-Type": "application/json"
         }
 
+    @tracker_retry()
+    def _request(self, method: str, path: str, **kwargs) -> requests.Response:
+        """Issue a Jira REST call, retrying transient failures with backoff.
+
+        Timeouts, connection errors, rate limiting (429) and 5xx are retried;
+        everything else is returned for the caller's own status-code handling.
+        ``path`` is relative to ``base_url`` (e.g. ``/rest/api/3/myself``).
+        """
+        kwargs.setdefault("timeout", 10)
+        try:
+            response = requests.request(
+                method, f"{self.base_url}{path}", auth=self.auth, headers=self.headers, **kwargs
+            )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            raise RetryableTrackerError(f"Jira request failed: {exc}")
+
+        if response.status_code == 429 or response.status_code >= 500:
+            retry_after = response.headers.get("Retry-After")
+            raise RetryableTrackerError(
+                f"Jira transient error: {response.status_code}",
+                retry_after=float(retry_after) if retry_after and retry_after.isdigit() else None,
+            )
+        return response
+
     def test_connection(self) -> bool:
         """Test if the Jira connection is working"""
         try:
-            response = requests.get(
-                f"{self.base_url}/rest/api/3/myself",
-                auth=self.auth,
-                headers=self.headers,
-                timeout=10
-            )
+            response = self._request("GET", "/rest/api/3/myself")
             return response.status_code == 200
         except Exception:
             return False
@@ -94,11 +114,8 @@ class JiraService:
     def get_project_info(self) -> Optional[Dict]:
         """Get Jira project information"""
         try:
-            response = requests.get(
-                f"{self.base_url}/rest/api/3/project/{self.integration.project_key}",
-                auth=self.auth,
-                headers=self.headers,
-                timeout=10
+            response = self._request(
+                "GET", f"/rest/api/3/project/{self.integration.project_key}"
             )
             if response.status_code == 200:
                 return response.json()
@@ -143,13 +160,7 @@ class JiraService:
             if issue_data.get("assignee"):
                 payload["fields"]["assignee"] = {"name": issue_data["assignee"]}
 
-            response = requests.post(
-                f"{self.base_url}/rest/api/3/issue",
-                auth=self.auth,
-                headers=self.headers,
-                json=payload,
-                timeout=10
-            )
+            response = self._request("POST", "/rest/api/3/issue", json=payload)
 
             if response.status_code == 201:
                 return response.json()
@@ -188,14 +199,8 @@ class JiraService:
             if update_data.get("priority"):
                 payload["fields"]["priority"] = {"name": update_data["priority"]}
 
-            response = requests.put(
-                f"{self.base_url}/rest/api/3/issue/{issue_key}",
-                auth=self.auth,
-                headers=self.headers,
-                json=payload,
-                timeout=10
-            )
-            
+            response = self._request("PUT", f"/rest/api/3/issue/{issue_key}", json=payload)
+
             return response.status_code in [200, 204]
         except Exception as e:
             logger.warning(f"Error updating Jira issue: {e}")
@@ -204,13 +209,8 @@ class JiraService:
     def get_issue(self, issue_key: str) -> Optional[Dict]:
         """Get issue details from Jira"""
         try:
-            response = requests.get(
-                f"{self.base_url}/rest/api/3/issue/{issue_key}",
-                auth=self.auth,
-                headers=self.headers,
-                timeout=10
-            )
-            
+            response = self._request("GET", f"/rest/api/3/issue/{issue_key}")
+
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
@@ -238,14 +238,10 @@ class JiraService:
                 }
             }
 
-            response = requests.post(
-                f"{self.base_url}/rest/api/3/issue/{issue_key}/comment",
-                auth=self.auth,
-                headers=self.headers,
-                json=payload,
-                timeout=10
+            response = self._request(
+                "POST", f"/rest/api/3/issue/{issue_key}/comment", json=payload
             )
-            
+
             return response.status_code == 201
         except Exception as e:
             logger.warning(f"Error adding comment to Jira issue: {e}")
@@ -255,13 +251,8 @@ class JiraService:
         """Transition issue to a new status"""
         try:
             # First get available transitions
-            response = requests.get(
-                f"{self.base_url}/rest/api/3/issue/{issue_key}/transitions",
-                auth=self.auth,
-                headers=self.headers,
-                timeout=10
-            )
-            
+            response = self._request("GET", f"/rest/api/3/issue/{issue_key}/transitions")
+
             if response.status_code == 200:
                 transitions = response.json().get("transitions", [])
                 target_transition = None
@@ -278,14 +269,10 @@ class JiraService:
                         }
                     }
                     
-                    response = requests.post(
-                        f"{self.base_url}/rest/api/3/issue/{issue_key}/transitions",
-                        auth=self.auth,
-                        headers=self.headers,
-                        json=payload,
-                        timeout=10
+                    response = self._request(
+                        "POST", f"/rest/api/3/issue/{issue_key}/transitions", json=payload
                     )
-                    
+
                     return response.status_code == 204
         except Exception as e:
             logger.warning(f"Error transitioning Jira issue: {e}")
@@ -299,14 +286,8 @@ class JiraService:
                 "fields": ["id", "key", "summary", "status", "assignee", "priority", "created", "updated"]
             }
 
-            response = requests.post(
-                f"{self.base_url}/rest/api/3/search",
-                auth=self.auth,
-                headers=self.headers,
-                json=payload,
-                timeout=10
-            )
-            
+            response = self._request("POST", "/rest/api/3/search", json=payload)
+
             if response.status_code == 200:
                 return response.json().get("issues", [])
         except Exception as e:
