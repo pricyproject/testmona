@@ -2,7 +2,6 @@ import logging
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
-from sqlalchemy.exc import IntegrityError
 from app import models, schemas
 from datetime import datetime, UTC
 import requests
@@ -119,79 +118,45 @@ def create_defect_management(
     defect: schemas.DefectManagementCreate,
     project_id: int,
     reported_by: int,
-    max_retries: int = 5
 ):
-    """Create a new defect with atomic defect_id generation"""
-    max_retries = 5
-    
-    for attempt in range(max_retries):
-        try:
-            # Generate unique defect_id if not provided
-            if not defect.defect_id:
-                # Use SELECT FOR UPDATE to lock the table and prevent race conditions
-                # Get all defects for this project to find the maximum defect_id number
-                # This prevents ID reuse after deletions
-                all_defects = db.query(models.Defect).filter(
-                    models.Defect.project_id == project_id
-                ).with_for_update().all()
-                
-                # Extract and find the maximum defect number from all existing defect_ids
-                # Supports both formats: DEF-{number} and P{projectId}-DEF-{number}
-                max_defect_number = 0
-                for existing_defect in all_defects:
-                    if existing_defect.defect_id:
-                        # Try to match both formats
-                        match = re.search(r'(?:P\d+-)?DEF-(\d+)', existing_defect.defect_id)
-                        if match:
-                            defect_number = int(match.group(1))
-                            if defect_number > max_defect_number:
-                                max_defect_number = defect_number
-                
-                # Generate ID with project prefix if project_id is provided
-                if project_id:
-                    defect.defect_id = f"P{project_id}-DEF-{max_defect_number + 1:03d}"
-                else:
-                    defect.defect_id = f"DEF-{max_defect_number + 1:03d}"
-            
-            db_defect = models.Defect(
-                **defect.model_dump(),
-                project_id=project_id,
-                reported_by=reported_by
-            )
-            db.add(db_defect)
-            db.commit()
-            db.refresh(db_defect)
-            
-            # Create history entry for creation
-            history = models.DefectHistory(
-                defect_id=db_defect.id,
-                user_id=reported_by,
-                field_name="status",
-                old_value=None,
-                new_value=defect.status.value if defect.status else "open",
-                change_reason="Initial defect creation"
-            )
-            db.add(history)
-            db.commit()
-            
-            return db_defect
-            
-        except IntegrityError as e:
-            # Rollback the transaction to release the lock
-            db.rollback()
-            
-            # If this was a duplicate defect_id error and we didn't provide a defect_id,
-            # try again with a different ID
-            if "defect_id" in str(e) and attempt < max_retries - 1:
-                # Force regeneration of defect_id on next attempt
-                defect.defect_id = None
-                continue
-            else:
-                # Re-raise if it's not a duplicate ID error or we've exhausted retries
-                raise
-        except Exception as e:
-            db.rollback()
-            raise
+    """Create a new defect.
+
+    Numbering is owned centrally by the ``before_insert`` listener in
+    ``services/sequence_service.py``: it allocates ``project_seq`` (race-safe via
+    a per-project row lock) and derives ``defect_id`` from it as
+    ``P{project_id}-DEF-{seq:03d}`` — so the URL number and the DEF- badge can
+    never diverge, and every create path (CRUD, import, sync, AI) numbers
+    identically. We no longer recompute the max defect number here (the old
+    full-table ``SELECT ... FOR UPDATE`` was a second, divergent source of truth
+    and a no-op on SQLite). A caller-supplied ``defect_id`` is still honoured by
+    the listener.
+    """
+    try:
+        db_defect = models.Defect(
+            **defect.model_dump(),
+            project_id=project_id,
+            reported_by=reported_by,
+        )
+        db.add(db_defect)
+        db.commit()
+        db.refresh(db_defect)
+
+        # Create history entry for creation
+        history = models.DefectHistory(
+            defect_id=db_defect.id,
+            user_id=reported_by,
+            field_name="status",
+            old_value=None,
+            new_value=defect.status.value if defect.status else "open",
+            change_reason="Initial defect creation"
+        )
+        db.add(history)
+        db.commit()
+
+        return db_defect
+    except Exception:
+        db.rollback()
+        raise
 
 
 # Defect statuses that represent a closed/done state on the external tracker.

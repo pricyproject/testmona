@@ -290,7 +290,18 @@ def recompute_milestones_for_test_run(db: Session, test_run: TestRun, *, commit:
         ids = _milestone_ids_for_test_run(db, test_run)
         if not ids:
             return
-        milestones = db.query(Milestone).filter(Milestone.id.in_(ids)).all()
+        # Lock the milestone rows for the read-modify-write so two concurrent
+        # execution writes feeding the same milestone serialise their recompute
+        # instead of racing to a lost update. Order by id for a deterministic
+        # lock order (no deadlock when several milestones are involved). No-op on
+        # SQLite, which serialises writers at the database level anyway.
+        milestones = (
+            db.query(Milestone)
+            .filter(Milestone.id.in_(ids))
+            .order_by(Milestone.id.asc())
+            .with_for_update()
+            .all()
+        )
         changed = False
         for milestone in milestones:
             changed = recompute_milestone_progress(db, milestone, commit=False) or changed

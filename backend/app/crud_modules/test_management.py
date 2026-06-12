@@ -542,7 +542,17 @@ def _refresh_milestones_by_ids(db: Session, milestone_ids):
         return
     from ..services.milestone_service import recompute_milestone_progress
     changed = False
-    for milestone in db.query(Milestone).filter(Milestone.id.in_(ids)).all():
+    # Lock the milestone rows (ordered for a deterministic lock order) so the
+    # read-modify-write recompute can't lose an update against a concurrent
+    # execution write. No-op on SQLite.
+    milestones = (
+        db.query(Milestone)
+        .filter(Milestone.id.in_(ids))
+        .order_by(Milestone.id.asc())
+        .with_for_update()
+        .all()
+    )
+    for milestone in milestones:
         changed = recompute_milestone_progress(db, milestone, commit=False) or changed
     if changed:
         safe_commit(db)
