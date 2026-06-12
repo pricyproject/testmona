@@ -18,7 +18,7 @@ from ..services.user_lifecycle import (
     mark_invitation_as_used,
     update_onboarding_task,
 )
-from ..models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage, RequirementFolder
+from ..models import Project, TestSuite, TestCase, TestCaseStep, TestRun, TestResult, User, Role, CustomFieldDefinition, CustomFieldValue, CustomFieldType, JiraIntegration, JiraIssue, Requirement, Defect, TestPlan, Milestone, TraceabilityMatrix, CoverageReport, Notification, TestCaseSection, SharedStep, GlobalParameter, TestDataset, TestMindmap, ImpactAnalysis, ExecutionEnvironment, ExecutionLog, TestSchedule, ExecutionEngine, TestRunEnvironment, DefectComment, DefectAttachment, DefectHistory, DefectWorkflow, DefectTemplate, TestResultDefectLink, DefectLinkType, DefectStatus, DefectSeverity, DefectPriority, IssueTrackerIntegration, SyncLog, KPIData, TestStepResult, ShareableReport, RootCauseAnalysis, DashboardWidget, TestCaseRevision, RequirementStatus, Priority, EntityType, TestTypeDefinition, PriorityDefinition, SharedStepTemplate, TestExecutionSettings, NotificationSettings, AutomationSettings, SystemSettings, requirement_test_case_links, requirement_test_plan_links, RequirementVersion, RequirementChatConversation, RequirementChatMessage, RequirementFolder
 from ..schemas import (
     ProjectCreate, ProjectUpdate,
     TestSuiteCreate, TestSuiteUpdate,
@@ -521,6 +521,101 @@ def _milestone_id_for_plan(db: Session, test_plan_id):
     return row[0] if row else None
 
 
+def _auto_create_defect_for_failed_result(db: Session, test_result: TestResult, result_data: dict):
+    """Auto-create a defect if test result is marked as failed and no defect exists."""
+    new_status = result_data.get('status')
+    if not new_status:
+        return
+
+    # Normalize status to lowercase
+    normalized_status = str(new_status).lower().strip()
+    is_failed = normalized_status in ('fail', 'failed')
+
+    if not is_failed:
+        return
+
+    # Check if a defect already exists for this test result
+    existing_defect_link = db.query(TestResultDefectLink).filter(
+        TestResultDefectLink.test_result_id == test_result.id
+    ).first()
+
+    if existing_defect_link:
+        return  # Defect already exists for this result
+
+    try:
+        # Get test case and test run info for context
+        test_case = db.query(TestCase).filter(TestCase.id == test_result.test_case_id).first()
+        test_run = db.query(TestRun).filter(TestRun.id == test_result.test_run_id).first()
+
+        if not test_case or not test_run:
+            return
+
+        # Generate defect title and description
+        case_name = test_case.name or f"Test Case {test_case.id}"
+        defect_title = f"Failed: {case_name}"
+        defect_description = f"Test case '{case_name}' failed in test run '{test_run.name}'.\n\nActual Result:\n{test_result.actual_result or 'No details provided'}"
+
+        # Get project_id from test run
+        project_id = test_run.project_id
+
+        # Find the next defect number for this project
+        all_defects = db.query(Defect).filter(
+            Defect.project_id == project_id
+        ).all()
+
+        max_defect_number = 0
+        for existing_defect in all_defects:
+            if existing_defect.defect_id:
+                import re
+                match = re.search(r'(?:P\d+-)?DEF-(\d+)', existing_defect.defect_id)
+                if match:
+                    defect_number = int(match.group(1))
+                    if defect_number > max_defect_number:
+                        max_defect_number = defect_number
+
+        # Generate defect_id
+        defect_id = f"P{project_id}-DEF-{max_defect_number + 1:03d}"
+
+        # Create the defect
+        new_defect = Defect(
+            title=defect_title,
+            description=defect_description,
+            defect_id=defect_id,
+            status=DefectStatus.OPEN,
+            severity=DefectSeverity.MEDIUM,
+            priority=DefectPriority.MEDIUM,
+            project_id=project_id,
+            test_case_id=test_case.id,
+            test_run_id=test_run.id,
+            reported_by=test_result.executed_by or 1,  # Use executor or fallback to user 1
+            actual_result=test_result.actual_result,
+        )
+
+        db.add(new_defect)
+        safe_commit(db)
+        db.refresh(new_defect)
+
+        # Create a link between the test result and the new defect
+        defect_link = TestResultDefectLink(
+            test_result_id=test_result.id,
+            defect_id=new_defect.id,
+            link_type=DefectLinkType.FOUND.value,
+            result_snapshot={
+                "status": test_result.status,
+                "executed_by": test_result.executed_by,
+                "executed_at": test_result.executed_at.isoformat() if test_result.executed_at else None,
+            },
+            created_by=test_result.executed_by or 1,
+        )
+
+        db.add(defect_link)
+        safe_commit(db)
+
+    except Exception as e:
+        # Log the error but don't fail the test result update
+        logger.error(f"Failed to auto-create defect for failed test result {test_result.id}: {e}")
+
+
 def create_test_result(db: Session, test_result: TestResultCreate):
     test_result_data = test_result.model_dump()
     db_test_result = TestResult(**test_result_data)
@@ -549,6 +644,8 @@ def update_test_result(db: Session, test_result_id: int, test_result: TestResult
         # timing/state-only updates (pause, resume, add-time) sharing this path.
         if 'status' in test_result_data:
             _refresh_milestone_progress_for_run(db, db_test_result.test_run_id)
+            # Auto-create defect if test result changed to failed
+            _auto_create_defect_for_failed_result(db, db_test_result, test_result_data)
     return db_test_result
 
 
