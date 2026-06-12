@@ -1,7 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from typing import Optional
 import secrets
+
+
+# Values of ``ENVIRONMENT`` that mean "this is a real deployment, fail fast on
+# misconfiguration" rather than a developer's machine.
+_PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging", "stage"}
 
 
 class Settings(BaseSettings):
@@ -10,7 +15,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"
     )
-    
+
+    # Declared before ``secret_key`` so it is validated first and is therefore
+    # available via ``info.data`` inside the secret_key validator.
+    environment: str = "development"
     database_url: str = "sqlite:///./test_management.db"
     secret_key: Optional[str] = None  # Must be set via environment variable
     algorithm: str = "HS256"
@@ -27,15 +35,30 @@ class Settings(BaseSettings):
     
     @field_validator('secret_key', mode='before')
     @classmethod
-    def generate_secret_key(cls, v):
+    def generate_secret_key(cls, v, info: ValidationInfo):
         if v is not None and v != "":
             return v
 
-        # No SECRET_KEY configured. A fresh random key on every startup would
-        # invalidate all sessions AND make every encrypted value (global
-        # parameters, Jira tokens, ...) permanently unrecoverable on restart.
-        # Persist the auto-generated key to a local file so it stays stable in
-        # development; production should still set SECRET_KEY explicitly.
+        # No SECRET_KEY configured. In a real deployment this is fatal: each
+        # process/replica would otherwise generate its own key, which (a) makes
+        # JWTs signed by one pod fail validation on another (random 401s /
+        # login loops) and (b) makes Fernet-encrypted secrets (Jira tokens, AI
+        # API keys, global parameters) written by one pod undecryptable by the
+        # rest. Fail fast instead of corrupting silently under horizontal scaling.
+        environment = str(info.data.get("environment", "development")).strip().lower()
+        if environment in _PRODUCTION_ENVIRONMENTS:
+            raise ValueError(
+                f"SECRET_KEY is required when ENVIRONMENT={environment!r}. Without "
+                "it, multiple replicas each generate a different key, breaking JWT "
+                "validation and making encrypted secrets undecryptable across pods. "
+                "Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
+
+        # Development only: a fresh random key on every startup would invalidate
+        # all sessions AND make every encrypted value permanently unrecoverable
+        # on restart. Persist the auto-generated key to a local file so it stays
+        # stable across restarts on a single machine.
         import os
         import warnings
         from pathlib import Path
