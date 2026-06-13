@@ -113,7 +113,6 @@ export function TestAssetHealth() {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdNum, debtType, severity, resolved, page]);
 
   const detectDebt = async () => {
