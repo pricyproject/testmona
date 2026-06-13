@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { FileText, TestTube, PlayCircle, TrendingUp, Users, Bug, FileCheck, Target, ExternalLink, AlertTriangle, Flag, Calendar, Loader2, CheckCircle } from 'lucide-react';
+import { FileText, TestTube, PlayCircle, TrendingUp, Users, Bug, FileCheck, Target, ExternalLink, AlertTriangle, Flag, Calendar, Loader2, CheckCircle, ShieldCheck } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { auditAPI, analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useProjectStore } from '@/stores/projectStore';
@@ -32,6 +32,15 @@ interface DashboardStatistics {
   passRate: number;
   totalExecuted?: number;
   totalNotStarted?: number;
+  releaseReadiness?: {
+    passRate: number;
+    openCriticalDefects: number;
+    untestedRequirements: number;
+    staleTests: number;
+    activeRequirements?: number;
+    activeTestCases?: number;
+    executedTestCases?: number;
+  };
 }
 
 const StatCard = ({ title, value, icon: Icon, color, trend, onClick }: StatCardProps) => {
@@ -323,6 +332,15 @@ export function Dashboard() {
       totalProjects: 0,
       totalExecuted: 0,
       totalNotStarted: 0,
+      releaseReadiness: {
+        passRate: 0,
+        openCriticalDefects: 0,
+        untestedRequirements: 0,
+        staleTests: 0,
+        activeRequirements: 0,
+        activeTestCases: 0,
+        executedTestCases: 0,
+      },
       recentActivity: recentActivities
     };
     }
@@ -344,9 +362,72 @@ export function Dashboard() {
       totalProjects: dashboardStats.totalProjects || 0,
       totalExecuted: dashboardStats.totalExecuted || 0,
       totalNotStarted: dashboardStats.totalNotStarted || 0,
+      releaseReadiness: {
+        passRate: dashboardStats.releaseReadiness?.passRate ?? passRate,
+        openCriticalDefects: dashboardStats.releaseReadiness?.openCriticalDefects || 0,
+        untestedRequirements: dashboardStats.releaseReadiness?.untestedRequirements || 0,
+        staleTests: dashboardStats.releaseReadiness?.staleTests || 0,
+        activeRequirements: dashboardStats.releaseReadiness?.activeRequirements || 0,
+        activeTestCases: dashboardStats.releaseReadiness?.activeTestCases || 0,
+        executedTestCases: dashboardStats.releaseReadiness?.executedTestCases || 0,
+      },
       recentActivity: recentActivities
     };
   }, [dashboardStats, recentActivities]);
+
+  const readinessPassRate = Math.max(0, Math.min(100, stats.releaseReadiness.passRate));
+  const readinessBlockers = stats.releaseReadiness.openCriticalDefects + stats.releaseReadiness.untestedRequirements + stats.releaseReadiness.staleTests;
+  const hasReadinessScope = stats.releaseReadiness.activeRequirements > 0 || stats.releaseReadiness.activeTestCases > 0;
+  const hasReadinessExecutions = stats.releaseReadiness.executedTestCases > 0;
+  const isReleaseReady = hasReadinessScope && hasReadinessExecutions && readinessPassRate === 100 && readinessBlockers === 0;
+  const readinessAccent = isReleaseReady
+    ? 'from-emerald-500 to-teal-500'
+    : 'from-amber-500 to-red-500';
+  const readinessStatusClasses = isReleaseReady
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
+    : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300';
+  const readinessMetrics = [
+    {
+      label: t('releaseReadinessPassRate'),
+      value: `${stats.releaseReadiness.passRate}%`,
+      detail: t('releaseReadinessPassRateHelp'),
+      icon: TrendingUp,
+      color: 'text-blue-600 dark:text-blue-400',
+      background: 'bg-blue-50 dark:bg-blue-950/30',
+      cta: t('viewTestRuns'),
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects'),
+    },
+    {
+      label: t('openCriticalDefects'),
+      value: stats.releaseReadiness.openCriticalDefects,
+      detail: t('openCriticalDefectsHelp'),
+      icon: AlertTriangle,
+      color: 'text-red-600 dark:text-red-400',
+      background: 'bg-red-50 dark:bg-red-950/30',
+      cta: t('reviewDefects'),
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
+    },
+    {
+      label: t('untestedRequirements'),
+      value: stats.releaseReadiness.untestedRequirements,
+      detail: t('untestedRequirementsHelp'),
+      icon: FileCheck,
+      color: 'text-indigo-600 dark:text-indigo-400',
+      background: 'bg-indigo-50 dark:bg-indigo-950/30',
+      cta: t('reviewRequirements'),
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/requirements` : '/projects'),
+    },
+    {
+      label: t('staleTests'),
+      value: stats.releaseReadiness.staleTests,
+      detail: t('staleTestsHelp'),
+      icon: TestTube,
+      color: 'text-amber-600 dark:text-amber-400',
+      background: 'bg-amber-50 dark:bg-amber-950/30',
+      cta: t('reviewTestHealth'),
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-asset-health` : '/projects'),
+    },
+  ];
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -453,6 +534,117 @@ export function Dashboard() {
           onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-plans` : '/projects')}
         />
       </div>
+
+      <Card className="overflow-hidden border-gray-200 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-950">
+        <CardHeader className="border-b border-gray-200 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_32%),linear-gradient(135deg,rgba(248,250,252,1),rgba(239,246,255,1))] dark:border-gray-800 dark:bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.20),transparent_32%),linear-gradient(135deg,rgba(17,24,39,1),rgba(15,23,42,1))]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+                <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                {t('releaseReadiness')}
+              </CardTitle>
+              <p className="mt-1 max-w-3xl text-sm text-gray-600 dark:text-gray-400">{t('releaseReadinessDescription')}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="w-fit bg-white/80 text-xs dark:bg-gray-950/60">
+                {t('releaseReadinessLive')}
+              </Badge>
+              <Badge variant="outline" className={`w-fit text-xs ${readinessStatusClasses}`}>
+                {isReleaseReady ? t('releaseReady') : t('releaseNeedsAttention')}
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.65fr]">
+            <div className="border-b border-gray-200 p-5 dark:border-gray-800 lg:border-b-0 lg:border-e">
+              <div className={`rounded-2xl bg-linear-to-br ${readinessAccent} p-px shadow-sm`}>
+                <div className="rounded-2xl bg-white p-5 dark:bg-gray-950">
+                  {!hasReadinessScope ? (
+                    <div className="flex min-h-72 flex-col items-center justify-center text-center">
+                      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 dark:bg-blue-950/30">
+                        <ShieldCheck className="h-7 w-7 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <p className="mt-4 text-lg font-semibold text-gray-900 dark:text-white">{t('releaseReadinessEmptyTitle')}</p>
+                      <p className="mt-2 max-w-sm text-sm leading-6 text-gray-600 dark:text-gray-400">{t('releaseReadinessEmptyDescription')}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-5"
+                        onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects')}
+                      >
+                        {t('releaseReadinessEmptyAction')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{t('releaseSignal')}</p>
+                          <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
+                            {isReleaseReady ? t('releaseReady') : t('releaseNeedsAttention')}
+                          </p>
+                        </div>
+                        <div
+                          className="grid h-24 w-24 shrink-0 place-items-center rounded-full"
+                          style={{ background: `conic-gradient(#10b981 ${readinessPassRate}%, rgba(148, 163, 184, 0.22) 0)` }}
+                          dir="ltr"
+                        >
+                          <div className="grid h-20 w-20 place-items-center rounded-full bg-white text-center dark:bg-gray-950">
+                            <span className="text-xl font-bold text-gray-900 dark:text-white">{readinessPassRate}%</span>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="mt-4 text-sm leading-6 text-gray-600 dark:text-gray-400">
+                        {!hasReadinessExecutions
+                          ? t('releaseReadinessNoExecutionSummary')
+                          : readinessBlockers === 0
+                            ? t('releaseReadinessClearSummary')
+                            : t('releaseReadinessBlockerSummary', { count: readinessBlockers })}
+                      </p>
+                      <div className="mt-5 grid grid-cols-2 gap-3">
+                        <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{t('activeRequirementsScope')}</p>
+                          <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{stats.releaseReadiness.activeRequirements}</p>
+                        </div>
+                        <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900">
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{t('activeTestCasesScope')}</p>
+                          <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{stats.releaseReadiness.activeTestCases}</p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+              {readinessMetrics.map((metric) => {
+                const Icon = metric.icon;
+                return (
+                  <button
+                    key={metric.label}
+                    type="button"
+                    onClick={metric.onClick}
+                    className="group rounded-2xl border border-gray-200 bg-gray-50/70 p-4 text-start transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white hover:shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:border-gray-800 dark:bg-gray-900/70 dark:hover:border-blue-900 dark:hover:bg-gray-900"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className={`rounded-xl p-2.5 ${metric.background}`}>
+                        <Icon className={`h-5 w-5 ${metric.color}`} />
+                      </span>
+                      <ExternalLink className="h-4 w-4 text-gray-300 opacity-0 transition group-hover:opacity-100 dark:text-gray-600" />
+                    </div>
+                    <p className="mt-4 text-3xl font-bold text-gray-900 dark:text-white">{metric.value}</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-700 dark:text-gray-300">{metric.label}</p>
+                    <p className="mt-2 min-h-10 text-xs leading-5 text-gray-500 dark:text-gray-400">{metric.detail}</p>
+                    <p className="mt-3 text-xs font-semibold text-blue-600 dark:text-blue-400">{metric.cta}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Recent Activity */}
       <Card className="border-gray-200 dark:border-gray-800 shadow-xs">

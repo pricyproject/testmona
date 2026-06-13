@@ -28,7 +28,12 @@ from ..crud import (
     update_dashboard_widget, delete_dashboard_widget,
     generate_dashboard_analytics
 )
-from ..services.analytics_shared import normalize_result_status, build_coverage_report
+from ..services.analytics_shared import (
+    add_legacy_reference_links,
+    get_linked_requirement_test_case_ids,
+    normalize_result_status,
+    build_coverage_report,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -919,19 +924,38 @@ def register_analytics_dashboard_routes(app):
                 total_test_cases = total_test_suites = total_test_runs = 0
                 total_requirements = total_defects = total_milestones = total_test_plans = 0
                 total_passed = total_failed = total_blocked = total_skipped = total_not_started = 0
+                open_critical_defects = untested_requirements = stale_tests = 0
+                readiness_pass_rate = readiness_executed = 0
+                readiness_requirement_ids = readiness_test_case_ids = []
             else:
                 # Batch-fetch all active test case IDs across all projects in one query
+                active_suite_filter = (models.TestSuite.status.is_(None)) | (models.TestSuite.status == models.Status.ACTIVE)
+                active_case_filter = (models.TestCase.status.is_(None)) | (models.TestCase.status == "active")
+                not_deleted_case_filter = (models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted == False)
                 tc_rows = (
-                    db.query(models.TestCase.id)
+                    db.query(models.TestCase.id, models.TestCase.reference)
                     .join(models.TestSuite)
                     .filter(
                         models.TestSuite.project_id.in_(project_ids),
-                        (models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted == False),
+                        not_deleted_case_filter,
                     )
                     .all()
                 )
-                all_test_case_ids = [row[0] for row in tc_rows]
+                all_test_case_ids = [row.id for row in tc_rows]
                 total_test_cases = len(all_test_case_ids)
+
+                readiness_tc_rows = (
+                    db.query(models.TestCase.id, models.TestCase.reference)
+                    .join(models.TestSuite)
+                    .filter(
+                        models.TestSuite.project_id.in_(project_ids),
+                        active_suite_filter,
+                        active_case_filter,
+                        not_deleted_case_filter,
+                    )
+                    .all()
+                )
+                readiness_test_case_ids = [row.id for row in readiness_tc_rows]
 
                 # Aggregate counts with single queries
                 total_test_suites = (
@@ -969,8 +993,38 @@ def register_analytics_dashboard_routes(app):
                     .scalar() or 0
                 )
 
+                open_critical_defects = (
+                    db.query(_func.count(models.Defect.id))
+                    .filter(
+                        models.Defect.project_id.in_(project_ids),
+                        models.Defect.severity == models.DefectSeverity.CRITICAL,
+                        models.Defect.status.in_([
+                            models.DefectStatus.OPEN,
+                            models.DefectStatus.IN_PROGRESS,
+                            models.DefectStatus.REOPENED,
+                        ]),
+                    )
+                    .scalar() or 0
+                )
+
+                stale_tests = (
+                    db.query(_func.count(models.TestDebtItem.id))
+                    .join(models.TestCase, models.TestDebtItem.test_case_id == models.TestCase.id)
+                    .join(models.TestSuite, models.TestCase.test_suite_id == models.TestSuite.id)
+                    .filter(
+                        models.TestDebtItem.project_id.in_(project_ids),
+                        models.TestDebtItem.debt_type == "stale",
+                        models.TestDebtItem.resolved_at.is_(None),
+                        active_suite_filter,
+                        active_case_filter,
+                        not_deleted_case_filter,
+                    )
+                    .scalar() or 0
+                )
+
                 # Latest result per test case — single batch query instead of per-row loop
                 total_passed = total_failed = total_blocked = total_skipped = total_not_started = 0
+                latest_status_by_test_case = {}
                 if all_test_case_ids:
                     latest_id_subq = (
                         db.query(
@@ -982,19 +1036,20 @@ def register_analytics_dashboard_routes(app):
                         .subquery()
                     )
                     latest_statuses = (
-                        db.query(models.TestResult.status)
+                        db.query(models.TestResult.test_case_id, models.TestResult.status)
                         .join(latest_id_subq, models.TestResult.id == latest_id_subq.c.max_id)
                         .all()
                     )
-                    for (status,) in latest_statuses:
-                        normalized = (status or "").lower()
-                        if normalized in {"pass", "passed"}:
+                    for test_case_id, status in latest_statuses:
+                        normalized = normalize_result_status(status)
+                        latest_status_by_test_case[test_case_id] = normalized
+                        if normalized == "passed":
                             total_passed += 1
-                        elif normalized in {"fail", "failed"}:
+                        elif normalized == "failed":
                             total_failed += 1
-                        elif normalized in {"block", "blocked"}:
+                        elif normalized == "blocked":
                             total_blocked += 1
-                        elif normalized in {"skip", "skipped"}:
+                        elif normalized == "skipped":
                             total_skipped += 1
                         else:
                             total_not_started += 1
@@ -1002,6 +1057,32 @@ def register_analytics_dashboard_routes(app):
                     total_not_started += total_test_cases - len(latest_statuses)
                 else:
                     total_not_started = 0
+
+                requirements = db.query(models.Requirement).filter(models.Requirement.project_id.in_(project_ids)).all()
+                readiness_requirements = [
+                    requirement for requirement in requirements
+                    if requirement.status != models.RequirementStatus.DEPRECATED
+                ]
+                readiness_requirement_ids = [requirement.id for requirement in readiness_requirements]
+                requirement_ids = [requirement.id for requirement in requirements]
+                linked_test_case_ids = get_linked_requirement_test_case_ids(db, requirement_ids, readiness_test_case_ids)
+                add_legacy_reference_links(linked_test_case_ids, requirements, readiness_tc_rows)
+                executed_statuses = {"passed", "failed", "blocked", "skipped"}
+                executed_test_case_ids = {
+                    test_case_id
+                    for test_case_id, status in latest_status_by_test_case.items()
+                    if test_case_id in readiness_test_case_ids and status in executed_statuses
+                }
+                readiness_passed = len([
+                    test_case_id for test_case_id in readiness_test_case_ids
+                    if latest_status_by_test_case.get(test_case_id) == "passed"
+                ])
+                readiness_executed = len(executed_test_case_ids)
+                readiness_pass_rate = round((readiness_passed / readiness_executed) * 100) if readiness_executed > 0 else 0
+                untested_requirements = len([
+                    requirement for requirement in readiness_requirements
+                    if not linked_test_case_ids.get(requirement.id, set()).intersection(executed_test_case_ids)
+                ])
             
             # Calculate pass rate
             total_executed = total_passed + total_failed + total_blocked + total_skipped
@@ -1025,7 +1106,16 @@ def register_analytics_dashboard_routes(app):
                 ],
                 "passRate": pass_rate,
                 "totalExecuted": total_executed,
-                "totalNotStarted": total_not_started
+                "totalNotStarted": total_not_started,
+                "releaseReadiness": {
+                    "passRate": readiness_pass_rate,
+                    "openCriticalDefects": open_critical_defects,
+                    "untestedRequirements": untested_requirements,
+                    "staleTests": stale_tests,
+                    "activeRequirements": len(readiness_requirement_ids),
+                    "activeTestCases": len(readiness_test_case_ids),
+                    "executedTestCases": readiness_executed,
+                }
             }
         except HTTPException:
             raise
