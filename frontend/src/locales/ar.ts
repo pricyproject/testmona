@@ -1689,6 +1689,7 @@ export const ar = {
     enterAcceptanceCriteria: 'أدخل معايير القبول',
     createRequirement: 'إنشاء متطلب',
     searchRequirements: 'البحث في المتطلبات حسب المعرف أو العنوان أو الوصف أو العلامات...',
+    requirementsAdvancedSearchPlaceholder: 'ابحث أو صفِّ — جرّب status:approved priority:high (اضغط / )',
     searchSharedSteps: 'البحث في الخطوات المشتركة...',
     searchParameters: 'البحث في المعلمات...',
     searchMilestones: 'البحث في المعالم...',

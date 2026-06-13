@@ -1507,6 +1507,7 @@ export const en = {
   enterAcceptanceCriteria: 'Enter acceptance criteria',
   createRequirement: 'Create Requirement',
   searchRequirements: 'Search requirements by ID, title, description, or tags...',
+  requirementsAdvancedSearchPlaceholder: 'Search or filter — try status:approved priority:high (press / )',
   searchSharedSteps: 'Search shared steps...',
   searchParameters: 'Search parameters...',
   searchMilestones: 'Search milestones...',

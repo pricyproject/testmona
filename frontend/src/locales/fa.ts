@@ -1720,6 +1720,7 @@ export const fa = {
     enterAcceptanceCriteria: 'معیارهای پذیرش را وارد کنید',
     createRequirement: 'ایجاد نیازمندی',
     searchRequirements: 'جستجوی نیازمندی‌ها بر اساس شناسه، عنوان، توضیحات یا برچسب‌ها...',
+    requirementsAdvancedSearchPlaceholder: 'جستجو یا فیلتر — مثلاً status:approved priority:high (کلید / )',
     searchSharedSteps: 'جستجوی مراحل مشترک...',
     searchParameters: 'جستجوی پارامترها...',
     searchMilestones: 'جستجوی نقاط عطف...',
