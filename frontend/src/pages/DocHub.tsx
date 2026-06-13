@@ -737,9 +737,20 @@ export function DocHub() {
             </div>
           </div>
           {loadingSpaces ? (
-            <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> {t('loading')}
-            </div>
+            <ul className="space-y-1" role="status" aria-busy="true" aria-label={t('loading')}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <li
+                  key={i}
+                  className="flex items-center gap-2 rounded-lg px-2 py-2"
+                >
+                  <div className="h-4 w-4 shrink-0 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                  <div
+                    className="h-3.5 animate-pulse rounded bg-slate-200 dark:bg-slate-700"
+                    style={{ width: `${70 - i * 8}%` }}
+                  />
+                </li>
+              ))}
+            </ul>
           ) : spaces.length === 0 ? (
             <button
               type="button"
@@ -1182,7 +1193,14 @@ export function DocHub() {
                 <BarChart3 className="h-4 w-4 text-primary" />{t('docInsights')}
               </div>
               {loadingOverview ? (
-                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t('loading')}</div>
+                <div className="grid gap-3 sm:grid-cols-3" role="status" aria-busy="true" aria-label={t('loading')}>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="rounded-lg border p-3">
+                      <div className="mb-2 h-3 w-24 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                      <div className="h-7 w-12 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                    </div>
+                  ))}
+                </div>
               ) : overview ? (
                 <div className="space-y-4">
                   <div className="grid gap-3 sm:grid-cols-3">
@@ -1217,7 +1235,7 @@ export function DocHub() {
 
           {/* Doc grid */}
           {loadingDocs ? (
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" role="status" aria-busy="true" aria-label={t('loading')}>
               {Array.from({ length: 6 }).map((_, i) => <li key={i}><DocCardSkeleton /></li>)}
             </ul>
           ) : !scopeAll && activeSpaceId == null ? (

@@ -2289,7 +2289,9 @@ export function Requirements() {
 
       {/* ── Content ────────────────────────────────────────────────────── */}
       {loading ? (
-        <RequirementsSkeleton viewMode={viewMode} />
+        <div role="status" aria-busy="true" aria-label={t('loading')}>
+          <RequirementsSkeleton viewMode={viewMode} />
+        </div>
       ) : paginatedRequirements.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex min-h-[18rem] flex-col items-center justify-center gap-4 p-10 text-center">

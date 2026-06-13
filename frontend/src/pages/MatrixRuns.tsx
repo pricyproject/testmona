@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { AlertCircle, Grid3X3, Loader2, Plus, Trash2 } from 'lucide-react';
 import { getApiErrorMessage } from '@/lib/api';
 import { MatrixRun } from '@/types';
@@ -339,9 +340,7 @@ export function MatrixRuns() {
       )}
 
       {isLoading ? (
-        <div className="flex min-h-[40vh] items-center justify-center text-slate-400">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
+        <MatrixRunsSkeleton />
       ) : matrixRuns.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
@@ -424,6 +423,34 @@ export function MatrixRuns() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function MatrixRunsSkeleton() {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3" role="status" aria-busy="true" aria-label={t('loading')}>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Card key={i}>
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-4 w-4 rounded" />
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-5 w-24 rounded-full" />
+                <Skeleton className="h-5 w-24 rounded-full" />
+              </div>
+            </div>
+            <Skeleton className="h-8 w-8 shrink-0 rounded-md" />
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }

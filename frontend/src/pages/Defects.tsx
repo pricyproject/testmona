@@ -2285,9 +2285,45 @@ export function Defects() {
       {/* Defects list */}
       <div className="space-y-3">
         {isLoading ? (
-          Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="h-32 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800/60" />
-          ))
+          viewMode === 'table' ? (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900" role="status" aria-busy="true" aria-label={t('loading')}>
+              <div className="flex items-center gap-4 border-b border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-gray-800 dark:bg-gray-800/40">
+                <div className="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="h-3 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="h-3 flex-1 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                <div className="hidden h-3 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700 sm:block" />
+                <div className="hidden h-3 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700 sm:block" />
+                <div className="h-3 w-8 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+              </div>
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="flex items-center gap-4 border-b border-gray-100 px-4 py-4 last:border-b-0 dark:border-gray-800">
+                  <div className="h-4 w-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-4 w-12 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-4 flex-1 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                  <div className="hidden h-5 w-16 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800 sm:block" />
+                  <div className="hidden h-5 w-16 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800 sm:block" />
+                  <div className="h-4 w-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3" role="status" aria-busy="true" aria-label={t('loading')}>
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+                  <div className="flex items-center justify-between">
+                    <div className="h-4 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-5 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                  <div className="h-5 w-3/4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="h-4 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+                  <div className="flex gap-2 pt-1">
+                    <div className="h-5 w-20 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-5 w-24 animate-pulse rounded-full bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         ) : paginatedDefects.length > 0 ? (
           viewMode === 'table' ? (
             <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
