@@ -1284,6 +1284,8 @@ export const fa = {
     archive: 'بایگانی',
     clearSelection: 'پاک کردن انتخاب',
     loadingProjects: 'در حال بارگذاری پروژه‌ها...',
+    searchProjects: 'جستجوی پروژه‌ها...',
+    noProjectsFound: 'پروژه‌ای یافت نشد',
     suites: 'مجموعه‌ها',
     cases: 'موارد',
     runs: 'اجراها',

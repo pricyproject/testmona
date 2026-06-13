@@ -1253,6 +1253,8 @@ export const ar = {
     archive: 'أرشفة',
     clearSelection: 'مسح التحديد',
     loadingProjects: 'جاري تحميل المشاريع...',
+    searchProjects: 'البحث في المشاريع...',
+    noProjectsFound: 'لا توجد مشاريع',
     suites: 'المجموعات',
     cases: 'الحالات',
     runs: 'عمليات التشغيل',

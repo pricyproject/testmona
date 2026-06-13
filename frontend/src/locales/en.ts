@@ -1064,6 +1064,8 @@ export const en = {
   archive: 'Archive',
   clearSelection: 'Clear Selection',
   loadingProjects: 'Loading projects...',
+  searchProjects: 'Search projects...',
+  noProjectsFound: 'No projects found',
   suites: 'Suites',
   cases: 'Cases',
   runs: 'Runs',
