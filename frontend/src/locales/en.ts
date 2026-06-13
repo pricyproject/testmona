@@ -2595,6 +2595,8 @@ export const en = {
   filterAll: 'All',
   noNotificationsYet: 'No notifications yet',
   noNotificationsDesc: "You'll see project updates, assignments, and system messages here.",
+  noUnreadNotifications: "You're all caught up",
+  unreadFilter: 'Unread',
   selectNotification: 'Select notification',
   markRead: 'Mark read',
   relatedEntityLabel: 'Related: {type} #{id}',

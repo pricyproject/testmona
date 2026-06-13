@@ -1,6 +1,27 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, CheckCheck, Trash2, Settings, Search, X, RefreshCw, Volume2, VolumeX, Moon, AlertTriangle, Filter, Eye, EyeOff } from 'lucide-react';
+import {
+  Bell,
+  BellOff,
+  CheckCheck,
+  Trash2,
+  Settings,
+  Search,
+  X,
+  RefreshCw,
+  Volume2,
+  VolumeX,
+  Moon,
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Eye,
+  EyeOff,
+  MoreVertical,
+  ListChecks,
+  ChevronRight,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -8,7 +29,6 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -28,9 +48,11 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const [page, setPage] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string | null>(null);
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [notificationPrefs, setNotificationPrefs] = useState({
     do_not_disturb: false,
@@ -113,13 +135,13 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
       }
 
       const response = await api.get(url);
-      
+
       if (append) {
         setNotifications(prev => [...prev, ...response.data]);
       } else {
         setNotifications(response.data);
       }
-      
+
       // Check if there are more notifications
       setHasMore(response.data.length === limit);
     } catch (error) {
@@ -132,12 +154,12 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
     setPage(0);
-    
+
     // Clear existing timer
     if (searchDebounceTimer) {
       clearTimeout(searchDebounceTimer);
     }
-    
+
     // Set new timer for debounced search. Pass the latest value explicitly so we
     // don't fetch with the previous keystroke's searchQuery from a stale closure.
     const timer = setTimeout(() => {
@@ -368,21 +390,18 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     };
   }, [searchDebounceTimer]);
 
-  const getNotificationColor = (type: string) => {
+  // Per-type visual language: a single source of truth for the icon + tint used
+  // by the avatar, so each row reads at a glance without a separate text badge.
+  const getNotificationVisuals = (type: string) => {
     switch (type) {
-      case 'success': return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
-      case 'warning': return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
-      case 'error': return 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300';
-      default: return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300';
-    }
-  };
-
-  const getNotificationAccent = (type: string) => {
-    switch (type) {
-      case 'success': return 'bg-emerald-500';
-      case 'warning': return 'bg-amber-500';
-      case 'error': return 'bg-red-500';
-      default: return 'bg-blue-500';
+      case 'success':
+        return { Icon: CheckCircle2, wrap: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-300', dot: 'bg-emerald-500' };
+      case 'warning':
+        return { Icon: AlertTriangle, wrap: 'bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-300', dot: 'bg-amber-500' };
+      case 'error':
+        return { Icon: XCircle, wrap: 'bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-300', dot: 'bg-red-500' };
+      default:
+        return { Icon: Info, wrap: 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300', dot: 'bg-blue-500' };
     }
   };
 
@@ -435,18 +454,11 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     return groups;
   };
 
-  // Build per-type unread chips for the header summary, keeping only the types
-  // that actually have unread items so we don't show noisy "0 Error" labels.
-  const unreadTypeChips = useMemo(() => {
-    const countByType = (type: string) =>
-      notifications.filter((n) => !n.is_read && n.type === type).length;
-    return [
-      { type: 'error', label: t('error'), count: countByType('error'), dot: 'bg-red-500', text: 'text-red-600 dark:text-red-300' },
-      { type: 'warning', label: t('warning'), count: countByType('warning'), dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-300' },
-      { type: 'success', label: t('success'), count: countByType('success'), dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-300' },
-      { type: 'info', label: t('info'), count: countByType('info'), dot: 'bg-blue-500', text: 'text-blue-600 dark:text-blue-300' },
-    ].filter((chip) => chip.count > 0);
-  }, [notifications, t]);
+  // "Unread" is a client-side view filter layered on top of the server-side type
+  // filter, so it doesn't need its own fetch round-trip.
+  const visibleNotifications = unreadOnly
+    ? notifications.filter((n) => !n.is_read)
+    : notifications;
 
   const filterOptions = [
     { value: null, label: t('filterAll') },
@@ -464,14 +476,22 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     if (isOpen) {
       setSearchQuery('');
       setBulkMode(false);
+      setUnreadOnly(false);
+      setShowMenu(false);
       fetchNotificationPrefs();
     } else {
       setFilterType(null);
     }
   }, [isOpen]);
 
+  const menuItemClass =
+    'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800';
+
   return (
-    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+    // `dir` must be passed explicitly: Radix stamps this onto the portaled
+    // content (defaulting to "ltr"), which otherwise overrides the document's
+    // RTL direction and breaks every logical utility used inside the panel.
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen} dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="relative">
         <DropdownMenuTrigger asChild>
           <Button
@@ -484,102 +504,168 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
           </Button>
         </DropdownMenuTrigger>
         {unreadCount > 0 && (
-          <span className={`pointer-events-none absolute -top-0.5 z-10 h-[18px] min-w-[18px] rounded-full bg-red-500 px-1 text-[10px] font-bold leading-[18px] text-white shadow-xs ring-2 ring-white dark:ring-slate-950 ${isRTL ? '-left-0.5' : '-right-0.5'}`}>
+          <span className="pointer-events-none absolute -top-0.5 -end-0.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-xs ring-2 ring-white dark:ring-slate-950">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </div>
 
       <DropdownMenuContent
-        className="relative w-[min(92vw,440px)] overflow-hidden rounded-2xl border-slate-200/80 bg-white p-0 shadow-2xl shadow-slate-900/12 dark:border-slate-800 dark:bg-slate-950"
-        align={isRTL ? 'start' : 'end'}
+        className="relative flex max-h-[min(80vh,640px)] w-[min(94vw,420px)] flex-col overflow-hidden rounded-2xl border-slate-200/80 bg-white p-0 text-start shadow-2xl shadow-slate-900/12 dark:border-slate-800 dark:bg-slate-950"
+        align="end"
+        sideOffset={10}
         forceMount
       >
-        <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/70">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-950 dark:text-white">{t('notificationsTitle')}</h3>
-                {unreadCount > 0 && (
-                  <Badge className="border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" variant="outline">
-                    {t('unreadCount', { count: unreadCount })}
-                  </Badge>
-                )}
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-                <span>{t('notificationSummary', { count: notifications.length })}</span>
-                {unreadTypeChips.length > 0 && (
-                  <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-700" />
-                )}
-                {unreadTypeChips.map((chip) => (
-                  <span
-                    key={chip.type}
-                    className={`inline-flex items-center gap-1 font-medium ${chip.text}`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full ${chip.dot}`} />
-                    {chip.count} {chip.label}
-                  </span>
-                ))}
-              </div>
-            </div>
+        {/* Header — title, live unread count, and the two primary actions. Every
+            secondary control lives in the overflow menu to keep this row calm. */}
+        <div className="flex items-center gap-3 px-4 pb-3 pt-3.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="text-[15px] font-bold tracking-tight text-slate-950 dark:text-white">
+              {t('notificationsTitle')}
+            </h3>
+            {unreadCount > 0 && (
+              <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-              {unreadCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={markAllAsRead}
-                  className="h-8 gap-1.5 rounded-full px-2 text-xs text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                  title={t('markAllRead')}
-                >
-                  <CheckCheck className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{t('markAllRead')}</span>
-                </Button>
+          <div className="ms-auto flex items-center gap-1">
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={markAllAsRead}
+                className="h-8 gap-1.5 rounded-full px-2.5 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+              >
+                <CheckCheck className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{t('markAllRead')}</span>
+              </Button>
+            )}
+
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowMenu((v) => !v)}
+                className={`h-8 w-8 rounded-full p-0 ${showMenu ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
+                aria-label={t('options')}
+                aria-expanded={showMenu}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+                  <div className="absolute end-0 top-full z-50 mt-1.5 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900">
+                    <button
+                      type="button"
+                      onClick={() => { toggleBulkMode(); setShowMenu(false); }}
+                      className={menuItemClass}
+                    >
+                      <ListChecks className="h-4 w-4 text-slate-400" />
+                      <span className="flex-1">{t('bulkSelectMode')}</span>
+                      {bulkMode && <span className="h-2 w-2 rounded-full bg-blue-500" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAutoRefresh((v) => !v)}
+                      className={menuItemClass}
+                    >
+                      <RefreshCw className={`h-4 w-4 text-slate-400 ${autoRefresh ? 'animate-spin' : ''}`} />
+                      <span className="flex-1">{t('autoRefresh')}</span>
+                      {autoRefresh && <span className="h-2 w-2 rounded-full bg-emerald-500" />}
+                    </button>
+
+                    <div className="my-1.5 h-px bg-slate-100 dark:bg-slate-800" />
+
+                    <button
+                      type="button"
+                      onClick={() => updateNotificationPrefs({ notification_sound_enabled: !notificationPrefs.notification_sound_enabled })}
+                      className={menuItemClass}
+                    >
+                      {notificationPrefs.notification_sound_enabled
+                        ? <Volume2 className="h-4 w-4 text-slate-400" />
+                        : <VolumeX className="h-4 w-4 text-slate-400" />}
+                      <span className="flex-1">
+                        {notificationPrefs.notification_sound_enabled ? t('notificationSoundOn') : t('notificationSoundOff')}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => updateNotificationPrefs({ do_not_disturb: !notificationPrefs.do_not_disturb })}
+                      className={menuItemClass}
+                    >
+                      <Moon className="h-4 w-4 text-slate-400" />
+                      <span className="flex-1">{t('doNotDisturbShort')}</span>
+                      {notificationPrefs.do_not_disturb && <span className="h-2 w-2 rounded-full bg-slate-500" />}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { updateNotificationPrefs({ mute_duration_hours: 1 }); setShowMenu(false); }}
+                      className={menuItemClass}
+                    >
+                      <BellOff className="h-4 w-4 text-slate-400" />
+                      <span className="flex-1">{t('muteOneHour')}</span>
+                    </button>
+
+                    <div className="my-1.5 h-px bg-slate-100 dark:bg-slate-800" />
+
+                    <button
+                      type="button"
+                      onClick={() => { setShowClearConfirm(true); setShowMenu(false); }}
+                      disabled={notifications.length === 0}
+                      className={`${menuItemClass} text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-300 dark:hover:bg-red-950/30`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span className="flex-1">{t('clearAll')}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate('/settings?tab=test-management#notification-settings');
+                        setShowMenu(false);
+                        setIsOpen(false);
+                      }}
+                      className={menuItemClass}
+                    >
+                      <Settings className="h-4 w-4 text-slate-400" />
+                      <span className="flex-1">{t('notificationSettingsTitle')}</span>
+                      <ChevronRight className="h-4 w-4 text-slate-300 rtl:rotate-180" />
+                    </button>
+                  </div>
+                </>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={toggleBulkMode}
-                className={`h-8 w-8 rounded-full p-0 ${bulkMode ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-200' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
-                title={t('bulkSelectMode')}
-              >
-                <Filter className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowClearConfirm(true)}
-                className="h-8 w-8 rounded-full p-0 text-slate-500 hover:bg-red-50 hover:text-red-700 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-                title={t('clearAll')}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
             </div>
           </div>
         </div>
 
-        <div className="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+        {/* Search + filters */}
+        <div className="px-4 pb-3">
           <div className="relative">
-            <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${isRTL ? 'right-3' : 'left-3'}`} />
+            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
               type="text"
               placeholder={t('searchNotifications')}
               value={searchQuery}
               onChange={(event) => handleSearchChange(event.target.value)}
-              className={`h-9 rounded-full bg-slate-50 text-sm dark:bg-slate-900 ${isRTL ? 'pr-9 pl-8' : 'pl-9 pr-8'}`}
+              className="h-9 rounded-xl border-slate-200 bg-slate-50 ps-9 pe-8 text-sm dark:border-slate-800 dark:bg-slate-900"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => {
-                  if (searchDebounceTimer) {
-                    clearTimeout(searchDebounceTimer);
-                  }
+                  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
                   setSearchQuery('');
                   setPage(0);
                   fetchNotifications(0, false, { search: '' });
                 }}
-                className={`absolute top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 ${isRTL ? 'left-2' : 'right-2'}`}
+                className="absolute end-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 aria-label={t('clearSearch')}
               >
                 <X className="h-3.5 w-3.5" />
@@ -587,267 +673,199 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
             )}
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {filterOptions.map((option) => (
-              <Button
-                key={option.value ?? 'all'}
-                variant={filterType === option.value ? 'secondary' : 'ghost'}
-                size="sm"
-                onClick={() => {
-                  setFilterType(option.value);
-                  setPage(0);
-                }}
-                className={`h-7 rounded-full px-3 text-xs ${filterType === option.value ? 'bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
-              >
-                {option.label}
-              </Button>
-            ))}
+          <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            <button
+              type="button"
+              onClick={() => setUnreadOnly((v) => !v)}
+              className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${unreadOnly ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}
+            >
+              {t('unreadFilter')}
+            </button>
+            <span className="h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+            {filterOptions.map((option) => {
+              const active = filterType === option.value;
+              return (
+                <button
+                  key={option.value ?? 'all'}
+                  type="button"
+                  onClick={() => { setFilterType(option.value); setPage(0); }}
+                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${active ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="max-h-[480px] overflow-y-auto bg-white dark:bg-slate-950">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
+        {/* Bulk action bar */}
+        {bulkMode && notifications.length > 0 && (
+          <div className="flex items-center justify-between gap-2 border-y border-blue-100 bg-blue-50/80 px-4 py-2 dark:border-blue-900/60 dark:bg-blue-950/30">
+            <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
+              {t('selectedCount', { count: selectedIds.size })}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={selectAll} className="h-7 rounded-full px-2.5 text-xs text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-900/40">
+                {t('selectAll')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={bulkMarkRead} disabled={selectedIds.size === 0} className="h-7 rounded-full px-2.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/40">
+                {t('markRead')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={bulkDelete} disabled={selectedIds.size === 0} className="h-7 rounded-full px-2.5 text-xs text-red-700 hover:bg-red-100 disabled:opacity-40 dark:text-red-300 dark:hover:bg-red-950/40">
+                {t('delete')}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* List */}
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-slate-100 dark:border-slate-900">
+          {loading && notifications.length === 0 ? (
+            <div className="flex items-center justify-center py-16">
               <RefreshCw className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-300" />
               <span className="sr-only">{t('loading')}</span>
             </div>
-          ) : notifications.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-6 py-14 text-center">
-              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-900">
+          ) : visibleNotifications.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-900">
                 <Bell className="h-7 w-7 text-slate-400" />
               </div>
-              <p className="text-sm font-semibold text-slate-950 dark:text-white">{t('noNotificationsYet')}</p>
-              <p className="mt-1 max-w-xs text-xs leading-5 text-slate-500 dark:text-slate-400">{t('noNotificationsDesc')}</p>
+              <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                {unreadOnly ? t('noUnreadNotifications') : t('noNotificationsYet')}
+              </p>
+              <p className="mt-1 max-w-xs text-xs leading-5 text-slate-500 dark:text-slate-400">
+                {t('noNotificationsDesc')}
+              </p>
             </div>
           ) : (
-            <>
-              {bulkMode && (
-                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 dark:border-blue-900 dark:bg-blue-950/40">
-                  <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
-                    {t('selectedCount', { count: selectedIds.size })}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={selectAll} className="h-7 rounded-full px-2 text-xs text-blue-700 dark:text-blue-200">
-                      {t('selectAll')}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={bulkMarkRead} disabled={selectedIds.size === 0} className="h-7 rounded-full px-2 text-xs text-blue-700 dark:text-blue-200">
-                      {t('markRead')}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={bulkDelete} disabled={selectedIds.size === 0} className="h-7 rounded-full px-2 text-xs text-red-700 dark:text-red-300">
-                      {t('delete')}
-                    </Button>
-                  </div>
+            Object.entries(groupNotificationsByDate(visibleNotifications)).map(([groupName, groupNotifs]) => (
+              <div key={groupName}>
+                <div className="sticky top-0 z-1 bg-white/90 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 backdrop-blur-sm dark:bg-slate-950/90 dark:text-slate-500">
+                  {t(groupName)}
                 </div>
-              )}
 
-              <div>
-                {Object.entries(groupNotificationsByDate(notifications)).map(([groupName, groupNotifs]) => (
-                  <div key={groupName}>
-                    <div className="sticky top-0 z-1 border-y border-slate-100 bg-slate-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-400">
-                      {t(groupName)}
-                    </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-900">
-                      {groupNotifs.map((notification) => {
-                        const isSelected = selectedIds.has(notification.id);
-                        const isUnread = !notification.is_read;
+                {groupNotifs.map((notification) => {
+                  const isSelected = selectedIds.has(notification.id);
+                  const isUnread = !notification.is_read;
+                  const { Icon, wrap, dot } = getNotificationVisuals(notification.type);
 
-                        return (
-                          <div
-                            key={notification.id}
-                            onClick={() => {
-                              if (bulkMode) toggleSelect(notification.id);
-                            }}
-                            className={`group relative px-4 py-3 transition-colors ${bulkMode ? 'cursor-pointer' : ''} ${isSelected ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-slate-900/70'} ${isUnread ? 'bg-slate-50/70 dark:bg-slate-900/40' : ''}`}
-                          >
-                            {isUnread && <span className={`absolute top-0 h-full w-1 ${getNotificationAccent(notification.type)} ${isRTL ? 'right-0' : 'left-0'}`} />}
-                            <div className="flex items-start gap-3">
-                              {bulkMode && (
-                                <div onClick={(event) => event.stopPropagation()} className="pt-1">
-                                  <Checkbox
-                                    checked={isSelected}
-                                    onCheckedChange={() => toggleSelect(notification.id)}
-                                    aria-label={t('selectNotification')}
-                                  />
-                                </div>
-                              )}
+                  return (
+                    <div
+                      key={notification.id}
+                      onClick={() => { if (bulkMode) toggleSelect(notification.id); }}
+                      className={`group relative flex gap-3 px-4 py-3 transition-colors ${bulkMode ? 'cursor-pointer' : ''} ${isSelected ? 'bg-blue-50/80 dark:bg-blue-950/30' : isUnread ? 'bg-blue-50/40 hover:bg-blue-50/70 dark:bg-blue-950/15 dark:hover:bg-blue-950/25' : 'hover:bg-slate-50 dark:hover:bg-slate-900/60'}`}
+                    >
+                      {bulkMode ? (
+                        <div onClick={(event) => event.stopPropagation()} className="flex items-start pt-1">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleSelect(notification.id)}
+                            aria-label={t('selectNotification')}
+                          />
+                        </div>
+                      ) : (
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${wrap}`}>
+                          <Icon className="h-[18px] w-[18px]" />
+                        </div>
+                      )}
 
-                              <div className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${getNotificationAccent(notification.type)} ${isUnread ? 'opacity-100' : 'opacity-35'}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start gap-2">
+                          <h4 className={`min-w-0 flex-1 truncate text-sm ${isUnread ? 'font-semibold text-slate-950 dark:text-white' : 'font-medium text-slate-700 dark:text-slate-200'}`}>
+                            {decodeHtmlEntities(notification.title)}
+                          </h4>
+                          <span className="shrink-0 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+                            {formatDate(notification.created_at)}
+                          </span>
+                          {isUnread && <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-label={getTypeLabel(notification.type)} />}
+                        </div>
 
-                              <div className="min-w-0 flex-1">
-                                <div className="mb-1 flex flex-wrap items-center gap-2">
-                                  <Badge className={`border px-2 py-0 text-[10px] font-bold capitalize ${getNotificationColor(notification.type)}`} variant="outline">
-                                    {getTypeLabel(notification.type)}
-                                  </Badge>
-                                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{formatDate(notification.created_at)}</span>
-                                  {notification.type === 'error' && <AlertTriangle className="h-3.5 w-3.5 text-red-500" />}
-                                </div>
+                        <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                          {decodeHtmlEntities(notification.message)}
+                        </p>
 
-                                <h4 className="line-clamp-1 text-sm font-semibold text-slate-950 dark:text-white">
-                                  {decodeHtmlEntities(notification.title)}
-                                </h4>
-                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                                  {decodeHtmlEntities(notification.message)}
-                                </p>
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          {notification.related_entity_type ? (
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); viewRelatedEntity(notification); }}
+                              className="inline-flex items-center gap-1 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
+                            >
+                              <span className="truncate">
+                                {t('relatedEntityLabel', {
+                                  type: formatRelatedEntityType(notification.related_entity_type),
+                                  id: notification.related_entity_id || '-',
+                                })}
+                              </span>
+                              <ChevronRight className="h-3 w-3 shrink-0 rtl:rotate-180" />
+                            </button>
+                          ) : <span />}
 
-                                {notification.related_entity_type && (
-                                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                                      {t('relatedEntityLabel', {
-                                        type: formatRelatedEntityType(notification.related_entity_type),
-                                        id: notification.related_entity_id || '-',
-                                      })}
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        viewRelatedEntity(notification);
-                                      }}
-                                      className="h-6 rounded-full px-2 text-xs text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                                    >
-                                      {t('view')}
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="flex shrink-0 items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                                {notification.is_read ? (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      markAsUnread(notification.id);
-                                    }}
-                                    className="h-8 w-8 rounded-full p-0 text-slate-400 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
-                                    title={t('markAsUnread')}
-                                  >
-                                    <EyeOff className="h-3.5 w-3.5" />
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      markAsRead(notification.id);
-                                    }}
-                                    className="h-8 w-8 rounded-full p-0 text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                                    title={t('markAsRead')}
-                                  >
-                                    <Eye className="h-3.5 w-3.5" />
-                                  </Button>
-                                )}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    deleteNotification(notification.id);
-                                  }}
-                                  className="h-8 w-8 rounded-full p-0 text-slate-400 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30 dark:hover:text-red-300"
-                                  title={t('deleteNotificationLabel')}
+                          {!bulkMode && (
+                            <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                              {notification.is_read ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => { event.stopPropagation(); markAsUnread(notification.id); }}
+                                  className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
+                                  title={t('markAsUnread')}
+                                  aria-label={t('markAsUnread')}
                                 >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
+                                  <EyeOff className="h-3.5 w-3.5" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(event) => { event.stopPropagation(); markAsRead(notification.id); }}
+                                  className="rounded-lg p-1.5 text-blue-600 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                                  title={t('markAsRead')}
+                                  aria-label={t('markAsRead')}
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(event) => { event.stopPropagation(); deleteNotification(notification.id); }}
+                                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                                title={t('deleteNotificationLabel')}
+                                aria-label={t('deleteNotificationLabel')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
                             </div>
-                          </div>
-                        );
-                      })}
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            </>
+            ))
           )}
         </div>
 
-        {/* Footer always renders so prefs (DND/sound/mute) and settings stay
-            reachable even when the list is empty — otherwise a user who muted
-            everything could never toggle it back from here. */}
-        <div className="border-t border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-900/60">
-            {notifications.length > 0 && hasMore && (
-              <div className="grid grid-cols-2 border-b border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={loadMore}
-                  disabled={loading}
-                  className="py-2.5 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
-                >
-                  {loading ? t('loading') : t('loadMore')}
-                </button>
-                <button
-                  type="button"
-                  onClick={loadAll}
-                  disabled={loading}
-                  className={`py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800 ${isRTL ? 'border-r border-slate-200 dark:border-slate-800' : 'border-l border-slate-200 dark:border-slate-800'}`}
-                >
-                  {t('loadAll')}
-                </button>
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-              <div className="flex flex-wrap items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setAutoRefresh(!autoRefresh)}
-                  className={`h-8 rounded-full px-2 text-xs ${autoRefresh ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'text-slate-600 dark:text-slate-300'}`}
-                  title={t('autoRefresh')}
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'} ${autoRefresh ? 'animate-spin' : ''}`} />
-                  {t('autoRefresh')}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => updateNotificationPrefs({ do_not_disturb: !notificationPrefs.do_not_disturb })}
-                  className={`h-8 rounded-full px-2 text-xs ${notificationPrefs.do_not_disturb ? 'bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-white' : 'text-slate-600 dark:text-slate-300'}`}
-                  title={t('doNotDisturbShort')}
-                >
-                  <Moon className={`h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                  {t('doNotDisturbShort')}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => updateNotificationPrefs({ notification_sound_enabled: !notificationPrefs.notification_sound_enabled })}
-                  className="h-8 rounded-full px-2 text-xs text-slate-600 dark:text-slate-300"
-                  title={notificationPrefs.notification_sound_enabled ? t('notificationSoundOn') : t('notificationSoundOff')}
-                >
-                  {notificationPrefs.notification_sound_enabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-                </Button>
-              </div>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => updateNotificationPrefs({ mute_duration_hours: 1 })}
-                className="h-8 rounded-full px-2 text-xs text-slate-600 dark:text-slate-300"
-                title={t('muteOneHour')}
-              >
-                {t('muteOneHour')}
-              </Button>
-            </div>
-
+        {/* Load more — only when paging through the full (non-unread-filtered) list */}
+        {!unreadOnly && notifications.length > 0 && hasMore && (
+          <div className="grid grid-cols-2 border-t border-slate-100 dark:border-slate-900">
             <button
               type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                navigate('/settings?tab=test-management#notification-settings');
-                setIsOpen(false);
-              }}
-              className="flex w-full items-center justify-center gap-2 border-t border-slate-200 px-4 py-3 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50 dark:border-slate-800 dark:text-blue-300 dark:hover:bg-blue-950/30"
+              onClick={loadMore}
+              disabled={loading}
+              className="py-2.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
             >
-              <Settings className="h-4 w-4" />
-              {t('notificationSettingsTitle')}
+              {loading ? t('loading') : t('loadMore')}
+            </button>
+            <button
+              type="button"
+              onClick={loadAll}
+              disabled={loading}
+              className="border-s border-slate-100 py-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              {t('loadAll')}
             </button>
           </div>
+        )}
 
         {showClearConfirm && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-xs">

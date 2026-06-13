@@ -842,6 +842,8 @@ export const fa = {
     filterAll: 'همه',
     noNotificationsYet: 'هنوز اعلانی نیست',
     noNotificationsDesc: 'به‌روزرسانی‌های پروژه، تخصیص‌ها و پیام‌های سیستم اینجا نمایش داده می‌شوند.',
+    noUnreadNotifications: 'همه را خوانده‌اید',
+    unreadFilter: 'خوانده‌نشده',
     selectNotification: 'انتخاب اعلان',
     markRead: 'خوانده شد',
     relatedEntityLabel: 'مرتبط: {type} #{id}',

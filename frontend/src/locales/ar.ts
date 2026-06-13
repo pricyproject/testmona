@@ -841,6 +841,8 @@ export const ar = {
     filterAll: 'الكل',
     noNotificationsYet: 'لا توجد إشعارات بعد',
     noNotificationsDesc: 'ستظهر هنا تحديثات المشاريع والتعيينات ورسائل النظام.',
+    noUnreadNotifications: 'لقد اطّلعت على كل شيء',
+    unreadFilter: 'غير المقروءة',
     selectNotification: 'تحديد الإشعار',
     markRead: 'تحديد كمقروء',
     relatedEntityLabel: 'مرتبط: {type} #{id}',
