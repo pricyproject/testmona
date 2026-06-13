@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Search, X, CornerDownLeft } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/hooks/useTranslation';
 
 export interface SearchSuggestionGroup {
   key: string;
@@ -49,6 +50,7 @@ export function TestCaseSearchBar({
   resultCount,
   resultLabel,
 }: TestCaseSearchBarProps) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -212,7 +214,7 @@ export function TestCaseSearchBar({
                 inputRef.current?.focus();
               }}
               className="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-700"
-              aria-label="Clear search"
+              aria-label={t('clearSearch')}
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -260,7 +262,7 @@ export function TestCaseSearchBar({
           </ul>
           <div className="flex items-center justify-between gap-2 border-t border-gray-100 bg-gray-50/60 px-3 py-1.5 text-[11px] text-gray-400 dark:border-gray-800 dark:bg-gray-900/60">
             <span>
-              <kbd className="font-mono">↑↓</kbd> navigate · <kbd className="font-mono">↵</kbd> select · <kbd className="font-mono">esc</kbd> close
+              <kbd className="font-mono">↑↓</kbd> {t('searchPaletteNavigate')} · <kbd className="font-mono">↵</kbd> {t('searchPaletteSelect')} · <kbd className="font-mono">esc</kbd> {t('searchPaletteClose')}
             </span>
             {typeof resultCount === 'number' && (
               <span className="font-medium text-gray-500 dark:text-gray-400">

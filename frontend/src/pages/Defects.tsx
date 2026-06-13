@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,13 +46,23 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { TestCaseSearchBar, SearchSuggestionGroup } from '@/components/TestCases/TestCaseSearchBar';
+import { parseDefectQuery, defectMatchesQuery } from '@/components/Defects/defectsSearchQuery';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Bug, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal, MoreHorizontal, Filter, ArrowUpDown, X, Activity, ShieldAlert, Flag, Sparkles, Maximize2, Minimize2 } from 'lucide-react';
+import { Plus, Bug, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal, MoreHorizontal, Filter, ArrowUpDown, X, Activity, ShieldAlert, Flag, Sparkles, Maximize2, Minimize2, List, Table2, Columns3 } from 'lucide-react';
 
 const SEVERITY_STRIPE: Record<string, string> = {
   critical: 'bg-red-500',
@@ -60,6 +70,16 @@ const SEVERITY_STRIPE: Record<string, string> = {
   medium: 'bg-blue-400',
   low: 'bg-slate-300',
 };
+
+// Columns for the board (kanban) view, ordered by typical defect lifecycle.
+const BOARD_COLUMNS: Array<{ status: string; dot: string }> = [
+  { status: 'open', dot: 'bg-red-500' },
+  { status: 'in_progress', dot: 'bg-yellow-500' },
+  { status: 'fixed', dot: 'bg-green-500' },
+  { status: 'reopened', dot: 'bg-orange-500' },
+  { status: 'closed', dot: 'bg-gray-400' },
+  { status: 'rejected', dot: 'bg-purple-500' },
+];
 
 const LINKED_ENTITY_PAGE_SIZE = 500;
 
@@ -195,6 +215,35 @@ function PillPickerRow({
   );
 }
 
+type DefectViewMode = 'list' | 'table' | 'board';
+
+function ViewToggleButton({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ElementType;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={label}
+      aria-label={label}
+      className={`flex h-8 items-center justify-center rounded-md px-2.5 text-sm font-medium transition ${
+        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
+  );
+}
+
 function SummaryStat({
   label,
   value,
@@ -316,6 +365,23 @@ export function Defects() {
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [sortMode, setSortMode] = useState<string>('newest');
+  const [viewMode, setViewMode] = useState<DefectViewMode>(() => {
+    if (typeof window === 'undefined') return 'list';
+    try {
+      const stored = window.localStorage.getItem('defects-view-mode');
+      return stored === 'table' || stored === 'board' ? stored : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  const changeViewMode = (mode: DefectViewMode) => {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem('defects-view-mode', mode);
+    } catch {
+      // ignore persistence failures (private mode, etc.)
+    }
+  };
   const [expandedDefectIds, setExpandedDefectIds] = useState<Set<number>>(new Set());
   const [defectResultLinks, setDefectResultLinks] = useState<Record<number, any[]>>({});
   const [loadingDefectResultLinks, setLoadingDefectResultLinks] = useState<Set<number>>(new Set());
@@ -436,46 +502,46 @@ export function Defects() {
   const getPlaceholders = () => {
     const placeholders: Record<string, any> = {
       jira: {
-        name: 'My Jira Integration',
+        name: t('trackerNameJira'),
         apiUrl: 'https://your-domain.atlassian.net',
         projectKey: 'TEST',
-        projectKeyLabel: 'Project Key',
-        projectKeyDesc: 'The project key from your Jira instance (e.g., TEST, PROJ)'
+        projectKeyLabel: t('trackerLabelProjectKey'),
+        projectKeyDesc: t('trackerDescJira')
       },
       github: {
-        name: 'My GitHub Integration',
+        name: t('trackerNameGithub'),
         apiUrl: 'https://api.github.com',
         projectKey: 'owner/repo',
-        projectKeyLabel: 'Repository',
-        projectKeyDesc: 'GitHub repository in format: owner/repo'
+        projectKeyLabel: t('trackerLabelRepository'),
+        projectKeyDesc: t('trackerDescGithub')
       },
       gitlab: {
-        name: 'My GitLab Integration',
+        name: t('trackerNameGitlab'),
         apiUrl: 'https://gitlab.com/api/v4',
         projectKey: 'namespace/project',
-        projectKeyLabel: 'Project Path',
-        projectKeyDesc: 'GitLab project path (e.g., namespace/project)'
+        projectKeyLabel: t('trackerLabelProjectPath'),
+        projectKeyDesc: t('trackerDescGitlab')
       },
       'azure-devops': {
-        name: 'My Azure DevOps Integration',
+        name: t('trackerNameAzure'),
         apiUrl: 'https://dev.azure.com/your-org',
         projectKey: 'Project Name',
-        projectKeyLabel: 'Project Name',
-        projectKeyDesc: 'Azure DevOps project name'
+        projectKeyLabel: t('trackerLabelProjectName'),
+        projectKeyDesc: t('trackerDescAzure')
       },
       linear: {
-        name: 'My Linear Integration',
+        name: t('trackerNameLinear'),
         apiUrl: 'https://api.linear.app',
         projectKey: 'Team Key',
-        projectKeyLabel: 'Team Key',
-        projectKeyDesc: 'Linear team key (e.g., ENG, PROD)'
+        projectKeyLabel: t('trackerLabelTeamKey'),
+        projectKeyDesc: t('trackerDescLinear')
       },
       asana: {
-        name: 'My Asana Integration',
+        name: t('trackerNameAsana'),
         apiUrl: 'https://app.asana.com/api/1.0',
         projectKey: 'Project GID',
-        projectKeyLabel: 'Project GID',
-        projectKeyDesc: 'Asana project GID (numeric ID)'
+        projectKeyLabel: t('trackerLabelProjectGid'),
+        projectKeyDesc: t('trackerDescAsana')
       }
     };
     return placeholders[integrationForm.tracker_type] || placeholders.jira;
@@ -828,28 +894,79 @@ export function Defects() {
   const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
   const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
 
-  const filteredDefects = (() => {
-    const query = searchQuery.trim().toLowerCase();
-    return defects.filter((defect) => {
-      if (query) {
-        const haystack = [
-          defect.title,
-          defect.description,
-          defect.defect_id,
-          defect.tags,
-          defect.environment,
-          defect.requirement_id,
-        ]
-          .map((value) => String(value || '').toLowerCase())
-          .join(' ');
-        if (!haystack.includes(query)) return false;
-      }
-      if (statusFilter !== 'all' && String(defect.status) !== statusFilter) return false;
-      if (severityFilter !== 'all' && String(defect.severity) !== severityFilter) return false;
-      if (priorityFilter !== 'all' && String(defect.priority) !== priorityFilter) return false;
-      return true;
+  // Parse the search box once per keystroke into structured terms + key:value
+  // filters so the per-row matcher stays cheap as the result set scales.
+  const parsedSearchQuery = useMemo(() => parseDefectQuery(searchQuery), [searchQuery]);
+
+  // Suggestion catalog for the "/" advanced-search palette, derived from the
+  // project's real statuses, severities, priorities, tags and environments so
+  // completions are always valid against the current data.
+  const searchSuggestionGroups = useMemo<SearchSuggestionGroup[]>(() => {
+    const tagCounts = new Map<string, number>();
+    const envCounts = new Map<string, number>();
+    defects.forEach((defect) => {
+      (defect.tags || '')
+        .split(',')
+        .map((tag: string) => tag.trim())
+        .filter(Boolean)
+        .forEach((tag: string) => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
+      const env = String(defect.environment || '').trim();
+      if (env) envCounts.set(env, (envCounts.get(env) || 0) + 1);
     });
-  })();
+    const topTags = Array.from(tagCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([tag]) => ({ value: tag.toLowerCase(), label: tag }));
+    const topEnvs = Array.from(envCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([env]) => ({ value: env.toLowerCase(), label: env }));
+
+    return [
+      {
+        key: 'status',
+        label: t('status'),
+        values: [
+          { value: 'open', label: t('open') },
+          { value: 'in_progress', label: t('inProgress') },
+          { value: 'fixed', label: t('fixed') },
+          { value: 'reopened', label: t('reopened') },
+          { value: 'closed', label: t('closed') },
+          { value: 'rejected', label: t('rejected') },
+        ],
+      },
+      {
+        key: 'severity',
+        label: t('defectSeverity'),
+        values: [
+          { value: 'critical', label: t('critical') },
+          { value: 'high', label: t('high') },
+          { value: 'medium', label: t('medium') },
+          { value: 'low', label: t('low') },
+        ],
+      },
+      {
+        key: 'priority',
+        label: t('defectPriority'),
+        values: [
+          { value: 'urgent', label: t('urgent') },
+          { value: 'high', label: t('high') },
+          { value: 'medium', label: t('medium') },
+          { value: 'low', label: t('low') },
+        ],
+      },
+      { key: 'tag', label: t('tags'), values: topTags },
+      { key: 'env', label: t('environment'), values: topEnvs },
+    ];
+  }, [defects, t]);
+
+  const filteredDefects = defects.filter((defect) => {
+    if (!defectMatchesQuery(defect, parsedSearchQuery)) return false;
+    if (statusFilter !== 'all' && String(defect.status) !== statusFilter) return false;
+    if (severityFilter !== 'all' && String(defect.severity) !== severityFilter) return false;
+    if (priorityFilter !== 'all' && String(defect.priority) !== priorityFilter) return false;
+    return true;
+  });
 
   const sortedDefects = [...filteredDefects].sort((a, b) => {
     switch (sortMode) {
@@ -890,6 +1007,46 @@ export function Defects() {
     },
     { total: 0, open: 0, inProgress: 0, resolved: 0, critical: 0 }
   );
+
+  // Safe, locale-aware date formatter — guards against missing or unparsable
+  // timestamps so the table/board/list never render "Invalid Date".
+  const formatDefectDate = (value?: string | null): string => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    try {
+      return date.toLocaleDateString(language);
+    } catch {
+      // Bad/unsupported locale tag — fall back to the runtime default.
+      return date.toLocaleDateString();
+    }
+  };
+
+  // Bucket the filtered defects into board (kanban) columns. Any defect whose
+  // status isn't one of the known lifecycle states (legacy/custom/empty values)
+  // is collected into a trailing "Other" column so nothing silently disappears
+  // from the board.
+  const boardColumns = (() => {
+    const knownStatuses = new Set(BOARD_COLUMNS.map((column) => column.status));
+    const columns = BOARD_COLUMNS.map((column) => ({
+      key: column.status,
+      dot: column.dot,
+      isOther: false,
+      defects: sortedDefects.filter((defect) => String(defect.status || '').toLowerCase() === column.status),
+    }));
+    const orphanDefects = sortedDefects.filter(
+      (defect) => !knownStatuses.has(String(defect.status || '').toLowerCase()),
+    );
+    if (orphanDefects.length > 0) {
+      columns.push({
+        key: 'other',
+        dot: 'bg-slate-400',
+        isOther: true,
+        defects: orphanDefects,
+      });
+    }
+    return columns;
+  })();
 
   const hasActiveFilters = searchQuery.trim() !== ''
     || statusFilter !== 'all'
@@ -1191,6 +1348,18 @@ export function Defects() {
     return labels[status] || t('notSynced');
   };
 
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      open: t('open'),
+      in_progress: t('inProgress'),
+      fixed: t('fixed'),
+      reopened: t('reopened'),
+      closed: t('closed'),
+      rejected: t('rejected'),
+    };
+    return labels[status] || String(status || '').replace('_', ' ');
+  };
+
   const getTriageLabel = (value: string) => {
     const labels: Record<string, string> = {
       low: t('low'),
@@ -1206,7 +1375,7 @@ export function Defects() {
     if (integrations.length === 0) {
       toast({
         title: t('noIntegrationsAvailable'),
-        description: 'Please add an integration first before syncing defects',
+        description: t('pleaseAddIntegrationFirst'),
         variant: 'destructive',
       });
       return;
@@ -1513,7 +1682,7 @@ export function Defects() {
                             <div className="flex items-center gap-2 mb-2">
                               <h4 className="font-semibold">{integration.name}</h4>
                               {!integration.is_active && (
-                                <Badge variant="outline" className="text-xs">Inactive</Badge>
+                                <Badge variant="outline" className="text-xs">{t('inactive')}</Badge>
                               )}
                             </div>
                             <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
@@ -1524,12 +1693,12 @@ export function Defects() {
                                 <Badge variant="outline">{integration.project_key}</Badge>
                               )}
                               <Badge className={getSyncStatusBadge(integration.sync_status)}>
-                                {integration.sync_status}
+                                {getSyncStatusLabel(integration.sync_status)}
                               </Badge>
                             </div>
                             {integration.last_sync && (
                               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Last sync: {new Date(integration.last_sync).toLocaleString()}
+                                {t('lastSyncLabel')}: {new Date(integration.last_sync).toLocaleString()}
                               </p>
                             )}
                             {integration.sync_error && (
@@ -2034,17 +2203,24 @@ export function Defects() {
             )}
           </div>
         )}
-        <div className="flex gap-4 items-center">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
-            <Input
-              placeholder={t('searchDefects')}
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="min-w-[220px] flex-1">
+            <TestCaseSearchBar
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              onChange={setSearchQuery}
+              placeholder={t('defectsAdvancedSearchPlaceholder')}
+              groups={searchSuggestionGroups}
+              isRTL={isRTL}
+              resultCount={filteredDefects.length}
+              resultLabel={t('defects')}
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex h-10 shrink-0 items-center gap-1 rounded-lg border border-border bg-muted/50 p-1">
+            <ViewToggleButton active={viewMode === 'list'} onClick={() => changeViewMode('list')} icon={List} label={t('listView')} />
+            <ViewToggleButton active={viewMode === 'table'} onClick={() => changeViewMode('table')} icon={Table2} label={t('tableView')} />
+            <ViewToggleButton active={viewMode === 'board'} onClick={() => changeViewMode('board')} icon={Columns3} label={t('boardView')} />
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-40">
                 <SelectValue placeholder={t('status')} />
@@ -2113,6 +2289,164 @@ export function Defects() {
             <div key={index} className="h-32 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800/60" />
           ))
         ) : paginatedDefects.length > 0 ? (
+          viewMode === 'table' ? (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+              <Table className="min-w-[760px]">
+                <TableHeader>
+                  <TableRow className="border-b border-gray-200 bg-gray-50/80 hover:bg-gray-50/80 dark:border-gray-800 dark:bg-gray-800/40 dark:hover:bg-gray-800/40 [&_th]:text-xs [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-gray-500 dark:[&_th]:text-gray-400">
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={paginatedDefects.length > 0 && paginatedDefects.every((d) => selectedDefectIds.includes(d.id))}
+                        onCheckedChange={(checked) => {
+                          const pageIds = paginatedDefects.map((d) => d.id);
+                          setSelectedDefectIds((prev) =>
+                            checked ? Array.from(new Set([...prev, ...pageIds])) : prev.filter((id) => !pageIds.includes(id)),
+                          );
+                        }}
+                        aria-label={t('selectDefect')}
+                      />
+                    </TableHead>
+                    <TableHead>{t('defectId')}</TableHead>
+                    <TableHead>{t('title')}</TableHead>
+                    <TableHead>{t('status')}</TableHead>
+                    <TableHead>{t('defectSeverity')}</TableHead>
+                    <TableHead>{t('defectPriority')}</TableHead>
+                    <TableHead>{t('environment')}</TableHead>
+                    <TableHead>{t('created')}</TableHead>
+                    <TableHead className="w-12" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedDefects.map((defect) => {
+                    const externalUrl = defect.external_issue_url || defect.jira_link;
+                    return (
+                      <TableRow key={defect.id} className="border-b border-gray-100 dark:border-gray-800">
+                        <TableCell className="py-2">
+                          <Checkbox
+                            checked={selectedDefectIds.includes(defect.id)}
+                            onCheckedChange={() => toggleDefectSelection(defect.id)}
+                            aria-label={t('selectDefect')}
+                          />
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <Link
+                            to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
+                            className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            {defect.defect_id}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="max-w-[320px] py-2">
+                          <Link
+                            to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
+                            className="block truncate font-medium text-slate-900 hover:text-blue-700 hover:underline dark:text-slate-100 dark:hover:text-blue-300"
+                            title={defect.title}
+                          >
+                            {defect.title}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <Badge className={getStatusBadge(defect.status)}>{getStatusLabel(defect.status)}</Badge>
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <Badge className={`${getSeverityBadge(defect.severity)} gap-1`}>
+                            <ShieldAlert className="h-3 w-3" />{getTriageLabel(defect.severity)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <Badge className={`${getPriorityBadge(defect.priority)} gap-1`}>
+                            <Flag className="h-3 w-3" />{getTriageLabel(defect.priority)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate py-2 text-sm text-gray-600 dark:text-gray-400" title={defect.environment || undefined}>{defect.environment || '-'}</TableCell>
+                        <TableCell className="py-2 text-sm text-gray-500 dark:text-gray-400">
+                          {formatDefectDate(defect.created_at)}
+                        </TableCell>
+                        <TableCell className="py-2">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" aria-label={t('defectsMoreActions')} className="h-8 w-8 p-0">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-52">
+                              <DropdownMenuItem onClick={() => handleEditDefect(defect)}>
+                                <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('edit')}
+                              </DropdownMenuItem>
+                              {defect.test_case_id && (
+                                <DropdownMenuItem onClick={() => handleLinkToTestCase(defect)}>
+                                  <Link2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                  {t('viewTestExecution')}
+                                </DropdownMenuItem>
+                              )}
+                              {externalUrl && (
+                                <DropdownMenuItem onClick={() => handleViewInExternal(externalUrl)}>
+                                  <ExternalLink className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                  {t('defectsOpenInTracker')}
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteDefect(defect.id)}
+                                className="text-red-600 focus:bg-red-50 focus:text-red-700 dark:text-red-400 dark:focus:bg-red-950/30"
+                              >
+                                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('delete')}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : viewMode === 'board' ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {boardColumns.map((column) => (
+                  <div key={column.key} className="flex flex-col rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+                      <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${column.dot}`} aria-hidden="true" />
+                        <span className="truncate">{column.isOther ? t('defectsBoardOtherColumn') : getStatusLabel(column.key)}</span>
+                      </span>
+                      <Badge variant="secondary" className="rounded-full">{column.defects.length}</Badge>
+                    </div>
+                    <div className="flex max-h-[70vh] flex-col gap-2 overflow-y-auto p-2">
+                      {column.defects.length === 0 ? (
+                        <p className="px-2 py-6 text-center text-xs text-slate-400 dark:text-slate-500">{t('defectsBoardEmptyColumn')}</p>
+                      ) : (
+                        column.defects.map((defect) => (
+                          <Link
+                            key={defect.id}
+                            to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
+                            className="block rounded-xl border border-slate-200 bg-white p-3 shadow-xs transition hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-slate-700"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{defect.defect_id}</span>
+                              <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                                {formatDefectDate(defect.created_at)}
+                              </span>
+                            </div>
+                            <p className="mt-1 line-clamp-2 text-sm font-medium text-slate-900 dark:text-slate-100">{defect.title}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <Badge className={`${getSeverityBadge(defect.severity)} gap-1 text-[11px]`}>
+                                <ShieldAlert className="h-3 w-3" />{getTriageLabel(defect.severity)}
+                              </Badge>
+                              <Badge className={`${getPriorityBadge(defect.priority)} gap-1 text-[11px]`}>
+                                <Flag className="h-3 w-3" />{getTriageLabel(defect.priority)}
+                              </Badge>
+                            </div>
+                          </Link>
+                        ))
+                      )}
+                    </div>
+                  </div>
+              ))}
+            </div>
+          ) : (
           paginatedDefects.map((defect) => {
             const isExpanded = expandedDefectIds.has(defect.id);
             const syncStatus = defect.sync_status || defect.external_sync_status;
@@ -2210,7 +2544,7 @@ export function Defects() {
                           </button>
                         )}
                         <span className="ml-auto text-gray-400 dark:text-gray-500">
-                          {new Date(defect.created_at).toLocaleDateString(language)}
+                          {formatDefectDate(defect.created_at)}
                         </span>
                       </div>
                     </div>
@@ -2403,6 +2737,7 @@ export function Defects() {
               </Card>
             );
           })
+          )
         ) : (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-xs dark:border-slate-700 dark:bg-slate-900">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
@@ -2431,8 +2766,8 @@ export function Defects() {
         )}
       </div>
 
-      {/* Pagination */}
-      {sortedDefects.length > 0 && totalPages > 1 && (
+      {/* Pagination — board view shows every column in full, so it opts out */}
+      {viewMode !== 'board' && sortedDefects.length > 0 && totalPages > 1 && (
         <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900 sm:flex-row">
           <div className="text-sm text-gray-600 dark:text-gray-400">
             {t('showingDefects', {
