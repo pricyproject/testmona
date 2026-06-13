@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-06-13
+
+### Added
+- **Environment matrix runs.** Group N per-environment test runs under a single matrix
+  and review them in a pivot results view (RTL-localized).
+- **Auto-defects.** Automatically create defects when test results fail, and keep defect
+  status in sync with external issue trackers.
+- **Test asset health scoring.** A health-score engine for test assets, with bulk resolve
+  of flagged debt items.
+- Milestones auto-update their progress and status from test execution; notify the
+  milestone owner when a run completes, and notify a defect's assignee when assigned.
+- Dashboard **release readiness** card.
+- Test cases: an advanced query language with a `/` command palette and a responsive UI.
+- Structured JSON logging pipeline (structlog) and tenacity-based retry/backoff for
+  tracker calls and `project_seq` allocation.
+- PostgreSQL support via psycopg2 on Python 3.13, with the runtime baseline aligned to 3.13.
+
+### Changed
+- Frontend modernization: adopt **React Query** for data fetching and **React Hook Form**
+  for forms across the forms and list pages, and replace axios instance monkey-patching
+  with module-level state.
+- Dashboard: modern cards and a responsive layout (behavior preserved).
+- Auth: fold the password-change dependency onto `get_current_user` (fixes the API-token
+  skip path).
+
+### Fixed
+- Concurrency: lock the project row during `project_seq` allocation to prevent colliding
+  numbers; single-source defect numbering through the `project_seq` listener (with retry)
+  and lock the milestone recompute; gate token cleanup behind a DB lease so only one
+  replica runs it.
+- Routes: move static routes ahead of dynamic path segments to prevent shadowing.
+- Health: add a real DB/migration check to `/health`, and preserve the deep-link
+  destination across the login redirect.
+- TQL: make `!=` NULL-safe and extend `IS EMPTY` to cover empty strings.
+- i18n: replace an unanalyzable dynamic import with explicit per-locale lazy imports.
+- Startup: remove a duplicate migration call from the lifespan handler.
+- Traceability: paginate the matrix query before hydration; repair matrix-run schema drift.
+- Test plans: stop an infinite render loop caused by an unstable query fallback.
+- Frontend: preserve transparent logo backgrounds.
+- Build: bump tailwindcss to 4.3.1 to silence DEP0205 on Node 26.
+
+### Security
+- Auth: reject inactive users at login, revoke the old refresh token on rotation, and stop
+  persisting raw refresh tokens; drop the forced-password-change redirect to a
+  non-existent route.
+- Config: require `SECRET_KEY` in production to prevent per-replica key drift.
+
+## [0.5.4] - 2026-06-11
+
+### Added
+- **Test asset health monitoring** — surface flaky, stale, and unowned test assets, with
+  server-side pagination for the debt-items table.
+- **Test infrastructure** — backend pytest suite and frontend Vitest unit/integration
+  tests, wired into CI.
+- Typed response models for delete endpoints and remaining ad-hoc returns.
+- i18n: lazy-loaded `fa` and `ar` locale chunks.
+- Doc Hub: space stats, a reorder endpoint, per-space icons/colors, and a richer UI.
+
+### Changed
+- Replace `print()` with structured logging across the backend.
+- Consolidate schema management onto a single Alembic authority.
+- Replace deprecated `datetime.utcnow()` and FastAPI `on_event` with modern equivalents.
+
+### Fixed
+- Performance: eliminate N+1 query patterns in test-case RBAC and dashboard statistics.
+- Remove hardcoded fallback data returned on DB errors.
+- Import/export: restore route decorators and the `export_test_results` handler lost in a
+  module split.
+- i18n: pass the user's language to all `toLocaleDateString` calls; add 213 missing `fa`
+  and 186 missing `ar` keys.
+- TestRunDetail: fix RTL `space-x`/icon margins, i18n, type safety, silent errors, and a
+  duplicate interface.
+- Types: add `retest_needed`, `defect_links`, and `test_case.test_type` to `TestResult`.
+- Test cases: add `projectId` to the `loadEnums` effect dependency array.
+- Use `/health` (not `/api/health`) for the backend connectivity check.
+- Remove a debug `console.log` from the `PasswordChangeDialog` render path.
+
 ## [0.5.3] - 2026-06-10
 
 ### Added
@@ -259,7 +336,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of TestMona: projects, requirements, test cases, suites, runs,
   defects, milestones, and reports.
 
-[Unreleased]: https://github.com/pricyproject/testmona/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/pricyproject/testmona/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/pricyproject/testmona/compare/v0.5.4...v0.5.5
+[0.5.4]: https://github.com/pricyproject/testmona/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/pricyproject/testmona/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/pricyproject/testmona/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/pricyproject/testmona/compare/v0.5.0...v0.5.1
