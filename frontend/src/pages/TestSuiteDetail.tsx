@@ -1473,7 +1473,16 @@ export function TestSuiteDetail() {
 
       {/* Edit dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={(open) => (isUpdating ? null : setIsEditDialogOpen(open))}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[460px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="sm:max-w-[460px]"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && editForm.name.trim() && !isUpdating) {
+              e.preventDefault();
+              void handleSaveEdit();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t('editTestSuite')}</DialogTitle>
             <DialogDescription>{t('makeChangesToTestSuite')}</DialogDescription>
@@ -1587,7 +1596,16 @@ export function TestSuiteDetail() {
           if (!open) closeSectionForm();
         }}
       >
-        <DialogContent isRTL={isRTL} className="sm:max-w-[520px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="sm:max-w-[520px]"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && sectionForm.name.trim() && !isSavingSection) {
+              e.preventDefault();
+              void handleSaveSection();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>
               {editingSection ? t('editSection') : t('createNewSection')}

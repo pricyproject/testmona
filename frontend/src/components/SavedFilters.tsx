@@ -264,7 +264,18 @@ export function SavedFilters({ projectId, scope, currentDefinition, hasActiveFil
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>{t('name')}</Label>
-              <Input value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus placeholder={t('savedFilterNamePlaceholder')} />
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && newName.trim() && !isSaving) {
+                    e.preventDefault();
+                    void handleSave();
+                  }
+                }}
+                autoFocus
+                placeholder={t('savedFilterNamePlaceholder')}
+              />
             </div>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox checked={newDefault} onCheckedChange={(v) => setNewDefault(v === true)} />

@@ -195,7 +195,16 @@ export function MatrixRuns() {
               </Button>
             </DialogTrigger>
           )}
-          <DialogContent isRTL={isRTL} className="max-h-[92vh] overflow-y-auto sm:max-w-[760px]">
+          <DialogContent
+            isRTL={isRTL}
+            className="max-h-[92vh] overflow-y-auto sm:max-w-[760px]"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && canSubmit && !isCreating) {
+                e.preventDefault();
+                void handleCreate();
+              }
+            }}
+          >
             <DialogHeader>
               <div className="flex items-start gap-3 text-start">
                 <div className="rounded-2xl bg-blue-600 p-3 text-white shadow-lg shadow-blue-600/20">

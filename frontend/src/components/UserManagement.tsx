@@ -140,6 +140,13 @@ export function UserManagement() {
     return roleLabels[normalizedRole] || normalizedRole;
   };
 
+  const submitOnCtrlEnter = (handler: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handler();
+    }
+  };
+
   const handleCreateUser = async () => {
     if (!createUsername || !createEmail || !createPassword) {
       toast({
@@ -507,7 +514,7 @@ export function UserManagement() {
 
       {/* Create User Dialog */}
       <Dialog open={createUserDialogOpen} onOpenChange={setCreateUserDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[500px]">
+        <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={submitOnCtrlEnter(handleCreateUser)}>
           <DialogHeader>
             <DialogTitle>{t('createUser')}</DialogTitle>
             <DialogDescription>
@@ -592,7 +599,7 @@ export function UserManagement() {
 
       {/* Invite User Dialog */}
       <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[500px]">
+        <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={submitOnCtrlEnter(handleInviteUser)}>
           <DialogHeader>
             <DialogTitle>{t('inviteUser')}</DialogTitle>
             <DialogDescription>
@@ -663,7 +670,7 @@ export function UserManagement() {
 
       {/* Edit User Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+        <DialogContent isRTL={isRTL} className="sm:max-w-[425px]" onKeyDown={submitOnCtrlEnter(handleUpdateUser)}>
           <DialogHeader>
             <DialogTitle>{t('editUser')}</DialogTitle>
             <DialogDescription>

@@ -276,6 +276,12 @@ export function ApiTokens() {
                     placeholder={t('apiTokenNamePlaceholder')}
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && newName.trim() && !isCreating) {
+                        e.preventDefault();
+                        void handleCreate();
+                      }
+                    }}
                     autoFocus
                   />
                 </div>

@@ -686,7 +686,16 @@ export function MilestoneDetail() {
       </Card>
 
       <Dialog open={linkOpen} onOpenChange={(open) => (open ? null : setLinkOpen(false))}>
-        <DialogContent isRTL={isRTL} className="max-h-[85vh] overflow-hidden sm:max-w-[560px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="max-h-[85vh] overflow-hidden sm:max-w-[560px]"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && selectedPlanIds.length > 0 && !linkSaving) {
+              e.preventDefault();
+              void saveLinks();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t('linkExistingPlan')}</DialogTitle>
             <DialogDescription>{t('viewTestPlans')}</DialogDescription>

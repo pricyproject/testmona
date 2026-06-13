@@ -468,7 +468,15 @@ function GenerateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir={isRTL ? 'rtl' : 'ltr'}>
+      <DialogContent
+        dir={isRTL ? 'rtl' : 'ltr'}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && !generating) {
+            e.preventDefault();
+            onGenerate({ mode: rangeMode, since, until, includeAi });
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-violet-500" />

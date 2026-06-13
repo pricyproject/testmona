@@ -2883,7 +2883,17 @@ export function TestCases() {
                   </Button>
                 </DialogTrigger>
               )}
-              <DialogContent isRTL={isRTL} className={`sm:max-w-[600px] ${isRTL ? 'font-vazir' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
+              <DialogContent
+                isRTL={isRTL}
+                className={`sm:max-w-[600px] ${isRTL ? 'font-vazir' : ''}`}
+                dir={isRTL ? 'rtl' : 'ltr'}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && suiteName.trim() && !isCreatingSuite) {
+                    e.preventDefault();
+                    void handleCreateTestSuiteForProject();
+                  }
+                }}
+              >
                 <DialogHeader>
                   <DialogTitle>{t('createNewTestSuite')}</DialogTitle>
                   <DialogDescription>

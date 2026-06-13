@@ -442,7 +442,15 @@ export function Webhooks() {
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent
+          className="max-w-lg"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && !createdSecret && !isSubmitting) {
+              e.preventDefault();
+              void handleCreate();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{createdSecret ? t('webhookCreated') : t('createWebhook')}</DialogTitle>
             <DialogDescription>

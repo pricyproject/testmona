@@ -1983,7 +1983,19 @@ export function RequirementDetail() {
         </Dialog>
 
         <Dialog open={linkDialogOpen} onOpenChange={(open) => { if (!bulkUpdating) setLinkDialogOpen(open); }}>
-          <DialogContent isRTL={isRTL} className="max-w-2xl">
+          <DialogContent
+            isRTL={isRTL}
+            className="max-w-2xl"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && selectedAvailableTestCaseIds.length > 0 && !bulkUpdating) {
+                e.preventDefault();
+                void (async () => {
+                  const ok = await handleBulkLink(selectedAvailableTestCaseIds);
+                  if (ok) setLinkDialogOpen(false);
+                })();
+              }
+            }}
+          >
             <DialogHeader>
               <DialogTitle>{t('linkExistingTestCases')}</DialogTitle>
               <DialogDescription>{t('searchTestCasesToLink')}</DialogDescription>
@@ -2050,7 +2062,16 @@ export function RequirementDetail() {
         </Dialog>
 
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogContent isRTL={isRTL} className="max-w-2xl">
+          <DialogContent
+            isRTL={isRTL}
+            className="max-w-2xl"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && !creatingTestCase && testSuites.length > 0) {
+                e.preventDefault();
+                void handleCreateAndLinkTestCase();
+              }
+            }}
+          >
             <DialogHeader>
               <DialogTitle>{t('createAndLinkTestCase')}</DialogTitle>
               <DialogDescription>{t('createAndLinkTestCaseDesc')}</DialogDescription>
@@ -2156,7 +2177,16 @@ export function RequirementDetail() {
             setEditDialogOpen(open);
           }}
         >
-          <DialogContent isRTL={isRTL} className="max-w-3xl">
+          <DialogContent
+            isRTL={isRTL}
+            className="max-w-3xl"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && canSaveRequirement) {
+                e.preventDefault();
+                void handleUpdateRequirement();
+              }
+            }}
+          >
             <DialogHeader>
               <DialogTitle>{t('editRequirement')}</DialogTitle>
               <DialogDescription>{t('updateRequirementInfo')}</DialogDescription>

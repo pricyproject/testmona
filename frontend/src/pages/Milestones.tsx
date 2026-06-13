@@ -1043,7 +1043,16 @@ function MilestoneFormDialog({
   };
 
   return (
-    <DialogContent isRTL={isRTL} className="max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-xl">
+    <DialogContent
+      isRTL={isRTL}
+      className="max-h-[90vh] gap-0 overflow-y-auto p-0 sm:max-w-xl"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && !submitDisabled) {
+          e.preventDefault();
+          onSubmit();
+        }
+      }}
+    >
       {/* Header */}
       <DialogHeader className="space-y-0 border-b border-border p-6">
         <div className="flex items-start gap-3.5">

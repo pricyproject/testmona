@@ -2502,7 +2502,16 @@ export function TestRunDetail() {
 
       {/* Link Defect Dialog */}
       <Dialog open={linkDialogResultId !== null} onOpenChange={(open) => !open && setLinkDialogResultId(null)}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[480px]">
+        <DialogContent
+          isRTL={isRTL}
+          className="sm:max-w-[480px]"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && linkDefectId && !isLinkingDefect) {
+              e.preventDefault();
+              void handleLinkDefectSave();
+            }
+          }}
+        >
           <DialogHeader className="min-w-0">
             <DialogTitle className="truncate">{t('linkDefectToResult')}</DialogTitle>
             <DialogDescription>{t('linkDefectToResultDesc')}</DialogDescription>
