@@ -249,8 +249,10 @@ export function TestPlans() {
   const listFilters = { sortBy, sortOrder, statusFilter, searchQuery, milestoneFilter };
   const testPlansQuery = useTestPlansList(numericProjectId, listFilters, numericProjectId != null);
   const milestonesQuery = useTestPlanMilestones(numericProjectId, numericProjectId != null);
-  const testPlans: TestPlan[] = testPlansQuery.data ?? [];
-  const milestones: Milestone[] = milestonesQuery.data ?? [];
+  // Stable references: `?? []` would otherwise mint a fresh array every render
+  // while the query is pending, retriggering array-keyed effects in a loop.
+  const testPlans: TestPlan[] = useMemo(() => testPlansQuery.data ?? [], [testPlansQuery.data]);
+  const milestones: Milestone[] = useMemo(() => milestonesQuery.data ?? [], [milestonesQuery.data]);
   const isLoading = numericProjectId != null && testPlansQuery.isLoading;
 
   // Requirement options for the create/edit scope picker (fetched while a dialog is open).
@@ -302,7 +304,11 @@ export function TestPlans() {
   }, [testPlans, milestoneFilter]);
 
   useEffect(() => {
-    setSelectedPlanIds((current) => current.filter((id) => testPlans.some((plan) => plan.id === id)));
+    setSelectedPlanIds((current) => {
+      const next = current.filter((id) => testPlans.some((plan) => plan.id === id));
+      // Preserve the reference when nothing was pruned so setState bails out.
+      return next.length === current.length ? current : next;
+    });
   }, [testPlans]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
