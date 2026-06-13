@@ -247,7 +247,7 @@ export function Sidebar({
             title={appName}
             className="flex items-center gap-2 overflow-hidden rounded-lg transition-opacity hover:opacity-80"
           >
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden ${appLogoUrl ? 'bg-transparent' : 'bg-blue-600'}`}>
               {appLogoUrl ? (
                 <img src={appLogoUrl} alt={appName} className="h-full w-full rounded-lg object-cover" />
               ) : (

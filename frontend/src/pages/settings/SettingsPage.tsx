@@ -2416,7 +2416,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                       {t('brandingDescription', { appName })}
                     </p>
                   </div>
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-sm font-bold text-white">
+                  <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-sm font-bold text-white ${sanitizeLogoUrl(appLogoUrlInput) ? 'bg-transparent' : 'bg-blue-600'}`}>
                     {sanitizeLogoUrl(appLogoUrlInput) ? (
                       <img src={sanitizeLogoUrl(appLogoUrlInput)} alt={appNameInput || appName} className="h-full w-full rounded-2xl object-cover" />
                     ) : (
