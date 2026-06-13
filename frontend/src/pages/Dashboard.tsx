@@ -4,11 +4,27 @@ import type { LucideIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { FileText, TestTube, PlayCircle, TrendingUp, Users, Bug, FileCheck, Target, ExternalLink, AlertTriangle, Flag, Calendar, Loader2, CheckCircle, ShieldCheck } from 'lucide-react';
+import { FileText, TestTube, PlayCircle, TrendingUp, Users, Bug, FileCheck, Target, ExternalLink, AlertTriangle, Flag, Calendar, Loader2, CheckCircle, ShieldCheck, ArrowUpRight, ChevronRight } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { auditAPI, analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useProjectStore } from '@/stores/projectStore';
 import { AuditAction, AuditTrail, EntityType } from '@/types';
+
+// Calm, cohesive icon-chip tones shared across stat cards and quick actions.
+// Soft tint in light mode, low-opacity fill in dark mode — reads modern and
+// keeps the palette restrained instead of a saturated rainbow.
+const TONES = {
+  blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400',
+  emerald: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400',
+  amber: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
+  violet: 'bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-400',
+  indigo: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400',
+  rose: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
+  orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400',
+  teal: 'bg-teal-50 text-teal-600 dark:bg-teal-500/10 dark:text-teal-400',
+} as const;
+
+type Tone = keyof typeof TONES;
 
 // StatCard component moved outside to avoid React 19 issues
 interface StatCardProps {
@@ -53,7 +69,7 @@ const StatCard = ({ title, value, icon: Icon, color, trend, onClick }: StatCardP
   };
 
   return (
-  <Card 
+  <Card
     role={onClick ? 'button' : undefined}
     tabIndex={onClick ? 0 : undefined}
     className="hover:shadow-lg transition-shadow duration-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
@@ -199,7 +215,7 @@ export function Dashboard() {
   const [isActivityLoading, setIsActivityLoading] = useState(true);
   const [statsError, setStatsError] = useState('');
   const [activityError, setActivityError] = useState('');
-  
+
   useEffect(() => {
     const controller = new AbortController();
     const projectId = selectedProject?.id;
@@ -251,13 +267,13 @@ export function Dashboard() {
     // This prevents users from being navigated to projects they don't have access to
     const targetProjectId = activity.project_id;
     const shouldNavigate = !selectedProject || selectedProject.id === targetProjectId;
-    
+
     if (!shouldNavigate) {
       // If activity belongs to a different project, show message or do nothing
       // This prevents confusing context switching
       return;
     }
-    
+
     if (activity.entity_type === 'user') {
       navigate('/settings');
       return;
@@ -270,12 +286,12 @@ export function Dashboard() {
 
     // Use the activity's project_id if available, otherwise use selected project
     const projectId = targetProjectId || selectedProject?.id;
-    
+
     if (!projectId) {
       // If no project context, don't navigate
       return;
     }
-    
+
     // Handle real audit trail data
     switch (activity.entity_type) {
       case 'test_case':
@@ -380,31 +396,36 @@ export function Dashboard() {
   const hasReadinessScope = stats.releaseReadiness.activeRequirements > 0 || stats.releaseReadiness.activeTestCases > 0;
   const hasReadinessExecutions = stats.releaseReadiness.executedTestCases > 0;
   const isReleaseReady = hasReadinessScope && hasReadinessExecutions && readinessPassRate === 100 && readinessBlockers === 0;
+  // Share of active test cases that have at least one execution — fills the
+  // signal panel and gives the pass rate context (a high pass rate over few
+  // executions is weaker evidence than over the full scope).
+  const executionProgress = stats.releaseReadiness.activeTestCases > 0
+    ? Math.round((stats.releaseReadiness.executedTestCases / stats.releaseReadiness.activeTestCases) * 100)
+    : 0;
+  // Ring colour tracks the pass rate so the signal reads at a glance.
+  const ringColor = readinessPassRate >= 90 ? '#10b981' : readinessPassRate >= 60 ? '#f59e0b' : '#ef4444';
   const readinessAccent = isReleaseReady
     ? 'from-emerald-500 to-teal-500'
     : 'from-amber-500 to-red-500';
   const readinessStatusClasses = isReleaseReady
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
     : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300';
-  const readinessMetrics = [
-    {
-      label: t('releaseReadinessPassRate'),
-      value: `${stats.releaseReadiness.passRate}%`,
-      detail: t('releaseReadinessPassRateHelp'),
-      icon: TrendingUp,
-      color: 'text-blue-600 dark:text-blue-400',
-      background: 'bg-blue-50 dark:bg-blue-950/30',
-      cta: t('viewTestRuns'),
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects'),
-    },
+  // Quality-gate blockers. Pass rate is intentionally omitted here — it is
+  // already surfaced by the signal ring and the top "Pass Rate" stat card.
+  const readinessMetrics: {
+    label: string;
+    value: number;
+    detail: string;
+    icon: LucideIcon;
+    tone: Tone;
+    onClick: () => void;
+  }[] = [
     {
       label: t('openCriticalDefects'),
       value: stats.releaseReadiness.openCriticalDefects,
       detail: t('openCriticalDefectsHelp'),
       icon: AlertTriangle,
-      color: 'text-red-600 dark:text-red-400',
-      background: 'bg-red-50 dark:bg-red-950/30',
-      cta: t('reviewDefects'),
+      tone: 'rose',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
     },
     {
@@ -412,9 +433,7 @@ export function Dashboard() {
       value: stats.releaseReadiness.untestedRequirements,
       detail: t('untestedRequirementsHelp'),
       icon: FileCheck,
-      color: 'text-indigo-600 dark:text-indigo-400',
-      background: 'bg-indigo-50 dark:bg-indigo-950/30',
-      cta: t('reviewRequirements'),
+      tone: 'indigo',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/requirements` : '/projects'),
     },
     {
@@ -422,10 +441,39 @@ export function Dashboard() {
       value: stats.releaseReadiness.staleTests,
       detail: t('staleTestsHelp'),
       icon: TestTube,
-      color: 'text-amber-600 dark:text-amber-400',
-      background: 'bg-amber-50 dark:bg-amber-950/30',
-      cta: t('reviewTestHealth'),
+      tone: 'amber',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-asset-health` : '/projects'),
+    },
+  ];
+
+  const quickActions: { title: string; description: string; icon: LucideIcon; tone: Tone; onClick: () => void }[] = [
+    {
+      title: t('createTestCase'),
+      description: t('addNewTestCase'),
+      icon: FileText,
+      tone: 'blue',
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects'),
+    },
+    {
+      title: t('startTestRun'),
+      description: t('executeTests'),
+      icon: PlayCircle,
+      tone: 'emerald',
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects'),
+    },
+    {
+      title: t('reportDefect'),
+      description: t('logNewIssue'),
+      icon: Bug,
+      tone: 'rose',
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
+    },
+    {
+      title: t('viewReports'),
+      description: t('checkAnalytics'),
+      icon: FileCheck,
+      tone: 'violet',
+      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/reports` : '/projects'),
     },
   ];
 
@@ -436,8 +484,8 @@ export function Dashboard() {
           <div>
             <h1 className="text-3xl font-bold">{t('dashboard')}</h1>
             <p className="text-gray-600 dark:text-gray-400">
-              {selectedProject 
-                ? t('viewingDataFor', { name: selectedProject.name }) 
+              {selectedProject
+                ? t('viewingDataFor', { name: selectedProject.name })
                 : t('welcomeToTestManagement')}
             </p>
           </div>
@@ -535,7 +583,8 @@ export function Dashboard() {
         />
       </div>
 
-      <Card className="overflow-hidden border-gray-200 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-950">
+      {/* Release Readiness */}
+      <Card className="overflow-hidden rounded-2xl border-gray-200/80 bg-white shadow-xs dark:border-gray-800 dark:bg-gray-950">
         <CardHeader className="border-b border-gray-200 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_32%),linear-gradient(135deg,rgba(248,250,252,1),rgba(239,246,255,1))] dark:border-gray-800 dark:bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.20),transparent_32%),linear-gradient(135deg,rgba(17,24,39,1),rgba(15,23,42,1))]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -558,10 +607,10 @@ export function Dashboard() {
         <CardContent className="p-0">
           <div className="grid grid-cols-1 lg:grid-cols-[0.95fr_1.65fr]">
             <div className="border-b border-gray-200 p-5 dark:border-gray-800 lg:border-b-0 lg:border-e">
-              <div className={`rounded-2xl bg-linear-to-br ${readinessAccent} p-px shadow-sm`}>
-                <div className="rounded-2xl bg-white p-5 dark:bg-gray-950">
+              <div className={`h-full rounded-2xl bg-linear-to-br ${readinessAccent} p-px shadow-sm`}>
+                <div className="flex h-full flex-col rounded-2xl bg-white p-5 dark:bg-gray-950">
                   {!hasReadinessScope ? (
-                    <div className="flex min-h-72 flex-col items-center justify-center text-center">
+                    <div className="flex min-h-72 flex-1 flex-col items-center justify-center text-center">
                       <div className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 dark:bg-blue-950/30">
                         <ShieldCheck className="h-7 w-7 text-blue-600 dark:text-blue-400" />
                       </div>
@@ -588,7 +637,7 @@ export function Dashboard() {
                         </div>
                         <div
                           className="grid h-24 w-24 shrink-0 place-items-center rounded-full"
-                          style={{ background: `conic-gradient(#10b981 ${readinessPassRate}%, rgba(148, 163, 184, 0.22) 0)` }}
+                          style={{ background: `conic-gradient(${ringColor} ${readinessPassRate}%, rgba(148, 163, 184, 0.22) 0)` }}
                           dir="ltr"
                         >
                           <div className="grid h-20 w-20 place-items-center rounded-full bg-white text-center dark:bg-gray-950">
@@ -603,7 +652,22 @@ export function Dashboard() {
                             ? t('releaseReadinessClearSummary')
                             : t('releaseReadinessBlockerSummary', { count: readinessBlockers })}
                       </p>
-                      <div className="mt-5 grid grid-cols-2 gap-3">
+                      {/* Execution coverage — fills the panel and contextualises the pass rate */}
+                      <div className="mt-5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-gray-500 dark:text-gray-400">
+                            {t('reports_testsExecutedOf', { executed: stats.releaseReadiness.executedTestCases, total: stats.releaseReadiness.activeTestCases })}
+                          </span>
+                          <span className="font-semibold text-gray-700 tabular-nums dark:text-gray-300">{executionProgress}%</span>
+                        </div>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800" dir="ltr">
+                          <div
+                            className={`h-full rounded-full bg-linear-to-r ${readinessAccent} transition-all duration-500`}
+                            style={{ width: `${executionProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-auto grid grid-cols-2 gap-3 pt-5">
                         <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900">
                           <p className="text-xs text-gray-500 dark:text-gray-400">{t('activeRequirementsScope')}</p>
                           <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{stats.releaseReadiness.activeRequirements}</p>
@@ -618,26 +682,28 @@ export function Dashboard() {
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-3 p-5">
               {readinessMetrics.map((metric) => {
                 const Icon = metric.icon;
+                const hasIssue = metric.value > 0;
                 return (
                   <button
                     key={metric.label}
                     type="button"
                     onClick={metric.onClick}
-                    className="group rounded-2xl border border-gray-200 bg-gray-50/70 p-4 text-start transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white hover:shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:border-gray-800 dark:bg-gray-900/70 dark:hover:border-blue-900 dark:hover:bg-gray-900"
+                    className="group flex items-center gap-4 rounded-2xl border border-gray-200 bg-gray-50/70 p-4 text-start transition hover:border-blue-200 hover:bg-white hover:shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:border-gray-800 dark:bg-gray-900/70 dark:hover:border-blue-900 dark:hover:bg-gray-900"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className={`rounded-xl p-2.5 ${metric.background}`}>
-                        <Icon className={`h-5 w-5 ${metric.color}`} />
-                      </span>
-                      <ExternalLink className="h-4 w-4 text-gray-300 opacity-0 transition group-hover:opacity-100 dark:text-gray-600" />
+                    <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${TONES[metric.tone]}`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{metric.label}</p>
+                      <p className="mt-0.5 text-xs leading-5 text-gray-500 dark:text-gray-400">{metric.detail}</p>
                     </div>
-                    <p className="mt-4 text-3xl font-bold text-gray-900 dark:text-white">{metric.value}</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-700 dark:text-gray-300">{metric.label}</p>
-                    <p className="mt-2 min-h-10 text-xs leading-5 text-gray-500 dark:text-gray-400">{metric.detail}</p>
-                    <p className="mt-3 text-xs font-semibold text-blue-600 dark:text-blue-400">{metric.cta}</p>
+                    <span className={`text-2xl font-bold tabular-nums ${hasIssue ? 'text-gray-900 dark:text-white' : 'text-gray-300 dark:text-gray-600'}`}>
+                      {metric.value}
+                    </span>
+                    <ChevronRight className={`h-4 w-4 shrink-0 text-gray-300 transition-transform group-hover:translate-x-0.5 dark:text-gray-600 ${isRTL ? 'rotate-180' : ''}`} />
                   </button>
                 );
               })}
@@ -646,111 +712,98 @@ export function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* Recent Activity */}
-      <Card className="border-gray-200 dark:border-gray-800 shadow-xs">
-        <CardHeader className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">{t('recentActivity')}</CardTitle>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => navigate('/activity-management')}
-              className="h-8 px-3 text-xs font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors"
-            >
-              <ExternalLink className={`h-3.5 w-3.5 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} />
-              {t('viewAllActivities')}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isActivityLoading ? (
-            <div className="flex items-center justify-center gap-2 py-12 px-4 text-sm text-gray-600 dark:text-gray-400">
-              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-              <span>{t('loadingRecentActivity')}</span>
+      {/* Recent Activity + Quick Actions */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="rounded-2xl border-gray-200/80 shadow-xs lg:col-span-2 dark:border-gray-800">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">{t('recentActivity')}</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/activity-management')}
+                className="h-8 px-3 text-xs font-medium"
+              >
+                <ExternalLink className={`h-3.5 w-3.5 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} />
+                {t('viewAllActivities')}
+              </Button>
             </div>
-          ) : activityError ? (
-            <div role="alert" className="m-4 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-              {activityError}
-            </div>
-          ) : recentActivities.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3">
-                <Calendar className="h-8 w-8 text-gray-400" />
+          </CardHeader>
+          <CardContent className="p-0">
+            {isActivityLoading ? (
+              <div className="flex items-center justify-center gap-2 py-12 px-4 text-sm text-gray-600 dark:text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <span>{t('loadingRecentActivity')}</span>
               </div>
-              <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">{t('noRecentActivity')}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{t('activityWillAppear')}</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100 dark:divide-gray-800">
-              {stats.recentActivity.map((activity, index) => (
-                <div 
-                  key={activity.id || index} 
-                  className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-all duration-150 group"
-                  onClick={() => handleActivityClick(activity)}
-                >
-                  <div className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-800 group-hover:scale-105 transition-transform">
-                    <ActivityIcon activity={activity} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-900 dark:text-white font-medium leading-snug">
-                      <span>{formatActivityToken(activity.action, t) || t('unknown')}</span>
-                      {activity.entity_type && <span className="text-gray-600 dark:text-gray-400 font-normal"> {formatEntityLabel(activity.entity_type, t)}</span>}
-                      {activity.description && <span className="text-gray-600 dark:text-gray-400 font-normal">: {formatActivityDescription(activity.description, t)}</span>}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {formatDateTime(activity.created_at, t('unknownTime'))}
-                    </p>
-                  </div>
-                  <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <ExternalLink className="h-4 w-4 text-gray-400 dark:text-gray-500" />
-                  </div>
+            ) : activityError ? (
+              <div role="alert" className="m-4 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                {activityError}
+              </div>
+            ) : recentActivities.length === 0 ? (
+              <div className="text-center py-12 px-4">
+                <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Calendar className="h-8 w-8 text-gray-400" />
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">{t('noRecentActivity')}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t('activityWillAppear')}</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                {stats.recentActivity.map((activity, index) => (
+                  <div
+                    key={activity.id || index}
+                    className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-all duration-150 group"
+                    onClick={() => handleActivityClick(activity)}
+                  >
+                    <div className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-800 group-hover:scale-105 transition-transform">
+                      <ActivityIcon activity={activity} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900 dark:text-white font-medium leading-snug">
+                        <span>{formatActivityToken(activity.action, t) || t('unknown')}</span>
+                        {activity.entity_type && <span className="text-gray-600 dark:text-gray-400 font-normal"> {formatEntityLabel(activity.entity_type, t)}</span>}
+                        {activity.description && <span className="text-gray-600 dark:text-gray-400 font-normal">: {formatActivityDescription(activity.description, t)}</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {formatDateTime(activity.created_at, t('unknownTime'))}
+                      </p>
+                    </div>
+                    <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <ExternalLink className="h-4 w-4 text-gray-400 dark:text-gray-500" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects')}
-        >
-          <CardContent className="p-6 text-center">
-            <FileText className="h-8 w-8 text-blue-600 mx-auto mb-2" />
-            <h3 className="font-semibold">{t('createTestCase')}</h3>
-            <p className="text-sm text-gray-600">{t('addNewTestCase')}</p>
-          </CardContent>
-        </Card>
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects')}
-        >
-          <CardContent className="p-6 text-center">
-            <PlayCircle className="h-8 w-8 text-green-600 mx-auto mb-2" />
-            <h3 className="font-semibold">{t('startTestRun')}</h3>
-            <p className="text-sm text-gray-600">{t('executeTests')}</p>
-          </CardContent>
-        </Card>
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects')}
-        >
-          <CardContent className="p-6 text-center">
-            <Bug className="h-8 w-8 text-red-600 mx-auto mb-2" />
-            <h3 className="font-semibold">{t('reportDefect')}</h3>
-            <p className="text-sm text-gray-600">{t('logNewIssue')}</p>
-          </CardContent>
-        </Card>
-        <Card 
-          className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105"
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/reports` : '/projects')}
-        >
-          <CardContent className="p-6 text-center">
-            <FileCheck className="h-8 w-8 text-purple-600 mx-auto mb-2" />
-            <h3 className="font-semibold">{t('viewReports')}</h3>
-            <p className="text-sm text-gray-600">{t('checkAnalytics')}</p>
+        {/* Quick Actions */}
+        <Card className="rounded-2xl border-gray-200/80 shadow-xs lg:self-start dark:border-gray-800">
+          <CardHeader className="border-b border-gray-200 dark:border-gray-800">
+            <CardTitle className="text-base font-semibold text-gray-900 dark:text-white">{t('quickActions')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 p-3">
+            {quickActions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.title}
+                  type="button"
+                  onClick={action.onClick}
+                  className="group flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-start transition-all duration-200 hover:border-gray-200 hover:bg-gray-50 hover:shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:hover:border-gray-800 dark:hover:bg-gray-900"
+                >
+                  <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${TONES[action.tone]} transition-transform group-hover:scale-105`}>
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{action.title}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">{action.description}</p>
+                  </div>
+                  <ArrowUpRight className={`h-4 w-4 shrink-0 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-gray-600 ${isRTL ? 'rotate-[-90deg]' : ''}`} />
+                </button>
+              );
+            })}
           </CardContent>
         </Card>
       </div>
