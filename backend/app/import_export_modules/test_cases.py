@@ -261,6 +261,19 @@ async def import_test_cases(
                 if row_action == 'update' and duplicate_case:
                     updated_case = update_import_test_case_without_commit(db, duplicate_case, dict(test_case_data))
                     apply_imported_timestamps(updated_case, cleaned_data.get('created_at'), cleaned_data.get('updated_at'))
+                    if custom_fields and validate_custom_fields:
+                        for custom_field in custom_fields:
+                            field_value = cleaned_data.get(custom_field.name, '') or cleaned_data.get(custom_field.slug or '', '')
+                            if field_value:
+                                db.query(CustomFieldValue).filter(
+                                    CustomFieldValue.test_case_id == updated_case.id,
+                                    CustomFieldValue.field_definition_id == custom_field.id,
+                                ).delete(synchronize_session=False)
+                                db.add(CustomFieldValue(
+                                    field_definition_id=custom_field.id,
+                                    test_case_id=updated_case.id,
+                                    value=transform_custom_field_value(field_value, custom_field),
+                                ))
                     db.commit()
                     imported_count += 1
                     result.update({"status": "updated", "updated_id": updated_case.id})
@@ -707,9 +720,17 @@ def export_test_cases(
     if truncated:
         test_cases = test_cases[:MAX_ROWS_PER_EXPORT]
 
+    # external_key custom fields are carried by the dedicated built-in
+    # ``external_key`` column, so they must not also get their own column or the
+    # exported CSV would have two columns that normalize to ``external_key`` and
+    # fail to re-import ("Duplicate columns after normalization").
+    external_key_field_ids = get_external_key_field_ids(project_custom_fields)
+
     custom_field_headers: Dict[int, str] = {}
     used_headers = set(TEST_CASE_CSV_FIELDS)
     for custom_field in project_custom_fields:
+        if custom_field.id in external_key_field_ids:
+            continue
         header = sanitize_csv_field(custom_field.name.strip() if custom_field.name else '') or custom_field.slug or f"custom_field_{custom_field.id}"
         if header in used_headers:
             header = custom_field.slug or f"{header}_{custom_field.id}"
@@ -746,6 +767,14 @@ def export_test_cases(
             for value in getattr(test_case, 'custom_field_values', [])
             if value.field_definition_id in custom_field_headers
         }
+        external_key_value = next(
+            (
+                value.value
+                for value in getattr(test_case, 'custom_field_values', [])
+                if value.field_definition_id in external_key_field_ids and (value.value or '')
+            ),
+            '',
+        )
         row_data = {
             'id': test_case.id,
             'title': test_case.title,
@@ -763,6 +792,7 @@ def export_test_cases(
             'order_index': str(test_case.order_index if test_case.order_index is not None else 0),
             'is_multistep': 'true' if getattr(test_case, 'is_multistep', False) else 'false',
             'multistep_data': multistep_data,
+            'external_key': external_key_value or '',
             'created_at': test_case.created_at.isoformat() if test_case.created_at else '',
             'updated_at': test_case.updated_at.isoformat() if test_case.updated_at else '',
         }

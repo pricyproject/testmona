@@ -93,6 +93,8 @@ import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
 import { Section } from '@/types/testCases';
 import { ImportPreview } from '@/components/ImportPreview';
 import { SortableTestCaseRow } from '@/components/TestCases/SortableTestCaseRow';
+import { TestCaseSearchBar, SearchSuggestionGroup } from '@/components/TestCases/TestCaseSearchBar';
+import { parseSearchQuery, testCaseMatchesQuery } from '@/components/TestCases/searchQuery';
 import { SavedFilters } from '@/components/SavedFilters';
 import { BulkEditTestCasesDialog } from '@/components/BulkEditTestCasesDialog';
 
@@ -253,6 +255,7 @@ export function TestCases() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSectionId, setImportSectionId] = useState<string>('none');
+  const [isImportDragActive, setIsImportDragActive] = useState(false);
   const [sectionSearchQuery, setSectionSearchQuery] = useState<string>('');
 
   // Drag and drop sensors
@@ -286,7 +289,7 @@ export function TestCases() {
   // Only the 'all' bucket is pre-expanded; section ids are added as the API hierarchy
   // loads so we don't bake any project's actual ids into source.
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all']));
-  const [sectionsPanelCollapsed, setSectionsPanelCollapsed] = useState(false);
+  const [sectionsPanelCollapsed, setSectionsPanelCollapsed] = useState(true);
 
   // Move test case dialog state
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
@@ -1099,12 +1102,12 @@ export function TestCases() {
       return (
         <div key={section.id} className={level > 0 ? 'ml-3 rtl:ml-0 rtl:mr-3' : ''}>
           <DroppableSection section={section}>
-            <Button
-              variant={selectedTestSuite === section.id ? 'default' : 'ghost'}
-              className={`w-full justify-start text-xs font-normal py-1 h-auto ${level === 0 ? 'font-semibold' : 'font-normal'} ${level > 0 ? 'text-gray-600' : ''} ${
+            <button
+              type="button"
+              className={`group flex w-full items-center rounded-lg px-2 py-1.5 text-xs transition-all duration-200 ${level === 0 ? 'font-semibold' : 'font-normal'} ${
                 selectedTestSuite === section.id
-                  ? 'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                  ? 'bg-blue-600/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                  : `${level > 0 ? 'text-gray-600 dark:text-gray-300' : 'text-gray-700 dark:text-gray-200'} hover:bg-gray-100 dark:hover:bg-gray-800`
               }`}
               onClick={() => {
                 handleScopeSelection(section.id);
@@ -1135,24 +1138,24 @@ export function TestCases() {
             <div className="ml-auto flex items-center gap-1 shrink-0">
               {hasSubsections && (
                 <span
-                  className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded cursor-help"
+                  className="text-[11px] text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-full cursor-help"
                   title={`Total including subsections: ${cumulativeCount}`}
                 >
                   {cumulativeCount}
                 </span>
               )}
               <span
-                className={`text-xs px-1.5 py-0.5 rounded cursor-help ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full cursor-help transition-colors ${
                   selectedTestSuite === section.id
-                    ? 'bg-blue-100 text-blue-600 font-medium dark:bg-blue-900 dark:text-blue-300'
-                    : 'text-gray-400 bg-gray-50 dark:bg-gray-800'
+                    ? 'bg-blue-600 text-white font-medium'
+                    : 'text-gray-400 bg-gray-100 group-hover:bg-gray-200 dark:bg-gray-800'
                 }`}
                 title={`Direct test cases in this section: ${directCount}`}
               >
                 {directCount}
               </span>
             </div>
-          </Button>
+          </button>
           </DroppableSection>
           {hasChildren && isExpanded && (
             <div className="ml-1 rtl:ml-0 rtl:mr-1 border-l rtl:border-l-0 rtl:border-r border-gray-200 dark:border-gray-700 pl-1 rtl:pl-0 rtl:pr-1">
@@ -1320,21 +1323,66 @@ export function TestCases() {
     return normalizedValue.includes(normalizedFilterValue);
   };
 
+  // Parse the search box once per keystroke into structured terms + key:value
+  // filters so the per-row matcher stays cheap as the result set scales.
+  const parsedSearchQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);
+
+  // Suggestion catalog for the "/" advanced-search palette, derived from the
+  // project's real priorities, types and tags so completions are always valid.
+  const searchSuggestionGroups = useMemo<SearchSuggestionGroup[]>(() => {
+    const tagCounts = new Map<string, number>();
+    apiTestCases.forEach((tc) => {
+      (tc.tags || '')
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .forEach((tag) => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
+    });
+    const topTags = Array.from(tagCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([tag]) => ({ value: tag.toLowerCase(), label: tag }));
+
+    return [
+      {
+        key: 'priority',
+        label: 'Priority',
+        values: priorityOptions.map((o) => ({ value: o.value.toLowerCase(), label: o.label })),
+      },
+      {
+        key: 'type',
+        label: 'Type',
+        values: testTypeOptions.map((o) => ({ value: o.value.toLowerCase(), label: o.label })),
+      },
+      { key: 'tag', label: 'Tag', values: topTags },
+      {
+        key: 'is',
+        label: 'Automation',
+        values: [
+          { value: 'automated', label: 'Automated' },
+          { value: 'manual', label: 'Manual' },
+        ],
+      },
+      { key: 'reference', label: 'Reference', values: [] },
+    ];
+  }, [apiTestCases, priorityOptions, testTypeOptions]);
+
+  // Header summary counts — memoized so the strip doesn't re-scan the full list
+  // on every unrelated re-render of this large component.
+  const headerStatCounts = useMemo(() => {
+    const norm = (v: unknown) => String(v ?? '').toLowerCase();
+    return {
+      total: apiTestCases.length,
+      highPriority: apiTestCases.filter((tc) => ['high', 'critical'].includes(norm(tc.priority))).length,
+      automated: apiTestCases.filter((tc) => norm(tc.test_type).includes('autom')).length,
+      suites: testSuites.length,
+    };
+  }, [apiTestCases, testSuites]);
+
   // Filtered and sorted test cases (client-side filtering only for search and filters)
   const filteredAndSortedTestCases = useMemo(() => {
-    const normalizedSearchQuery = normalizeSearchValue(searchQuery);
-
     return apiTestCases.filter(testCase => {
-      const standardSearchText = [
-        testCase.title,
-        testCase.description,
-        testCase.reference,
-        testCase.tags,
-        testCase.preconditions,
-        testCase.steps,
-        testCase.expected_result,
-      ].filter(Boolean).join(' ').toLowerCase();
-      const matchesSearch = !normalizedSearchQuery || standardSearchText.includes(normalizedSearchQuery);
+      const matchesSearch = testCaseMatchesQuery(testCase, parsedSearchQuery);
       const matchesCustomField = matchesCustomFieldFilter(testCase);
 
       const matchesType = filterType === 'all' || normalizeSearchValue(testCase.test_type) === normalizeSearchValue(filterType);
@@ -1359,7 +1407,7 @@ export function TestCases() {
 
       return matchesSearch && matchesCustomField && matchesType && matchesPriority && matchesSuite;
     });
-  }, [apiTestCases, mockSections, searchQuery, customFieldFilterId, customFieldFilterValue, filterType, filterPriority, selectedTestSuite, selectedCustomFieldFilter]);
+  }, [apiTestCases, mockSections, parsedSearchQuery, customFieldFilterId, customFieldFilterValue, filterType, filterPriority, selectedTestSuite, selectedCustomFieldFilter]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -2126,34 +2174,45 @@ export function TestCases() {
     void loadCustomFields();
   };
 
-  const handleImportFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const validateAndSetImportFile = useCallback((file: File | undefined | null): boolean => {
     if (!file) {
-      return;
+      return false;
     }
 
     if (!file.name.toLowerCase().endsWith('.csv')) {
-      event.target.value = '';
       toast({
         title: t('invalidFileType'),
         description: t('pleaseSelectCSVFile'),
         variant: "destructive",
       });
-      return;
+      return false;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      event.target.value = '';
       toast({
         title: t('fileTooLarge'),
         description: t('pleaseSelectCSVFileSmallerThan10MB'),
         variant: "destructive",
       });
-      return;
+      return false;
     }
 
     setImportFile(file);
+    return true;
   }, [t, toast]);
+
+  const handleImportFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!validateAndSetImportFile(file)) {
+      event.target.value = '';
+    }
+  }, [validateAndSetImportFile]);
+
+  const handleImportDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsImportDragActive(false);
+    validateAndSetImportFile(event.dataTransfer.files?.[0]);
+  }, [validateAndSetImportFile]);
 
   // Bulk actions
   const handleSelectAll = (checked: boolean | "indeterminate") => {
@@ -2772,12 +2831,21 @@ export function TestCases() {
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">{t('testCasesTitle')}</h1>
-          <p className="text-gray-600 dark:text-gray-400">{t('testCasesDescription')}</p>
-        </div>
-        <div className="flex gap-2">
+      {/* Page header */}
+      <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-white to-gray-50/60 p-5 dark:border-gray-800 dark:from-gray-900 dark:to-gray-950">
+        <div className="pointer-events-none absolute -right-10 -top-12 h-44 w-44 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 right-24 h-40 w-40 rounded-full bg-indigo-500/10 blur-3xl" />
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3.5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-blue-600/20 bg-blue-600/10 text-blue-600 dark:text-blue-400">
+              <FileText className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{t('testCasesTitle')}</h1>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{t('testCasesDescription')}</p>
+            </div>
+          </div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={loadTestCases} title="Refresh test cases">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -3601,7 +3669,39 @@ export function TestCases() {
             </DialogContent>
           </Dialog>
         </div>
+        </div>
       </div>
+
+      {/* Summary stats */}
+      {(() => {
+        const stats = [
+          { label: t('totalTestCases'), value: headerStatCounts.total, icon: FileText, tint: 'text-blue-600 dark:text-blue-400', ring: 'bg-blue-500/10' },
+          { label: t('highPriority'), value: headerStatCounts.highPriority, icon: AlertTriangle, tint: 'text-amber-600 dark:text-amber-400', ring: 'bg-amber-500/10' },
+          { label: t('automated'), value: headerStatCounts.automated, icon: Wand2, tint: 'text-emerald-600 dark:text-emerald-400', ring: 'bg-emerald-500/10' },
+          { label: t('testSuites'), value: headerStatCounts.suites, icon: Layers, tint: 'text-indigo-600 dark:text-indigo-400', ring: 'bg-indigo-500/10' },
+        ];
+        const statsLoading = loading && headerStatCounts.total === 0;
+        return (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {stats.map((s) => (
+              <div
+                key={s.label}
+                className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700"
+              >
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${s.ring} ${s.tint}`}>
+                  <s.icon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  {statsLoading
+                    ? <div className="h-7 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+                    : <div className="text-2xl font-bold leading-none text-gray-900 dark:text-white">{s.value}</div>}
+                  <div className="mt-1 truncate text-xs font-medium text-gray-500 dark:text-gray-400">{s.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       <DndContext
         sensors={sensors}
@@ -3610,83 +3710,101 @@ export function TestCases() {
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
           {/* Sections Sidebar */}
         {sectionsPanelCollapsed ? (
           <div className="shrink-0">
-            <Button
-              variant="outline"
+            <button
+              type="button"
               onClick={() => setSectionsPanelCollapsed(false)}
               title={t('sections')}
-              className="flex h-auto flex-col items-center gap-2 px-2 py-3"
+              className="group flex h-full min-h-[7rem] w-12 flex-col items-center gap-3 rounded-2xl border border-gray-200/80 bg-gradient-to-b from-white to-gray-50 py-4 shadow-sm transition-all duration-300 hover:border-blue-300 hover:from-blue-50/60 hover:shadow-md dark:border-gray-800 dark:from-gray-900 dark:to-gray-900/60 dark:hover:border-blue-800/70 dark:hover:from-blue-950/30"
             >
-              <ChevronRight className="h-4 w-4 rtl:rotate-180" />
-              <Layers className="h-4 w-4" />
-            </Button>
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600/10 text-blue-600 transition-colors group-hover:bg-blue-600 group-hover:text-white dark:text-blue-400">
+                <Layers className="h-4 w-4" />
+              </span>
+              <span
+                className="flex-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-400 [writing-mode:vertical-rl] group-hover:text-blue-600 dark:text-gray-500 dark:group-hover:text-blue-400"
+                style={{ transform: 'rotate(180deg)' }}
+              >
+                {t('sections')}
+              </span>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition-all group-hover:bg-blue-600/10 group-hover:text-blue-600 dark:text-gray-500 dark:group-hover:text-blue-400">
+                <ChevronRight className="h-4 w-4 rtl:rotate-180" />
+              </span>
+            </button>
           </div>
         ) : (
-        <div className="w-64 shrink-0">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold flex items-center justify-between">
-                <span className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    onClick={() => setSectionsPanelCollapsed(true)}
-                    title={t('collapse')}
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5 rtl:rotate-180" />
-                  </Button>
-                  {t('sections')}
+        <div className="w-full shrink-0 duration-300 animate-in fade-in slide-in-from-left-3 lg:w-64">
+          <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-gray-800 dark:bg-gray-900 lg:sticky lg:top-4">
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-r from-gray-50/80 to-transparent px-4 py-3 dark:border-gray-800 dark:from-gray-900/60">
+              <span className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400">
+                  <Layers className="h-4 w-4" />
                 </span>
+                {t('sections')}
+              </span>
+              <div className="flex items-center gap-0.5">
                 {currentTestSuiteId && (
                   <Button
                     variant="ghost"
                     size="sm"
+                    className="h-7 w-7 rounded-lg p-0 text-gray-500 hover:bg-blue-600/10 hover:text-blue-600 dark:text-gray-400"
                     onClick={() =>
                       navigate(`/projects/${currentProjectId}/test-suites/${currentTestSuiteId}`)
                     }
                     title={t('sectionsManagedInTestSuites')}
                   >
-                    <Plus className="h-3 w-3" />
+                    <Plus className="h-4 w-4" />
                   </Button>
                 )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 rounded-lg p-0 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
+                  onClick={() => setSectionsPanelCollapsed(true)}
+                  title={t('collapse')}
+                >
+                  <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
+                </Button>
+              </div>
+            </div>
+            <div className="p-3">
               <div className="space-y-3">
                 {/* Search input for sections */}
                 <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                  <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 rtl:left-auto rtl:right-3" />
                   <Input
                     placeholder={t('searchSections')}
                     value={sectionSearchQuery}
                     onChange={(e) => setSectionSearchQuery(e.target.value)}
-                    className="pl-8 h-8 text-xs"
+                    className="h-9 rounded-xl border-gray-200 bg-gray-50/60 pl-9 text-xs transition-colors focus-visible:bg-white rtl:pl-3 rtl:pr-9 dark:border-gray-800 dark:bg-gray-800/40"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                <div className="max-h-[calc(100vh-13rem)] space-y-1 overflow-y-auto pr-0.5">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-gray-400 dark:text-gray-500">
                     {t('testCaseSections')}
                   </div>
-                  <Button
-                    variant={selectedTestSuite === 'all' ? 'secondary' : 'ghost'}
-                    className="w-full justify-start text-sm font-semibold"
+                  <button
+                    type="button"
+                    className={`group flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-200 ${
+                      selectedTestSuite === 'all'
+                        ? 'bg-blue-600/10 text-blue-700 shadow-sm dark:bg-blue-500/15 dark:text-blue-300'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800'
+                    }`}
                     onClick={() => handleScopeSelection('all')}
                   >
-                    <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 text-blue-500`} />
+                    <Folder className="h-4 w-4 shrink-0 text-blue-500" />
                     <span className="flex-1 truncate text-left rtl:text-right">{t('testCasesTitle')}</span>
-                    <span className={`text-xs px-2 py-1 rounded ${
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
                       selectedTestSuite === 'all'
-                      ? 'bg-blue-100 text-blue-600 font-medium'
-                      : 'text-gray-600 bg-gray-100 font-medium'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-500 group-hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400'
                   }`}>
                     {apiTestCases.length}
                   </span>
-                </Button>
+                </button>
 
                 {/* Group sections by test suite */}
                 {(() => {
@@ -3765,21 +3883,25 @@ export function TestCases() {
                   }
 
                   return Array.from(sectionsBySuite.entries()).map(([suiteId, suiteData]) => (
-                    <div key={suiteId} className="mb-3">
-                      <Button
-                        variant={selectedTestSuite === getSuiteSelectionValue(suiteId) ? 'secondary' : 'ghost'}
-                        className="mb-1 h-auto w-full justify-start px-3 py-1.5 text-xs font-semibold"
+                    <div key={suiteId} className="mb-2 mt-1">
+                      <button
+                        type="button"
+                        className={`group mb-0.5 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200 ${
+                          selectedTestSuite === getSuiteSelectionValue(suiteId)
+                            ? 'bg-blue-600/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                            : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800'
+                        }`}
                         onClick={() => handleScopeSelection(getSuiteSelectionValue(suiteId))}
                       >
-                        <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 text-blue-600`} />
+                        <Folder className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                         <span className="min-w-0 flex-1 truncate text-left rtl:text-right">
                           {suiteData.name}
                         </span>
-                        <span className="shrink-0 text-xs text-gray-500">
+                        <span className="shrink-0 text-[11px] font-medium text-gray-400">
                           {t('testCasesCountSimple', { count: apiTestCases.filter((tc) => tc.test_suite_id === suiteId).length })}
                         </span>
-                      </Button>
-                      <div className="ml-2">
+                      </button>
+                      <div className="ml-2 space-y-0.5 border-l border-gray-100 pl-2 rtl:border-l-0 rtl:border-r rtl:pl-0 rtl:pr-2 dark:border-gray-800">
                         {(() => {
                           const unsectionedValue = getUnsectionedSelectionValue(suiteId);
                           const unsectionedCount = apiTestCases.filter((tc) => tc.test_suite_id === suiteId && !tc.section_id).length;
@@ -3790,18 +3912,22 @@ export function TestCases() {
                             <>
                               {showUnsectioned && (
                                 <DroppableUnsectioned suiteId={suiteId} suiteName={suiteData.name}>
-                                  <Button
-                                    variant={selectedTestSuite === unsectionedValue ? 'secondary' : 'ghost'}
-                                    className="h-auto w-full justify-start px-3 py-1 text-xs font-normal"
+                                  <button
+                                    type="button"
+                                    className={`group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-normal transition-all duration-200 ${
+                                      selectedTestSuite === unsectionedValue
+                                        ? 'bg-blue-600/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                                        : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                                    }`}
                                     onClick={() => handleScopeSelection(unsectionedValue)}
                                     title={t('unsectionedTooltip')}
                                   >
-                                    <Folder className={`${isRTL ? 'ml-2' : 'mr-2'} h-3.5 w-3.5 text-gray-400`} />
+                                    <Folder className="h-3.5 w-3.5 shrink-0 text-gray-400" />
                                     <span className="min-w-0 flex-1 truncate text-left rtl:text-right">{t('unsectioned')}</span>
-                                    <span className="shrink-0 rounded bg-gray-50 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-gray-800">
+                                    <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-gray-800">
                                       {unsectionedCount}
                                     </span>
-                                  </Button>
+                                  </button>
                                 </DroppableUnsectioned>
                               )}
                               {suiteData.sections.length > 0 ? (
@@ -3818,8 +3944,8 @@ export function TestCases() {
                 })()}
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
         )}
 
@@ -3829,9 +3955,9 @@ export function TestCases() {
           {(() => {
             const breadcrumbPath = getBreadcrumbPath();
             return breadcrumbPath.length >= 1 ? (
-              <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm">
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 dark:border-gray-800 dark:bg-gray-900">
                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                  <span className="font-medium">Navigation:</span>
+                  <Folder className="h-4 w-4 text-blue-500" />
                   {breadcrumbPath.map((section, index) => (
                     <div key={index} className="flex items-center gap-2">
                       {index > 0 && <span className="text-gray-400">›</span>}
@@ -3873,23 +3999,23 @@ export function TestCases() {
           })()}
 
           {/* Search Bar and Bulk Actions */}
-          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex flex-1">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    placeholder={t('searchTestCases')}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+              <div className="w-full sm:max-w-md sm:flex-1">
+                <TestCaseSearchBar
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder={t('searchTestCases')}
+                  groups={searchSuggestionGroups}
+                  isRTL={isRTL}
+                  resultCount={filteredAndSortedTestCases.length}
+                  resultLabel={t('results')}
+                />
               </div>
               {selectedTestCases.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">
-                    {selectedTestCases.length} selected
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 dark:border-blue-900 dark:bg-blue-950/40">
+                  <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                    {t('selectedCount', { count: selectedTestCases.length })}
                   </span>
                   <Button variant="outline" size="sm" onClick={() => setBulkEditOpen(true)}>
                     <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('bulkEdit')}
@@ -3908,9 +4034,9 @@ export function TestCases() {
             </div>
 
             {/* Filters */}
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-gray-500" />
+            <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4 dark:border-gray-800">
+              <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                <Filter className="h-4 w-4" />
                 <span className="text-sm font-medium">{t('filters')}</span>
               </div>
               {currentProjectId && (
@@ -4021,16 +4147,36 @@ export function TestCases() {
                   )}
                 </div>
               )}
+              {(searchQuery.trim() !== ''
+                || filterType !== 'all'
+                || filterPriority !== 'all'
+                || customFieldFilterId !== CUSTOM_FIELD_FILTER_ALL
+                || customFieldFilterValue !== CUSTOM_FIELD_FILTER_ANY_VALUE) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-8 text-gray-500 hover:text-gray-700 dark:text-gray-400"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setFilterType('all');
+                    setFilterPriority('all');
+                    setCustomFieldFilterId(CUSTOM_FIELD_FILTER_ALL);
+                    setCustomFieldFilterValue(CUSTOM_FIELD_FILTER_ANY_VALUE);
+                  }}
+                >
+                  <X className={`h-3.5 w-3.5 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} /> {t('clearFilters')}
+                </Button>
+              )}
             </div>
           </div>
 
           {/* Test Cases Table */}
-          <Card>
+          <Card className="overflow-hidden rounded-lg border-gray-200 dark:border-gray-800">
             <CardContent className="p-0">
               <SortableContext items={paginatedTestCases.map(tc => tc.id)} strategy={verticalListSortingStrategy}>
-                <Table>
+                <Table className="min-w-[720px]">
                     <TableHeader>
-                      <TableRow className="bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <TableRow className="border-b border-gray-200 bg-gray-50/80 hover:bg-gray-50/80 dark:border-gray-800 dark:bg-gray-800/40 dark:hover:bg-gray-800/40 [&_th]:text-xs [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-gray-500 dark:[&_th]:text-gray-400">
                         <TableHead className="w-12">
                           <Checkbox
                             checked={
@@ -4065,6 +4211,20 @@ export function TestCases() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
+                      {loading && paginatedTestCases.length === 0 && (
+                        Array.from({ length: 6 }).map((_, i) => (
+                          <TableRow key={`skeleton-${i}`} className="hover:bg-transparent">
+                            <TableCell className="py-3"><div className="h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-4 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-4 w-48 animate-pulse rounded bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-5 w-16 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-5 w-16 animate-pulse rounded-full bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-4 w-24 animate-pulse rounded bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-700" /></TableCell>
+                            <TableCell className="py-3"><div className="h-4 w-4 animate-pulse rounded bg-gray-200 dark:bg-gray-700" /></TableCell>
+                          </TableRow>
+                        ))
+                      )}
                       {paginatedTestCases.map((testCase) => (
                         <SortableTestCaseRow
                           key={testCase.id}
@@ -4082,17 +4242,73 @@ export function TestCases() {
                           isRTL={isRTL}
                         />
                       ))}
-                      {!loading && paginatedTestCases.length === 0 && (
-                        <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={8} className="h-40 text-center">
-                            <div className="flex flex-col items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
-                              <FileText className="h-10 w-10 text-gray-300 dark:text-gray-600" />
-                              <p className="text-sm font-medium">{t('noTestCasesFound')}</p>
-                              <p className="text-xs text-gray-400">{t('tryAdjustingSearch')}</p>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      {!loading && paginatedTestCases.length === 0 && (() => {
+                        const filtersActive =
+                          searchQuery.trim() !== '' ||
+                          filterType !== 'all' ||
+                          filterPriority !== 'all' ||
+                          customFieldFilterId !== CUSTOM_FIELD_FILTER_ALL ||
+                          customFieldFilterValue !== CUSTOM_FIELD_FILTER_ANY_VALUE;
+                        return (
+                          <TableRow className="hover:bg-transparent">
+                            <TableCell colSpan={8} className="h-64 px-6 text-center">
+                              <div className="flex flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400">
+                                <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/60">
+                                  {filtersActive
+                                    ? <Search className="h-7 w-7 text-gray-400 dark:text-gray-500" />
+                                    : <FileText className="h-7 w-7 text-gray-400 dark:text-gray-500" />}
+                                </div>
+                                {filtersActive ? (
+                                  <>
+                                    <div>
+                                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('noMatchingTestCases')}</p>
+                                      <p className="mt-0.5 text-xs text-gray-400">{t('tryAdjustingSearch')}</p>
+                                    </div>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="mt-1 rounded-md"
+                                      onClick={() => {
+                                        setSearchQuery('');
+                                        setFilterType('all');
+                                        setFilterPriority('all');
+                                        setCustomFieldFilterId(CUSTOM_FIELD_FILTER_ALL);
+                                        setCustomFieldFilterValue(CUSTOM_FIELD_FILTER_ANY_VALUE);
+                                      }}
+                                    >
+                                      <X className={`h-3.5 w-3.5 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} /> {t('clearFilters')}
+                                    </Button>
+                                  </>
+                                ) : !currentTestSuiteId ? (
+                                  <>
+                                    <div>
+                                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('noTestCasesYet')}</p>
+                                      <p className="mt-0.5 max-w-xs text-xs text-gray-400">{t('createTestSuiteToStart')}</p>
+                                    </div>
+                                    {canWrite && (
+                                      <Button size="sm" className="mt-1 rounded-md" onClick={() => setIsSuiteDialogOpen(true)}>
+                                        <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('createTestSuite')}
+                                      </Button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <div>
+                                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('noTestCasesYet')}</p>
+                                      <p className="mt-0.5 max-w-xs text-xs text-gray-400">{t('createFirstTestCase')}</p>
+                                    </div>
+                                    {canWrite && (
+                                      <Button size="sm" className="mt-1 rounded-md" onClick={handleOpenModal}>
+                                        <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('addNewTestCase')}
+                                      </Button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })()}
                     </TableBody>
                   </Table>
                 </SortableContext>
@@ -4100,13 +4316,13 @@ export function TestCases() {
           </Card>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mt-4">
-            <div className="flex items-center gap-4">
-              <div className="text-sm text-gray-600">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
                 {t('showing', { start: filteredAndSortedTestCases.length > 0 ? startIndex + 1 : 0, end: endIndex, total: filteredAndSortedTestCases.length })}
               </div>
               <div className="flex items-center gap-2">
-                <Label className="text-sm text-gray-600">{t('itemsPerPage')}:</Label>
+                <Label className="text-sm text-gray-600 dark:text-gray-400">{t('itemsPerPage')}:</Label>
                 <Select value={itemsPerPage.toString()} onValueChange={(value) => {
                   const newItemsPerPage = parseInt(value);
                   setItemsPerPage(newItemsPerPage);
@@ -4128,11 +4344,11 @@ export function TestCases() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => setCurrentPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}>
                 <ChevronLeft className="h-4 w-4 rtl:rotate-180" /> {t('previous')}
               </Button>
-              <span className="text-sm">{t('pageOf', { current: safePage, total: Math.max(1, totalPages) })}</span>
-              <Button variant="outline" size="sm" onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))} disabled={safePage >= totalPages}>
+              <span className="rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">{t('pageOf', { current: safePage, total: Math.max(1, totalPages) })}</span>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => setCurrentPage(Math.min(totalPages, safePage + 1))} disabled={safePage >= totalPages}>
                 {t('next')} <ChevronRight className="h-4 w-4 rtl:rotate-180" />
               </Button>
             </div>
@@ -4307,14 +4523,26 @@ export function TestCases() {
         if (!open) {
           setImportFile(null);
           setImportSectionId('none');
+          setIsImportDragActive(false);
         }
       }}>
-        <DialogContent isRTL={isRTL} className="max-h-[92vh] max-w-7xl overflow-y-auto border-0 bg-background p-0 text-foreground">
-          <div className="p-6">
-            <DialogHeader>
-              <DialogTitle>{t('importTestCasesFromCSV')}</DialogTitle>
-              <DialogDescription>{t('importTestCasesFromCSVDescription')}</DialogDescription>
+        <DialogContent isRTL={isRTL} className="max-h-[92vh] max-w-6xl gap-0 overflow-hidden bg-background p-0 text-foreground">
+          {/* Clean minimalist header */}
+          <div className="border-b border-border px-6 py-4">
+            <DialogHeader className="space-y-1 text-start">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Upload className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <DialogTitle className="text-base font-semibold">{t('importTestCasesFromCSV')}</DialogTitle>
+                  <DialogDescription className="text-sm text-muted-foreground">{t('importTestCasesFromCSVDescription')}</DialogDescription>
+                </div>
+              </div>
             </DialogHeader>
+          </div>
+
+          <div className="max-h-[calc(92vh-5rem)] overflow-y-auto px-6 py-5">
             {importFile && currentTestSuiteId && (
               <ImportPreview
                 file={importFile}
@@ -4356,49 +4584,62 @@ export function TestCases() {
               />
             )}
             {importFile && !currentTestSuiteId && (
-              <div className="py-8 text-center text-sm text-red-600">{t('noTestSuiteFoundForProject')}</div>
+              <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-6 py-8 text-center dark:border-red-900/50 dark:bg-red-950/30">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-300">{t('noTestSuiteFoundForProject')}</p>
+              </div>
             )}
             {!importFile && (
-              <div className="mx-auto max-w-2xl py-8" dir={isRTL ? 'rtl' : 'ltr'}>
-                <div className="rounded-3xl border border-dashed bg-card p-8 text-center text-card-foreground shadow-xs">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-                    <Upload className="h-8 w-8" />
+              <div className="mx-auto max-w-2xl py-1 duration-200 animate-in fade-in" dir={isRTL ? 'rtl' : 'ltr'}>
+                <Input
+                  ref={fileInputRef}
+                  id="import-file"
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={handleImportFileSelect}
+                  className="sr-only"
+                />
+                {/* Drag-and-drop dropzone */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => fileInputRef.current?.click()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
+                  onDragOver={(e) => { e.preventDefault(); if (!isImportDragActive) setIsImportDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setIsImportDragActive(false); }}
+                  onDrop={handleImportDrop}
+                  className={`group flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed p-10 text-center outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                    isImportDragActive
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-muted/20 hover:border-primary/50 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-transform duration-200 ${isImportDragActive ? 'scale-105' : 'group-hover:scale-105'}`}>
+                    <Upload className="h-6 w-6" />
                   </div>
-                  <div className="mt-5 space-y-2">
-                    <h3 className="text-lg font-semibold">{t('selectCSVFile')}</h3>
-                    <p className="text-sm text-muted-foreground">{t('selectCSVFileDescription')}</p>
+                  <h3 className="mt-4 text-base font-semibold">{t('selectCSVFile')}</h3>
+                  <p className="mt-1 max-w-sm text-sm text-muted-foreground">{t('selectCSVFileDescription')}</p>
+                  <div className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity group-hover:opacity-90">
+                    <Upload className="h-4 w-4" />
+                    {t('browseCSVFile')}
                   </div>
+                  <p className="mt-3 text-xs text-muted-foreground">{t('csvImportLimitHint')}</p>
+                </div>
 
-                  <div className="mx-auto mt-6 max-w-md text-left rtl:text-right">
-                    <Label htmlFor="import-file" className="mb-2 block text-sm font-medium">{t('csvFile')} <span className="text-destructive">*</span></Label>
-                    <Input
-                      ref={fileInputRef}
-                      id="import-file"
-                      type="file"
-                      accept=".csv,text/csv"
-                      onChange={handleImportFileSelect}
-                      className="sr-only"
-                    />
-                    <Button type="button" variant="outline" className="h-12 w-full justify-center" onClick={() => fileInputRef.current?.click()}>
-                      <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                      {t('browseCSVFile')}
-                    </Button>
-                    <p className="mt-2 text-xs text-muted-foreground">{t('csvImportLimitHint')}</p>
-                  </div>
-
-                  <div className="mt-6 grid gap-3 text-left rtl:text-right md:grid-cols-2">
-                    {[
-                      t('csvImportFeatureMapping'),
-                      t('csvImportFeatureCustomFields'),
-                      t('csvImportFeatureValidation'),
-                      t('csvImportFeatureBulkSave'),
-                    ].map((feature) => (
-                      <div key={feature} className="flex items-center gap-2 rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">
-                        <Check className="h-4 w-4 text-primary" />
-                        {feature}
-                      </div>
-                    ))}
-                  </div>
+                <div className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                  {[
+                    t('csvImportFeatureMapping'),
+                    t('csvImportFeatureCustomFields'),
+                    t('csvImportFeatureValidation'),
+                    t('csvImportFeatureBulkSave'),
+                  ].map((feature) => (
+                    <div key={feature} className="flex items-center gap-1.5">
+                      <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                      {feature}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

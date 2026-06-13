@@ -14,36 +14,36 @@ async def validate_file_size(
     file: UploadFile,
     max_size: int,
     size_name: str = "file"
-) -> int:
+) -> bytes:
     """
     Validate file size before processing.
-    
+
     Args:
         file: UploadFile object
         max_size: Maximum allowed size in bytes
         size_name: Name of the size limit for error messages
-        
+
     Returns:
-        Actual file size in bytes
-        
+        The validated file content as bytes
+
     Raises:
         HTTPException: If file size exceeds limit
     """
     # Read file content to get actual size
     content = await file.read()
     file_size = len(content)
-    
+
     # Reset file pointer for subsequent reads
     await file.seek(0)
-    
+
     if file_size > max_size:
         max_size_mb = max_size / (1024 * 1024)
         raise HTTPException(
             status_code=413,
             detail=f"{size_name} size must not exceed {max_size_mb:.1f}MB"
         )
-    
-    return file_size
+
+    return content
 
 
 def validate_file_type(

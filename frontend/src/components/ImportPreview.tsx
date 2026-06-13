@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronRight, Eye, FileText, Folder, Loader2, RotateCcw, Save, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, FileText, Folder, Loader2, RotateCcw, Save, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -328,6 +327,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
   const [virtualScrollTop, setVirtualScrollTop] = useState(0);
   const [bulkEditField, setBulkEditField] = useState<BulkEditableField>('priority');
   const [bulkEditValue, setBulkEditValue] = useState('medium');
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
@@ -1106,10 +1106,10 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
   if (isParsing) {
     return (
       <div className="flex min-h-72 items-center justify-center py-10" dir={isRTL ? 'rtl' : 'ltr'}>
-        <div className="rounded-2xl border bg-card p-8 text-center text-card-foreground shadow-xs">
-          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-primary" />
-          <div className="font-semibold">{t('importParsingCsv')}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{file.name}</div>
+        <div className="max-w-sm rounded-xl border bg-card p-8 text-center text-card-foreground">
+          <Loader2 className="mx-auto mb-4 h-7 w-7 animate-spin text-primary" />
+          <div className="font-medium">{t('importParsingCsv')}</div>
+          <div className="mt-1 truncate text-sm text-muted-foreground" title={file.name}>{file.name}</div>
         </div>
       </div>
     );
@@ -1117,16 +1117,14 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
 
   if (parseErrors.length > 0) {
     return (
-      <div className="space-y-5 py-4" dir={isRTL ? 'rtl' : 'ltr'}>
-        <Card className="border-destructive/30 bg-destructive/10">
-          <CardContent className="flex gap-3 p-5">
-            <X className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-            <div className="space-y-2">
-              <h3 className="font-semibold text-destructive">{t('importCsvCouldNotBeParsed')}</h3>
-              {parseErrors.map((error) => <p key={error} className="text-sm text-destructive">{error}</p>)}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="space-y-4 py-2" dir={isRTL ? 'rtl' : 'ltr'}>
+        <div className="flex gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <X className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div className="min-w-0 space-y-1.5">
+            <h3 className="font-medium text-destructive">{t('importCsvCouldNotBeParsed')}</h3>
+            {parseErrors.map((error) => <p key={error} className="break-words text-sm text-destructive/90">{error}</p>)}
+          </div>
+        </div>
         <div className="flex justify-end">
           <Button variant="outline" onClick={onCancel}>{t('cancel')}</Button>
         </div>
@@ -1134,108 +1132,99 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
     );
   }
 
+  const mappedColumnCount = columnMapping.filter((mapping) => mapping.targetField).length;
+
   return (
-    <div className="space-y-6 py-2" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="rounded-2xl border bg-card p-5 text-card-foreground shadow-lg">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-primary/10 p-2 text-primary"><Upload className="h-5 w-5" /></div>
-              <div>
-                <h2 className="text-xl font-semibold">{t('importCsvFlowTitle')}</h2>
-                <p className="text-sm text-muted-foreground">{t('importCsvFlowDescription')}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <Badge variant="secondary" className="bg-muted text-muted-foreground hover:bg-muted/80"><FileText className="mr-1 h-3 w-3" />{file.name}</Badge>
-              <Badge variant="secondary" className="bg-muted text-muted-foreground hover:bg-muted/80">{(file.size / 1024).toFixed(1)} KB</Badge>
-              <Badge variant="secondary" className="bg-muted text-muted-foreground hover:bg-muted/80">{stats.total} {t('rows')}</Badge>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center text-xs md:min-w-80">
-            {[
-              { id: 'mapping', label: t('importStepMap') },
-              { id: 'preview', label: t('importStepReview') },
-              { id: 'finish', label: t('importStepImport') },
-            ].map((item, index) => {
-              const active = item.id === step || (item.id === 'finish' && isImporting);
-              return (
-                <div key={item.id} className={`rounded-xl border px-3 py-2 ${active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-muted/40 text-muted-foreground'}`}>
-                  <div className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-background">{index + 1}</div>
+    <div className="space-y-4 py-1" dir={isRTL ? 'rtl' : 'ltr'}>
+      {/* Slim context bar: file info + step indicator */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+          <FileText className="h-4 w-4 shrink-0 text-primary" />
+          <span className="max-w-[220px] truncate font-medium text-foreground" title={file.name}>{file.name}</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="whitespace-nowrap">{(file.size / 1024).toFixed(1)} KB</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="whitespace-nowrap">{stats.total} {t('rows')}</span>
+        </div>
+        <div className="flex items-center gap-1 text-xs font-medium">
+          {[
+            { id: 'mapping', label: t('importStepMap') },
+            { id: 'preview', label: t('importStepReview') },
+          ].map((item, index) => {
+            const isActive = item.id === step;
+            const isDone = item.id === 'mapping' && step === 'preview';
+            return (
+              <React.Fragment key={item.id}>
+                {index > 0 && <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground/40 ${isRTL ? 'rotate-180' : ''}`} />}
+                <div className={`flex items-center gap-1.5 rounded-full px-3 py-1 transition-colors ${isActive ? 'bg-primary text-primary-foreground' : isDone ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-background/25 text-[10px] font-semibold">{isDone ? <Check className="h-3 w-3" /> : index + 1}</span>
                   {item.label}
                 </div>
-              );
-            })}
-          </div>
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
 
-	      {(parseWarnings.length > 0 || !titleMapped || hasDuplicateMappedFields) && (
-        <Card className="border-primary/30 bg-primary/10">
-          <CardContent className="space-y-2 p-4 text-sm text-primary">
-            {!titleMapped && <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />{t('importTitleMustBeMapped')}</div>}
-            {hasDuplicateMappedFields && <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />{t('importDuplicateMappedFields')}</div>}
-            {parseWarnings.map((warning) => <div key={warning} className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />{warning}</div>)}
-          </CardContent>
-        </Card>
+      {(parseWarnings.length > 0 || !titleMapped || hasDuplicateMappedFields) && (
+        <div className="space-y-1.5 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3.5 py-2.5 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+          {!titleMapped && <div className="flex items-center gap-2"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{t('importTitleMustBeMapped')}</div>}
+          {hasDuplicateMappedFields && <div className="flex items-center gap-2"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{t('importDuplicateMappedFields')}</div>}
+          {parseWarnings.map((warning) => <div key={warning} className="flex items-center gap-2"><AlertTriangle className="h-3.5 w-3.5 shrink-0" />{warning}</div>)}
+        </div>
       )}
 
       {step === 'mapping' ? (
-        <div className="space-y-5">
-          <Card className="overflow-hidden">
-            <CardContent className="grid gap-4 p-4 md:grid-cols-[minmax(0,0.8fr)_minmax(280px,1fr)] md:items-center">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Folder className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <CardTitle className="text-base">{t('targetSection')}</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">{t('selectSection')}</p>
-                </div>
+        <div className="space-y-4">
+          {/* Target section */}
+          <div className="flex flex-col gap-2.5 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <Folder className="h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t('targetSection')}</div>
+                <div className="text-xs text-muted-foreground">{t('selectSection')}</div>
               </div>
-              <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
-                <SelectTrigger className="h-11 w-full bg-background"><SelectValue placeholder={t('selectSection')} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{t('noSection')}</SelectItem>
-                  {sectionOptions.map((section) => (
-                    <SelectItem key={section.id} value={section.id}>{`${'  '.repeat(section.depth)}${section.name}`}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
+            </div>
+            <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
+              <SelectTrigger className="h-9 bg-background sm:w-72"><SelectValue placeholder={t('selectSection')} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('noSection')}</SelectItem>
+                {sectionOptions.map((section) => (
+                  <SelectItem key={section.id} value={section.id}>{`${'  '.repeat(section.depth)}${section.name}`}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b bg-muted/20 px-3 py-2.5">
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <CardTitle className="text-base">{t('columnMapping')}</CardTitle>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="destructive">{t('importRequiredField')}</Badge>
-                  <span className="text-sm text-muted-foreground">{columnMapping.filter((mapping) => mapping.targetField).length} / {availableColumns.length} {t('columnsMapped')}</span>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 p-3">
-              {availableColumns.length === 0 ? (
-                <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">{t('importNoColumnsFound')}</div>
-              ) : availableColumns.map((column, index) => {
-                const mapping = mappingByColumn.get(column);
-                const mapped = Boolean(mapping?.targetField);
-                const requiredMappingLabel = getRequiredMappingLabel(mapping);
-                return (
-                  <div key={column} className={`grid gap-2 rounded-lg border px-3 py-2 md:grid-cols-[minmax(0,0.9fr)_minmax(220px,1fr)] md:items-center ${mapped ? 'border-primary/30 bg-primary/5' : 'border-border bg-muted/30'}`}>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold ${mapped ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>{index + 1}</span>
+          {/* Column mapping */}
+          <div className="overflow-hidden rounded-lg border bg-card">
+            <div className="flex items-center justify-between gap-2 border-b px-3.5 py-2.5">
+              <span className="text-sm font-medium">{t('columnMapping')}</span>
+              <span className="text-xs text-muted-foreground">{mappedColumnCount} / {availableColumns.length} {t('columnsMapped')}</span>
+            </div>
+            {availableColumns.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">{t('importNoColumnsFound')}</div>
+            ) : (
+              <div className="divide-y">
+                {availableColumns.map((column) => {
+                  const mapping = mappingByColumn.get(column);
+                  const mapped = Boolean(mapping?.targetField);
+                  const requiredMappingLabel = getRequiredMappingLabel(mapping);
+                  return (
+                    <div key={column} className="flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:gap-4">
+                      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${mapped ? 'bg-primary' : 'bg-muted-foreground/30 ring-1 ring-border'}`} />
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-foreground">{column}</div>
-                          <div className="text-xs text-muted-foreground">{t('csvColumn')}</div>
+                          <div className="truncate text-sm font-medium text-foreground" title={column}>{column}</div>
+                          <div className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+                            <span>{getCoverageLabel(column, mapping)}</span>
+                            {requiredMappingLabel ? <span className="font-medium text-destructive">· {requiredMappingLabel}</span> : null}
+                            {mapping?.confidence ? <span className="text-primary">· {t('importAutoMatched', { confidence: mapping.confidence })}</span> : null}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="space-y-2">
                       <Select value={getMappingValue(mapping)} onValueChange={(value) => updateMapping(column, value)}>
-                        <SelectTrigger className="h-9 bg-background"><SelectValue placeholder={t('selectField')} /></SelectTrigger>
+                        <SelectTrigger className="h-9 bg-background sm:w-64"><SelectValue placeholder={t('selectField')} /></SelectTrigger>
                         <SelectContent className="max-h-80">
                           <SelectItem value={IGNORE_FIELD}>{t('ignoreThisColumn')}</SelectItem>
                           {STANDARD_FIELDS.map((field) => <SelectItem key={field.key} value={field.key}>{t(field.labelKey as any)}{field.required ? ` - ${t('importRequiredField')}` : ''}</SelectItem>)}
@@ -1243,33 +1232,26 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                           {customFields.map((field) => <SelectItem key={field.id} value={`custom_${field.id}`}>{field.name}{field.is_required ? ` (${t('required')})` : ''}</SelectItem>)}
                         </SelectContent>
                       </Select>
-	                      <div className="flex flex-wrap gap-1.5">
-	                        <Badge variant="secondary">{getCoverageLabel(column, mapping)}</Badge>
-	                        {requiredMappingLabel ? <Badge variant="destructive">{requiredMappingLabel}</Badge> : null}
-	                        {mapping?.confidence ? <Badge variant="outline">{t('importAutoMatched', { confidence: mapping.confidence })}</Badge> : null}
-	                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {lowConfidenceMappings.length > 0 && (
-            <Card className="border-amber-400/40 bg-amber-50/80 text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
-              <CardContent className="space-y-2 p-4 text-sm">
-                <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />{t('lowConfidenceMappings')}</div>
-                <div className="flex flex-wrap gap-2">
-                  {lowConfidenceMappings.map((mapping) => <Badge key={mapping.csvColumn} variant="outline">{mapping.csvColumn} → {getPreviewFieldLabel(mapping.csvColumn)} ({mapping.confidence}%)</Badge>)}
-                </div>
-                <p className="text-xs opacity-80">{t('lowConfidenceMappingsHint')}</p>
-              </CardContent>
-            </Card>
+            <div className="space-y-2 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3.5 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+              <div className="flex items-center gap-2 font-medium"><AlertTriangle className="h-3.5 w-3.5" />{t('lowConfidenceMappings')}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {lowConfidenceMappings.map((mapping) => <Badge key={mapping.csvColumn} variant="outline" className="bg-background/60">{mapping.csvColumn} → {getPreviewFieldLabel(mapping.csvColumn)} ({mapping.confidence}%)</Badge>)}
+              </div>
+              <p className="text-xs opacity-80">{t('lowConfidenceMappingsHint')}</p>
+            </div>
           )}
 
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <p className="text-sm text-muted-foreground">{t('importMapRequiredHint')}</p>
-            <div className="flex justify-end gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="hidden text-xs text-muted-foreground sm:block">{t('importMapRequiredHint')}</p>
+            <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onCancel}>{t('cancel')}</Button>
               <Button onClick={() => setStep('preview')} disabled={!titleMapped || hasDuplicateMappedFields || stats.total === 0}>{t('continueToPreview')}<ChevronRight className={`h-4 w-4 ${isRTL ? 'mr-2 rotate-180' : 'ml-2'}`} /></Button>
             </div>
@@ -1277,199 +1259,158 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card p-2 text-sm shadow-xs">
+          {/* Consolidated summary strip */}
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             {[
-              { label: t('totalRows'), value: stats.total, className: 'bg-muted text-muted-foreground' },
-              { label: t('validRows'), value: stats.valid, className: 'bg-primary/10 text-primary' },
-              { label: t('invalidRows'), value: stats.invalid, className: stats.invalid > 0 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground' },
-              { label: t('warnings'), value: stats.warnings, className: 'bg-muted text-muted-foreground' },
-              { label: t('edited'), value: stats.edited, className: 'bg-primary/10 text-primary' },
+              { label: t('totalRows'), value: stats.total, accent: 'text-foreground' },
+              { label: t('validRows'), value: stats.valid, accent: 'text-emerald-600 dark:text-emerald-400' },
+              { label: t('importSummaryDuplicates'), value: importSummary.duplicates, accent: importSummary.duplicates > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground' },
+              { label: t('invalidRows'), value: importSummary.invalid, accent: importSummary.invalid > 0 ? 'text-destructive' : 'text-foreground' },
+              { label: t('importSummaryWillImport'), value: importSummary.willImport, accent: 'text-primary' },
             ].map((item) => (
-              <div key={item.label} className={`rounded-xl px-3 py-1.5 ${item.className}`}>
-                <span className="font-semibold">{item.value}</span>
-                <span className="ml-1 opacity-75">{item.label}</span>
+              <div key={item.label} className="rounded-lg border bg-card px-3 py-2">
+                <div className={`text-xl font-semibold tabular-nums ${item.accent}`}>{item.value}</div>
+                <div className="truncate text-xs text-muted-foreground">{item.label}</div>
               </div>
             ))}
           </div>
 
-          <Card className="overflow-hidden">
-            <CardContent className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] lg:items-center">
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap gap-1.5">
-                  <Button variant="outline" size="sm" onClick={() => setStep('mapping')}><RotateCcw className="mr-2 h-4 w-4" />{t('remapColumns')}</Button>
-                  <Button variant={issueFilter === 'all' ? 'outline-solid' : 'default'} size="sm" onClick={() => setIssueFilter(issueFilter === 'all' ? 'invalid' : 'all')}><Eye className="mr-2 h-4 w-4" />{issueFilter === 'all' ? t('showOnlyIssues') : t('showAllRows')}</Button>
-                  <Button variant="outline" size="sm" onClick={resetEdits} disabled={stats.edited === 0}><RotateCcw className="mr-2 h-4 w-4" />{t('resetEdits')}</Button>
-                </div>
-	                <div className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
-	                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('duplicateResolutionMode')}</Label>
-	                  <Select value={duplicateMode} onValueChange={(value) => setDuplicateMode(value as ImportDuplicateMode)}>
-	                    <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
-	                    <SelectContent>
-	                      <SelectItem value="create_only">{t('duplicateModeCreateOnly')}</SelectItem>
-	                      <SelectItem value="skip_duplicates">{t('duplicateModeSkip')}</SelectItem>
-	                      <SelectItem value="update_existing">{t('duplicateModeUpdate')}</SelectItem>
-	                      <SelectItem value="create_copy">{t('duplicateModeCopy')}</SelectItem>
-	                    </SelectContent>
-	                  </Select>
-	                </div>
-	                <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-	                  <Badge variant="outline">{t('importReadyCount', { count: stats.valid })}</Badge>
-	                  <Badge variant="outline">{previewColumns.length} / {availableColumns.length} {t('columnsMapped')}</Badge>
-	                  {ignoredColumnCount > 0 ? <Badge variant="outline">{ignoredColumnCount} {t('importIgnoredColumn')}</Badge> : null}
-	                </div>
-              </div>
-              <div className="rounded-xl border bg-muted/30 p-2.5">
-                <div className="mb-1.5 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('targetSection')}</div>
-                    <div className="truncate text-sm font-medium text-foreground">{selectedSectionName}</div>
-                  </div>
-                  <Folder className="h-5 w-5 shrink-0 text-primary" />
-                </div>
-                <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
-                  <SelectTrigger className="h-9 w-full bg-background"><SelectValue placeholder={t('selectSection')} /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">{t('noSection')}</SelectItem>
-                    {sectionOptions.map((section) => (
-                      <SelectItem key={section.id} value={section.id}>{`${'  '.repeat(section.depth)}${section.name}`}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-	          </Card>
-
-	          <Card className="border-primary/20 bg-primary/5">
-	            <CardContent className="grid gap-2 p-3 text-sm grid-cols-[repeat(auto-fit,minmax(130px,1fr))]">
-	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryNew')}</div><div className="text-xl font-semibold">{importSummary.newRows}</div></div>
-	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryDuplicates')}</div><div className="text-xl font-semibold">{importSummary.duplicates}</div></div>
-	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryInvalid')}</div><div className="text-xl font-semibold">{importSummary.invalid}</div></div>
-	              <div className="rounded-xl bg-background p-3"><div className="text-xs text-muted-foreground">{t('importSummaryWillImport')}</div><div className="text-xl font-semibold">{importSummary.willImport}</div></div>
-	            </CardContent>
-	          </Card>
-
           {allValidRowsSkippedAsDuplicates && (
-            <Card className="border-amber-400/50 bg-amber-50 text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
-              <CardContent className="flex gap-3 p-4 text-sm">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-                <div>
-                  <div className="font-semibold">{t('importNoRowsDueToDuplicatesTitle')}</div>
-                  <div className="mt-1 opacity-85">{t('importNoRowsDueToDuplicatesHint')}</div>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="flex gap-2.5 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3.5 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-medium">{t('importNoRowsDueToDuplicatesTitle')}</div>
+                <div className="mt-0.5 opacity-85">{t('importNoRowsDueToDuplicatesHint')}</div>
+              </div>
+            </div>
           )}
 
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b bg-muted/20 px-3 py-2.5">
-              <CardTitle className="text-base">{t('bulkEditColumns')}</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 p-3 lg:grid-cols-[180px_minmax(180px,1fr)_auto] lg:items-end">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('field')}</Label>
-                <Select value={bulkEditField} onValueChange={(value) => handleBulkFieldChange(value as BulkEditableField)}>
-                  <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
+          {/* Toolbar: actions + duplicate handling + filters */}
+          <div className="overflow-hidden rounded-lg border bg-card">
+            <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2.5">
+              <Button variant="outline" size="sm" onClick={() => setStep('mapping')}><RotateCcw className="me-1.5 h-3.5 w-3.5" />{t('remapColumns')}</Button>
+              <div className="flex min-w-0 items-center gap-2">
+                <Label className="hidden whitespace-nowrap text-xs text-muted-foreground sm:inline">{t('duplicateResolutionMode')}</Label>
+                <Select value={duplicateMode} onValueChange={(value) => setDuplicateMode(value as ImportDuplicateMode)}>
+                  <SelectTrigger className="h-8 w-40 bg-background sm:w-44"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="priority">{t('priority')}</SelectItem>
-                    <SelectItem value="section_id">{t('section')}</SelectItem>
-                    <SelectItem value="created_at">{t('created')}</SelectItem>
+                    <SelectItem value="create_only">{t('duplicateModeCreateOnly')}</SelectItem>
+                    <SelectItem value="skip_duplicates">{t('duplicateModeSkip')}</SelectItem>
+                    <SelectItem value="update_existing">{t('duplicateModeUpdate')}</SelectItem>
+                    <SelectItem value="create_copy">{t('duplicateModeCopy')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('value')}</Label>
-                {bulkEditField === 'priority' ? (
-                  <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
-                    <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {['low', 'medium', 'high', 'critical'].map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                ) : bulkEditField === 'section_id' ? (
-                  <Select value={bulkEditValue || 'none'} onValueChange={(value) => setBulkEditValue(value === 'none' ? '' : value)}>
-                    <SelectTrigger className="h-9 bg-background"><SelectValue placeholder={t('selectSection')} /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">{t('noSection')}</SelectItem>
-                      {sectionOptions.map((section) => <SelectItem key={section.id} value={section.id}>{`${'  '.repeat(section.depth)}${section.name}`}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input type="datetime-local" value={bulkEditValue} onChange={(event) => setBulkEditValue(event.target.value)} className="h-9 bg-background" />
-                )}
+              <Button variant={showBulkEdit ? 'default' : 'outline'} size="sm" onClick={() => setShowBulkEdit((value) => !value)}>{t('bulkEditColumns')}</Button>
+              <Button variant="outline" size="sm" onClick={resetEdits} disabled={stats.edited === 0}><RotateCcw className="me-1.5 h-3.5 w-3.5" />{t('resetEdits')}</Button>
+              <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground ms-auto">
+                <Folder className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="max-w-[180px] truncate" title={selectedSectionName}>{selectedSectionName}</span>
               </div>
-              <div className="flex flex-wrap gap-2">
+            </div>
+
+            {showBulkEdit && (
+              <div className="flex flex-wrap items-end gap-2 border-b bg-muted/20 px-3 py-2.5">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">{t('field')}</Label>
+                  <Select value={bulkEditField} onValueChange={(value) => handleBulkFieldChange(value as BulkEditableField)}>
+                    <SelectTrigger className="h-8 w-40 bg-background"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="priority">{t('priority')}</SelectItem>
+                      <SelectItem value="section_id">{t('section')}</SelectItem>
+                      <SelectItem value="created_at">{t('created')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">{t('value')}</Label>
+                  {bulkEditField === 'priority' ? (
+                    <Select value={bulkEditValue} onValueChange={setBulkEditValue}>
+                      <SelectTrigger className="h-8 w-40 bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {['low', 'medium', 'high', 'critical'].map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : bulkEditField === 'section_id' ? (
+                    <Select value={bulkEditValue || 'none'} onValueChange={(value) => setBulkEditValue(value === 'none' ? '' : value)}>
+                      <SelectTrigger className="h-8 w-48 bg-background"><SelectValue placeholder={t('selectSection')} /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{t('noSection')}</SelectItem>
+                        {sectionOptions.map((section) => <SelectItem key={section.id} value={section.id}>{`${'  '.repeat(section.depth)}${section.name}`}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input type="datetime-local" value={bulkEditValue} onChange={(event) => setBulkEditValue(event.target.value)} className="h-8 w-52 bg-background" />
+                  )}
+                </div>
                 <Button variant="outline" size="sm" onClick={() => applyBulkEdit(bulkEditField, bulkEditValue)} disabled={bulkEditField === 'section_id' && !bulkEditValue}>{t('applyToAllRows')}</Button>
                 {bulkEditField === 'created_at' ? <Button variant="outline" size="sm" onClick={() => applyBulkEdit('created_at', getDefaultCreatedAt(), true)}>{t('setEmptyCreationTimesToNow')}</Button> : null}
-                <Button variant="outline" size="sm" onClick={() => applyBulkEdit('priority', 'medium')}>{t('setAllPriorityMedium')}</Button>
+                <Button variant="ghost" size="sm" onClick={() => applyBulkEdit('priority', 'medium')}>{t('setAllPriorityMedium')}</Button>
               </div>
-            </CardContent>
-          </Card>
+            )}
 
-	          {isImporting && (
-	            <Card className="border-primary/30">
-	              <CardContent className="flex flex-col gap-2 p-4 text-sm md:flex-row md:items-center md:justify-between">
-	                <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin text-primary" />{progress.message || t(`importPhase${progress.phase.charAt(0).toUpperCase()}${progress.phase.slice(1)}` as any)}</div>
-	                {progress.totalRows ? <Badge variant="outline">{progress.processedRows || 0} / {progress.totalRows} {t('rows')}</Badge> : null}
-	                {progress.totalChunks ? <Badge variant="outline">{t('importChunkProgress', { current: progress.currentChunk || 0, total: progress.totalChunks })}</Badge> : null}
-	              </CardContent>
-	            </Card>
-	          )}
+            <div className="flex flex-wrap gap-1.5 px-3 py-2.5">
+              {([
+                ['all', t('allRows'), issueCounts.all],
+                ['invalid', t('invalidRows'), issueCounts.invalid],
+                ['duplicates', t('importSummaryDuplicates'), issueCounts.duplicates],
+                ['warnings', t('warnings'), issueCounts.warnings],
+                ['missing_required', t('missingRequiredFields'), issueCounts.missing_required],
+                ['custom_field_errors', t('customFieldErrors'), issueCounts.custom_field_errors],
+              ] as Array<[IssueFilter, string, number]>).map(([filter, label, count]) => {
+                const active = issueFilter === filter;
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setIssueFilter(filter)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-muted-foreground hover:bg-muted'}`}
+                  >
+                    {label}
+                    <span className={`rounded-full px-1.5 text-[10px] ${active ? 'bg-primary-foreground/20' : 'bg-muted'}`}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-	          {lastResult && (
-	            <Card className="border-border">
-	              <CardContent className="flex flex-col gap-3 p-4 text-sm md:flex-row md:items-center md:justify-between">
-	                <div>
-	                  <div className="font-semibold">{lastResult.message}</div>
-	                  <div className="text-muted-foreground">{t('importResultReportHint')}</div>
-	                </div>
-	                <div className="flex flex-wrap gap-2">
-	                  <Button variant="outline" size="sm" onClick={() => downloadImportReport('csv')}>{t('downloadCsvReport')}</Button>
-	                  <Button variant="outline" size="sm" onClick={() => downloadImportReport('json')}>{t('downloadJsonReport')}</Button>
-	                </div>
-	              </CardContent>
-	            </Card>
-	          )}
-
-	          <Card className="overflow-hidden rounded-2xl">
-            <CardHeader className="border-b bg-muted/30 px-3 py-2.5">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="text-base">{t('dataPreview')}</CardTitle>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {filteredRows.length} {t('rows')} · {previewColumns.length} {t('columnsMapped')}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-1.5 md:justify-end">
-                  <Badge>{t('validRows')}: {stats.valid}</Badge>
-                  {stats.invalid > 0 ? <Badge variant="destructive">{t('invalidRows')}: {stats.invalid}</Badge> : null}
-                  {stats.warnings > 0 ? <Badge variant="outline">{t('warnings')}: {stats.warnings}</Badge> : null}
-                </div>
+          {isImporting && (
+            <div className="flex flex-col gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3.5 py-2.5 text-sm md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin text-primary" />{progress.message || t(`importPhase${progress.phase.charAt(0).toUpperCase()}${progress.phase.slice(1)}` as any)}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {progress.totalRows ? <Badge variant="outline">{progress.processedRows || 0} / {progress.totalRows} {t('rows')}</Badge> : null}
+                {progress.totalChunks ? <Badge variant="outline">{t('importChunkProgress', { current: progress.currentChunk || 0, total: progress.totalChunks })}</Badge> : null}
               </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="border-b bg-background/80 px-3 py-2">
-                <div className="flex flex-wrap gap-1.5">
-                  {([
-                    ['all', t('allRows'), issueCounts.all],
-                    ['invalid', t('invalidRows'), issueCounts.invalid],
-                    ['duplicates', t('importSummaryDuplicates'), issueCounts.duplicates],
-                    ['warnings', t('warnings'), issueCounts.warnings],
-                    ['missing_required', t('missingRequiredFields'), issueCounts.missing_required],
-                    ['custom_field_errors', t('customFieldErrors'), issueCounts.custom_field_errors],
-                  ] as Array<[IssueFilter, string, number]>).map(([filter, label, count]) => (
-                    <Button key={filter} variant={issueFilter === filter ? 'default' : 'outline-solid'} size="sm" onClick={() => setIssueFilter(filter)}>
-                      {label} <Badge variant="secondary" className="ml-2">{count}</Badge>
-                    </Button>
-                  ))}
-                </div>
+            </div>
+          )}
+
+          {lastResult && (
+            <div className="flex flex-col gap-3 rounded-lg border px-3.5 py-3 text-sm md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-medium">{lastResult.message}</div>
+                <div className="text-muted-foreground">{t('importResultReportHint')}</div>
               </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => downloadImportReport('csv')}>{t('downloadCsvReport')}</Button>
+                <Button variant="outline" size="sm" onClick={() => downloadImportReport('json')}>{t('downloadJsonReport')}</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Data preview */}
+          <div className="overflow-hidden rounded-lg border bg-card">
+            <div className="flex items-center justify-between gap-2 border-b px-3.5 py-2">
+              <span className="text-sm font-medium">{t('dataPreview')}</span>
+              <span className="text-xs text-muted-foreground">{filteredRows.length} {t('rows')} · {previewColumns.length} {t('columnsMapped')}</span>
+            </div>
+            <div className="p-0">
               <div
                 ref={previewScrollRef}
                 className="h-[58vh] min-h-[360px] overflow-y-auto overflow-x-hidden bg-muted/10 p-2 md:p-3"
                 onScroll={(event) => setVirtualScrollTop(event.currentTarget.scrollTop)}
               >
                 {virtualRows.rows.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-10 text-center text-sm text-muted-foreground">{t('importNoRowsMatchFilter')}</div>
+                  <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">{t('importNoRowsMatchFilter')}</div>
                 ) : (
                   <div style={{ minHeight: virtualRows.totalHeight || undefined }}>
                     <div style={{ paddingTop: virtualRows.offsetTop, paddingBottom: virtualRows.bottomPadding }} className="space-y-2">
@@ -1487,7 +1428,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                                 </div>
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-1.5">
-                                    {row.isValid ? <Badge><Check className="mr-1 h-3 w-3" />{t('valid')}</Badge> : <Badge variant="destructive"><X className="mr-1 h-3 w-3" />{t('invalid')}</Badge>}
+                                    {row.isValid ? <Badge><Check className="me-1 h-3 w-3" />{t('valid')}</Badge> : <Badge variant="destructive"><X className="me-1 h-3 w-3" />{t('invalid')}</Badge>}
                                     {row.isEdited ? <Badge variant="outline">{t('edited')}</Badge> : null}
                                     {duplicateInfo?.isDuplicate ? <Badge variant="outline">{t('importDuplicateBadge')}</Badge> : null}
                                   </div>
@@ -1496,10 +1437,10 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                                 </div>
                               </div>
                               {(row.errors.length > 0 || row.warnings.length > 0 || duplicateInfo?.isDuplicate) && (
-                                <div className="flex flex-wrap gap-1.5 md:justify-end">
+                                <div className="flex min-w-0 flex-wrap gap-1.5 md:max-w-[55%] md:justify-end">
                                   {duplicateInfo?.isDuplicate ? (
                                     <Select value={duplicateInfo.effectiveAction} onValueChange={(value) => setRowActions((previous) => ({ ...previous, [row.id]: value as ImportDuplicateMode }))}>
-                                      <SelectTrigger className="h-8 w-44 bg-background"><SelectValue /></SelectTrigger>
+                                      <SelectTrigger className="h-8 w-full bg-background sm:w-44"><SelectValue /></SelectTrigger>
                                       <SelectContent>
                                         <SelectItem value="create_only">{t('rowActionCreateOnly')}</SelectItem>
                                         <SelectItem value="skip_duplicates">{t('rowActionSkip')}</SelectItem>
@@ -1508,8 +1449,8 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                                       </SelectContent>
                                     </Select>
                                   ) : null}
-                                  {row.errors.map((error) => <Badge key={error} variant="destructive">{error}</Badge>)}
-                                  {row.warnings.map((warning) => <Badge key={warning} variant="outline">{warning}</Badge>)}
+                                  {row.errors.map((error) => <Badge key={error} variant="destructive" className="max-w-full whitespace-normal break-words text-start">{error}</Badge>)}
+                                  {row.warnings.map((warning) => <Badge key={warning} variant="outline" className="max-w-full whitespace-normal break-words text-start">{warning}</Badge>)}
                                 </div>
                               )}
                             </div>
@@ -1532,38 +1473,25 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
                   </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          <div className="sticky bottom-0 z-30 rounded-2xl border bg-background/95 p-3 shadow-2xl backdrop-blur-sm supports-backdrop-filter:bg-background/80">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Button variant="outline" size="sm" onClick={() => setStep('mapping')} disabled={isImporting}><RotateCcw className="mr-2 h-4 w-4" />{t('back')}</Button>
-                <Badge variant="outline">{t('validRows')}: {stats.valid}</Badge>
-                <Badge variant="outline">{t('importSummaryWillImport')}: {importSummary.willImport}</Badge>
-                <span className="text-xs text-muted-foreground">{t('importInvalidRowsSkipped')}</span>
+          <div className="sticky bottom-0 z-30 -mx-1 rounded-xl border bg-background/95 px-3 py-2.5 shadow-lg backdrop-blur-sm supports-backdrop-filter:bg-background/80">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <Button variant="ghost" size="sm" onClick={() => setStep('mapping')} disabled={isImporting}><RotateCcw className="me-1.5 h-3.5 w-3.5" />{t('back')}</Button>
+                <span className="text-muted-foreground">
+                  {t('importSummaryWillImport')}: <span className="font-semibold text-foreground tabular-nums">{importSummary.willImport}</span>
+                  {stats.invalid > 0 ? <span className="ms-1 text-xs">· {t('importInvalidRowsSkipped')}</span> : null}
+                </span>
               </div>
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
-                <div className="grid gap-1 md:w-56">
-                  <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t('duplicateResolutionMode')}</Label>
-                  <Select value={duplicateMode} onValueChange={(value) => setDuplicateMode(value as ImportDuplicateMode)}>
-                    <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="create_only">{t('duplicateModeCreateOnly')}</SelectItem>
-                      <SelectItem value="skip_duplicates">{t('duplicateModeSkip')}</SelectItem>
-                      <SelectItem value="update_existing">{t('duplicateModeUpdate')}</SelectItem>
-                      <SelectItem value="create_copy">{t('duplicateModeCopy')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={onCancel} disabled={isImporting}>{t('cancel')}</Button>
-                  <Button variant="outline" onClick={() => handleConfirm(true)} disabled={stats.valid === 0 || isImporting}>{t('validateOnly')}</Button>
-                  <Button onClick={() => handleConfirm(false)} disabled={stats.valid === 0 || importSummary.willImport === 0 || isImporting} className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                    {isImporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                    {isImporting ? t('importing') : t('importValidTestCases', { count: importSummary.willImport })}
-                  </Button>
-                </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={onCancel} disabled={isImporting}>{t('cancel')}</Button>
+                <Button variant="outline" onClick={() => handleConfirm(true)} disabled={stats.valid === 0 || isImporting}>{t('validateOnly')}</Button>
+                <Button onClick={() => handleConfirm(false)} disabled={stats.valid === 0 || importSummary.willImport === 0 || isImporting}>
+                  {isImporting ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Save className="me-2 h-4 w-4" />}
+                  {isImporting ? t('importing') : t('importValidTestCases', { count: importSummary.willImport })}
+                </Button>
               </div>
             </div>
           </div>

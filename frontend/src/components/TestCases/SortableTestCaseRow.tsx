@@ -89,14 +89,14 @@ export function SortableTestCaseRow({
   }
 
   return (
-    <TableRow ref={setNodeRef} style={style} className={`hover:bg-gray-50 dark:hover:bg-gray-800 ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+    <TableRow ref={setNodeRef} style={style} className={`group border-b border-gray-100 transition-colors hover:bg-gray-50/80 dark:border-gray-800 dark:hover:bg-gray-800/50 ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
       <TableCell className="w-12 py-2">
         <div className="flex items-center gap-2">
           <Checkbox
             checked={isSelected}
             onCheckedChange={(checked) => handleSelectTestCase(testCase.id, checked as boolean)}
           />
-          <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+          <div {...attributes} {...listeners} className="cursor-grab opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing">
             <GripVertical className="h-4 w-4 text-gray-400 hover:text-gray-600" />
           </div>
         </div>
@@ -120,12 +120,12 @@ export function SortableTestCaseRow({
         </Button>
       </TableCell>
       <TableCell className="py-2">
-        <Badge className={`text-xs capitalize ${resolveBadgeClass(typeBadge)}`} style={resolveBadgeStyle(typeBadge)}>
+        <Badge className={`rounded-full text-xs font-medium capitalize ${resolveBadgeClass(typeBadge)}`} style={resolveBadgeStyle(typeBadge)}>
           {testCase.test_type}
         </Badge>
       </TableCell>
       <TableCell className="py-2">
-        <Badge className={`text-xs capitalize ${resolveBadgeClass(priorityBadge)}`} style={resolveBadgeStyle(priorityBadge)}>
+        <Badge className={`rounded-full text-xs font-medium capitalize ${resolveBadgeClass(priorityBadge)}`} style={resolveBadgeStyle(priorityBadge)}>
           {testCase.priority}
         </Badge>
       </TableCell>

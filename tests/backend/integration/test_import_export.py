@@ -184,3 +184,98 @@ def test_import_template_handles_dict_options(client):
     assert resp.status_code == 200, resp.text
     assert "Environment" in resp.json()["fieldnames"]
     assert "staging" in resp.json()["content"]
+
+
+def _upload_csv(client, csv_text, *, key, **extra_data):
+    data = {"test_suite_id": client.suite_id}
+    data.update(extra_data)
+    return client.post(
+        "/import-export/import/test-cases/",
+        files={"file": ("cases.csv", csv_text, "text/csv")},
+        data=data,
+        headers={"Idempotency-Key": key},
+    )
+
+
+def test_multipart_upload_import_and_validate(client):
+    """The multipart file-upload import/validate endpoints must not 500.
+
+    ``validate_file_size`` previously returned the byte *count* instead of the
+    file *content*, so ``contents.decode(...)`` raised and every upload failed.
+    """
+    csv_text = "title,priority\nLogin works,high\n"
+
+    validate = client.post(
+        "/import-export/import/test-cases/validate",
+        files={"file": ("cases.csv", csv_text, "text/csv")},
+        data={"test_suite_id": client.suite_id},
+    )
+    assert validate.status_code == 200, validate.text
+    assert validate.json()["valid"] is True
+
+    imported = _upload_csv(client, csv_text, key="mp-1")
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["imported_rows"] == 1
+    assert len(imported.json()["created_ids"]) == 1
+
+
+def test_external_key_export_reimports_without_duplicate_columns(client):
+    """An external_key custom field must round-trip through export -> import.
+
+    Export emits a built-in ``external_key`` column; the external_key custom
+    field must not also get its own column or both normalize to ``external_key``
+    on re-import and fail with "Duplicate columns after normalization".
+    """
+    from app import models
+    Session = client.SessionLocal
+    db = Session()
+    db.add(models.CustomFieldDefinition(
+        name="External Key",
+        slug="external_key",
+        field_type=models.CustomFieldType.TEXT,
+        is_required=False,
+        project_id=client.project_id,
+    ))
+    db.commit()
+    db.close()
+
+    seed = _upload_csv(client, "title,External Key\nCase A,EXT-1\n", key="ek-seed")
+    assert seed.status_code == 200, seed.text
+
+    export = client.get(f"/import-export/export/test-cases/?test_suite_id={client.suite_id}")
+    assert export.status_code == 200, export.text
+    content = export.json()["content"]
+
+    import csv as _csv
+    parsed = list(_csv.DictReader(io.StringIO(content)))
+    assert parsed[0]["external_key"] == "EXT-1"  # value carried by built-in column
+
+    # Re-importing the exported CSV must succeed (no duplicate-column rejection).
+    reimport = _upload_csv(client, content, key="ek-reimport", import_mode="update_existing")
+    assert reimport.status_code == 200, reimport.text
+
+
+def test_multipart_update_refreshes_custom_field_values(client):
+    """Updating an existing case via multipart import must update custom fields."""
+    from app import models
+    Session = client.SessionLocal
+    db = Session()
+    db.add(models.CustomFieldDefinition(
+        name="Component",
+        field_type=models.CustomFieldType.TEXT,
+        is_required=False,
+        project_id=client.project_id,
+    ))
+    db.commit()
+    db.close()
+
+    assert _upload_csv(client, "title,Component\nCase A,OldVal\n", key="cf-1").status_code == 200
+    updated = _upload_csv(
+        client, "title,Component\nCase A,NewVal\n", key="cf-2", import_mode="update_existing"
+    )
+    assert updated.status_code == 200, updated.text
+
+    db = Session()
+    values = [v.value for v in db.query(models.CustomFieldValue).all()]
+    db.close()
+    assert values == ["NewVal"]
