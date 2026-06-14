@@ -84,6 +84,7 @@ from .routes.traceability_coverage import register_traceability_coverage_routes
 from .routes.analytics_dashboard import register_analytics_dashboard_routes
 from .routes.remaining_routes import register_remaining_routes
 from .routes.notifications import register_notifications_routes
+from .routes.inbox import register_inbox_routes
 from .routes.definitions import register_definitions_routes
 from .routes.custom_fields import register_custom_fields_routes
 from .routes.shared_steps import register_shared_steps_routes
@@ -112,6 +113,7 @@ register_traceability_coverage_routes(app)
 register_analytics_dashboard_routes(app)
 register_remaining_routes(app)
 register_notifications_routes(app)
+register_inbox_routes(app)
 register_definitions_routes(app)
 register_custom_fields_routes(app)
 register_shared_steps_routes(app)

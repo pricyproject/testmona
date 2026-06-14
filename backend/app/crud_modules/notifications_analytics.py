@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
-from sqlalchemy import func, or_, text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
@@ -206,6 +206,168 @@ def bulk_delete_notifications(db: Session, user_id: int, notification_ids: List[
         Notification.user_id == user_id,
         Notification.id.in_(notification_ids)
     ).delete()
+    safe_commit(db)
+    return result
+
+
+# --- Work Inbox -------------------------------------------------------------
+# The inbox is the subset of a user's notifications whose category the
+# notification engine marks "actionable". ``open`` items are not archived;
+# ``done`` items have been archived (handled) but kept for history.
+
+def get_inbox_notifications(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    status: str = "open",
+    category: Optional[str] = None,
+    unread_only: bool = False,
+    skip: int = 0,
+    limit: int = 50,
+):
+    """List a user's Work Inbox items, newest first.
+
+    ``status`` is one of ``open`` (not archived), ``done`` (archived), or ``all``.
+    ``category`` optionally narrows to a single actionable category, and
+    ``unread_only`` restricts to items the user hasn't seen yet.
+    """
+    if not actionable_categories:
+        return []
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+    )
+    if category:
+        if category not in actionable_categories:
+            return []
+        query = query.filter(Notification.category == category)
+    if status == "open":
+        query = query.filter(Notification.archived == False)  # noqa: E712
+    elif status == "done":
+        query = query.filter(Notification.archived == True)  # noqa: E712
+    if unread_only:
+        query = query.filter(Notification.is_read == False)  # noqa: E712
+    return (
+        query.order_by(Notification.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def resolve_actor_names(db: Session, notifications: List["Notification"]) -> None:
+    """Attach an ``actor_name`` display string to each notification in place.
+
+    Bulk-loads the actor users for a page in one query (no N+1) and sets a
+    transient ``actor_name`` attribute the API schema serializes. Notifications
+    with no actor, or whose actor was deleted, simply get ``None``.
+    """
+    actor_ids = {n.actor_id for n in notifications if getattr(n, "actor_id", None)}
+    names: dict = {}
+    if actor_ids:
+        rows = (
+            db.query(User.id, User.full_name, User.username)
+            .filter(User.id.in_(actor_ids))
+            .all()
+        )
+        names = {uid: (full_name or username) for uid, full_name, username in rows}
+    for n in notifications:
+        n.actor_name = names.get(getattr(n, "actor_id", None))
+
+
+def get_inbox_summary(db: Session, user_id: int, actionable_categories: List[str]):
+    """Return per-category open/done/unread counts plus open + unread totals.
+
+    Counting both open and done per category lets the inbox rail show meaningful
+    filters in either view and hide categories that have nothing in them. Only
+    open (non-archived) items feed the totals/badges — a done item is no longer
+    pending work. ``unread`` counts only open items the user hasn't seen yet.
+    """
+    if not actionable_categories:
+        return 0, 0, {}
+    rows = (
+        db.query(
+            Notification.category,
+            Notification.archived,
+            func.count(Notification.id),
+            func.sum(case((Notification.is_read == False, 1), else_=0)),  # noqa: E712
+        )
+        .filter(
+            Notification.user_id == user_id,
+            Notification.category.in_(actionable_categories),
+        )
+        .group_by(Notification.category, Notification.archived)
+        .all()
+    )
+    per_category: dict = {}
+    for cat, archived, count, unread in rows:
+        entry = per_category.setdefault(cat, {"open": 0, "done": 0, "unread": 0})
+        if archived:
+            entry["done"] += int(count or 0)
+        else:
+            entry["open"] += int(count or 0)
+            entry["unread"] += int(unread or 0)
+    total_open = sum(v["open"] for v in per_category.values())
+    total_unread = sum(v["unread"] for v in per_category.values())
+    return total_open, total_unread, per_category
+
+
+def set_notification_archived(db: Session, notification_id: int, archived: bool):
+    """Mark a single notification archived (done) or restore it to the inbox."""
+    db_notification = db.query(Notification).filter(Notification.id == notification_id).first()
+    if db_notification:
+        db_notification.archived = archived
+        safe_commit(db)
+        db.refresh(db_notification)
+    return db_notification
+
+
+def archive_inbox_notifications(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    category: Optional[str] = None,
+):
+    """Archive (mark done) every open inbox item, optionally one category only.
+
+    An unknown ``category`` is a no-op (returns 0) rather than silently widening
+    the scope to every category.
+    """
+    if category is not None and category not in actionable_categories:
+        return 0
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+        Notification.archived == False,  # noqa: E712
+    )
+    if category:
+        query = query.filter(Notification.category == category)
+    result = query.update({"archived": True}, synchronize_session=False)
+    safe_commit(db)
+    return result
+
+
+def mark_inbox_all_read(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    category: Optional[str] = None,
+):
+    """Mark every open inbox item read, optionally scoped to one category.
+
+    An unknown ``category`` is a no-op (returns 0) rather than marking everything.
+    """
+    if category is not None and category not in actionable_categories:
+        return 0
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+        Notification.archived == False,  # noqa: E712
+        Notification.is_read == False,  # noqa: E712
+    )
+    if category:
+        query = query.filter(Notification.category == category)
+    result = query.update({"is_read": True}, synchronize_session=False)
     safe_commit(db)
     return result
 
