@@ -145,6 +145,19 @@ if settings.database_url.startswith("sqlite"):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+elif _normalize_url(settings.database_url).get_backend_name() == "mysql":
+    @event.listens_for(engine, "connect")
+    def _force_mysql_utc(dbapi_connection, connection_record):  # noqa: ARG001
+        # MySQL/MariaDB ``NOW()`` (what ``func.now()`` compiles to) returns time in
+        # the session time zone, which defaults to ``SYSTEM`` — the server's local
+        # zone. We persist those values into tz-naive ``DateTime`` columns and
+        # serialize them without a tz designator, but the frontend treats naive
+        # timestamps as UTC (see frontend ``parseServerDate``). Pin the session to
+        # UTC so server-generated timestamps match that contract — and stay
+        # consistent with SQLite, whose ``CURRENT_TIMESTAMP`` is already UTC.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("SET time_zone = '+00:00'")
+        cursor.close()
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
