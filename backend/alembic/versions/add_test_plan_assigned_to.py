@@ -23,17 +23,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Nullable assignee mirroring requirements/defects/test-runs so a plan owner
-    # can be notified the same way. Loose nullable FK works across every backend.
+    # ``assigned_to`` is a loose reference (no FK / cascade), matching
+    # ``notifications.actor_id``: an inline ForeignKey in ALTER ... ADD COLUMN
+    # fails on MySQL/MariaDB, and the app only ever reads the id, so the column is
+    # added plain and just indexed for lookups.
     add_column_if_missing(
         op,
         "test_plans",
-        sa.Column(
-            "assigned_to",
-            sa.Integer(),
-            sa.ForeignKey("users.id"),
-            nullable=True,
-        ),
+        sa.Column("assigned_to", sa.Integer(), nullable=True),
     )
     create_index_if_missing(op, "ix_test_plans_assigned_to", "test_plans", ["assigned_to"])
 
