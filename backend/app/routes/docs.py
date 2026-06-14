@@ -302,18 +302,26 @@ def _apply_feedback_payload(feedback: models.DocFeedback, payload: schemas.DocFe
 
 def _record_visit(db: Session, doc: models.Doc, user: models.User) -> None:
     now = _utcnow()
-    doc.view_count = (doc.view_count or 0) + 1
-    doc.last_viewed_at = now
     visit = (
         db.query(models.DocVisit)
         .filter(models.DocVisit.doc_id == doc.id, models.DocVisit.user_id == user.id)
         .first()
     )
+    # Coalesce repeated reads by the same user into at most one counted view per
+    # window, so re-navigating to the doc (or loading it before editing) doesn't
+    # inflate view_count / visit_count. `last_visited_at` is always refreshed so
+    # unread tracking stays accurate.
+    last = _as_aware(visit.last_visited_at) if visit is not None else None
+    counts_view = last is None or last <= now - _AUDIT_VIEW_WINDOW
+    if counts_view:
+        doc.view_count = (doc.view_count or 0) + 1
+        doc.last_viewed_at = now
     if visit is None:
         visit = models.DocVisit(doc_id=doc.id, user_id=user.id, visit_count=1, first_visited_at=now, last_visited_at=now)
         db.add(visit)
     else:
-        visit.visit_count = (visit.visit_count or 0) + 1
+        if counts_view:
+            visit.visit_count = (visit.visit_count or 0) + 1
         visit.last_visited_at = now
     try:
         crud.safe_commit(db)

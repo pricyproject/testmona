@@ -4,8 +4,11 @@ import type { Doc, DocFeedback, DocFeedbackType } from '@/types';
 
 export const docDetailKeys = {
   detail: (docId: number | null) => ['docDetail', docId] as const,
-  feedback: (docId: number | null, includeResolved: boolean) =>
-    ['docDetail', docId, 'feedback', includeResolved] as const,
+  // `canEdit` is part of the key because it changes what the queryFn fetches (the
+  // editor-only items list). The mutations invalidate by the `[…, 'feedback']`
+  // prefix, so both canEdit/includeResolved variants are still caught.
+  feedback: (docId: number | null, canEdit: boolean, includeResolved: boolean) =>
+    ['docDetail', docId, 'feedback', canEdit, includeResolved] as const,
 };
 
 // Primary document bundle: the doc plus the side panels (space, requirement
@@ -35,7 +38,7 @@ export function useDocFeedback(
   enabled: boolean,
 ) {
   return useQuery({
-    queryKey: docDetailKeys.feedback(docId, includeResolved),
+    queryKey: docDetailKeys.feedback(docId, canEdit, includeResolved),
     queryFn: async () => {
       const [summary, items] = await Promise.all([
         docsAPI.getFeedback(docId as number),

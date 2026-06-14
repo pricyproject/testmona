@@ -123,7 +123,9 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const feedbackQuery = useDocFeedback(parsedDocId, canEditDoc, feedbackIncludeResolved, !!doc);
   const feedback: DocFeedbackSummary | null = feedbackQuery.data?.summary ?? null;
   const feedbackItems: DocFeedback[] = feedbackQuery.data?.items ?? [];
-  const feedbackListLoading = feedbackQuery.isFetching;
+  // Only the initial list load gates the controls; a background refetch (e.g.
+  // triggered by casting a helpful vote) must not disable the resolve UI.
+  const feedbackListLoading = feedbackQuery.isLoading;
 
   const updateDoc = useUpdateDoc(parsedDocId);
   const deleteDocMutation = useDeleteDoc(parsedDocId);
@@ -133,6 +135,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const savingTitle = updateDoc.isPending;
   const deleting = deleteDocMutation.isPending;
   const feedbackSaving = submitFeedbackMutation.isPending || clearFeedbackMutation.isPending;
+  const feedbackResolving = resolveFeedbackMutation.isPending;
 
   // Surface a load failure as a toast (mirrors the previous imperative load).
   useEffect(() => {
@@ -140,6 +143,17 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       toast({ title: t('error'), description: t('docLoadFailed'), variant: 'destructive' });
     }
   }, [docQuery.isError, t, toast]);
+
+  // Keep the active tab in sync with the URL (deep-links and browser back/forward
+  // change `?tab=`/the route without remounting), and clamp away tabs the current
+  // user can't see — stats is admin-only, so a controlled Tabs left on `stats`
+  // would render an empty body with no matching trigger/content.
+  const canViewStats = Boolean(doc?.can_view_stats);
+  useEffect(() => {
+    let next: DocTab = DOC_TABS.includes(queryTab as DocTab) ? (queryTab as DocTab) : initialTab;
+    if (next === 'stats' && !canViewStats) next = 'document';
+    setTab(next);
+  }, [queryTab, initialTab, canViewStats]);
 
   // Full refresh of the document bundle, used by child sections after they
   // mutate version history / links / related docs.
@@ -241,6 +255,14 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     }
   };
 
+  // The two direct-vote buttons toggle: clicking the active vote clears it rather
+  // than re-submitting the same value (which would show a misleading "saved" toast).
+  const toggleVote = (feedbackType: DocFeedbackType) => {
+    if (feedbackSaving) return;
+    if (activeFeedback === feedbackType) void clearMyFeedback();
+    else void submitFeedback(feedbackType);
+  };
+
   const openFeedbackDialog = (feedbackType: DocFeedbackType) => {
     setFeedbackDialogType(feedbackType);
     setFeedbackComment('');
@@ -254,7 +276,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   };
 
   const resolveFeedback = async (item: DocFeedback, resolved: boolean) => {
-    if (!doc || feedbackListLoading) return;
+    if (!doc || feedbackResolving) return;
     try {
       await resolveFeedbackMutation.mutateAsync({ feedbackId: item.id, resolved });
     } catch {
@@ -425,7 +447,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
               <Button
                 type="button"
                 variant={activeFeedback === 'helpful' ? 'default' : 'outline'}
-                onClick={() => submitFeedback('helpful')}
+                onClick={() => toggleVote('helpful')}
                 disabled={feedbackSaving}
                 className="justify-start"
               >
@@ -436,7 +458,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
               <Button
                 type="button"
                 variant={activeFeedback === 'not_helpful' ? 'default' : 'outline'}
-                onClick={() => submitFeedback('not_helpful')}
+                onClick={() => toggleVote('not_helpful')}
                 disabled={feedbackSaving}
                 className="justify-start"
               >
@@ -495,7 +517,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
                             {item.user?.full_name || item.user?.username || item.user?.email || `#${item.user_id}`}
                           </span>
                           <span className="ms-auto" />
-                          <Button type="button" variant="ghost" size="sm" disabled={feedbackListLoading} onClick={() => resolveFeedback(item, !item.resolved)}>
+                          <Button type="button" variant="ghost" size="sm" disabled={feedbackResolving} onClick={() => resolveFeedback(item, !item.resolved)}>
                             <CheckCircle2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                             {item.resolved ? t('docFeedbackReopen') : t('docFeedbackResolve')}
                           </Button>
