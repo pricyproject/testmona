@@ -69,6 +69,8 @@ import {
   useTestPlansList,
   useTestPlanMilestones,
   useTestPlanReqOptions,
+  useTestPlanMembers,
+  type TestPlanMember,
 } from '@/hooks/queries/testPlans';
 
 type TestPlanStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'blocked' | 'completed';
@@ -83,6 +85,7 @@ interface TestPlan {
   milestone_id: number | null;
   milestone_title: string | null;
   created_by: number;
+  assigned_to?: number | null;
   status: TestPlanStatus;
   target_start_date: string | null;
   target_end_date: string | null;
@@ -125,6 +128,7 @@ interface FormState {
   actualEndDate: string;
   status: TestPlanStatus;
   milestoneId: string;
+  assigneeId: string;
 }
 
 const emptyForm: FormState = {
@@ -143,6 +147,7 @@ const emptyForm: FormState = {
   actualEndDate: '',
   status: 'pending',
   milestoneId: '',
+  assigneeId: '',
 };
 
 const STATUS_OPTIONS: TestPlanStatus[] = ['pending', 'running', 'completed', 'blocked', 'failed', 'passed', 'skipped'];
@@ -255,6 +260,10 @@ export function TestPlans() {
   const milestones: Milestone[] = useMemo(() => milestonesQuery.data ?? [], [milestonesQuery.data]);
   const isLoading = numericProjectId != null && testPlansQuery.isLoading;
 
+  // Project members for the assignee picker (loaded only while a dialog is open).
+  const membersQuery = useTestPlanMembers(numericProjectId, numericProjectId != null && (isCreateOpen || isEditOpen));
+  const members: TestPlanMember[] = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
+
   // Requirement options for the create/edit scope picker (fetched while a dialog is open).
   const reqOptionsQuery = useTestPlanReqOptions(numericProjectId, numericProjectId != null && (isCreateOpen || isEditOpen));
   const reqOptions = reqOptionsQuery.data ?? [];
@@ -364,6 +373,7 @@ export function TestPlans() {
     actual_start_date: dateInputToIso(form.actualStartDate),
     actual_end_date: dateInputToIso(form.actualEndDate),
     milestone_id: form.milestoneId ? Number(form.milestoneId) : null,
+    assigned_to: form.assigneeId ? Number(form.assigneeId) : null,
     ...(includeStatus ? { status: form.status } : {}),
   });
 
@@ -581,6 +591,7 @@ export function TestPlans() {
       actualEndDate: toDateInputValue(plan.actual_end_date),
       status: plan.status,
       milestoneId: plan.milestone_id ? String(plan.milestone_id) : '',
+      assigneeId: plan.assigned_to ? String(plan.assigned_to) : '',
     };
     setForm(next);
     setInitialForm(next);
@@ -811,6 +822,25 @@ export function TestPlans() {
               {validationErrors.milestoneId && (
                 <p className="text-xs text-red-500">{validationErrors.milestoneId}</p>
               )}
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('assigneeLabel')}</Label>
+              <Select
+                value={form.assigneeId || 'none'}
+                onValueChange={(value) => setField('assigneeId', value === 'none' ? '' : value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t('unassigned')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t('unassigned')}</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.user_id} value={String(m.user_id)}>
+                      {m.full_name || m.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
