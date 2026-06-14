@@ -13,6 +13,7 @@ import { BulkEditDefectsDialog } from '@/components/BulkEditDefectsDialog';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
 import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 import { SearchableTestCaseSelect } from '@/components/Defects/SearchableTestCaseSelect';
+import { DefectComments } from '@/components/Defects/DefectComments';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -3244,6 +3245,16 @@ export function Defects() {
               />
             </div>
           </div>
+          {editingDefect?.id && projectId && (
+            <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
+              <DefectComments
+                defectId={editingDefect.id}
+                projectId={parseInt(projectId)}
+                defectLabel={editingDefect.defect_id || undefined}
+                canComment={canWrite}
+              />
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
               {t('cancel')}

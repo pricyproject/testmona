@@ -46,6 +46,7 @@ export interface DefectManagement {
 export interface DefectComment {
   id: number;
   defect_id: number;
+  parent_id?: number | null;
   user_id: number;
   comment: string;
   is_internal: boolean;
@@ -158,6 +159,7 @@ export const defectManagementAPI = {
   createDefectComment: async (projectId: number, defectId: number, comment: {
     comment: string;
     is_internal?: boolean;
+    parent_id?: number | null;
   }): Promise<DefectComment> => {
     const response = await api.post(`/projects/${projectId}/defects-management/${defectId}/comments`, comment);
     return response.data;
