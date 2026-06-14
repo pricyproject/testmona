@@ -34,6 +34,7 @@ from ..auth import get_current_active_user
 from ..database import get_db
 from ..services import doc_conversion_service as conv
 from ..services import doc_impact_service
+from ..services import notification_engine
 from ..services import watch_service
 from ..services import doc_release_notes_service as release_notes
 from ..services import feature_file_service
@@ -142,20 +143,17 @@ def _notify_doc_mentions(
         if not recipients:
             return
 
-        actor_name = actor.full_name or actor.username
-        title = "You were mentioned"
-        for uid in recipients:
-            crud.create_notification(
-                db,
-                schemas.NotificationCreate(
-                    user_id=uid,
-                    title=title,
-                    message=f'{actor_name} mentioned you in "{doc.title}"',
-                    type=models.NotificationType.INFO,
-                    related_entity_type="doc",
-                    related_entity_id=doc.id,
-                ),
-            )
+        actor_name = notification_engine.actor_display_name(actor)
+        notification_engine.emit(
+            db,
+            category=notification_engine.MENTION,
+            user_ids=list(recipients),
+            actor_id=actor.id,
+            title="You were mentioned",
+            message=f'{actor_name} mentioned you in "{doc.title}"',
+            related_entity_type="doc",
+            related_entity_id=doc.id,
+        )
     except Exception:
         logger.exception("Failed to create doc mention notifications for doc %s", doc.id)
 
@@ -174,7 +172,7 @@ def _notify_doc_feedback(
         recipients = {uid for uid in (doc.created_by, doc.updated_by) if uid and uid != actor.id}
         if not recipients:
             return
-        actor_name = actor.full_name or actor.username or actor.email
+        actor_name = notification_engine.actor_display_name(actor)
         labels = {
             "not_helpful": "not helpful",
             "clarification": "needs clarification",
@@ -182,18 +180,16 @@ def _notify_doc_feedback(
         }
         feedback_label = labels.get(feedback_type, feedback_type.replace("_", " "))
         detail = f": {comment[:180]}" if comment else ""
-        for uid in recipients:
-            crud.create_notification(
-                db,
-                schemas.NotificationCreate(
-                    user_id=uid,
-                    title="Document feedback",
-                    message=f'{actor_name} marked "{doc.title}" as {feedback_label}{detail}',
-                    type=models.NotificationType.INFO,
-                    related_entity_type="doc",
-                    related_entity_id=doc.id,
-                ),
-            )
+        notification_engine.emit(
+            db,
+            category=notification_engine.FEEDBACK,
+            user_ids=list(recipients),
+            actor_id=actor.id,
+            title="Document feedback",
+            message=f'{actor_name} marked "{doc.title}" as {feedback_label}{detail}',
+            related_entity_type="doc",
+            related_entity_id=doc.id,
+        )
     except Exception:
         logger.exception("Failed to create doc feedback notifications for doc %s", doc.id)
 

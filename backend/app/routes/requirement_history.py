@@ -14,7 +14,7 @@ from .. import crud, models, rbac, schemas
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
-from ..services import watch_service
+from ..services import notification_engine, watch_service
 from ..services.mentions import project_member_users as _project_member_users
 from ..services.mentions import resolve_mentions as _resolve_mentions
 
@@ -45,28 +45,29 @@ def _notify_comment(
         if not recipients:
             return
 
-        actor_name = actor.full_name or actor.username
+        actor_name = notification_engine.actor_display_name(actor)
         snippet = (comment.body or "").strip()
         if len(snippet) > 140:
             snippet = snippet[:140].rstrip() + "…"
 
         for uid, reason in recipients.items():
             if reason == "mention":
+                category = notification_engine.MENTION
                 title = "You were mentioned"
                 message = f'{actor_name} mentioned you on {requirement.requirement_id}: "{snippet}"'
             else:
+                category = notification_engine.COMMENT_REPLY
                 title = "New reply to your comment"
                 message = f'{actor_name} replied on {requirement.requirement_id}: "{snippet}"'
-            crud.create_notification(
+            notification_engine.emit(
                 db,
-                schemas.NotificationCreate(
-                    user_id=uid,
-                    title=title,
-                    message=message,
-                    type=models.NotificationType.INFO,
-                    related_entity_type="requirement",
-                    related_entity_id=requirement.id,
-                ),
+                category=category,
+                user_ids=[uid],
+                actor_id=actor.id,
+                title=title,
+                message=message,
+                related_entity_type="requirement",
+                related_entity_id=requirement.id,
             )
     except Exception:
         logger.exception("Failed to create comment notifications for requirement %s", requirement.id)

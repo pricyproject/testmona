@@ -15,6 +15,7 @@ from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user, get_current_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
+from ..services import notification_engine
 
 logger = logging.getLogger(__name__)
 
@@ -239,21 +240,17 @@ def _notify_test_run_assignee(db: Session, test_run: TestRun, assigned_by: User,
     if not assignee or not test_run.assigned_to:
         return
 
-    try:
-        crud.create_notification(
-            db=db,
-            notification=schemas.NotificationCreate(
-                user_id=assignee.id,
-                title="Test run assigned",
-                message=f"{assigned_by.full_name or assigned_by.username} assigned test run {test_run.name} to you.",
-                type=models.NotificationType.INFO,
-                related_entity_type="test_run",
-                related_entity_id=test_run.id,
-            ),
-        )
-        logger.info("Created test run assignment notification", extra={"test_run_id": test_run.id, "assignee_id": assignee.id})
-    except Exception:
-        logger.exception("Failed to create test run assignment notification", extra={"test_run_id": test_run.id, "assignee_id": assignee.id})
+    actor_name = notification_engine.actor_display_name(assigned_by)
+    notification_engine.emit(
+        db,
+        category=notification_engine.ASSIGNMENT,
+        user_ids=[assignee.id],
+        actor_id=assigned_by.id if assigned_by else None,
+        title="Test run assigned",
+        message=f"{actor_name} assigned test run {test_run.name} to you.",
+        related_entity_type="test_run",
+        related_entity_id=test_run.id,
+    )
 
 
 def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User) -> None:
@@ -270,18 +267,18 @@ def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User) 
         if not owner:
             return
 
-        crud.create_notification(
-            db=db,
-            notification=schemas.NotificationCreate(
-                user_id=owner.id,
-                title="Test run completed",
-                message=f"{completed_by.full_name or completed_by.username} completed test run {test_run.name} for milestone {milestone.name}.",
-                type=models.NotificationType.INFO,
-                related_entity_type="test_run",
-                related_entity_id=test_run.id,
-            ),
+        actor_name = notification_engine.actor_display_name(completed_by)
+        notification_engine.emit(
+            db,
+            category=notification_engine.STATUS,
+            user_ids=[owner.id],
+            actor_id=completed_by.id if completed_by else None,
+            title="Test run completed",
+            message=f"{actor_name} completed test run {test_run.name} for milestone {milestone.name}.",
+            type_override=models.NotificationType.SUCCESS,
+            related_entity_type="test_run",
+            related_entity_id=test_run.id,
         )
-        logger.info("Created milestone owner notification", extra={"test_run_id": test_run.id, "milestone_id": milestone.id, "owner_id": owner.id})
     except Exception:
         logger.exception("Failed to create milestone owner notification", extra={"test_run_id": test_run.id, "milestone_id": test_run.milestone_id})
 
@@ -293,6 +290,7 @@ __all__ = [
     "_get_test_case_linked_requirements",
     "_is_completed_result_status",
     "_normalize_status_value",
+    "_notify_milestone_owner",
     "_notify_test_run_assignee",
     "_reference_tokens",
     "_section_is_descendant_of",

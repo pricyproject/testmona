@@ -19,7 +19,8 @@ from typing import List, Optional, Sequence
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import EntityWatch, Notification, NotificationType, User
+from ..models import EntityWatch, User
+from . import notification_engine
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ def notify_watchers_of_change(
         changed_clause = f" Changed: {', '.join(fields)}." if fields else ""
         note_clause = f' Note: "{change_note.strip()}".' if change_note and change_note.strip() else ""
 
-        title = f"{label} was {verb}"[:200]
+        title = f"{label} was {verb}"
         message = (
             f"{actor_name} {verb} {label} (v{version_number})."
             f"{changed_clause}{note_clause}"
@@ -199,17 +200,19 @@ def notify_watchers_of_change(
         )
         related_type = _CHANGE_NOTIFICATION_TYPE[entity_type]
 
-        for uid in recipients:
-            db.add(
-                Notification(
-                    user_id=uid,
-                    title=title,
-                    message=message,
-                    type=NotificationType.INFO,
-                    related_entity_type=related_type,
-                    related_entity_id=entity_id,
-                )
-            )
+        # commit=False: these rows are flushed with the caller's version-save commit
+        # so the notification and the version it describes persist atomically.
+        notification_engine.emit(
+            db,
+            category=notification_engine.WATCH_CHANGE,
+            user_ids=recipients,
+            actor_id=actor_id,
+            title=title,
+            message=message,
+            related_entity_type=related_type,
+            related_entity_id=entity_id,
+            commit=False,
+        )
     except Exception:
         logger.exception(
             "Failed to queue watch notifications for %s %s", entity_type, entity_id

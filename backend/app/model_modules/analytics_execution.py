@@ -20,6 +20,16 @@ class Notification(Base):
     message = Column(Text, nullable=False)
     type = Column(Enum(NotificationType), default=NotificationType.INFO)
     is_read = Column(Boolean, default=False)
+    # Engine category key (e.g. 'mention', 'assignment', 'watch_change'). NULL for
+    # legacy/manually-created rows. Drives the Work Inbox: the engine knows which
+    # categories are "actionable" and therefore belong in a user's inbox.
+    category = Column(String(50), index=True)
+    # Inbox dismissal. An archived notification is "done" — hidden from the open
+    # Work Inbox but kept for history and still visible in the bell dropdown.
+    archived = Column(Boolean, default=False, nullable=False)
+    # Who triggered the notification (loose reference, no FK): drives the actor
+    # avatar/name in the Work Inbox. NULL for system-generated notifications.
+    actor_id = Column(Integer, index=True)
     related_entity_type = Column(String(50))  # e.g., 'test_case', 'defect', 'project'
     related_entity_id = Column(Integer)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

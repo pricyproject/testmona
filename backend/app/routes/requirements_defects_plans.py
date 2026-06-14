@@ -22,6 +22,7 @@ from ..services.milestone_service import enrich_milestone, enrich_milestones, ge
 from ..services.atlassian_document_service import fetch_requirement_source
 from ..services.tracker_import_service import fetch_requirement_from_tracker
 from ..services import feature_file_service
+from ..services import notification_engine
 from ..services.doc_conversion_service import markdown_to_html, next_requirement_id
 from ..crud import (
     create_requirement, get_requirements, get_requirement, update_requirement, delete_requirement,
@@ -202,27 +203,65 @@ def notify_defect_assignee(
         ).first()
         if not assignee:
             return
-        actor = (assigned_by.full_name or assigned_by.username) if assigned_by else "Someone"
+        actor = notification_engine.actor_display_name(assigned_by)
         label = defect.defect_id or defect.title or f"#{defect.id}"
-        crud.create_notification(
-            db=db,
-            notification=schemas.NotificationCreate(
-                user_id=assignee.id,
-                title="Defect assigned",
-                message=f"{actor} assigned defect {label} to you.",
-                type=models.NotificationType.INFO,
-                related_entity_type="defect",
-                related_entity_id=defect.id,
-            ),
-        )
-        logger.info(
-            "Created defect assignment notification",
-            extra={"defect_id": defect.id, "assignee_id": assignee.id},
+        notification_engine.emit(
+            db,
+            category=notification_engine.ASSIGNMENT,
+            user_ids=[assignee.id],
+            actor_id=assigned_by.id if assigned_by else None,
+            title="Defect assigned",
+            message=f"{actor} assigned defect {label} to you.",
+            related_entity_type="defect",
+            related_entity_id=defect.id,
         )
     except Exception:
         logger.exception(
             "Failed to create defect assignment notification",
             extra={"defect_id": getattr(defect, "id", None), "assignee_id": assignee_id},
+        )
+
+
+def notify_requirement_assignee(
+    db: Session,
+    requirement: "models.Requirement",
+    assigned_by: Optional[schemas.User],
+    previous_assigned_to: Optional[int] = None,
+) -> None:
+    """Send an in-app notification when a requirement is newly assigned to a user.
+
+    Mirrors ``notify_defect_assignee`` so a requirement assignee learns about work
+    the same way defect and test-run assignees do — and the alert lands in their
+    Work Inbox via the engine's ASSIGNMENT category. No-op when the assignee is
+    unchanged, on self-assignment, or when the requirement is unassigned.
+    """
+    assignee_id = requirement.assigned_to
+    if not assignee_id or assignee_id == previous_assigned_to:
+        return
+    if assigned_by is not None and assignee_id == assigned_by.id:
+        return
+    try:
+        assignee = db.query(models.User).filter(
+            models.User.id == assignee_id, models.User.is_active == True
+        ).first()
+        if not assignee:
+            return
+        actor = notification_engine.actor_display_name(assigned_by)
+        label = requirement.requirement_id or requirement.title or f"#{requirement.id}"
+        notification_engine.emit(
+            db,
+            category=notification_engine.ASSIGNMENT,
+            user_ids=[assignee.id],
+            actor_id=assigned_by.id if assigned_by else None,
+            title="Requirement assigned",
+            message=f"{actor} assigned requirement {label} to you.",
+            related_entity_type="requirement",
+            related_entity_id=requirement.id,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to create requirement assignment notification",
+            extra={"requirement_id": getattr(requirement, "id", None), "assignee_id": assignee_id},
         )
 
 
@@ -523,7 +562,9 @@ def register_requirements_defects_plans_routes(app):
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
                 logger.warning(f"Failed to create audit trail for requirement creation: {e}")
-            
+
+            notify_requirement_assignee(db, db_requirement, current_user)
+
             return db_requirement
         except IntegrityError as e:
             db.rollback()
@@ -1482,9 +1523,13 @@ def register_requirements_defects_plans_routes(app):
             if folder is None or folder.project_id != db_requirement.project_id:
                 raise HTTPException(status_code=400, detail="Folder not found in this project")
 
+        # Capture the prior assignee before the update so we only notify on a real
+        # change (and never re-notify when other fields are edited).
+        prior_assigned_to = db_requirement.assigned_to
+
         try:
             db_requirement = update_requirement(db, requirement_id=requirement_id, requirement=requirement, actor_id=current_user.id)
-            
+
             # Create audit trail
             try:
                 from ..services.audit_service import get_audit_service
@@ -1502,7 +1547,12 @@ def register_requirements_defects_plans_routes(app):
                 audit_service.create_audit_trail(audit_data)
             except Exception as e:
                 logger.warning(f"Failed to create audit trail for requirement update: {e}")
-            
+
+            if "assigned_to" in update_fields:
+                notify_requirement_assignee(
+                    db, db_requirement, current_user, previous_assigned_to=prior_assigned_to
+                )
+
             return db_requirement
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))

@@ -74,10 +74,32 @@ class Notification(NotificationBase):
     id: int
     user_id: int
     is_read: bool
+    category: Optional[str] = None
+    archived: bool = False
+    actor_id: Optional[int] = None
+    # Resolved display name of the actor, attached by the inbox route for the
+    # avatar/byline. Not a stored column, so it is optional and defaults to None.
+    actor_name: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class InboxCategorySummary(BaseModel):
+    """Per-category open/done/unread counts for the Work Inbox rail."""
+    key: str
+    label: str
+    open: int
+    done: int
+    unread: int
+
+
+class InboxSummary(BaseModel):
+    """Aggregate counts that drive the Work Inbox header and the navbar badge."""
+    total_open: int
+    total_unread: int
+    categories: List[InboxCategorySummary]
 
 
 class WatchStatus(BaseModel):
