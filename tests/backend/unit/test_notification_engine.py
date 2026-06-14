@@ -131,3 +131,181 @@ def test_actionable_category_does_not_coalesce(users_db):
         )
     # Every mention is individually meaningful, so both survive.
     assert _count(users_db, user_id=2, category="mention") == 2
+
+
+# --- NotificationBatch / the de-duplication ladder --------------------------
+
+
+def test_batch_keeps_highest_priority_category_per_user_and_entity(users_db):
+    """assignee + watcher + reporter for one save → one row, the highest-priority."""
+    batch = ne.NotificationBatch()
+    # User 2 is the assignee...
+    batch.add(
+        category=ne.ASSIGNMENT,
+        user_ids=[2],
+        actor_id=1,
+        title="Requirement assigned",
+        message="assigned",
+        related_entity_type="requirement",
+        related_entity_id=42,
+    )
+    # ...and a watcher of the same requirement (note the watch alias entity type)...
+    batch.add(
+        category=ne.WATCH_CHANGE,
+        user_ids=[2],
+        actor_id=1,
+        title="Requirement updated",
+        message="watched change",
+        related_entity_type="requirement_change",
+        related_entity_id=42,
+    )
+    # ...and mentioned in the same save — the top of the ladder.
+    batch.add(
+        category=ne.MENTION,
+        user_ids=[2],
+        actor_id=1,
+        title="You were mentioned",
+        message="mention",
+        related_entity_type="requirement",
+        related_entity_id=42,
+    )
+    rows = batch.flush(users_db)
+
+    assert _count(users_db, user_id=2, related_entity_id=42) == 1
+    assert {r.category for r in rows} == {"mention"}
+    survivor = users_db.query(models.Notification).filter_by(user_id=2, related_entity_id=42).one()
+    assert survivor.category == "mention"
+    assert survivor.message == "mention"
+
+
+def test_batch_does_not_dedupe_across_distinct_entities(users_db):
+    """The ladder is per-entity: colliding categories on different entities coexist."""
+    batch = ne.NotificationBatch()
+    batch.add(
+        category=ne.ASSIGNMENT,
+        user_ids=[2],
+        actor_id=1,
+        title="Assigned A",
+        message="a",
+        related_entity_type="requirement",
+        related_entity_id=1,
+    )
+    batch.add(
+        category=ne.MENTION,
+        user_ids=[2],
+        actor_id=1,
+        title="Mention B",
+        message="b",
+        related_entity_type="requirement",
+        related_entity_id=2,
+    )
+    batch.flush(users_db)
+    assert _count(users_db, user_id=2) == 2
+
+
+def test_batch_lower_priority_survives_for_users_the_winner_does_not_cover(users_db):
+    """A higher-priority intent only suppresses the users it actually names."""
+    batch = ne.NotificationBatch()
+    # Watch broadcast to two watchers...
+    batch.add(
+        category=ne.WATCH_CHANGE,
+        user_ids=[1, 2],
+        actor_id=99,
+        title="Updated",
+        message="watch",
+        related_entity_type="requirement_change",
+        related_entity_id=7,
+    )
+    # ...but only user 2 is the assignee.
+    batch.add(
+        category=ne.ASSIGNMENT,
+        user_ids=[2],
+        actor_id=99,
+        title="Assigned",
+        message="assignment",
+        related_entity_type="requirement",
+        related_entity_id=7,
+    )
+    batch.flush(users_db)
+
+    u1 = users_db.query(models.Notification).filter_by(user_id=1, related_entity_id=7).one()
+    u2 = users_db.query(models.Notification).filter_by(user_id=2, related_entity_id=7).one()
+    # User 1 (watcher only) keeps the watch broadcast; user 2 gets the assignment.
+    assert u1.category == "watch_change"
+    assert u2.category == "assignment"
+
+
+def test_batch_applies_actor_exclusion_and_dedupe_via_emit(users_db):
+    """The batch funnels through emit, so actor-exclusion still applies."""
+    batch = ne.NotificationBatch()
+    batch.add(
+        category=ne.ASSIGNMENT,
+        user_ids=[1, 2],
+        actor_id=1,  # actor must never be notified, even via the batch
+        title="Assigned",
+        message="m",
+        related_entity_type="defect",
+        related_entity_id=3,
+    )
+    rows = batch.flush(users_db)
+    assert {r.user_id for r in rows} == {2}
+    assert _count(users_db, user_id=1) == 0
+
+
+def test_batch_mention_beats_reply_without_handrolled_suppression(users_db):
+    """The comment path's two intents collapse by the ladder: mention > reply."""
+    batch = ne.NotificationBatch()
+    batch.add(
+        category=ne.MENTION,
+        user_ids=[2],
+        actor_id=1,
+        title="Mentioned",
+        message="mention",
+        related_entity_type="requirement",
+        related_entity_id=9,
+    )
+    batch.add(
+        category=ne.COMMENT_REPLY,
+        user_ids=[2],  # same user is also the parent-comment author
+        actor_id=1,
+        title="Reply",
+        message="reply",
+        related_entity_type="requirement",
+        related_entity_id=9,
+    )
+    batch.flush(users_db)
+    rows = users_db.query(models.Notification).filter_by(user_id=2, related_entity_id=9).all()
+    assert len(rows) == 1
+    assert rows[0].category == "mention"
+
+
+def test_batch_forwards_commit_flag_to_emit(users_db, monkeypatch):
+    """flush(commit=…) is forwarded to emit, so the version-save path can keep
+    commit=False and persist notifications atomically with its own change."""
+    seen = []
+
+    def fake_emit(db, **kwargs):
+        seen.append(kwargs.get("commit"))
+        return []
+
+    monkeypatch.setattr(ne, "emit", fake_emit)
+    batch = ne.NotificationBatch()
+    batch.add(
+        category=ne.WATCH_CHANGE,
+        user_ids=[2],
+        actor_id=1,
+        title="Updated",
+        message="m",
+        related_entity_type="requirement_change",
+        related_entity_id=11,
+    )
+    batch.flush(users_db, commit=False)
+    assert seen == [False]
+
+    seen.clear()
+    batch.flush(users_db)  # default commits
+    assert seen == [True]
+
+
+def test_empty_batch_flush_is_noop(users_db):
+    assert ne.NotificationBatch().flush(users_db) == []

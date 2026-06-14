@@ -75,6 +75,7 @@ def record_requirement_version(
     actor_id: Optional[int] = None,
     change_note: Optional[str] = None,
     commit: bool = True,
+    batch=None,
 ) -> RequirementVersion:
     """Snapshot the requirement's current content as a new version row.
 
@@ -143,6 +144,7 @@ def record_requirement_version(
             actor_id=actor_id,
             changed_fields=changed_fields,
             change_note=change_note,
+            batch=batch,
         )
 
     if commit:
@@ -468,6 +470,7 @@ def update_requirement(
     requirement_id: int,
     requirement: RequirementUpdate,
     actor_id: Optional[int] = None,
+    batch=None,
 ):
     db_requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if db_requirement:
@@ -489,10 +492,12 @@ def update_requirement(
         safe_commit(db)
         db.refresh(db_requirement)
 
-        # Snapshot the new state for version history.
+        # Snapshot the new state for version history. When the caller threads a
+        # notification batch, the watch broadcast queued here is collected into it
+        # so it de-duplicates against the caller's assignment notification.
         try:
             record_requirement_version(
-                db, db_requirement, action="updated", actor_id=actor_id
+                db, db_requirement, action="updated", actor_id=actor_id, batch=batch
             )
         except Exception:
             db.rollback()

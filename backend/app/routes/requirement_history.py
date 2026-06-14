@@ -32,17 +32,16 @@ def _notify_comment(
     parent_author_id: Optional[int],
 ) -> None:
     """Best-effort notifications for a new comment: @mentioned members and the
-    author of the comment being replied to. Never raises into the request."""
+    author of the comment being replied to. Both intents go through one
+    :class:`NotificationBatch`, so a parent author who is *also* @mentioned gets a
+    single row — the higher-priority mention — without any hand-rolled suppression.
+    Never raises into the request."""
     try:
-        members = _project_member_users(db, requirement.project_id)
-        # recipient_id -> reason ("mention" wins over "reply" if both apply)
-        recipients: Dict[int, str] = {}
-        for uid in _resolve_mentions(comment.body, members):
-            recipients[uid] = "mention"
-        if parent_author_id and parent_author_id != actor.id and parent_author_id not in recipients:
-            recipients[parent_author_id] = "reply"
-
-        if not recipients:
+        mentioned = _resolve_mentions(comment.body, _project_member_users(db, requirement.project_id))
+        reply_target = (
+            parent_author_id if parent_author_id and parent_author_id != actor.id else None
+        )
+        if not mentioned and reply_target is None:
             return
 
         actor_name = notification_engine.actor_display_name(actor)
@@ -50,25 +49,28 @@ def _notify_comment(
         if len(snippet) > 140:
             snippet = snippet[:140].rstrip() + "…"
 
-        for uid, reason in recipients.items():
-            if reason == "mention":
-                category = notification_engine.MENTION
-                title = "You were mentioned"
-                message = f'{actor_name} mentioned you on {requirement.requirement_id}: "{snippet}"'
-            else:
-                category = notification_engine.COMMENT_REPLY
-                title = "New reply to your comment"
-                message = f'{actor_name} replied on {requirement.requirement_id}: "{snippet}"'
-            notification_engine.emit(
-                db,
-                category=category,
-                user_ids=[uid],
+        batch = notification_engine.NotificationBatch()
+        if mentioned:
+            batch.add(
+                category=notification_engine.MENTION,
+                user_ids=list(mentioned),
                 actor_id=actor.id,
-                title=title,
-                message=message,
+                title="You were mentioned",
+                message=f'{actor_name} mentioned you on {requirement.requirement_id}: "{snippet}"',
                 related_entity_type="requirement",
                 related_entity_id=requirement.id,
             )
+        if reply_target is not None:
+            batch.add(
+                category=notification_engine.COMMENT_REPLY,
+                user_ids=[reply_target],
+                actor_id=actor.id,
+                title="New reply to your comment",
+                message=f'{actor_name} replied on {requirement.requirement_id}: "{snippet}"',
+                related_entity_type="requirement",
+                related_entity_id=requirement.id,
+            )
+        batch.flush(db)
     except Exception:
         logger.exception("Failed to create comment notifications for requirement %s", requirement.id)
 

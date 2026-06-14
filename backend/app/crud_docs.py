@@ -249,6 +249,7 @@ def record_doc_version(
     actor_id: Optional[int] = None,
     change_note: Optional[str] = None,
     commit: bool = True,
+    batch=None,
 ) -> models.DocVersion:
     """Snapshot the doc's current content as a new dense, 1-based version row.
 
@@ -312,6 +313,7 @@ def record_doc_version(
             actor_id=actor_id,
             changed_fields=changed_fields,
             change_note=change_note,
+            batch=batch,
         )
 
     if commit:
@@ -1002,7 +1004,7 @@ def create_doc(db: Session, payload: schemas.DocCreate, actor_id: int, commit: b
     return doc
 
 
-def update_doc(db: Session, doc: models.Doc, payload: schemas.DocUpdate, actor_id: int) -> models.Doc:
+def update_doc(db: Session, doc: models.Doc, payload: schemas.DocUpdate, actor_id: int, batch=None) -> models.Doc:
     data = payload.model_dump(exclude_unset=True)
     change_note = data.pop("change_note", None)
 
@@ -1021,7 +1023,9 @@ def update_doc(db: Session, doc: models.Doc, payload: schemas.DocUpdate, actor_i
     for field, value in data.items():
         setattr(doc, field, value)
     doc.updated_by = actor_id
-    record_doc_version(db, doc, action="updated", actor_id=actor_id, change_note=change_note, commit=False)
+    # When the caller threads a notification batch, the watch broadcast queued here
+    # is collected into it so it de-duplicates against the caller's mention notice.
+    record_doc_version(db, doc, action="updated", actor_id=actor_id, change_note=change_note, commit=False, batch=batch)
     safe_commit(db)
     db.refresh(doc)
     return doc

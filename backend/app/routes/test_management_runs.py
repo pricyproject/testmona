@@ -11,6 +11,7 @@ from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user, get_current_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
+from ..services import notification_engine
 from .test_management_helpers import *
 
 logger = logging.getLogger(__name__)
@@ -238,12 +239,17 @@ def register_run_routes(app):
             except Exception as e:
                 logger.error(f"Failed to update test run environment snapshot: {e}")
 
+        # One batch for the save: a user who is both the new assignee and the
+        # milestone owner of a just-completed run gets a single row (the
+        # higher-priority assignment), not two.
+        batch = notification_engine.NotificationBatch()
         if "assigned_to" in changed_fields and db_test_run.assigned_to != old_assignee_id:
-            _notify_test_run_assignee(db, db_test_run, current_user, assignee)
+            _notify_test_run_assignee(db, db_test_run, current_user, assignee, batch=batch)
 
         # Notify milestone owner when test run completes
         if changed_fields.get("status") == "completed":
-            _notify_milestone_owner(db, db_test_run, current_user)
+            _notify_milestone_owner(db, db_test_run, current_user, batch=batch)
+        batch.flush(db)
 
         # Create audit trail
         try:

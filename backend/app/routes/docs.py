@@ -124,13 +124,17 @@ def _notify_doc_mentions(
     doc: models.Doc,
     actor: models.User,
     previous_markdown: Optional[str],
+    batch: Optional[notification_engine.NotificationBatch] = None,
 ) -> None:
     """Best-effort notifications for @mentions added to a doc's body.
 
     Only project-scoped docs notify (global docs have no member audience). We
     diff against the previous content so the frequent autosaves from the editor
-    never re-notify a user who was already mentioned. Never raises into the
-    request — mirrors ``_notify_comment`` in the requirements feature."""
+    never re-notify a user who was already mentioned. When a ``batch`` is supplied
+    the mention intent is added to it so it de-duplicates against the watch
+    broadcast for the same save (a watcher who is mentioned gets one row, the
+    mention); otherwise it is emitted immediately. Never raises into the request —
+    mirrors ``_notify_comment`` in the requirements feature."""
     if doc.project_id is None:
         return
     try:
@@ -144,8 +148,8 @@ def _notify_doc_mentions(
             return
 
         actor_name = notification_engine.actor_display_name(actor)
-        notification_engine.emit(
-            db,
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
             category=notification_engine.MENTION,
             user_ids=list(recipients),
             actor_id=actor.id,
@@ -154,6 +158,8 @@ def _notify_doc_mentions(
             related_entity_type="doc",
             related_entity_id=doc.id,
         )
+        if batch is None:
+            target.flush(db)
     except Exception:
         logger.exception("Failed to create doc mention notifications for doc %s", doc.id)
 
@@ -180,8 +186,8 @@ def _notify_doc_feedback(
         }
         feedback_label = labels.get(feedback_type, feedback_type.replace("_", " "))
         detail = f": {comment[:180]}" if comment else ""
-        notification_engine.emit(
-            db,
+        batch = notification_engine.NotificationBatch()
+        batch.add(
             category=notification_engine.FEEDBACK,
             user_ids=list(recipients),
             actor_id=actor.id,
@@ -190,6 +196,7 @@ def _notify_doc_feedback(
             related_entity_type="doc",
             related_entity_id=doc.id,
         )
+        batch.flush(db)
     except Exception:
         logger.exception("Failed to create doc feedback notifications for doc %s", doc.id)
 
@@ -1647,9 +1654,14 @@ def register_docs_routes(app) -> None:
         # Validate the (possibly new) folder against the (possibly new) space.
         if "folder_id" in payload.model_fields_set:
             _validate_folder_in_space(db, payload.folder_id, target_space_id)
-        doc = crud_docs.update_doc(db, doc, payload, actor_id=current_user.id)
+        # One batch for the save: the watch broadcast queued inside update_doc and
+        # the @mention notice below flush once, so a watcher who is newly mentioned
+        # gets a single row — the mention — rather than two.
+        batch = notification_engine.NotificationBatch()
+        doc = crud_docs.update_doc(db, doc, payload, actor_id=current_user.id, batch=batch)
         _reconcile_grants_after_move(db, doc, previous_project_id, current_user)
-        _notify_doc_mentions(db, doc, current_user, previous_markdown)
+        _notify_doc_mentions(db, doc, current_user, previous_markdown, batch=batch)
+        batch.flush(db)
         return _doc_out(doc, current_user, db)
 
     @app.delete("/docs/{doc_id}", status_code=204, tags=["Docs"])

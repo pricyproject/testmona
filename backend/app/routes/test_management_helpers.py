@@ -236,13 +236,13 @@ def _validate_test_run_assignee(db: Session, user_id: Optional[int], project_id:
     return assignee
 
 
-def _notify_test_run_assignee(db: Session, test_run: TestRun, assigned_by: User, assignee: Optional[User]) -> None:
+def _notify_test_run_assignee(db: Session, test_run: TestRun, assigned_by: User, assignee: Optional[User], batch=None) -> None:
     if not assignee or not test_run.assigned_to:
         return
 
     actor_name = notification_engine.actor_display_name(assigned_by)
-    notification_engine.emit(
-        db,
+    target = batch or notification_engine.NotificationBatch()
+    target.add(
         category=notification_engine.ASSIGNMENT,
         user_ids=[assignee.id],
         actor_id=assigned_by.id if assigned_by else None,
@@ -251,10 +251,18 @@ def _notify_test_run_assignee(db: Session, test_run: TestRun, assigned_by: User,
         related_entity_type="test_run",
         related_entity_id=test_run.id,
     )
+    if batch is None:
+        target.flush(db)
 
 
-def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User) -> None:
-    """Notify the milestone owner when a test run completes."""
+def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User, batch=None) -> None:
+    """Notify the milestone owner when a test run completes.
+
+    When a ``batch`` is supplied the status intent is added to it so it
+    de-duplicates against any higher-priority notice for the same run and
+    recipient (e.g. the owner was also just assigned the run); otherwise it is
+    emitted immediately.
+    """
     if not test_run.milestone_id:
         return
 
@@ -268,8 +276,8 @@ def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User) 
             return
 
         actor_name = notification_engine.actor_display_name(completed_by)
-        notification_engine.emit(
-            db,
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
             category=notification_engine.STATUS,
             user_ids=[owner.id],
             actor_id=completed_by.id if completed_by else None,
@@ -279,6 +287,8 @@ def _notify_milestone_owner(db: Session, test_run: TestRun, completed_by: User) 
             related_entity_type="test_run",
             related_entity_id=test_run.id,
         )
+        if batch is None:
+            target.flush(db)
     except Exception:
         logger.exception("Failed to create milestone owner notification", extra={"test_run_id": test_run.id, "milestone_id": test_run.milestone_id})
 

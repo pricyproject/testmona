@@ -184,13 +184,16 @@ def notify_defect_assignee(
     defect: "models.Defect",
     assigned_by: Optional[schemas.User],
     previous_assigned_to: Optional[int] = None,
+    batch: Optional[notification_engine.NotificationBatch] = None,
 ) -> None:
     """Send an in-app notification when a defect is newly assigned to a user.
 
     Mirrors ``_notify_test_run_assignee`` so a defect assignee learns about work
     the same way a test-run assignee does. No-op when the assignee is unchanged,
-    on self-assignment, or when the defect is unassigned. Notification delivery
-    never blocks the write path.
+    on self-assignment, or when the defect is unassigned. When a ``batch`` is
+    supplied the intent is added to it (the caller flushes once, de-duplicating
+    against any colliding notification); otherwise it is emitted immediately.
+    Notification delivery never blocks the write path.
     """
     assignee_id = defect.assigned_to
     if not assignee_id or assignee_id == previous_assigned_to:
@@ -205,8 +208,8 @@ def notify_defect_assignee(
             return
         actor = notification_engine.actor_display_name(assigned_by)
         label = defect.defect_id or defect.title or f"#{defect.id}"
-        notification_engine.emit(
-            db,
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
             category=notification_engine.ASSIGNMENT,
             user_ids=[assignee.id],
             actor_id=assigned_by.id if assigned_by else None,
@@ -215,6 +218,8 @@ def notify_defect_assignee(
             related_entity_type="defect",
             related_entity_id=defect.id,
         )
+        if batch is None:
+            target.flush(db)
     except Exception:
         logger.exception(
             "Failed to create defect assignment notification",
@@ -227,13 +232,17 @@ def notify_requirement_assignee(
     requirement: "models.Requirement",
     assigned_by: Optional[schemas.User],
     previous_assigned_to: Optional[int] = None,
+    batch: Optional[notification_engine.NotificationBatch] = None,
 ) -> None:
     """Send an in-app notification when a requirement is newly assigned to a user.
 
     Mirrors ``notify_defect_assignee`` so a requirement assignee learns about work
     the same way defect and test-run assignees do — and the alert lands in their
     Work Inbox via the engine's ASSIGNMENT category. No-op when the assignee is
-    unchanged, on self-assignment, or when the requirement is unassigned.
+    unchanged, on self-assignment, or when the requirement is unassigned. When a
+    ``batch`` is supplied the intent is added to it (so a save that both reassigns
+    and edits a watched requirement yields one row, not two); otherwise it is
+    emitted immediately.
     """
     assignee_id = requirement.assigned_to
     if not assignee_id or assignee_id == previous_assigned_to:
@@ -248,8 +257,8 @@ def notify_requirement_assignee(
             return
         actor = notification_engine.actor_display_name(assigned_by)
         label = requirement.requirement_id or requirement.title or f"#{requirement.id}"
-        notification_engine.emit(
-            db,
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
             category=notification_engine.ASSIGNMENT,
             user_ids=[assignee.id],
             actor_id=assigned_by.id if assigned_by else None,
@@ -258,6 +267,8 @@ def notify_requirement_assignee(
             related_entity_type="requirement",
             related_entity_id=requirement.id,
         )
+        if batch is None:
+            target.flush(db)
     except Exception:
         logger.exception(
             "Failed to create requirement assignment notification",
@@ -1528,7 +1539,13 @@ def register_requirements_defects_plans_routes(app):
         prior_assigned_to = db_requirement.assigned_to
 
         try:
-            db_requirement = update_requirement(db, requirement_id=requirement_id, requirement=requirement, actor_id=current_user.id)
+            # One batch for the whole save: the watch broadcast queued inside
+            # update_requirement and the assignment notice below are flushed once
+            # so an assignee who also watches the requirement gets a single row.
+            batch = notification_engine.NotificationBatch()
+            db_requirement = update_requirement(
+                db, requirement_id=requirement_id, requirement=requirement, actor_id=current_user.id, batch=batch
+            )
 
             # Create audit trail
             try:
@@ -1550,9 +1567,10 @@ def register_requirements_defects_plans_routes(app):
 
             if "assigned_to" in update_fields:
                 notify_requirement_assignee(
-                    db, db_requirement, current_user, previous_assigned_to=prior_assigned_to
+                    db, db_requirement, current_user, previous_assigned_to=prior_assigned_to, batch=batch
                 )
 
+            batch.flush(db)
             return db_requirement
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -1612,8 +1630,8 @@ def register_requirements_defects_plans_routes(app):
         label = db_requirement.requirement_id or db_requirement.title or f"#{db_requirement.id}"
         note = review_request.note
         note_clause = f' Note: "{note}".' if note else ""
-        rows = notification_engine.emit(
-            db,
+        batch = notification_engine.NotificationBatch()
+        batch.add(
             category=notification_engine.REVIEW,
             user_ids=review_request.reviewer_ids,
             actor_id=current_user.id,
@@ -1622,6 +1640,7 @@ def register_requirements_defects_plans_routes(app):
             related_entity_type="requirement",
             related_entity_id=db_requirement.id,
         )
+        rows = batch.flush(db)
         notified_ids = [r.user_id for r in rows]
         return schemas.RequirementReviewRequestResult(
             message=f"Requested review from {len(notified_ids)} reviewer(s)",

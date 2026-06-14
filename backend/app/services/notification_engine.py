@@ -34,6 +34,25 @@ Two product rules also live here so every feature inherits them for free:
   user has read it, the next event creates a fresh row, so genuinely new activity
   is never swallowed. Distinct actionable events (each mention, each assignment)
   keep ``coalesce=False`` because every one of them matters individually.
+
+One more rule completes the picture — the **de-duplication ladder**. A single
+mutating write often has several independent reasons to notify the *same* person
+about the *same* entity: they are the assignee *and* a watcher *and* the original
+reporter. Sending each reason straight to :func:`emit` would stack several rows
+for one event. :data:`CATEGORY_PRIORITY` ranks the categories that can collide
+(lower number wins):
+
+    mention > comment_reply > review > assignment > feedback > status > watch_change
+
+i.e. a direct @mention outranks a reply to your comment, which outranks a review
+request, an assignment, document feedback, a status update, and finally the purely
+informational "something you watch changed" broadcast. :class:`NotificationBatch`
+applies this ranking: a write path records every notification it *might* send and
+flushes once, and the batch keeps only the highest-priority category per
+``(user, entity)`` group before calling :func:`emit`. De-duplication is therefore
+structural — no route hand-rolls suppression sets — and the engine stays the
+single funnel where actor-exclusion, recipient dedupe, deactivated-account
+filtering and coalescing all happen.
 """
 
 from __future__ import annotations
@@ -108,6 +127,163 @@ def all_categories() -> List[NotificationCategory]:
 def actionable_category_keys() -> List[str]:
     """Keys of every category that belongs in the Work Inbox."""
     return [c.key for c in _CATEGORIES.values() if c.actionable]
+
+
+# --- De-duplication ladder --------------------------------------------------
+# Lower number wins. Documented in the module docstring; this is the machine
+# form of "mention > comment_reply > review > assignment > feedback > status >
+# watch_change". Categories absent from the map (e.g. SYSTEM) sort last and so
+# never suppress a ranked category.
+CATEGORY_PRIORITY: Dict[str, int] = {
+    MENTION.key: 0,
+    COMMENT_REPLY.key: 1,
+    REVIEW.key: 2,
+    ASSIGNMENT.key: 3,
+    FEEDBACK.key: 4,
+    STATUS.key: 5,
+    WATCH_CHANGE.key: 6,
+}
+
+_UNRANKED_PRIORITY = 1_000
+
+# Watch alerts deliberately carry a distinct ``related_entity_type``
+# ("doc_change"/"requirement_change") so the client can deep-link to the version
+# diff. For de-duplication they nonetheless name the *same* underlying entity as a
+# mention/assignment/review on that doc or requirement, so the ladder must fold the
+# alias onto the base type — otherwise an assignment would not suppress the watch
+# broadcast for the very same requirement.
+_ENTITY_TYPE_ALIASES = {
+    "doc_change": "doc",
+    "requirement_change": "requirement",
+}
+
+
+def _canonical_entity_type(entity_type: Optional[str]) -> Optional[str]:
+    if entity_type is None:
+        return None
+    return _ENTITY_TYPE_ALIASES.get(entity_type, entity_type)
+
+
+@dataclass
+class _Intent:
+    """One recorded "we might notify these users about this" request."""
+
+    category: NotificationCategory
+    user_ids: tuple
+    title: str
+    message: str
+    related_entity_type: Optional[str]
+    related_entity_id: Optional[int]
+    actor_id: Optional[int]
+    type_override: Optional[NotificationType]
+
+
+class NotificationBatch:
+    """Per-request collector that enforces the de-duplication ladder.
+
+    A single mutating write often has several reasons to notify the same person
+    about the same entity (assignee *and* watcher *and* reporter). Routing each
+    reason straight to :func:`emit` would stack several rows for one event. The
+    batch instead collects *intents* via :meth:`add` and, on :meth:`flush`, groups
+    them by ``(user_id, entity)`` and keeps only the highest-priority category per
+    group (see :data:`CATEGORY_PRIORITY`) before handing the survivors to
+    :func:`emit`. De-duplication is therefore structural: a write path records
+    every notification it might send and flushes once, instead of hand-rolling
+    suppression sets.
+
+    Watch-change aliases ("doc_change"/"requirement_change") are folded onto their
+    base entity type for grouping, so an assignment on a requirement correctly
+    supersedes the watch broadcast for the same requirement. ``flush`` honours
+    ``commit`` exactly as :func:`emit` does, so the version-save path can pass
+    ``commit=False`` and persist the notifications atomically with its own change.
+    """
+
+    def __init__(self) -> None:
+        self._intents: List[_Intent] = []
+
+    def add(
+        self,
+        *,
+        category: NotificationCategory,
+        user_ids: Iterable[int],
+        title: str,
+        message: str,
+        related_entity_type: Optional[str] = None,
+        related_entity_id: Optional[int] = None,
+        actor_id: Optional[int] = None,
+        type_override: Optional[NotificationType] = None,
+    ) -> None:
+        """Record an intent. Emits nothing until :meth:`flush`."""
+        self._intents.append(
+            _Intent(
+                category=category,
+                user_ids=tuple(user_ids),
+                title=title,
+                message=message,
+                related_entity_type=related_entity_type,
+                related_entity_id=related_entity_id,
+                actor_id=actor_id,
+                type_override=type_override,
+            )
+        )
+
+    def flush(self, db: Session, *, commit: bool = True) -> List[Notification]:
+        """Collapse colliding intents by the ladder and emit the survivors.
+
+        For each ``(recipient, entity)`` only the highest-priority category
+        survives; ties keep the earliest-added intent. Intents naming no concrete
+        entity (``related_entity_id is None``) are never grouped together — each is
+        kept independently, since there is nothing stable to dedupe on. Returns the
+        emitted rows (across all surviving intents).
+        """
+        if not self._intents:
+            return []
+
+        # winner key -> (priority, seq, intent, uid)
+        winners: Dict[tuple, tuple] = {}
+        for seq, intent in enumerate(self._intents):
+            priority = CATEGORY_PRIORITY.get(intent.category.key, _UNRANKED_PRIORITY)
+            ent_type = _canonical_entity_type(intent.related_entity_type)
+            for uid in intent.user_ids:
+                if uid is None:
+                    continue
+                if intent.related_entity_id is None:
+                    key: tuple = ("__no_entity__", seq, uid)
+                else:
+                    key = (uid, ent_type, intent.related_entity_id)
+                current = winners.get(key)
+                if current is None or priority < current[0]:
+                    winners[key] = (priority, seq, intent, uid)
+
+        # Re-bucket the winning recipients back onto their intents so each emit
+        # call carries exactly the users for whom that intent won. Keyed by the
+        # intent's insertion order to keep emitted text deterministic.
+        buckets: Dict[int, tuple] = {}
+        for _priority, seq, intent, uid in winners.values():
+            bucket = buckets.get(seq)
+            if bucket is None:
+                buckets[seq] = (intent, [uid])
+            else:
+                bucket[1].append(uid)
+
+        rows: List[Notification] = []
+        for seq in sorted(buckets):
+            intent, uids = buckets[seq]
+            rows.extend(
+                emit(
+                    db,
+                    category=intent.category,
+                    user_ids=uids,
+                    title=intent.title,
+                    message=intent.message,
+                    related_entity_type=intent.related_entity_type,
+                    related_entity_id=intent.related_entity_id,
+                    actor_id=intent.actor_id,
+                    type_override=intent.type_override,
+                    commit=commit,
+                )
+            )
+        return rows
 
 
 def emit(

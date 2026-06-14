@@ -168,11 +168,17 @@ def notify_watchers_of_change(
     actor_id: Optional[int],
     changed_fields: Sequence[str] | None = None,
     change_note: Optional[str] = None,
+    batch: "notification_engine.NotificationBatch | None" = None,
 ) -> None:
     """Queue change notifications for every watcher except the actor.
 
-    Notification rows are *added* to the session but not committed, so they are
-    persisted atomically with the version row by the caller's commit. This is
+    When a ``batch`` is supplied the watch intent is *added* to it and nothing is
+    emitted here — the owning write path flushes the batch once so this broadcast
+    is de-duplicated against any higher-priority notification (assignment, mention)
+    for the same recipient and entity. When no batch is supplied the intent is
+    emitted on its own with ``commit=False``, so the rows are added to the session
+    but not committed and persist atomically with the version row by the caller's
+    commit (the doc create/restore/merge paths rely on this). Either way this is
     best-effort: any failure is logged and swallowed so it can never break the
     underlying save.
     """
@@ -200,10 +206,8 @@ def notify_watchers_of_change(
         )
         related_type = _CHANGE_NOTIFICATION_TYPE[entity_type]
 
-        # commit=False: these rows are flushed with the caller's version-save commit
-        # so the notification and the version it describes persist atomically.
-        notification_engine.emit(
-            db,
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
             category=notification_engine.WATCH_CHANGE,
             user_ids=recipients,
             actor_id=actor_id,
@@ -211,8 +215,13 @@ def notify_watchers_of_change(
             message=message,
             related_entity_type=related_type,
             related_entity_id=entity_id,
-            commit=False,
         )
+        # Standalone (no caller batch): emit now with commit=False so the rows are
+        # flushed with the caller's version-save commit and persist atomically.
+        # With a caller batch, the owning write path flushes it once after adding
+        # its own (higher-priority) intents.
+        if batch is None:
+            target.flush(db, commit=False)
     except Exception:
         logger.exception(
             "Failed to queue watch notifications for %s %s", entity_type, entity_id
