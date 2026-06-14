@@ -4,6 +4,10 @@ import {
   ArrowLeft,
   Check,
   Cloud,
+  FolderTree,
+  Hash,
+  Languages,
+  Layers,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -11,7 +15,9 @@ import {
   PanelRightOpen,
   Save,
   Settings2,
+  ShieldCheck,
   Sparkles,
+  Tag,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -33,6 +39,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI, projectAssignmentsAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { parsePositiveIntegerParam } from '@/utils/validation';
+import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/utils/datetime';
 import type { Doc, DocDir, DocFolder, DocListItem, DocSpace, DocStatus } from '@/types';
 
@@ -116,6 +123,12 @@ export function DocEditor() {
     const words = content.replace(/[#>*_`~[\]()-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
     return words.length;
   }, [content]);
+
+  // Preview chips for the tags field: split on commas, trim, drop empties.
+  const tagList = useMemo(
+    () => tags.split(',').map((s) => s.trim()).filter(Boolean),
+    [tags],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -364,14 +377,20 @@ export function DocEditor() {
         {showMeta && (
           <>
             <div
-              className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+              className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm lg:hidden"
               onClick={() => setShowMeta(false)}
               aria-hidden
             />
             <aside
-              className={`fixed inset-y-0 z-50 w-80 max-w-[85vw] space-y-4 overflow-y-auto bg-background p-4 shadow-xl lg:static lg:z-auto lg:w-auto lg:max-w-none lg:overflow-visible lg:bg-transparent lg:p-0 lg:shadow-none ${isRTL ? 'left-0 border-r border-slate-200 dark:border-slate-800 lg:border-r-0' : 'right-0 border-l border-slate-200 dark:border-slate-800 lg:border-l-0'}`}
+              className={cn(
+                'fixed inset-y-0 z-50 flex w-80 max-w-[85vw] flex-col overflow-y-auto bg-background shadow-2xl',
+                'lg:static lg:z-auto lg:w-auto lg:max-w-none lg:self-start lg:overflow-visible lg:bg-transparent lg:shadow-none',
+                'lg:sticky lg:top-6',
+                isRTL ? 'left-0' : 'right-0',
+              )}
             >
-              <div className="flex items-center justify-between lg:hidden">
+              {/* Mobile drawer header — desktop uses the panel header below. */}
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800 lg:hidden">
                 <span className="flex items-center gap-2 text-sm font-semibold">
                   <Settings2 className="h-4 w-4 text-muted-foreground" />
                   {t('docMetadata')}
@@ -380,59 +399,145 @@ export function DocEditor() {
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-            <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
-              <h3 className="mb-3 hidden items-center gap-2 text-sm font-semibold lg:flex">
-                <Settings2 className="h-4 w-4 text-muted-foreground" />
-                {t('docMetadata')}
-              </h3>
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">{t('status')}</Label>
-                  <Select value={status} onValueChange={(v) => setStatus(v as DocStatus)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {STATUSES.map((s) => <SelectItem key={s} value={s}>{t(`docStatus_${s}` as any)}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {space && (
-                  <div className="space-y-1">
-                    <Label className="text-xs">{t('docFolder')}</Label>
-                    <Select value={folderId ? String(folderId) : 'none'} onValueChange={(v) => setFolderId(v === 'none' ? null : Number(v))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">{t('docNoFolder')}</SelectItem>
-                        {folders.map((f) => <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+
+              {/* Seamless properties panel: one cohesive card, hairline-divided sections. */}
+              <div className="flex-1 p-4 lg:p-0">
+                <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-card shadow-sm ring-1 ring-black/[0.02] dark:border-slate-800 dark:ring-white/[0.02]">
+                  {/* Panel header (desktop only — mobile has its own above). */}
+                  <div className="hidden items-center gap-2 border-b border-slate-200/80 bg-gradient-to-br from-slate-50 to-transparent px-4 py-3 dark:border-slate-800 dark:from-slate-800/40 lg:flex">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Settings2 className="h-4 w-4" />
+                    </span>
+                    <span className="text-sm font-semibold tracking-tight">{t('docMetadata')}</span>
                   </div>
-                )}
-                <div className="space-y-1">
-                  <Label className="text-xs">{t('docClassification')}</Label>
-                  <Input value={classification} onChange={(e) => setClassification(e.target.value)} placeholder={t('docClassificationPlaceholder')} />
-                  <p className="text-[11px] text-muted-foreground">{t('docClassificationHelp')}</p>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">{t('tags')}</Label>
-                  <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t('docTagsPlaceholder')} dir="auto" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">{t('docDirection')}</Label>
-                  <Select value={dir} onValueChange={(v) => setDir(v as DocDir)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {DIRECTIONS.map((d) => <SelectItem key={d} value={d}>{t(`docDir_${d}` as any)}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+
+                  <div className="divide-y divide-slate-200/70 dark:divide-slate-800/70">
+                    {/* Status — segmented control */}
+                    <section className="px-4 py-3.5">
+                      <Label className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <span className={cn('h-2 w-2 rounded-full', status === 'published' ? 'bg-emerald-500' : status === 'archived' ? 'bg-amber-500' : 'bg-slate-400')} />
+                        {t('status')}
+                      </Label>
+                      <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800/60">
+                        {STATUSES.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setStatus(s)}
+                            className={cn(
+                              'flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-all',
+                              status === s
+                                ? cn('shadow-sm', statusTone[s] || statusTone.draft)
+                                : 'text-muted-foreground hover:text-foreground',
+                            )}
+                          >
+                            {t(`docStatus_${s}` as any)}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    {/* Folder */}
+                    {space && (
+                      <section className="px-4 py-3.5">
+                        <Label className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <FolderTree className="h-3.5 w-3.5" />
+                          {t('docFolder')}
+                        </Label>
+                        <Select value={folderId ? String(folderId) : 'none'} onValueChange={(v) => setFolderId(v === 'none' ? null : Number(v))}>
+                          <SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">{t('docNoFolder')}</SelectItem>
+                            {folders.map((f) => <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </section>
+                    )}
+
+                    {/* Classification */}
+                    <section className="px-4 py-3.5">
+                      <Label className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        {t('docClassification')}
+                      </Label>
+                      <Input
+                        value={classification}
+                        onChange={(e) => setClassification(e.target.value)}
+                        placeholder={t('docClassificationPlaceholder')}
+                        className="h-9 rounded-lg"
+                      />
+                      <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{t('docClassificationHelp')}</p>
+                    </section>
+
+                    {/* Tags */}
+                    <section className="px-4 py-3.5">
+                      <Label className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <Tag className="h-3.5 w-3.5" />
+                        {t('tags')}
+                      </Label>
+                      <Input
+                        value={tags}
+                        onChange={(e) => setTags(e.target.value)}
+                        placeholder={t('docTagsPlaceholder')}
+                        dir="auto"
+                        className="h-9 rounded-lg"
+                      />
+                      {tagList.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {tagList.map((tag, i) => (
+                            <span
+                              key={`${tag}-${i}`}
+                              dir="auto"
+                              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary"
+                            >
+                              <Hash className="h-3 w-3 opacity-60" />
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    {/* Direction — segmented control */}
+                    <section className="px-4 py-3.5">
+                      <Label className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <Languages className="h-3.5 w-3.5" />
+                        {t('docDirection')}
+                      </Label>
+                      <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800/60">
+                        {DIRECTIONS.map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setDir(d)}
+                            className={cn(
+                              'flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-all',
+                              dir === d
+                                ? 'bg-background text-foreground shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground',
+                            )}
+                          >
+                            {t(`docDir_${d}` as any)}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    {/* Space + version footer */}
+                    {space && (
+                      <section className="flex items-center gap-2 bg-slate-50/60 px-4 py-3 dark:bg-slate-800/30">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-200/70 text-muted-foreground dark:bg-slate-700/50">
+                          <Layers className="h-3.5 w-3.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-foreground">{space.name}</p>
+                          <p className="text-[11px] text-muted-foreground">{t('docSpace')} · {t('docVersion')} v{doc.current_version}</p>
+                        </div>
+                      </section>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            {space && (
-              <div className="rounded-lg border border-slate-200 p-4 text-xs text-muted-foreground dark:border-slate-800">
-                <p>{t('docSpace')}: <span className="font-medium text-foreground">{space.name}</span></p>
-                <p className="mt-1">{t('docVersion')}: v{doc.current_version}</p>
-              </div>
-            )}
             </aside>
           </>
         )}
