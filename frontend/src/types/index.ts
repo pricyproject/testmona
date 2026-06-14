@@ -403,10 +403,33 @@ export interface Notification {
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
   is_read: boolean;
+  // Notification engine category key (e.g. 'mention', 'assignment'). Present on
+  // engine-emitted rows; absent on legacy/manual ones.
+  category?: string | null;
+  // Work Inbox dismissal: an archived item is "done".
+  archived?: boolean;
+  // Who triggered the notification + their resolved display name (inbox avatar/byline).
+  actor_id?: number | null;
+  actor_name?: string | null;
   related_entity_type?: string;
   related_entity_id?: number;
   created_at: string;
   user_id: number;
+}
+
+// Work Inbox: per-category open/unread counts for the filter rail.
+export interface InboxCategorySummary {
+  key: string;
+  label: string;
+  open: number;
+  done: number;
+  unread: number;
+}
+
+export interface InboxSummary {
+  total_open: number;
+  total_unread: number;
+  categories: InboxCategorySummary[];
 }
 
 // Watch / change-notification subscription status for a doc or requirement.

@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronRight, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Settings, ShieldCheck, Sun, User } from 'lucide-react';
+import { ChevronRight, Inbox, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Settings, ShieldCheck, Sun, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
 import { isAdminUser } from '@/utils/roles';
@@ -69,6 +69,8 @@ export function Navbar({
   const { selectedProject, projects } = useProjectStore();
   const { t, isRTL } = useTranslation();
   const [unreadCount, setUnreadCount] = useState(0);
+  // Open (pending) actionable items in the Work Inbox — drives the inbox badge.
+  const [inboxOpenCount, setInboxOpenCount] = useState(0);
   // Track the previous unread count + sound preferences so we can chime only
   // when a genuinely new notification arrives (and the user allows it).
   const prevUnreadRef = useRef<number | null>(null);
@@ -155,15 +157,26 @@ export function Navbar({
       }
     };
 
+    const fetchInboxCount = async () => {
+      try {
+        const { data } = await api.get('/inbox/summary');
+        setInboxOpenCount(data.total_open ?? 0);
+      } catch (error) {
+        console.error('Failed to fetch inbox summary:', error);
+      }
+    };
+
     const refresh = () => {
       fetchPrefs();
       fetchUnreadCount();
+      fetchInboxCount();
     };
 
     fetchPrefs();
     fetchUnreadCount();
+    fetchInboxCount();
     window.addEventListener('notifications:refresh', refresh);
-    const interval = setInterval(fetchUnreadCount, 60000);
+    const interval = setInterval(() => { fetchUnreadCount(); fetchInboxCount(); }, 60000);
     const prefsInterval = setInterval(fetchPrefs, 300000);
     return () => {
       window.removeEventListener('notifications:refresh', refresh);
@@ -258,6 +271,24 @@ export function Navbar({
           >
             {theme === 'light' ? <Moon className="h-[18px] w-[18px]" /> : <Sun className="h-[18px] w-[18px]" />}
           </Button>
+
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/inbox')}
+              title={t('workInboxTitle')}
+              aria-label={t('workInboxTitle')}
+              className={`${iconButtonClass} ${location.pathname === '/inbox' ? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white' : ''}`}
+            >
+              <Inbox className="h-[18px] w-[18px]" />
+            </Button>
+            {inboxOpenCount > 0 && (
+              <span className="pointer-events-none absolute -top-0.5 -end-0.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-bold text-white shadow-xs ring-2 ring-white dark:ring-gray-900">
+                {inboxOpenCount > 99 ? '99+' : inboxOpenCount}
+              </span>
+            )}
+          </div>
 
           <NotificationDropdown unreadCount={unreadCount} onUnreadCountChange={setUnreadCount} />
 

@@ -61,6 +61,7 @@ const TestData = lazyPage(() => import('@/pages/TestData'), 'TestData');
 const ActivityManagement = lazyPage(() => import('@/pages/ActivityManagement'), 'ActivityManagement');
 const Settings = lazyPage<{ adminMode?: boolean; projectId?: number; singleTab?: string }>(() => import('@/pages/Settings'), 'Settings');
 const Profile = lazyPage(() => import('@/pages/Profile'), 'Profile');
+const WorkInbox = lazyPage(() => import('@/pages/WorkInbox'), 'WorkInbox');
 const ProjectMembers = lazyPage(() => import('@/pages/ProjectMembers'), 'ProjectMembers');
 const ProjectSettings = lazyPage(() => import('@/pages/ProjectSettings'), 'ProjectSettings');
 const ApiTokens = lazyPage(() => import('@/pages/ApiTokens'), 'ApiTokens');
@@ -262,6 +263,7 @@ function AppWithRouter() {
         <Route path="/signup" element={<PostAuthRedirect />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/inbox" element={<WorkInbox />} />
         
         {/* Project-scoped routes */}
         <Route path="/projects/:projectId/test-suites" element={

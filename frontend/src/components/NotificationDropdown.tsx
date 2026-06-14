@@ -21,6 +21,7 @@ import {
   MoreVertical,
   ListChecks,
   ChevronRight,
+  Inbox,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +33,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import { openNotification } from '@/lib/notificationNavigation';
 import { Notification } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 
@@ -87,39 +89,8 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   };
 
   const viewRelatedEntity = async (notification: Notification) => {
-    if (!notification.related_entity_type || !notification.related_entity_id) return;
-
-    try {
-      if (notification.related_entity_type === 'test_run') {
-        const response = await api.get(`/test-runs/${notification.related_entity_id}`);
-        navigate(`/projects/${response.data.project_id}/test-runs/${notification.related_entity_id}`);
-      } else if (notification.related_entity_type === 'defect') {
-        navigate(`/defects/${notification.related_entity_id}`);
-      } else if (notification.related_entity_type === 'test_case') {
-        navigate(`/test-cases/${notification.related_entity_id}`);
-      } else if (notification.related_entity_type === 'requirement') {
-        const response = await api.get(`/requirements/${notification.related_entity_id}`);
-        navigate(`/projects/${response.data.project_id}/requirements/${response.data.project_seq ?? notification.related_entity_id}`);
-      } else if (notification.related_entity_type === 'doc') {
-        const response = await api.get(`/docs/${notification.related_entity_id}`);
-        const projectId = response.data.project_id;
-        navigate(projectId ? `/projects/${projectId}/docs/${notification.related_entity_id}` : `/docs/${notification.related_entity_id}`);
-      } else if (notification.related_entity_type === 'doc_change') {
-        // Watch alert: land on the revisions tab in diff mode so the reader sees
-        // exactly what changed.
-        const response = await api.get(`/docs/${notification.related_entity_id}`);
-        const projectId = response.data.project_id;
-        const base = projectId ? `/projects/${projectId}/docs/${notification.related_entity_id}` : `/docs/${notification.related_entity_id}`;
-        navigate(`${base}/revisions?compare=1`);
-      } else if (notification.related_entity_type === 'requirement_change') {
-        // Watch alert: open the requirement with its version-history diff in view.
-        const response = await api.get(`/requirements/${notification.related_entity_id}`);
-        navigate(`/projects/${response.data.project_id}/requirements/${response.data.project_seq ?? notification.related_entity_id}?compare=1`);
-      }
-      setIsOpen(false);
-    } catch (error) {
-      console.error('Failed to open related notification entity:', error);
-    }
+    const opened = await openNotification(notification, navigate);
+    if (opened) setIsOpen(false);
   };
 
   const fetchNotifications = async (
@@ -572,6 +543,18 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
                   <div className="absolute end-0 top-full z-50 mt-1.5 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10 dark:border-slate-800 dark:bg-slate-900">
+                    <button
+                      type="button"
+                      onClick={() => { navigate('/inbox'); setShowMenu(false); setIsOpen(false); }}
+                      className={menuItemClass}
+                    >
+                      <Inbox className="h-4 w-4 text-slate-400" />
+                      <span className="flex-1">{t('openWorkInbox')}</span>
+                      <ChevronRight className="h-4 w-4 text-slate-300 rtl:rotate-180" />
+                    </button>
+
+                    <div className="my-1.5 h-px bg-slate-100 dark:bg-slate-800" />
+
                     <button
                       type="button"
                       onClick={() => { toggleBulkMode(); setShowMenu(false); }}
