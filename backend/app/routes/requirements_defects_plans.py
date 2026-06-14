@@ -1557,6 +1557,79 @@ def register_requirements_defects_plans_routes(app):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    @app.post(
+        "/requirements/{requirement_id}/request-review",
+        response_model=schemas.RequirementReviewRequestResult,
+    )
+    def request_requirement_review_endpoint(
+        requirement_id: int,
+        review_request: schemas.RequirementReviewRequest,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Ask teammates to review a requirement.
+
+        Emits the engine's REVIEW notification (Work Inbox "Reviews") to each named
+        reviewer. The requester is never notified of their own request, and every
+        reviewer must exist, be active, and have access to the requirement's
+        project — so a review request can never leak a requirement to someone who
+        can't open it.
+        """
+        db_requirement = get_requirement(db, requirement_id=requirement_id)
+        if db_requirement is None:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+
+        if not rbac.has_permission(current_user, "write", db_requirement.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        reviewers = (
+            db.query(models.User)
+            .filter(
+                models.User.id.in_(review_request.reviewer_ids),
+                models.User.is_active == True,  # noqa: E712
+            )
+            .all()
+        )
+        found_by_id = {u.id: u for u in reviewers}
+        missing = [uid for uid in review_request.reviewer_ids if uid not in found_by_id]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reviewer(s) not found or inactive: {missing}",
+            )
+        no_access = [
+            uid
+            for uid in review_request.reviewer_ids
+            if not rbac.has_permission(found_by_id[uid], "read", db_requirement.project_id, db)
+        ]
+        if no_access:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reviewer(s) do not have access to this project: {no_access}",
+            )
+
+        actor_name = notification_engine.actor_display_name(current_user)
+        label = db_requirement.requirement_id or db_requirement.title or f"#{db_requirement.id}"
+        note = review_request.note
+        note_clause = f' Note: "{note}".' if note else ""
+        rows = notification_engine.emit(
+            db,
+            category=notification_engine.REVIEW,
+            user_ids=review_request.reviewer_ids,
+            actor_id=current_user.id,
+            title="Review requested",
+            message=f"{actor_name} requested your review of requirement {label}.{note_clause}",
+            related_entity_type="requirement",
+            related_entity_id=db_requirement.id,
+        )
+        notified_ids = [r.user_id for r in rows]
+        return schemas.RequirementReviewRequestResult(
+            message=f"Requested review from {len(notified_ids)} reviewer(s)",
+            requirement_id=db_requirement.id,
+            notified_count=len(notified_ids),
+            reviewer_ids=notified_ids,
+        )
+
     @app.delete("/requirements/{requirement_id}", response_model=schemas.MessageResponse)
     def delete_requirement_endpoint(
         requirement_id: int,

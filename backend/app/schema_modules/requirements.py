@@ -108,6 +108,45 @@ class FeatureFileImportResult(BaseModel):
     skipped: List[str] = []
 
 
+class RequirementReviewRequest(BaseModel):
+    """Ask one or more teammates to review a requirement.
+
+    Drives the engine's REVIEW notification (Work Inbox "Reviews"). ``reviewer_ids``
+    are the people whose review is requested; ``note`` is an optional message shown
+    in the notification.
+    """
+    reviewer_ids: List[int] = Field(..., min_length=1, max_length=50)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reviewer_ids")
+    @classmethod
+    def _dedupe_reviewers(cls, v: List[int]) -> List[int]:
+        seen: set[int] = set()
+        ordered: List[int] = []
+        for uid in v:
+            if uid in seen:
+                continue
+            seen.add(uid)
+            ordered.append(uid)
+        return ordered
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class RequirementReviewRequestResult(BaseModel):
+    """Outcome of a review request: who was actually notified."""
+    message: str
+    requirement_id: int
+    notified_count: int
+    reviewer_ids: List[int] = []
+
+
 # --- Requirement folders / categories --------------------------------------
 
 class RequirementFolderBase(BaseModel):
