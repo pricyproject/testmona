@@ -46,6 +46,7 @@ import {
 import { markdownToHtml } from '@/components/ui/content-editor';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { DocVersionHistory } from '@/components/docs/DocVersionHistory';
+import { WatchButton } from '@/components/WatchButton';
 import { DocRelatedSection } from '@/components/docs/DocRelatedSection';
 import { DocRequirementLinksSection } from '@/components/docs/DocRequirementLinksSection';
 import { ConvertDocDialog } from '@/components/docs/ConvertDocDialog';
@@ -311,6 +312,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('export')}
         </Button>
+        <WatchButton entityType="doc" entityId={doc.id} />
         {doc.can_share && (
           <Button variant="outline" size="sm" onClick={() => setShareOpen(true)}>
             <Share2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -539,7 +541,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         </TabsContent>
 
         <TabsContent value="revisions" className="mt-4">
-          <DocVersionHistory docId={doc.id} canEdit={doc.can_edit} canClear={doc.can_delete} onRestored={reloadDoc} />
+          <DocVersionHistory docId={doc.id} canEdit={doc.can_edit} canClear={doc.can_delete} onRestored={reloadDoc} defaultCompare={searchParams.get('compare') === '1'} />
         </TabsContent>
 
         <TabsContent value="links" className="mt-4">

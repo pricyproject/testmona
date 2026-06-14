@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import re
 from .. import schemas
 from ..retry_utils import seq_conflict_retry
+from ..services import watch_service
 from ..services.execution_timing import apply_test_result_execution_timing
 from ..services.user_lifecycle import (
     create_user_invitation,
@@ -87,21 +88,28 @@ def record_requirement_version(
         .first()
     )
 
-    # For routine saves, skip recording when none of the snapshotted content
-    # actually changed (e.g. an update that only touched assignee/parent).
+    # Which snapshotted fields changed vs the previous version — used both to
+    # short-circuit no-op saves (an update that only touched assignee/parent)
+    # and to tell watchers what actually changed.
+    changed_fields: List[str] = []
+    if latest is not None:
+        if latest.title != requirement.title:
+            changed_fields.append("title")
+        if latest.description != requirement.description:
+            changed_fields.append("description")
+        if latest.acceptance_criteria != requirement.acceptance_criteria:
+            changed_fields.append("acceptance criteria")
+        if latest.status != _enum_value(requirement.status):
+            changed_fields.append("status")
+        if latest.priority != _enum_value(requirement.priority):
+            changed_fields.append("priority")
+        if latest.tags != requirement.tags:
+            changed_fields.append("tags")
+        if latest.estimated_effort != requirement.estimated_effort:
+            changed_fields.append("estimated effort")
     # 'created' and 'restored' always record so the timeline stays meaningful.
-    if action == "updated" and latest is not None:
-        unchanged = (
-            latest.title == requirement.title
-            and latest.description == requirement.description
-            and latest.acceptance_criteria == requirement.acceptance_criteria
-            and latest.status == _enum_value(requirement.status)
-            and latest.priority == _enum_value(requirement.priority)
-            and latest.tags == requirement.tags
-            and latest.estimated_effort == requirement.estimated_effort
-        )
-        if unchanged:
-            return latest
+    if action == "updated" and latest is not None and not changed_fields:
+        return latest
 
     last_number = latest.version_number if latest is not None else 0
     version = RequirementVersion(
@@ -119,6 +127,24 @@ def record_requirement_version(
         created_by=actor_id,
     )
     db.add(version)
+
+    # Alert watchers about real content changes — never about the requirement's
+    # own creation nor the first-ever snapshot (nobody can be watching yet, and
+    # there is no prior version to diff against). Queued on the session so it
+    # commits atomically with the version row.
+    if action != "created" and latest is not None:
+        watch_service.notify_watchers_of_change(
+            db,
+            entity_type=watch_service.REQUIREMENT,
+            entity_id=requirement.id,
+            label=requirement.requirement_id or f'"{requirement.title}"',
+            version_number=version.version_number,
+            action=action,
+            actor_id=actor_id,
+            changed_fields=changed_fields,
+            change_note=change_note,
+        )
+
     if commit:
         safe_commit(db)
         db.refresh(version)
@@ -477,6 +503,9 @@ def delete_requirement(db: Session, requirement_id: int):
     db_requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if db_requirement:
         from ..models import TraceabilityMatrix, requirement_test_case_links
+
+        # Watches reference the requirement by loose id (no FK), clear them too.
+        watch_service.clear_watches(db, watch_service.REQUIREMENT, requirement_id)
 
         # Detach child requirements so their parent FK does not dangle.
         db.query(Requirement).filter(

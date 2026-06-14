@@ -30,6 +30,30 @@ class Notification(Base):
     user = relationship("User", back_populates="notifications")
 
 
+class EntityWatch(Base):
+    """A user's subscription to change notifications for a single entity.
+
+    Generic over entity kind (``entity_type`` is ``"doc"`` or ``"requirement"``)
+    so docs and requirements share one watch table. When a watched entity records
+    a new content version, every watcher except the actor receives a
+    :class:`Notification` pointing at the version history diff.
+    """
+    __tablename__ = "entity_watches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)  # 'doc' | 'requirement'
+    entity_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "entity_type", "entity_id", name="uq_entity_watch"),
+        Index("ix_entity_watches_entity", "entity_type", "entity_id"),
+    )
+
+
 # Analytics and Reporting Models
 
 class KPIData(Base):

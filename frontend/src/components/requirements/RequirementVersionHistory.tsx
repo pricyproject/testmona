@@ -23,6 +23,8 @@ interface Props {
   requirementId: number;
   canEdit: boolean;
   onRestored?: () => void;
+  /** Open in compare/diff mode (used when arriving from a watch notification). */
+  defaultCompare?: boolean;
 }
 
 // Bidi-isolate + auto-direct user content so it never renders reversed under
@@ -61,13 +63,13 @@ const actionMeta: Record<string, { icon: typeof Plus; tone: string }> = {
   restored: { icon: RotateCcw, tone: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
 };
 
-export function RequirementVersionHistory({ requirementId, canEdit, onRestored }: Props) {
+export function RequirementVersionHistory({ requirementId, canEdit, onRestored, defaultCompare = false }: Props) {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [compareMode, setCompareMode] = useState(false);
+  const [compareMode, setCompareMode] = useState(defaultCompare);
   const [restoreTarget, setRestoreTarget] = useState<RequirementVersion | null>(null);
   const [restoring, setRestoring] = useState(false);
 
@@ -138,7 +140,7 @@ export function RequirementVersionHistory({ requirementId, canEdit, onRestored }
   };
 
   return (
-    <section className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
+    <section id="version-history" className="scroll-mt-24 rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <History className="h-5 w-5 text-slate-500" />

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import { decodeHtmlEntities, decodeEntitiesDeep, htmlToReadableText, isHtmlMarku
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { RequirementVersionHistory } from '@/components/requirements/RequirementVersionHistory';
+import { WatchButton } from '@/components/WatchButton';
 import { RequirementComments } from '@/components/requirements/RequirementComments';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
@@ -219,6 +220,10 @@ const extractSourceDocument = (rawDescription?: string | null): SourceDoc | null
 
 export function RequirementDetail() {
   const { projectId, requirementId } = useParams<{ projectId: string; requirementId: string }>();
+  const [searchParams] = useSearchParams();
+  // Watch notifications deep-link here with ?compare=1 to open the version
+  // history straight into diff mode and scroll the reader to it.
+  const compareDeepLink = searchParams.get('compare') === '1';
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
@@ -445,6 +450,16 @@ export function RequirementDetail() {
       isMounted = false;
     };
   }, [projectId, requirement?.id]);
+
+  // Arriving from a watch notification (?compare=1): once the requirement is
+  // loaded, bring the version-history diff into view.
+  useEffect(() => {
+    if (!compareDeepLink || !requirement?.id) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById('version-history')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [compareDeepLink, requirement?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1173,6 +1188,7 @@ export function RequirementDetail() {
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
+              <WatchButton entityType="requirement" entityId={requirement.id} />
               <Button type="button" size="sm" variant="outline" onClick={() => setAiDialogOpen(true)}>
                 <Wand2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                 {t('generateTestCases')}
@@ -1547,6 +1563,7 @@ export function RequirementDetail() {
               <RequirementVersionHistory
                 requirementId={requirement.id}
                 canEdit
+                defaultCompare={compareDeepLink}
                 onRestored={() => setRequirementRefreshKey((key) => key + 1)}
               />
             )}

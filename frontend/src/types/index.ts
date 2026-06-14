@@ -409,6 +409,14 @@ export interface Notification {
   user_id: number;
 }
 
+// Watch / change-notification subscription status for a doc or requirement.
+export type WatchEntityType = 'doc' | 'requirement';
+
+export interface WatchStatus {
+  watching: boolean;
+  watcher_count: number;
+}
+
 // Audit Trail Types
 export type AuditAction = 'create' | 'update' | 'delete' | 'login' | 'logout' | 'execute' | 'assign' | 'unassign' | 'approve' | 'reject' | 'archive' | 'restore' | 'export' | 'import' | 'sync';
 

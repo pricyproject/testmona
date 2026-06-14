@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from . import models, schemas
 from .crud import safe_commit
+from .services import watch_service
 
 
 # --------------------------------------------------------------------------- #
@@ -262,16 +263,22 @@ def record_doc_version(
     )
 
     status_value = getattr(doc.status, "value", doc.status)
-    if action == "updated" and latest is not None:
-        unchanged = (
-            latest.title == doc.title
-            and latest.content_markdown == doc.content_markdown
-            and latest.status == status_value
-            and latest.classification == doc.classification
-            and latest.tags == doc.tags
-        )
-        if unchanged:
-            return latest
+    # Which snapshotted fields changed vs the previous version — used both to
+    # short-circuit no-op saves and to tell watchers what actually changed.
+    changed_fields: List[str] = []
+    if latest is not None:
+        if latest.title != doc.title:
+            changed_fields.append("title")
+        if latest.content_markdown != doc.content_markdown:
+            changed_fields.append("content")
+        if latest.status != status_value:
+            changed_fields.append("status")
+        if latest.classification != doc.classification:
+            changed_fields.append("classification")
+        if latest.tags != doc.tags:
+            changed_fields.append("tags")
+    if action == "updated" and latest is not None and not changed_fields:
+        return latest
 
     last_number = latest.version_number if latest is not None else 0
     version = models.DocVersion(
@@ -288,6 +295,25 @@ def record_doc_version(
     )
     db.add(version)
     doc.current_version = version.version_number
+
+    # Alert watchers about real content changes — never about the doc's own
+    # creation nor the first-ever snapshot (nobody can be watching yet, and
+    # there is no prior version to diff against). Queued on the session so it
+    # commits atomically with the version, whether we commit here or the caller
+    # does (e.g. restore passes commit=False).
+    if action != "created" and latest is not None:
+        watch_service.notify_watchers_of_change(
+            db,
+            entity_type=watch_service.DOC,
+            entity_id=doc.id,
+            label=f'"{doc.title}"',
+            version_number=version.version_number,
+            action=action,
+            actor_id=actor_id,
+            changed_fields=changed_fields,
+            change_note=change_note,
+        )
+
     if commit:
         safe_commit(db)
         db.refresh(version)
@@ -1002,6 +1028,8 @@ def update_doc(db: Session, doc: models.Doc, payload: schemas.DocUpdate, actor_i
 
 
 def delete_doc(db: Session, doc: models.Doc) -> None:
+    # Watches reference the doc by loose id (no FK), so clear them explicitly.
+    watch_service.clear_watches(db, watch_service.DOC, doc.id)
     db.delete(doc)
     safe_commit(db)
 

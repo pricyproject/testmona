@@ -80,6 +80,12 @@ class Notification(NotificationBase):
         from_attributes = True
 
 
+class WatchStatus(BaseModel):
+    """Whether the current user watches an entity, and how many users do."""
+    watching: bool
+    watcher_count: int
+
+
 # Analytics and Reporting Schemas
 
 class KPIDataBase(BaseModel):

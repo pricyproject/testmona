@@ -34,6 +34,7 @@ from ..auth import get_current_active_user
 from ..database import get_db
 from ..services import doc_conversion_service as conv
 from ..services import doc_impact_service
+from ..services import watch_service
 from ..services import doc_release_notes_service as release_notes
 from ..services import feature_file_service
 from .project_ai_chat import _cancel_on_disconnect
@@ -1698,6 +1699,48 @@ def register_docs_routes(app) -> None:
             content=body,
             media_type="text/markdown; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{_safe_filename(doc.title)}"'},
+        )
+
+    # ── Watch / change subscriptions ────────────────────────────────────────
+    @app.get("/docs/{doc_id}/watch", response_model=schemas.WatchStatus, tags=["Docs"])
+    def get_doc_watch(
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        return schemas.WatchStatus(
+            watching=watch_service.is_watching(db, current_user.id, watch_service.DOC, doc.id),
+            watcher_count=watch_service.count_watchers(db, watch_service.DOC, doc.id),
+        )
+
+    @app.post("/docs/{doc_id}/watch", response_model=schemas.WatchStatus, tags=["Docs"])
+    def watch_doc(
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        watch_service.add_watch(db, current_user.id, watch_service.DOC, doc.id)
+        return schemas.WatchStatus(
+            watching=True,
+            watcher_count=watch_service.count_watchers(db, watch_service.DOC, doc.id),
+        )
+
+    @app.delete("/docs/{doc_id}/watch", response_model=schemas.WatchStatus, tags=["Docs"])
+    def unwatch_doc(
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        watch_service.remove_watch(db, current_user.id, watch_service.DOC, doc.id)
+        return schemas.WatchStatus(
+            watching=False,
+            watcher_count=watch_service.count_watchers(db, watch_service.DOC, doc.id),
         )
 
     # ── Version history ─────────────────────────────────────────────────────

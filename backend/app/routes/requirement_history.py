@@ -14,6 +14,7 @@ from .. import crud, models, rbac, schemas
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
+from ..services import watch_service
 from ..services.mentions import project_member_users as _project_member_users
 from ..services.mentions import resolve_mentions as _resolve_mentions
 
@@ -161,6 +162,52 @@ def register_requirement_history_routes(app) -> None:
 
         return crud.restore_requirement_version(
             db, requirement, version, actor_id=current_user.id, change_note=payload.change_note
+        )
+
+    # --------------------------- Watch subscriptions -----------------------
+
+    @app.get("/requirements/{requirement_id}/watch", response_model=schemas.WatchStatus)
+    def get_requirement_watch(
+        requirement_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        requirement = _get_requirement_or_404(db, requirement_id)
+        if not rbac.has_permission(current_user, "read", requirement.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return schemas.WatchStatus(
+            watching=watch_service.is_watching(db, current_user.id, watch_service.REQUIREMENT, requirement.id),
+            watcher_count=watch_service.count_watchers(db, watch_service.REQUIREMENT, requirement.id),
+        )
+
+    @app.post("/requirements/{requirement_id}/watch", response_model=schemas.WatchStatus)
+    def watch_requirement(
+        requirement_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        requirement = _get_requirement_or_404(db, requirement_id)
+        if not rbac.has_permission(current_user, "read", requirement.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        watch_service.add_watch(db, current_user.id, watch_service.REQUIREMENT, requirement.id)
+        return schemas.WatchStatus(
+            watching=True,
+            watcher_count=watch_service.count_watchers(db, watch_service.REQUIREMENT, requirement.id),
+        )
+
+    @app.delete("/requirements/{requirement_id}/watch", response_model=schemas.WatchStatus)
+    def unwatch_requirement(
+        requirement_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        requirement = _get_requirement_or_404(db, requirement_id)
+        if not rbac.has_permission(current_user, "read", requirement.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        watch_service.remove_watch(db, current_user.id, watch_service.REQUIREMENT, requirement.id)
+        return schemas.WatchStatus(
+            watching=False,
+            watcher_count=watch_service.count_watchers(db, watch_service.REQUIREMENT, requirement.id),
         )
 
     # --------------------------- Comments / review -------------------------

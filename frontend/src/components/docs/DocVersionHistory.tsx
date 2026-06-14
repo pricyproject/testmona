@@ -25,6 +25,8 @@ interface Props {
   canEdit: boolean;
   canClear?: boolean;
   onRestored?: () => void;
+  /** Open in compare/diff mode (used when arriving from a watch notification). */
+  defaultCompare?: boolean;
 }
 
 const PLAINTEXT_DIR: CSSProperties = { unicodeBidi: 'plaintext', textAlign: 'start' };
@@ -47,13 +49,13 @@ const actionMeta: Record<string, { icon: typeof Plus; tone: string }> = {
   published: { icon: CheckCircle2, tone: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300' },
 };
 
-export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored }: Props) {
+export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored, defaultCompare = false }: Props) {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const [versions, setVersions] = useState<DocVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [compareMode, setCompareMode] = useState(false);
+  const [compareMode, setCompareMode] = useState(defaultCompare);
   const [restoreTarget, setRestoreTarget] = useState<DocVersion | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);

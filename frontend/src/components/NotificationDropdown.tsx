@@ -79,6 +79,8 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
       defect: t('entityDefect'),
       requirement: t('entityRequirement'),
       doc: t('entityDoc'),
+      doc_change: t('entityDoc'),
+      requirement_change: t('entityRequirement'),
     };
 
     return labels[entityType] || entityType.replace(/_/g, ' ');
@@ -102,6 +104,17 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
         const response = await api.get(`/docs/${notification.related_entity_id}`);
         const projectId = response.data.project_id;
         navigate(projectId ? `/projects/${projectId}/docs/${notification.related_entity_id}` : `/docs/${notification.related_entity_id}`);
+      } else if (notification.related_entity_type === 'doc_change') {
+        // Watch alert: land on the revisions tab in diff mode so the reader sees
+        // exactly what changed.
+        const response = await api.get(`/docs/${notification.related_entity_id}`);
+        const projectId = response.data.project_id;
+        const base = projectId ? `/projects/${projectId}/docs/${notification.related_entity_id}` : `/docs/${notification.related_entity_id}`;
+        navigate(`${base}/revisions?compare=1`);
+      } else if (notification.related_entity_type === 'requirement_change') {
+        // Watch alert: open the requirement with its version-history diff in view.
+        const response = await api.get(`/requirements/${notification.related_entity_id}`);
+        navigate(`/projects/${response.data.project_id}/requirements/${response.data.project_seq ?? notification.related_entity_id}?compare=1`);
       }
       setIsOpen(false);
     } catch (error) {
