@@ -3937,6 +3937,7 @@ export const fa = {
   docTitlePlaceholder: 'سند بدون عنوان',
   docCreateAndWrite: 'ساخت و نوشتن',
   docSelectSpace: 'برای دیدن اسناد، یک فضا را انتخاب کنید.',
+  docNoSpacesYet: 'هنوز فضایی وجود ندارد. برای افزودن اسناد، ابتدا یک فضا بسازید.',
   docNoneInSpace: 'هنوز سندی در این فضا وجود ندارد.',
   docCreateFailed: 'ایجاد سند ممکن نشد.',
   docSpaceCreated: 'فضا ایجاد شد',

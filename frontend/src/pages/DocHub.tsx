@@ -1341,8 +1341,16 @@ export function DocHub() {
               {Array.from({ length: 6 }).map((_, i) => <li key={i}><DocCardSkeleton /></li>)}
             </ul>
           ) : !scopeAll && activeSpaceId == null ? (
-            <div className="rounded-lg border border-dashed border-slate-300 p-12 text-center text-muted-foreground dark:border-slate-700">
-              {t('docSelectSpace')}
+            <div className="rounded-lg border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
+              <p className="text-sm text-muted-foreground">
+                {t(spaces.length === 0 ? 'docNoSpacesYet' : 'docSelectSpace')}
+              </p>
+              {spaces.length === 0 && (projectId != null ? canWrite : isAdmin) && (
+                <Button className="mt-4" size="sm" onClick={openCreateSpace}>
+                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('docNewSpace')}
+                </Button>
+              )}
             </div>
           ) : docs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">

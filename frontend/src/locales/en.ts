@@ -4149,6 +4149,7 @@ export const en = {
   docTitlePlaceholder: 'Untitled document',
   docCreateAndWrite: 'Create & write',
   docSelectSpace: 'Select a space to view its documents.',
+  docNoSpacesYet: 'No spaces yet. Create a space to start adding documents.',
   docNoneInSpace: 'No documents in this space yet.',
   docCreateFailed: 'Could not create the document.',
   docSpaceCreated: 'Space created',
