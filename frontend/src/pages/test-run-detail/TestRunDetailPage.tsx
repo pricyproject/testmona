@@ -816,7 +816,7 @@ export function TestRunDetail() {
     try {
       const testResultsPromises = selectedTestCasesToAdd.map(testCaseId =>
         testResultsAPI.create({
-          test_run_id: parseInt(id!),
+          test_run_id: runGlobalId,
           test_case_id: testCaseId,
           status: 'not_started',
           actual_result: undefined,
@@ -829,7 +829,7 @@ export function TestRunDetail() {
       await Promise.all(testResultsPromises);
       
       // Reload test results
-      const updatedTestResults = await testResultsAPI.getAll(parseInt(id!));
+      const updatedTestResults = await testResultsAPI.getAll(runGlobalId);
       const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
       setTestResults(updatedTestResults);
       if (updatedTestRun) {
@@ -855,7 +855,7 @@ export function TestRunDetail() {
       await Promise.all(deletePromises);
 
       // Reload test results
-      const updatedTestResults = await testResultsAPI.getAll(parseInt(id!));
+      const updatedTestResults = await testResultsAPI.getAll(runGlobalId);
       const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
       setTestResults(updatedTestResults);
       if (updatedTestRun) {
@@ -1296,7 +1296,7 @@ export function TestRunDetail() {
 
     try {
       setIsAssigningRun(true);
-      const updatedRun = await testRunsAPI.assign(parseInt(id, 10), normalizedId);
+      const updatedRun = await testRunsAPI.assign(runGlobalId, normalizedId);
       setTestRun((prev: any) => ({ ...prev, ...updatedRun }));
     } catch (error) {
       console.error('Failed to assign test run:', error);
@@ -1322,7 +1322,7 @@ export function TestRunDetail() {
 
     try {
       setIsSettingEnvironment(true);
-      const updatedRun = await testRunsAPI.update(parseInt(id, 10), { environment_id: normalizedId });
+      const updatedRun = await testRunsAPI.update(runGlobalId, { environment_id: normalizedId });
       setTestRun((prev: any) => ({ ...prev, ...updatedRun }));
     } catch (error) {
       console.error('Failed to set test run environment:', error);
