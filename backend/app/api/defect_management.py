@@ -6,11 +6,16 @@ from app.database import get_db
 from app.auth import get_current_user
 from app.rbac import has_permission, require_permission
 from app.security_utils import validate_file_size, MAX_ATTACHMENT_SIZE
+from app.services import notification_engine
+from app.services.mentions import project_member_users, resolve_mentions
+import logging
 import os
 import uuid
 from datetime import datetime
 import re
 import pathlib
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -81,6 +86,61 @@ def _get_project_defect_or_404(db: Session, project_id: int, defect_id: int):
     if not defect or defect.project_id != project_id:
         raise HTTPException(status_code=404, detail="Defect not found")
     return defect
+
+
+def _notify_defect_comment(
+    db: Session,
+    defect: "models.Defect",
+    comment: "models.DefectComment",
+    actor: "models.User",
+    parent_author_id: Optional[int],
+) -> None:
+    """Best-effort notifications for a new defect comment: @mentioned members and
+    the author of the comment being replied to. Both intents go through one
+    :class:`NotificationBatch`, so the ladder collapses a parent author who is
+    *also* @mentioned to a single row — the higher-priority mention — without any
+    hand-rolled suppression (mirrors ``_notify_comment`` on requirements). Defect
+    comments are not versioned saves, so there is no watch_change collision here;
+    the ladder still applies should a defect ever become watchable. Never raises
+    into the request."""
+    try:
+        mentioned = resolve_mentions(comment.comment, project_member_users(db, defect.project_id))
+        reply_target = (
+            parent_author_id if parent_author_id and parent_author_id != actor.id else None
+        )
+        if not mentioned and reply_target is None:
+            return
+
+        actor_name = notification_engine.actor_display_name(actor)
+        label = defect.defect_id or defect.title or f"#{defect.id}"
+        snippet = (comment.comment or "").strip()
+        if len(snippet) > 140:
+            snippet = snippet[:140].rstrip() + "…"
+
+        batch = notification_engine.NotificationBatch()
+        if mentioned:
+            batch.add(
+                category=notification_engine.MENTION,
+                user_ids=list(mentioned),
+                actor_id=actor.id,
+                title="You were mentioned",
+                message=f'{actor_name} mentioned you on {label}: "{snippet}"',
+                related_entity_type="defect",
+                related_entity_id=defect.id,
+            )
+        if reply_target is not None:
+            batch.add(
+                category=notification_engine.COMMENT_REPLY,
+                user_ids=[reply_target],
+                actor_id=actor.id,
+                title="New reply to your comment",
+                message=f'{actor_name} replied on {label}: "{snippet}"',
+                related_entity_type="defect",
+                related_entity_id=defect.id,
+            )
+        batch.flush(db)
+    except Exception:
+        logger.exception("Failed to create defect comment notifications for defect %s", defect.id)
 
 
 def _get_project_integration_or_404(db: Session, project_id: int, integration_id: int):
@@ -267,14 +327,31 @@ def create_defect_comment(
         raise HTTPException(status_code=403, detail="Write permission required")
 
     # Ensure the defect belongs to this project
-    _get_project_defect_or_404(db, project_id, defect_id)
+    defect = _get_project_defect_or_404(db, project_id, defect_id)
 
-    return crud_defect_management.create_defect_comment(
+    # Validate the parent (if any) and flatten replies to their thread root, so a
+    # reply-to-a-reply still notifies the right author and stays one level deep —
+    # mirrors the requirement comment thread model.
+    parent_author_id: Optional[int] = None
+    if comment.parent_id is not None:
+        parent = db.query(models.DefectComment).filter(
+            models.DefectComment.id == comment.parent_id,
+            models.DefectComment.defect_id == defect_id,
+        ).first()
+        if parent is None:
+            raise HTTPException(status_code=400, detail="Parent comment not found")
+        parent_author_id = parent.user_id
+        comment.parent_id = parent.parent_id or parent.id
+
+    db_comment = crud_defect_management.create_defect_comment(
         db=db,
         comment=comment,
         defect_id=defect_id,
         user_id=current_user.id
     )
+
+    _notify_defect_comment(db, defect, db_comment, current_user, parent_author_id)
+    return db_comment
 
 @router.put("/projects/{project_id}/defects-management/{defect_id}/comments/{comment_id}", response_model=schemas.DefectComment)
 def update_defect_comment(

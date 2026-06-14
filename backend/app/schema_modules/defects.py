@@ -402,7 +402,8 @@ class DefectCommentBase(BaseModel):
 
 
 class DefectCommentCreate(DefectCommentBase):
-    pass
+    # Optional parent for threaded replies; None is a top-level comment.
+    parent_id: Optional[int] = None
 
 
 class DefectCommentUpdate(BaseModel):
@@ -413,6 +414,7 @@ class DefectCommentUpdate(BaseModel):
 class DefectComment(DefectCommentBase):
     id: int
     defect_id: int
+    parent_id: Optional[int] = None
     user_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None

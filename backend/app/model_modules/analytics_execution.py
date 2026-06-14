@@ -337,6 +337,9 @@ class DefectComment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     defect_id = Column(Integer, ForeignKey("defects.id"), nullable=False)
+    # Self-FK: NULL is a top-level comment; a reply points at the comment it
+    # answers (flattened to the thread root by the create route).
+    parent_id = Column(Integer, ForeignKey("defect_comments.id", ondelete="CASCADE"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     comment = Column(Text, nullable=False)
     is_internal = Column(Boolean, default=False)  # Internal comments not visible to customers
@@ -346,6 +349,11 @@ class DefectComment(Base):
     # Relationships
     defect = relationship("Defect", back_populates="comments")
     author = relationship("User")
+    replies = relationship(
+        "DefectComment",
+        cascade="all, delete-orphan",
+        backref=backref("parent", remote_side=[id]),
+    )
 
 
 class DefectAttachment(Base):
