@@ -276,6 +276,54 @@ def notify_requirement_assignee(
         )
 
 
+def notify_test_plan_assignee(
+    db: Session,
+    test_plan: "models.TestPlan",
+    assigned_by: Optional[schemas.User],
+    previous_assigned_to: Optional[int] = None,
+    batch: Optional[notification_engine.NotificationBatch] = None,
+) -> None:
+    """Send an in-app notification when a test plan is newly assigned to a user.
+
+    The twin of ``notify_requirement_assignee``/``notify_defect_assignee`` so a
+    test-plan owner learns about work the same way, landing in their Work Inbox via
+    the engine's ASSIGNMENT category. No-op when the assignee is unchanged, on
+    self-assignment, or when the plan is unassigned. When a ``batch`` is supplied
+    the intent is added to it (flushed once by the caller); otherwise it is emitted
+    immediately.
+    """
+    assignee_id = test_plan.assigned_to
+    if not assignee_id or assignee_id == previous_assigned_to:
+        return
+    if assigned_by is not None and assignee_id == assigned_by.id:
+        return
+    try:
+        assignee = db.query(models.User).filter(
+            models.User.id == assignee_id, models.User.is_active == True
+        ).first()
+        if not assignee:
+            return
+        actor = notification_engine.actor_display_name(assigned_by)
+        label = test_plan.title or f"#{test_plan.id}"
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
+            category=notification_engine.ASSIGNMENT,
+            user_ids=[assignee.id],
+            actor_id=assigned_by.id if assigned_by else None,
+            title="Test plan assigned",
+            message=f"{actor} assigned test plan {label} to you.",
+            related_entity_type="test_plan",
+            related_entity_id=test_plan.id,
+        )
+        if batch is None:
+            target.flush(db)
+    except Exception:
+        logger.exception(
+            "Failed to create test plan assignment notification",
+            extra={"test_plan_id": getattr(test_plan, "id", None), "assignee_id": assignee_id},
+        )
+
+
 def _linked_requirement_test_plan_ids(db: Session, requirement_id: int) -> set[int]:
     rows = db.query(models.requirement_test_plan_links.c.test_plan_id).filter(
         models.requirement_test_plan_links.c.requirement_id == requirement_id,
@@ -2385,10 +2433,18 @@ def register_requirements_defects_plans_routes(app):
             if ms.project_id != test_plan.project_id:
                 raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
 
+        # Validate the assignee (if any) exists before persisting.
+        if test_plan.assigned_to is not None:
+            assignee = db.query(models.User).filter(models.User.id == test_plan.assigned_to).first()
+            if assignee is None:
+                raise HTTPException(status_code=400, detail="Assigned user not found")
+
         # Always set created_by from the authenticated user (security: ignore client-supplied value)
         test_plan_data = test_plan.model_copy(update={"created_by": current_user.id})
         db_test_plan = create_test_plan(db=db, test_plan=test_plan_data)
-        
+
+        notify_test_plan_assignee(db, db_test_plan, current_user)
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
@@ -2453,6 +2509,7 @@ def register_requirements_defects_plans_routes(app):
                 "milestone_id": tp.milestone_id,
                 "milestone_title": tp.milestone.title if tp.milestone else None,
                 "created_by": tp.created_by,
+                "assigned_to": tp.assigned_to,
                 "status": tp.status.value if tp.status else None,
                 "target_start_date": tp.target_start_date,
                 "target_end_date": tp.target_end_date,
@@ -2513,6 +2570,7 @@ def register_requirements_defects_plans_routes(app):
             "milestone_id": test_plan.milestone_id,
             "milestone_title": test_plan.milestone.title if test_plan.milestone else None,
             "created_by": test_plan.created_by,
+            "assigned_to": test_plan.assigned_to,
             "status": test_plan.status.value if test_plan.status else None,
             "target_start_date": test_plan.target_start_date,
             "target_end_date": test_plan.target_end_date,
@@ -2569,8 +2627,24 @@ def register_requirements_defects_plans_routes(app):
             if ms.project_id != db_test_plan.project_id:
                 raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
 
+        update_fields = test_plan.model_dump(exclude_unset=True)
+        # Validate the (possibly new) assignee, and capture the prior one so we only
+        # notify on a real change (and never re-notify when other fields are edited).
+        if "assigned_to" in update_fields and test_plan.assigned_to is not None:
+            assignee = db.query(models.User).filter(models.User.id == test_plan.assigned_to).first()
+            if assignee is None:
+                raise HTTPException(status_code=400, detail="Assigned user not found")
+        prior_assigned_to = db_test_plan.assigned_to
+
         db_test_plan = update_test_plan(db, test_plan_id=test_plan_id, test_plan=test_plan)
-        
+
+        if "assigned_to" in update_fields:
+            batch = notification_engine.NotificationBatch()
+            notify_test_plan_assignee(
+                db, db_test_plan, current_user, previous_assigned_to=prior_assigned_to, batch=batch
+            )
+            batch.flush(db)
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service

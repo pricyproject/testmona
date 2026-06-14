@@ -32,6 +32,7 @@ class TestPlanBase(BaseModel):
     title: str
     description: Optional[str] = None
     milestone_id: Optional[int] = None
+    assigned_to: Optional[int] = None
     status: TestStatus = TestStatus.PENDING
     target_start_date: Optional[datetime] = None
     target_end_date: Optional[datetime] = None
@@ -96,6 +97,7 @@ class TestPlanUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     milestone_id: Optional[int] = None
+    assigned_to: Optional[int] = None
     status: Optional[TestStatus] = None
     target_start_date: Optional[datetime] = None
     target_end_date: Optional[datetime] = None

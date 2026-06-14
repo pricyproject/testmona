@@ -107,6 +107,7 @@ class TestPlan(Base):
         Index("uq_test_plans_project_seq", "project_id", "project_seq", unique=True),
     )
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     status = Column(Enum(TestStatus), default=TestStatus.PENDING)
     target_start_date = Column(DateTime(timezone=True))
     target_end_date = Column(DateTime(timezone=True))
@@ -125,7 +126,9 @@ class TestPlan(Base):
     # Relationships
     project = relationship("Project")
     milestone = relationship("Milestone", back_populates="test_plans")
-    creator = relationship("User")
+    # Two FKs to users (created_by + assigned_to) require explicit foreign_keys.
+    creator = relationship("User", foreign_keys=[created_by])
+    assignee = relationship("User", foreign_keys=[assigned_to])
     test_runs = relationship("TestRun", back_populates="test_plan")
     requirements = relationship("Requirement", secondary="requirement_test_plan_links", back_populates="test_plans")
 
