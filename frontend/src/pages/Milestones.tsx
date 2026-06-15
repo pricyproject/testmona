@@ -1159,6 +1159,30 @@ function MilestoneFormDialog({
           </div>
         </div>
 
+        {/* Owner */}
+        {members.length > 0 && (
+          <div className="space-y-2">
+            <Label>{t('milestoneOwnerLabel')}</Label>
+            <Select
+              value={form.ownerId || 'none'}
+              onValueChange={(value) => update({ ownerId: value === 'none' ? '' : value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={t('unassigned')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('unassigned')}</SelectItem>
+                {members.map((m) => (
+                  <SelectItem key={m.user_id} value={String(m.user_id)}>
+                    {m.full_name || m.username}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t('milestoneOwnerHint')}</p>
+          </div>
+        )}
+
         {/* Dates */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
