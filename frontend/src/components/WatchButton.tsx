@@ -14,9 +14,10 @@ interface Props {
 }
 
 /**
- * Watch / unwatch toggle for a doc or requirement. Watchers are notified when a
- * new content version is recorded and can open the version history to see
- * exactly what changed, when, and by whom.
+ * Watch / unwatch toggle for any watchable entity (doc, requirement, defect, test
+ * case, test plan). Watchers are notified when the entity changes; for versioned
+ * entities the alert deep-links to the version-history diff, otherwise to the
+ * entity itself.
  */
 export function WatchButton({ entityType, entityId, size = 'sm' }: Props) {
   const { t, isRTL } = useTranslation();

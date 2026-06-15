@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { WatchButton } from '@/components/WatchButton';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
@@ -615,6 +616,7 @@ export function TestCaseDetail() {
                   <Share2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                   {t('copyLink')}
                 </Button>
+                <WatchButton entityType="test_case" entityId={testCase.id} />
                 <Button
                   variant="outline"
                   onClick={() => setShowSidebar((prev) => !prev)}

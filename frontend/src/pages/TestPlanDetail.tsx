@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { WatchButton } from '@/components/WatchButton';
 import { testPlansAPI, testRunsAPI, getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -354,6 +355,7 @@ export function TestPlanDetail() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <WatchButton entityType="test_plan" entityId={plan.id} />
           <Button onClick={() => goToRuns(runs.length === 0)} className="gap-1">
             {runs.length === 0 ? <CirclePlus className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {runs.length === 0 ? t('startNewRun') : t('viewTestRuns')}

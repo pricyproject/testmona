@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
+import { WatchButton } from '@/components/WatchButton';
 import {
   Select,
   SelectContent,
@@ -355,6 +356,7 @@ export function DefectDetail() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <WatchButton entityType="defect" entityId={defect.id} />
           {isSafeExternalUrl(defect.external_issue_url) && (
             <Button asChild variant="outline">
               <a href={defect.external_issue_url} target="_blank" rel="noreferrer">

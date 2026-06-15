@@ -21,9 +21,18 @@ export async function resolveNotificationTarget(
       return `/projects/${data.project_id}/test-runs/${id}`;
     }
     case "defect":
-      return `/defects/${id}`;
+    case "defect_change": {
+      const { data } = await api.get(`/defects/${id}`);
+      return data.project_id ? `/projects/${data.project_id}/defects/${id}` : `/defects/${id}`;
+    }
     case "test_case":
+    case "test_case_change":
       return `/test-cases/${id}`;
+    case "test_plan":
+    case "test_plan_change": {
+      const { data } = await api.get(`/test-plans/${id}`);
+      return data.project_id ? `/projects/${data.project_id}/test-plans/${id}` : `/test-plans/${id}`;
+    }
     case "requirement": {
       const { data } = await api.get(`/requirements/${id}`);
       return `/projects/${data.project_id}/requirements/${data.project_seq ?? id}`;

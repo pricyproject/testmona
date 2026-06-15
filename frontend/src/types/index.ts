@@ -433,7 +433,7 @@ export interface InboxSummary {
 }
 
 // Watch / change-notification subscription status for a doc or requirement.
-export type WatchEntityType = 'doc' | 'requirement';
+export type WatchEntityType = 'doc' | 'requirement' | 'defect' | 'test_case' | 'test_plan';
 
 export interface WatchStatus {
   watching: boolean;
