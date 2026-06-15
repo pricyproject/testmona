@@ -726,6 +726,12 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
+        existing = db.query(models.TestExecutionSettings).filter(models.TestExecutionSettings.id == settings_id).first()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Test execution settings not found")
+        if existing.project_id is not None and not rbac.has_permission(current_user, "write", existing.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
         db_settings = crud.update_test_execution_settings(db, settings_id=settings_id, settings=settings)
         if db_settings is None:
             raise HTTPException(status_code=404, detail="Test execution settings not found")
@@ -777,6 +783,12 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
+        existing = db.query(models.AutomationSettings).filter(models.AutomationSettings.id == settings_id).first()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Automation settings not found")
+        if existing.project_id is not None and not rbac.has_permission(current_user, "write", existing.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
         db_settings = crud.update_automation_settings(db, settings_id=settings_id, settings=settings)
         if db_settings is None:
             raise HTTPException(status_code=404, detail="Automation settings not found")

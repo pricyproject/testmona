@@ -266,10 +266,13 @@ def register_shared_steps_routes(app):
         template = crud.get_shared_step_template(db, template_id=template_id)
         if template is None:
             raise HTTPException(status_code=404, detail="Shared step template not found")
-        
-        if not rbac.has_permission(current_user, "read"):
+
+        if template.project_id is not None:
+            if not rbac.has_permission(current_user, "read", template.project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        elif not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
         return template
 
     @app.put("/shared-step-templates/{template_id}", response_model=schemas.SharedStepTemplate)
@@ -282,8 +285,11 @@ def register_shared_steps_routes(app):
         db_template = crud.get_shared_step_template(db, template_id=template_id)
         if db_template is None:
             raise HTTPException(status_code=404, detail="Shared step template not found")
-        
-        if not rbac.has_permission(current_user, "write"):
+
+        if db_template.project_id is not None:
+            if not rbac.has_permission(current_user, "write", db_template.project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        elif not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         if template.name is not None:
@@ -326,8 +332,11 @@ def register_shared_steps_routes(app):
         db_template = crud.get_shared_step_template(db, template_id=template_id)
         if db_template is None:
             raise HTTPException(status_code=404, detail="Shared step template not found")
-        
-        if not rbac.has_permission(current_user, "delete"):
+
+        if db_template.project_id is not None:
+            if not rbac.has_permission(current_user, "delete", db_template.project_id, db):
+                raise HTTPException(status_code=403, detail="Insufficient permissions")
+        elif not rbac.has_permission(current_user, "delete"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Store data for audit trail before deletion

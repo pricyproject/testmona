@@ -393,9 +393,25 @@ def register_custom_fields_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
+        project_id = None
+        if test_case_id is not None:
+            test_case = crud.get_test_case(db, test_case_id=test_case_id)
+            if not test_case or getattr(test_case, "is_deleted", False):
+                raise HTTPException(status_code=404, detail="Test case not found")
+            test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
+            if test_suite:
+                project_id = test_suite.project_id
+        elif field_definition_id is not None:
+            field_def = crud.get_custom_field_definition(db, field_id=field_definition_id)
+            if field_def is None:
+                raise HTTPException(status_code=404, detail="Custom field definition not found")
+            project_id = field_def.project_id
+        else:
+            raise HTTPException(status_code=400, detail="At least one of test_case_id or field_definition_id is required")
+
+        if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
         return crud.get_custom_field_values(db, test_case_id=test_case_id, field_definition_id=field_definition_id)
 
     @app.get("/custom-field-values/{value_id}", response_model=schemas.CustomFieldValue)

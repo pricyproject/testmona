@@ -23,7 +23,10 @@ def register_result_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
+        db_test_run = crud.get_test_run(db, test_run_id=test_run_id)
+        if db_test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        if not rbac.has_permission(current_user, "read", db_test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         test_results = crud.get_test_results(db, test_run_id=test_run_id)
@@ -371,7 +374,9 @@ def register_result_routes(app):
         if db_test_result is None:
             raise HTTPException(status_code=404, detail="Test result not found")
         test_run = crud.get_test_run(db, test_run_id=db_test_result.test_run_id)
-        if test_run and not rbac.has_permission(current_user, "read", test_run.project_id, db):
+        if test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        if not rbac.has_permission(current_user, "read", test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to view this test result")
         return crud.get_test_step_results_by_test_result(db, test_result_id)
 
@@ -387,7 +392,9 @@ def register_result_routes(app):
         if db_test_result is None:
             raise HTTPException(status_code=404, detail="Test result not found")
         test_run = crud.get_test_run(db, test_run_id=db_test_result.test_run_id)
-        if test_run and not rbac.has_permission(current_user, "write", test_run.project_id, db):
+        if test_run is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        if not rbac.has_permission(current_user, "write", test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to modify this test result")
         return crud.replace_test_step_results(db, test_result_id, step_results)
 
