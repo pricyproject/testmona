@@ -1,6 +1,6 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
 import re
 import html
@@ -62,6 +62,63 @@ class BulkNotificationUpdate(BaseModel):
 
 class BulkNotificationDelete(BaseModel):
     notification_ids: List[int]
+
+
+def _ensure_future(value: datetime) -> datetime:
+    """Reject a snooze target that is not in the future.
+
+    Naive datetimes are treated as UTC so a client that omits an offset can't
+    accidentally land a snooze in the past (or smuggle one through).
+    """
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if aware <= datetime.now(timezone.utc):
+        raise ValueError("snooze time must be in the future")
+    return value
+
+
+class InboxSnoozeRequest(BaseModel):
+    """Defer a single inbox item until ``until`` (must be in the future)."""
+    until: datetime
+
+    @field_validator("until")
+    @classmethod
+    def _future(cls, v: datetime) -> datetime:
+        return _ensure_future(v)
+
+
+# The triage actions the Work Inbox can apply to a selection of items at once.
+INBOX_BULK_ACTIONS = ("archive", "unarchive", "read", "unread", "snooze")
+
+
+class InboxBulkAction(BaseModel):
+    """Apply one triage action to a set of the current user's inbox items.
+
+    ``snooze`` requires ``until``; the other actions ignore it. ``ids`` is capped
+    to keep a single request bounded (mirrors the notification bulk endpoints).
+    """
+    ids: List[int] = Field(..., min_length=1, max_length=200)
+    action: str
+    until: Optional[datetime] = None
+
+    @field_validator("action")
+    @classmethod
+    def _valid_action(cls, v: str) -> str:
+        if v not in INBOX_BULK_ACTIONS:
+            raise ValueError(f"action must be one of {list(INBOX_BULK_ACTIONS)}")
+        return v
+
+    @model_validator(mode="after")
+    def _check_until(self):
+        if self.action == "snooze":
+            if self.until is None:
+                raise ValueError("until is required when action is 'snooze'")
+            _ensure_future(self.until)
+        return self
+
+
+class InboxBulkResult(BaseModel):
+    """How many items a bulk inbox action actually touched."""
+    affected_count: int
 
 
 class NotificationPreferencesUpdate(BaseModel):
@@ -158,10 +215,18 @@ class Notification(NotificationBase):
     is_read: bool
     category: Optional[str] = None
     archived: bool = False
+    # Inbox triage lifecycle (Plan B / W0): snooze hides a row from the open inbox
+    # until it elapses; done_at records when it was archived. Both null by default.
+    snoozed_until: Optional[datetime] = None
+    done_at: Optional[datetime] = None
     actor_id: Optional[int] = None
     # Resolved display name of the actor, attached by the inbox route for the
     # avatar/byline. Not a stored column, so it is optional and defaults to None.
     actor_name: Optional[str] = None
+    # Owning project, resolved per page by the inbox route (group-by-project view).
+    # Not stored on the row; None when the entity has no project or was deleted.
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -169,10 +234,11 @@ class Notification(NotificationBase):
 
 
 class InboxCategorySummary(BaseModel):
-    """Per-category open/done/unread counts for the Work Inbox rail."""
+    """Per-category open/snoozed/done/unread counts for the Work Inbox rail."""
     key: str
     label: str
     open: int
+    snoozed: int = 0
     done: int
     unread: int
 
@@ -181,6 +247,7 @@ class InboxSummary(BaseModel):
     """Aggregate counts that drive the Work Inbox header and the navbar badge."""
     total_open: int
     total_unread: int
+    total_snoozed: int = 0
     categories: List[InboxCategorySummary]
 
 

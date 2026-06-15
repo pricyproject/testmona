@@ -27,6 +27,12 @@ class Notification(Base):
     # Inbox dismissal. An archived notification is "done" — hidden from the open
     # Work Inbox but kept for history and still visible in the bell dropdown.
     archived = Column(Boolean, default=False, nullable=False)
+    # Inbox-owned triage lifecycle (Plan B / W0). While ``snoozed_until`` is set
+    # and in the future the row drops out of the open inbox until it elapses;
+    # ``done_at`` is stamped when ``archived`` flips true and cleared on restore.
+    # ``is_read`` stays a shared primitive owned by the bell/notification CRUD.
+    snoozed_until = Column(DateTime(timezone=True), nullable=True)
+    done_at = Column(DateTime(timezone=True), nullable=True)
     # Who triggered the notification (loose reference, no FK): drives the actor
     # avatar/name in the Work Inbox. NULL for system-generated notifications.
     actor_id = Column(Integer, index=True)

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
-from sqlalchemy import case, func, or_, text
+from sqlalchemy import and_, case, func, or_, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
@@ -215,6 +215,24 @@ def bulk_delete_notifications(db: Session, user_id: int, notification_ids: List[
 # notification engine marks "actionable". ``open`` items are not archived;
 # ``done`` items have been archived (handled) but kept for history.
 
+def _open_inbox_clauses(now: Optional[datetime] = None):
+    """The "open Work Inbox" predicate as reusable SQLAlchemy filter clauses.
+
+    A notification is in the open inbox iff it is NOT archived AND not currently
+    snoozed (no snooze set, or the snooze has already elapsed). The *actionable*
+    (category) and *user* parts of the predicate are applied by each caller since
+    they need per-call parameters; everything else lives here so the list, the
+    summary counts, and the bulk triage actions can never drift apart on what
+    "open" means.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return (
+        Notification.archived == False,  # noqa: E712
+        or_(Notification.snoozed_until.is_(None), Notification.snoozed_until <= now),
+    )
+
+
 def get_inbox_notifications(
     db: Session,
     user_id: int,
@@ -222,14 +240,18 @@ def get_inbox_notifications(
     status: str = "open",
     category: Optional[str] = None,
     unread_only: bool = False,
+    sort: str = "newest",
     skip: int = 0,
     limit: int = 50,
 ):
-    """List a user's Work Inbox items, newest first.
+    """List a user's Work Inbox items.
 
-    ``status`` is one of ``open`` (not archived), ``done`` (archived), or ``all``.
-    ``category`` optionally narrows to a single actionable category, and
-    ``unread_only`` restricts to items the user hasn't seen yet.
+    ``status`` is one of ``open`` (actionable, not archived, not currently
+    snoozed), ``snoozed`` (not archived, snoozed into the future), ``done``
+    (archived), or ``all``. ``category`` optionally narrows to a single actionable
+    category, and ``unread_only`` restricts to items the user hasn't seen yet.
+    ``sort`` is ``newest`` (default) or ``oldest`` — ordering by ``created_at`` so
+    "oldest first" surfaces the most-aged work and paginates correctly server-side.
     """
     if not actionable_categories:
         return []
@@ -242,13 +264,20 @@ def get_inbox_notifications(
             return []
         query = query.filter(Notification.category == category)
     if status == "open":
-        query = query.filter(Notification.archived == False)  # noqa: E712
+        query = query.filter(*_open_inbox_clauses())
+    elif status == "snoozed":
+        query = query.filter(
+            Notification.archived == False,  # noqa: E712
+            Notification.snoozed_until.isnot(None),
+            Notification.snoozed_until > datetime.now(timezone.utc),
+        )
     elif status == "done":
         query = query.filter(Notification.archived == True)  # noqa: E712
     if unread_only:
         query = query.filter(Notification.is_read == False)  # noqa: E712
+    order = Notification.created_at.asc() if sort == "oldest" else Notification.created_at.desc()
     return (
-        query.order_by(Notification.created_at.desc())
+        query.order_by(order)
         .offset(skip)
         .limit(limit)
         .all()
@@ -275,20 +304,114 @@ def resolve_actor_names(db: Session, notifications: List["Notification"]) -> Non
         n.actor_name = names.get(getattr(n, "actor_id", None))
 
 
-def get_inbox_summary(db: Session, user_id: int, actionable_categories: List[str]):
-    """Return per-category open/done/unread counts plus open + unread totals.
+def _inbox_project_models():
+    """Map of inbox entity type -> model with a direct ``project_id`` column.
 
-    Counting both open and done per category lets the inbox rail show meaningful
-    filters in either view and hide categories that have nothing in them. Only
-    open (non-archived) items feed the totals/badges — a done item is no longer
-    pending work. ``unread`` counts only open items the user hasn't seen yet.
+    ``Doc`` is imported lazily to keep this module's (already huge) top-level
+    model import list unchanged and sidestep import ordering. The ``project``
+    entity type isn't here — it *is* its own project id (handled in the caller).
+    """
+    from ..models import Doc
+
+    return {
+        "requirement": Requirement,
+        "defect": Defect,
+        "test_case": TestCase,
+        "test_plan": TestPlan,
+        "test_run": TestRun,
+        "doc": Doc,
+    }
+
+
+def resolve_inbox_projects(db: Session, notifications: List["Notification"]) -> None:
+    """Attach transient ``project_id``/``project_name`` to each notification.
+
+    Notifications store only ``(related_entity_type, related_entity_id)``; the
+    Work Inbox "group by project" view needs the owning project. We batch one
+    query per entity type (no N+1) to map each entity to its ``project_id``, then
+    a single query to name those projects. The ``*_change`` watch variants share
+    their base type's model, the ``project`` entity type is its own id, and
+    anything unresolvable (or a deleted entity) is left as ``None``.
+    """
+    models = _inbox_project_models()
+
+    def base_type(t):
+        return t[:-7] if t and t.endswith("_change") else t
+
+    # Collect entity ids to resolve, grouped by model.
+    by_model: dict = {}
+    for n in notifications:
+        n.project_id = None
+        n.project_name = None
+        etype = base_type(getattr(n, "related_entity_type", None))
+        eid = getattr(n, "related_entity_id", None)
+        if eid is None or etype == "project":
+            continue
+        model = models.get(etype)
+        if model is not None:
+            by_model.setdefault(model, set()).add(eid)
+
+    resolved: dict = {}
+    for model, ids in by_model.items():
+        for eid, pid in db.query(model.id, model.project_id).filter(model.id.in_(ids)).all():
+            resolved[(model, eid)] = pid
+
+    project_ids = set()
+    for n in notifications:
+        etype = base_type(getattr(n, "related_entity_type", None))
+        eid = getattr(n, "related_entity_id", None)
+        if eid is None:
+            continue
+        if etype == "project":
+            n.project_id = eid
+        else:
+            model = models.get(etype)
+            if model is not None:
+                n.project_id = resolved.get((model, eid))
+        if n.project_id is not None:
+            project_ids.add(n.project_id)
+
+    if project_ids:
+        names = dict(
+            db.query(Project.id, Project.name).filter(Project.id.in_(project_ids)).all()
+        )
+        for n in notifications:
+            if n.project_id is not None:
+                n.project_name = names.get(n.project_id)
+
+
+def get_inbox_summary(db: Session, user_id: int, actionable_categories: List[str]):
+    """Return per-category open/snoozed/done/unread counts and matching totals.
+
+    Counting open, snoozed and done per category lets the inbox rail show
+    meaningful filters in any view and hide categories that have nothing in them.
+    Only currently-open items (not archived, not snoozed — the shared
+    :func:`_open_inbox_clauses` predicate) feed the open totals/badges; a snoozed
+    item is deferred work and a done item is finished, so neither is "open".
+    ``unread`` counts only open items the user hasn't seen yet.
+
+    Returns ``(total_open, total_unread, total_snoozed, per_category)``.
     """
     if not actionable_categories:
-        return 0, 0, {}
+        return 0, 0, 0, {}
+    now = datetime.now(timezone.utc)
+    # 1 = not archived but snoozed into the future; archived rows are "done"
+    # regardless and are bucketed first below.
+    snoozed_flag = case(
+        (
+            and_(
+                Notification.snoozed_until.isnot(None),
+                Notification.snoozed_until > now,
+            ),
+            1,
+        ),
+        else_=0,
+    )
     rows = (
         db.query(
             Notification.category,
             Notification.archived,
+            snoozed_flag.label("snoozed"),
             func.count(Notification.id),
             func.sum(case((Notification.is_read == False, 1), else_=0)),  # noqa: E712
         )
@@ -296,27 +419,38 @@ def get_inbox_summary(db: Session, user_id: int, actionable_categories: List[str
             Notification.user_id == user_id,
             Notification.category.in_(actionable_categories),
         )
-        .group_by(Notification.category, Notification.archived)
+        .group_by(Notification.category, Notification.archived, snoozed_flag)
         .all()
     )
     per_category: dict = {}
-    for cat, archived, count, unread in rows:
-        entry = per_category.setdefault(cat, {"open": 0, "done": 0, "unread": 0})
+    for cat, archived, snoozed, count, unread in rows:
+        entry = per_category.setdefault(
+            cat, {"open": 0, "snoozed": 0, "done": 0, "unread": 0}
+        )
+        n = int(count or 0)
         if archived:
-            entry["done"] += int(count or 0)
+            entry["done"] += n
+        elif snoozed:
+            entry["snoozed"] += n
         else:
-            entry["open"] += int(count or 0)
+            entry["open"] += n
             entry["unread"] += int(unread or 0)
     total_open = sum(v["open"] for v in per_category.values())
     total_unread = sum(v["unread"] for v in per_category.values())
-    return total_open, total_unread, per_category
+    total_snoozed = sum(v["snoozed"] for v in per_category.values())
+    return total_open, total_unread, total_snoozed, per_category
 
 
 def set_notification_archived(db: Session, notification_id: int, archived: bool):
-    """Mark a single notification archived (done) or restore it to the inbox."""
+    """Mark a single notification archived (done) or restore it to the inbox.
+
+    Archiving stamps ``done_at``; restoring clears it, so the timestamp always
+    tracks whether the item is currently in the done state.
+    """
     db_notification = db.query(Notification).filter(Notification.id == notification_id).first()
     if db_notification:
         db_notification.archived = archived
+        db_notification.done_at = datetime.now(timezone.utc) if archived else None
         safe_commit(db)
         db.refresh(db_notification)
     return db_notification
@@ -328,21 +462,26 @@ def archive_inbox_notifications(
     actionable_categories: List[str],
     category: Optional[str] = None,
 ):
-    """Archive (mark done) every open inbox item, optionally one category only.
+    """Archive (mark done) every currently-open inbox item, optionally one
+    category only.
 
-    An unknown ``category`` is a no-op (returns 0) rather than silently widening
-    the scope to every category.
+    Operates on the visible open set (shared :func:`_open_inbox_clauses`
+    predicate) so snoozed items are left untouched. An unknown ``category`` is a
+    no-op (returns 0) rather than silently widening the scope to every category.
     """
     if category is not None and category not in actionable_categories:
         return 0
     query = db.query(Notification).filter(
         Notification.user_id == user_id,
         Notification.category.in_(actionable_categories),
-        Notification.archived == False,  # noqa: E712
+        *_open_inbox_clauses(),
     )
     if category:
         query = query.filter(Notification.category == category)
-    result = query.update({"archived": True}, synchronize_session=False)
+    result = query.update(
+        {"archived": True, "done_at": datetime.now(timezone.utc)},
+        synchronize_session=False,
+    )
     safe_commit(db)
     return result
 
@@ -353,21 +492,115 @@ def mark_inbox_all_read(
     actionable_categories: List[str],
     category: Optional[str] = None,
 ):
-    """Mark every open inbox item read, optionally scoped to one category.
+    """Mark every currently-open inbox item read, optionally scoped to one
+    category.
 
-    An unknown ``category`` is a no-op (returns 0) rather than marking everything.
+    Operates on the visible open set (shared :func:`_open_inbox_clauses`
+    predicate). An unknown ``category`` is a no-op (returns 0) rather than marking
+    everything.
     """
     if category is not None and category not in actionable_categories:
         return 0
     query = db.query(Notification).filter(
         Notification.user_id == user_id,
         Notification.category.in_(actionable_categories),
-        Notification.archived == False,  # noqa: E712
         Notification.is_read == False,  # noqa: E712
+        *_open_inbox_clauses(),
     )
     if category:
         query = query.filter(Notification.category == category)
     result = query.update({"is_read": True}, synchronize_session=False)
+    safe_commit(db)
+    return result
+
+
+def snooze_notification(db: Session, notification_id: int, until: datetime):
+    """Defer a single notification until ``until`` (Open → Snoozed).
+
+    A snoozed item drops out of the open inbox (see :func:`_open_inbox_clauses`)
+    until the time passes. Snoozing never archives, and clears any prior
+    ``done_at`` so a restored-then-snoozed item is consistently "not done".
+    """
+    db_notification = db.query(Notification).filter(Notification.id == notification_id).first()
+    if db_notification:
+        db_notification.snoozed_until = until
+        db_notification.archived = False
+        db_notification.done_at = None
+        safe_commit(db)
+        db.refresh(db_notification)
+    return db_notification
+
+
+def unsnooze_notification(db: Session, notification_id: int):
+    """Clear a notification's snooze, returning it to the open inbox immediately."""
+    db_notification = db.query(Notification).filter(Notification.id == notification_id).first()
+    if db_notification:
+        db_notification.snoozed_until = None
+        safe_commit(db)
+        db.refresh(db_notification)
+    return db_notification
+
+
+def sweep_due_snoozes(db: Session, user_id: int):
+    """Clear elapsed snoozes for a user so due items rejoin the open inbox.
+
+    The open predicate already treats an elapsed snooze as open, so this is a
+    lazy-on-read tidy-up (called from the inbox list/summary) rather than a
+    correctness requirement: nulling ``snoozed_until`` keeps the dedicated
+    "Snoozed" view and its counts honest. Returns how many rows resurfaced.
+    """
+    now = datetime.now(timezone.utc)
+    result = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id == user_id,
+            Notification.snoozed_until.isnot(None),
+            Notification.snoozed_until <= now,
+        )
+        .update({"snoozed_until": None}, synchronize_session=False)
+    )
+    if result:
+        safe_commit(db)
+    return result
+
+
+def bulk_inbox_action(
+    db: Session,
+    user_id: int,
+    notification_ids: List[int],
+    action: str,
+    actionable_categories: List[str],
+    until: Optional[datetime] = None,
+):
+    """Apply one triage ``action`` to a set of the user's inbox items at once.
+
+    Scoped to the caller's own actionable notifications, so an id that isn't
+    theirs (or isn't an inbox category) is silently skipped rather than touched.
+    ``snooze`` requires ``until``. Returns the number of rows actually updated.
+    """
+    if not notification_ids or not actionable_categories:
+        return 0
+    query = db.query(Notification).filter(
+        Notification.id.in_(notification_ids),
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+    )
+    now = datetime.now(timezone.utc)
+    if action == "archive":
+        values = {"archived": True, "done_at": now}
+    elif action == "unarchive":
+        values = {"archived": False, "done_at": None}
+    elif action == "read":
+        values = {"is_read": True}
+    elif action == "unread":
+        values = {"is_read": False}
+    elif action == "snooze":
+        if until is None:
+            return 0
+        values = {"snoozed_until": until, "archived": False, "done_at": None}
+    else:
+        return 0
+    result = query.update(values, synchronize_session=False)
     safe_commit(db)
     return result
 
