@@ -150,6 +150,10 @@ class Milestone(Base):
     actual_date = Column(DateTime(timezone=True), nullable=True)
     progress_percentage = Column(Integer, default=0)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Loose reference (no DB FK), matching TestPlan.assigned_to / Notification.actor_id:
+    # the column is added by an ALTER (inline FKs there fail on MySQL/MariaDB), the
+    # app only ever reads the id, and a second users FK would need disambiguating.
+    owner_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

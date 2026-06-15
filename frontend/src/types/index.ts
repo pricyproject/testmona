@@ -800,6 +800,7 @@ export interface Milestone {
   progress_percentage: number;
   project_id: number;
   created_by?: number;
+  owner_id?: number | null;
   created_at: string;
   updated_at?: string;
   test_plan_count: number;
@@ -828,6 +829,7 @@ export interface MilestoneCreate {
   target_date?: string;
   project_id: number;
   created_by?: number;
+  owner_id?: number | null;
 }
 
 export interface MilestoneUpdate {
@@ -837,6 +839,7 @@ export interface MilestoneUpdate {
   status?: MilestoneStatus;
   actual_date?: string;
   progress_percentage?: number;
+  owner_id?: number | null;
 }
 
 export interface MilestoneStats {

@@ -2951,6 +2951,8 @@ export const en = {
   milestoneTitle: "Milestone title",
   milestoneTitleRequired: "Milestone title is required.",
   milestoneTitlePlaceholder: "Example: Regression sign-off for v2.4",
+  milestoneOwnerLabel: "Owner",
+  milestoneOwnerHint: "The owner is notified when assigned and when runs complete for this milestone.",
   milestonesProcessSubtitle: "Plan releases around requirements, test plans, execution results, and defects in one operational view.",
   noMilestonesFound: "No milestones found",
   noMilestonesFoundDescription: "Create a test-process milestone or adjust your filters.",

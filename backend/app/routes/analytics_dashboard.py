@@ -34,9 +34,55 @@ from ..services.analytics_shared import (
     normalize_result_status,
     build_coverage_report,
 )
+from ..services import notification_engine
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _notify_rca_assignee(
+    db: Session,
+    analysis: "models.RootCauseAnalysis",
+    assigned_by: Optional[schemas.User],
+    previous_assigned_to: Optional[int] = None,
+) -> None:
+    """Notify a root-cause-analysis assignee when they are newly assigned.
+
+    The lightweight twin of the requirement/defect/test-plan/milestone assignment
+    notifies — an RCA assignee lands work in their Work Inbox via the engine's
+    ASSIGNMENT category the same way. No-op when the assignee is unchanged, on
+    self-assignment, or when the analysis is unassigned. Delivery never blocks the
+    write path.
+    """
+    assignee_id = analysis.assigned_to
+    if not assignee_id or assignee_id == previous_assigned_to:
+        return
+    if assigned_by is not None and assignee_id == assigned_by.id:
+        return
+    try:
+        assignee = db.query(models.User).filter(
+            models.User.id == assignee_id, models.User.is_active == True
+        ).first()
+        if not assignee:
+            return
+        actor = notification_engine.actor_display_name(assigned_by)
+        label = analysis.analysis_title or f"#{analysis.id}"
+        batch = notification_engine.NotificationBatch()
+        batch.add(
+            category=notification_engine.ASSIGNMENT,
+            user_ids=[assignee.id],
+            actor_id=assigned_by.id if assigned_by else None,
+            title="Root cause analysis assigned",
+            message=f"{actor} assigned root cause analysis {label} to you.",
+            related_entity_type="root_cause_analysis",
+            related_entity_id=analysis.id,
+        )
+        batch.flush(db)
+    except Exception:
+        logger.exception(
+            "Failed to create root cause analysis assignment notification",
+            extra={"analysis_id": getattr(analysis, "id", None), "assignee_id": assignee_id},
+        )
 
 
 REPORT_SECTIONS = {"kpis", "summary", "recent_activity", "trends", "team_performance", "upcoming"}
@@ -1541,7 +1587,9 @@ def register_analytics_dashboard_routes(app):
             raise HTTPException(status_code=400, detail="root_cause is required")
 
         db_analysis = create_root_cause_analysis(db=db, analysis=analysis)
-        
+
+        _notify_rca_assignee(db, db_analysis, current_user)
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
@@ -1593,7 +1641,12 @@ def register_analytics_dashboard_routes(app):
         for protected in ("id", "project_id", "discovered_by", "created_at"):
             analysis.pop(protected, None)
 
+        prior_assigned_to = db_analysis.assigned_to
+
         updated = update_root_cause_analysis(db, analysis_id=analysis_id, analysis_data=analysis)
+
+        if "assigned_to" in analysis:
+            _notify_rca_assignee(db, updated, current_user, previous_assigned_to=prior_assigned_to)
 
         # Create audit trail
         try:

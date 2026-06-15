@@ -324,6 +324,55 @@ def notify_test_plan_assignee(
         )
 
 
+def notify_milestone_owner_assigned(
+    db: Session,
+    milestone: "models.Milestone",
+    assigned_by: Optional[schemas.User],
+    previous_owner_id: Optional[int] = None,
+    batch: Optional[notification_engine.NotificationBatch] = None,
+) -> None:
+    """Send an in-app notification when a milestone owner is newly assigned.
+
+    The twin of ``notify_test_plan_assignee``/``notify_requirement_assignee`` so a
+    milestone owner learns about ownership the same way, landing in their Work Inbox
+    via the engine's ASSIGNMENT category. This is the owner-*change* event; it is a
+    distinct concern from the run-completion STATUS notice (``_notify_milestone_owner``)
+    and never collides with it. No-op when the owner is unchanged, on self-assignment,
+    or when the milestone is unowned. When a ``batch`` is supplied the intent is added
+    to it (flushed once by the caller); otherwise it is emitted immediately.
+    """
+    owner_id = milestone.owner_id
+    if not owner_id or owner_id == previous_owner_id:
+        return
+    if assigned_by is not None and owner_id == assigned_by.id:
+        return
+    try:
+        owner = db.query(models.User).filter(
+            models.User.id == owner_id, models.User.is_active == True
+        ).first()
+        if not owner:
+            return
+        actor = notification_engine.actor_display_name(assigned_by)
+        label = milestone.title or f"#{milestone.id}"
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
+            category=notification_engine.ASSIGNMENT,
+            user_ids=[owner.id],
+            actor_id=assigned_by.id if assigned_by else None,
+            title="Milestone assigned",
+            message=f"{actor} made you owner of milestone {label}.",
+            related_entity_type="milestone",
+            related_entity_id=milestone.id,
+        )
+        if batch is None:
+            target.flush(db)
+    except Exception:
+        logger.exception(
+            "Failed to create milestone owner notification",
+            extra={"milestone_id": getattr(milestone, "id", None), "owner_id": owner_id},
+        )
+
+
 def _linked_requirement_test_plan_ids(db: Session, requirement_id: int) -> set[int]:
     rows = db.query(models.requirement_test_plan_links.c.test_plan_id).filter(
         models.requirement_test_plan_links.c.requirement_id == requirement_id,
@@ -2851,8 +2900,16 @@ def register_requirements_defects_plans_routes(app):
         if duplicate:
             raise HTTPException(status_code=400, detail="Milestone title already exists in this project")
 
+        # Validate the owner (if any) exists before persisting.
+        if milestone.owner_id is not None:
+            owner = db.query(models.User).filter(models.User.id == milestone.owner_id).first()
+            if owner is None:
+                raise HTTPException(status_code=400, detail="Owner user not found")
+
         milestone_data = milestone.model_copy(update={"created_by": current_user.id})
         db_milestone = create_milestone(db=db, milestone=milestone_data)
+
+        notify_milestone_owner_assigned(db, db_milestone, current_user)
 
         try:
             from ..services.audit_service import get_audit_service
@@ -2926,6 +2983,13 @@ def register_requirements_defects_plans_routes(app):
             ).first()
             if duplicate:
                 raise HTTPException(status_code=400, detail="Milestone title already exists in this project")
+        # Validate the (possibly new) owner, and capture the prior one so we only
+        # notify on a real change (and never re-notify when other fields are edited).
+        if "owner_id" in update_data and update_data["owner_id"] is not None:
+            owner = db.query(models.User).filter(models.User.id == update_data["owner_id"]).first()
+            if owner is None:
+                raise HTTPException(status_code=400, detail="Owner user not found")
+        prior_owner_id = db_milestone.owner_id
         if update_data.get("status") == schemas.MilestoneStatus.COMPLETED:
             current_health = enrich_milestone(db, db_milestone)
             if (
@@ -2952,6 +3016,13 @@ def register_requirements_defects_plans_routes(app):
             milestone_id=milestone_id,
             milestone=schemas.MilestoneUpdate(**update_data),
         )
+
+        if "owner_id" in update_data:
+            batch = notification_engine.NotificationBatch()
+            notify_milestone_owner_assigned(
+                db, db_milestone, current_user, previous_owner_id=prior_owner_id, batch=batch
+            )
+            batch.flush(db)
 
         try:
             from ..services.audit_service import get_audit_service

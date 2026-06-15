@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   Target,
   Trash2,
+  UserCircle2,
   XCircle,
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -61,6 +62,7 @@ import { milestonesAPI, testPlansAPI } from '@/lib/api';
 import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useTestPlanMembers, type TestPlanMember } from '@/hooks/queries/testPlans';
 
 type TFn = (key: any, params?: Record<string, string | number>) => string;
 type ViewMode = 'grid' | 'list';
@@ -71,6 +73,7 @@ interface MilestoneFormState {
   targetDate: string;
   actualDate: string;
   status: MilestoneStatus;
+  ownerId: string;
 }
 
 const emptyStats: MilestoneStats = {
@@ -94,6 +97,7 @@ const defaultForm: MilestoneFormState = {
   targetDate: '',
   actualDate: '',
   status: 'planned',
+  ownerId: '',
 };
 
 const statusOptions: MilestoneStatus[] = ['planned', 'in_progress', 'completed', 'cancelled'];
@@ -135,6 +139,11 @@ export function Milestones() {
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [form, setForm] = useState<MilestoneFormState>(defaultForm);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Project members for the owner picker (loaded only while the dialog is open).
+  const membersQuery = useTestPlanMembers(currentProjectId, currentProjectId != null && isDialogOpen);
+  const members: TestPlanMember[] = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
+
   const loadMilestones = async () => {
     await milestonesQuery.refetch();
   };
@@ -219,6 +228,7 @@ export function Milestones() {
       targetDate: milestone.target_date ? toDateInputValue(milestone.target_date) : '',
       actualDate: milestone.actual_date ? toDateInputValue(milestone.actual_date) : '',
       status: milestone.status,
+      ownerId: milestone.owner_id ? String(milestone.owner_id) : '',
     });
     setFormError(null);
     setIsDialogOpen(true);
@@ -284,6 +294,7 @@ export function Milestones() {
           status: form.status,
           target_date: targetDateIso,
           actual_date: actualDateIso,
+          owner_id: form.ownerId ? Number(form.ownerId) : null,
         };
         await milestonesAPI.update(editingMilestone.id, updatePayload);
         if (
@@ -313,6 +324,7 @@ export function Milestones() {
           actual_date: actualDateIso ?? undefined,
           status: form.status,
           project_id: currentProjectId,
+          owner_id: form.ownerId ? Number(form.ownerId) : undefined,
         });
       }
 
@@ -401,6 +413,7 @@ export function Milestones() {
                 isRTL={isRTL}
                 editing={editingMilestone}
                 existingMilestones={milestones}
+                members={members}
                 form={form}
                 setForm={setForm}
                 formError={formError}
@@ -995,6 +1008,7 @@ function MilestoneFormDialog({
   isRTL,
   editing,
   existingMilestones,
+  members,
   form,
   setForm,
   formError,
@@ -1006,6 +1020,7 @@ function MilestoneFormDialog({
   isRTL: boolean;
   editing: Milestone | null;
   existingMilestones: Milestone[];
+  members: TestPlanMember[];
   form: MilestoneFormState;
   setForm: React.Dispatch<React.SetStateAction<MilestoneFormState>>;
   formError: string | null;

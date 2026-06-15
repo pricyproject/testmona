@@ -2823,6 +2823,8 @@ export const ar = {
   milestoneTitle: "عنوان المعلم",
   milestoneTitleRequired: "عنوان المعلم مطلوب.",
   milestoneTitlePlaceholder: "مثال: اعتماد اختبار الانحدار للإصدار v2.4",
+  milestoneOwnerLabel: "المالك",
+  milestoneOwnerHint: "يتم إعلام المالك عند التعيين وعند اكتمال عمليات التشغيل لهذه المرحلة.",
   milestonesProcessSubtitle: "خطط الإصدارات حول المتطلبات وخطط الاختبار ونتائج التنفيذ والعيوب في عرض تشغيلي واحد.",
   noMilestonesFound: "لم يتم العثور على معالم",
   noMilestonesFoundDescription: "أنشئ معلما لعملية الاختبار أو عدل عوامل التصفية.",

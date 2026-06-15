@@ -175,6 +175,7 @@ class MilestoneBase(BaseModel):
     target_date: Optional[datetime] = None
     actual_date: Optional[datetime] = None
     progress_percentage: int = 0
+    owner_id: Optional[int] = None
 
     @field_validator('title')
     @classmethod
@@ -212,6 +213,7 @@ class MilestoneUpdate(BaseModel):
     target_date: Optional[datetime] = None
     actual_date: Optional[datetime] = None
     progress_percentage: Optional[int] = None
+    owner_id: Optional[int] = None
 
     @field_validator('title')
     @classmethod

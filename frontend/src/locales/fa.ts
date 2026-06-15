@@ -2793,6 +2793,8 @@ export const fa = {
   milestoneTitle: "عنوان نقطه عطف",
   milestoneTitleRequired: "عنوان نقطه عطف الزامی است.",
   milestoneTitlePlaceholder: "مثال: تایید رگرسیون برای نسخه v2.4",
+  milestoneOwnerLabel: "مالک",
+  milestoneOwnerHint: "هنگام واگذاری و پس از تکمیل اجراها برای این نقطه عطف به مالک اطلاع داده می شود.",
   milestonesProcessSubtitle: "انتشارها را بر اساس نیازمندی ها، برنامه های تست، نتایج اجرا و نقص ها در یک نمای عملیاتی برنامه ریزی کنید.",
   noMilestonesFound: "نقطه عطفی پیدا نشد",
   noMilestonesFoundDescription: "یک نقطه عطف فرایند تست ایجاد کنید یا فیلترها را تغییر دهید.",
