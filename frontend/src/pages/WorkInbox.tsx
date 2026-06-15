@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Inbox,
   AtSign,
@@ -47,7 +47,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { inboxAPI, type InboxStatus, type InboxSort, type InboxBulkActionType } from '@/lib/api/inbox';
+import { inboxAPI, type InboxStatus, type InboxSort, type InboxBulkActionType, type InboxActorOption } from '@/lib/api/inbox';
 import { useInboxViewStore, type InboxGroupBy } from '@/stores/inboxViewStore';
 import { openNotification, resolveNotificationTarget } from '@/lib/notificationNavigation';
 import { requirementsAPI } from '@/lib/api/requirements_docs';
@@ -176,6 +176,7 @@ function ageLabel(ageMs: number, t: (k: string, p?: Record<string, string | numb
 
 export function WorkInbox() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuthStore();
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
@@ -203,10 +204,13 @@ export function WorkInbox() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState('');
-  const [actorFilter, setActorFilter] = useState<string | null>(null);
+  const deferredSearch = useDeferredValue(search.trim());
+  const [actorFilter, setActorFilter] = useState<number | null>(null);
+  const [actorOptions, setActorOptions] = useState<InboxActorOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [focusIndex, setFocusIndex] = useState(-1);
+  const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
   // When set, the custom-snooze dialog is open and will apply to these ids.
   const [customSnooze, setCustomSnooze] = useState<{ ids: number[] } | null>(null);
 
@@ -230,7 +234,16 @@ export function WorkInbox() {
   const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await inboxAPI.list({ status, category: activeCategory, unreadOnly, sort, skip: 0, limit: PAGE_SIZE });
+      const data = await inboxAPI.list({
+        status,
+        category: activeCategory,
+        unreadOnly,
+        search: deferredSearch,
+        actorId: actorFilter,
+        sort,
+        skip: 0,
+        limit: PAGE_SIZE,
+      });
       setItems(data);
       setHasMore(data.length === PAGE_SIZE);
     } catch (error) {
@@ -238,7 +251,17 @@ export function WorkInbox() {
     } finally {
       setLoading(false);
     }
-  }, [status, activeCategory, unreadOnly, sort]);
+  }, [status, activeCategory, unreadOnly, deferredSearch, actorFilter, sort]);
+
+  const fetchActors = useCallback(async () => {
+    try {
+      const data = await inboxAPI.actors({ status, category: activeCategory, unreadOnly, search: deferredSearch });
+      setActorOptions(data);
+      setActorFilter((current) => (current && !data.some((actor) => actor.id === current) ? null : current));
+    } catch (error) {
+      console.error('Failed to load inbox actors:', error);
+    }
+  }, [status, activeCategory, unreadOnly, deferredSearch]);
 
   // Offset paging keyed off the loaded count. Archiving/restoring removes an item
   // from both the local list and the server-side set, so skip=items.length stays
@@ -247,7 +270,16 @@ export function WorkInbox() {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const data = await inboxAPI.list({ status, category: activeCategory, unreadOnly, sort, skip: items.length, limit: PAGE_SIZE });
+      const data = await inboxAPI.list({
+        status,
+        category: activeCategory,
+        unreadOnly,
+        search: deferredSearch,
+        actorId: actorFilter,
+        sort,
+        skip: items.length,
+        limit: PAGE_SIZE,
+      });
       setItems((prev) => {
         const seen = new Set(prev.map((n) => n.id));
         return [...prev, ...data.filter((n) => !seen.has(n.id))];
@@ -267,6 +299,11 @@ export function WorkInbox() {
 
   useEffect(() => {
     if (!user) return;
+    fetchActors();
+  }, [user, fetchActors]);
+
+  useEffect(() => {
+    if (!user) return;
     fetchSummary();
   }, [user, fetchSummary]);
 
@@ -274,7 +311,14 @@ export function WorkInbox() {
   useEffect(() => {
     setSelected(new Set());
     setFocusIndex(-1);
-  }, [status, activeCategory, unreadOnly, sort]);
+  }, [status, activeCategory, unreadOnly, sort, deferredSearch, actorFilter]);
+
+  useEffect(() => {
+    const state = location.state as { notificationRedirectError?: string } | null;
+    if (!state?.notificationRedirectError) return;
+    toast({ title: t(state.notificationRedirectError), variant: 'destructive' });
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate, t, toast]);
 
   // Let the navbar bell + inbox badge re-read counts after any mutation here.
   const broadcast = () => window.dispatchEvent(new CustomEvent('notifications:refresh'));
@@ -397,7 +441,6 @@ export function WorkInbox() {
       if (ids.length === 1) await inboxAPI.snooze(ids[0], iso);
       else await inboxAPI.bulk(ids, 'snooze', iso);
       clearSelection();
-      await fetchItems();
       await afterMutation();
       toast({ title: t('inboxSnoozedToast', { count: ids.length }) });
     } catch (error) {
@@ -422,9 +465,22 @@ export function WorkInbox() {
     setBusy(true);
     try {
       const { archived_count } = await inboxAPI.archiveAll(activeCategory);
+      setConfirmArchiveAll(false);
       await fetchItems();
       await afterMutation();
       if (archived_count > 0) toast({ title: t('inboxArchivedToast', { count: archived_count }) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unsnoozeAll = async () => {
+    setBusy(true);
+    try {
+      const { unsnoozed_count } = await inboxAPI.unsnoozeAll(activeCategory);
+      await fetchItems();
+      await afterMutation();
+      if (unsnoozed_count > 0) toast({ title: t('inboxUnsnoozedToast', { count: unsnoozed_count }) });
     } finally {
       setBusy(false);
     }
@@ -451,9 +507,13 @@ export function WorkInbox() {
       await fetchItems();
       await afterMutation();
       const key =
-        action === 'read' || action === 'unread'
+        action === 'read'
           ? 'inboxMarkedReadToast'
-          : 'inboxArchivedToast';
+          : action === 'unread'
+            ? 'inboxMarkedUnreadToast'
+            : action === 'unarchive'
+              ? 'inboxRestoredToast'
+              : 'inboxArchivedToast';
       if (affected_count > 0) toast({ title: t(key, { count: affected_count }) });
     } finally {
       setBusy(false);
@@ -468,25 +528,8 @@ export function WorkInbox() {
     [t]
   );
 
-  // Actor options present in the loaded page (W3 actor filter).
-  const actorOptions = useMemo(() => {
-    const names = new Set<string>();
-    for (const n of items) if (n.actor_name) names.add(n.actor_name);
-    return [...names].sort((a, b) => a.localeCompare(b));
-  }, [items]);
-
-  const visibleItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return items.filter((n) => {
-      if (actorFilter && (n.actor_name ?? '') !== actorFilter) return false;
-      if (!q) return true;
-      return (
-        decodeHtmlEntities(n.title).toLowerCase().includes(q) ||
-        decodeHtmlEntities(n.message).toLowerCase().includes(q) ||
-        (n.actor_name ?? '').toLowerCase().includes(q)
-      );
-    });
-  }, [items, search, actorFilter]);
+  const actorFilterLabel = actorOptions.find((actor) => actor.id === actorFilter)?.name;
+  const visibleItems = items;
 
   // Grouped sections (W3). Date is the default; category / entity regroup the
   // same loaded page client-side.
@@ -598,6 +641,10 @@ export function WorkInbox() {
   const totalSnoozed = summary?.total_snoozed ?? 0;
   const totalDone = summary?.categories.reduce((sum, c) => sum + c.done, 0) ?? 0;
   const countFor = (s: InboxStatus) => (s === 'open' ? totalOpen : s === 'snoozed' ? totalSnoozed : totalDone);
+  const hasTransientFilter = Boolean(deferredSearch || actorFilter);
+  const archiveAllCount = activeCategory
+    ? summary?.categories.find((c) => c.key === activeCategory)?.open ?? 0
+    : totalOpen;
 
   const catCount = (c: InboxSummary['categories'][number]) =>
     status === 'open' ? c.open : status === 'snoozed' ? c.snoozed : c.done;
@@ -613,7 +660,9 @@ export function WorkInbox() {
     { key: 'all_open', labelKey: 'inboxViewAllOpen', status: 'open', category: null, Icon: Inbox },
     { key: 'assigned', labelKey: 'inboxViewAssigned', status: 'open', category: 'assignment', Icon: UserPlus },
     { key: 'mentions', labelKey: 'inboxViewMentions', status: 'open', category: 'mention', Icon: AtSign },
+    { key: 'replies', labelKey: 'inboxViewReplies', status: 'open', category: 'comment_reply', Icon: MessageSquareReply },
     { key: 'reviews', labelKey: 'inboxViewReviews', status: 'open', category: 'review', Icon: ClipboardCheck },
+    { key: 'feedback', labelKey: 'inboxViewFeedback', status: 'open', category: 'feedback', Icon: MessageSquareWarning },
     { key: 'snoozed', labelKey: 'inboxViewSnoozed', status: 'snoozed', category: null, Icon: Clock },
     { key: 'done', labelKey: 'inboxViewDone', status: 'done', category: null, Icon: Archive },
   ];
@@ -657,17 +706,23 @@ export function WorkInbox() {
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             <span className="hidden sm:ms-1.5 sm:inline">{t('refresh')}</span>
           </Button>
-          {status === 'open' && items.length > 0 && (
+          {status === 'open' && items.length > 0 && !hasTransientFilter && (
             <>
               <Button variant="outline" size="sm" onClick={markAllRead} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
                 <CheckCheck className="h-4 w-4" />
                 <span className="hidden sm:inline">{t('markAllRead')}</span>
               </Button>
-              <Button size="sm" onClick={archiveAll} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
+              <Button size="sm" onClick={() => setConfirmArchiveAll(true)} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
                 <Archive className="h-4 w-4" />
                 <span className="hidden sm:inline">{t('inboxArchiveAll')}</span>
               </Button>
             </>
+          )}
+          {status === 'snoozed' && items.length > 0 && !hasTransientFilter && (
+            <Button variant="outline" size="sm" onClick={unsnoozeAll} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
+              <AlarmClockOff className="h-4 w-4" />
+              <span className="hidden sm:inline">{t('inboxUnsnoozeAll')}</span>
+            </Button>
           )}
         </div>
       </div>
@@ -807,16 +862,16 @@ export function WorkInbox() {
                 <DropdownMenuTrigger asChild>
                   <button type="button" className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">
                     <UserIcon className="h-4 w-4 text-slate-400" />
-                    <span className="max-w-[120px] truncate">{actorFilter ?? t('inboxFilterActorAll')}</span>
+                    <span className="max-w-[120px] truncate">{actorFilterLabel ?? t('inboxFilterActorAll')}</span>
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="max-h-72 w-52 overflow-y-auto">
                   <DropdownMenuLabel>{t('inboxFilterFrom')}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuRadioGroup value={actorFilter ?? '__all__'} onValueChange={(v) => setActorFilter(v === '__all__' ? null : v)}>
+                  <DropdownMenuRadioGroup value={actorFilter ? String(actorFilter) : '__all__'} onValueChange={(v) => setActorFilter(v === '__all__' ? null : Number(v))}>
                     <DropdownMenuRadioItem value="__all__">{t('inboxFilterActorAll')}</DropdownMenuRadioItem>
-                    {actorOptions.map((name) => (
-                      <DropdownMenuRadioItem key={name} value={name}>{name}</DropdownMenuRadioItem>
+                    {actorOptions.map((actor) => (
+                      <DropdownMenuRadioItem key={actor.id} value={String(actor.id)}>{actor.name}</DropdownMenuRadioItem>
                     ))}
                   </DropdownMenuRadioGroup>
                 </DropdownMenuContent>
@@ -872,6 +927,7 @@ export function WorkInbox() {
                 {status !== 'done' && (
                   <SnoozeMenu
                     t={t}
+                    formatSnoozeUntil={formatSnoozeUntil}
                     onPick={(date) => applySnooze([...selected], date)}
                     onCustom={() => setCustomSnooze({ ids: [...selected] })}
                     trigger={
@@ -960,7 +1016,7 @@ export function WorkInbox() {
               })
             )}
 
-            {!loading && hasMore && !search.trim() && (
+            {!loading && hasMore && (
               <button
                 type="button"
                 onClick={loadMore}
@@ -986,6 +1042,20 @@ export function WorkInbox() {
         }}
         invalidToast={() => toast({ title: t('inboxSnoozeInvalid'), variant: 'destructive' })}
       />
+      <Dialog open={confirmArchiveAll} onOpenChange={setConfirmArchiveAll}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('inboxArchiveAllConfirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('inboxArchiveAllConfirmDesc', { count: archiveAllCount })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setConfirmArchiveAll(false)}>{t('inboxCancel')}</Button>
+            <Button onClick={archiveAll} disabled={busy}>{t('inboxArchiveAllConfirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1046,25 +1116,34 @@ const humanizeEntity = (type: string): string =>
 
 function SnoozeMenu({
   t,
+  formatSnoozeUntil,
   onPick,
   onCustom,
   trigger,
 }: {
   t: (k: string, p?: Record<string, string | number>) => string;
+  formatSnoozeUntil: (d?: string | null) => string;
   onPick: (date: Date) => void;
   onCustom: () => void;
   trigger: React.ReactNode;
 }) {
+  const now = new Date();
+  const presets = SNOOZE_PRESETS.map((preset) => ({ ...preset, value: preset.date() })).filter(
+    (preset) => preset.key !== 'later' || preset.value.toDateString() === now.toDateString()
+  );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuLabel>{t('inboxSnooze')}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {SNOOZE_PRESETS.map((p) => (
-          <DropdownMenuItem key={p.key} onSelect={() => onPick(p.date())}>
+        {presets.map((p) => (
+          <DropdownMenuItem key={p.key} onSelect={() => onPick(p.value)}>
             <Clock className="me-2 h-4 w-4 text-slate-400" />
-            {t(p.labelKey)}
+            <span className="flex flex-col">
+              <span>{t(p.labelKey)}</span>
+              <span className="text-[11px] text-slate-400">{formatSnoozeUntil(p.value.toISOString())}</span>
+            </span>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
@@ -1314,6 +1393,7 @@ function InboxRow({
             ) : status === 'open' ? (
               <SnoozeMenu
                 t={t}
+                formatSnoozeUntil={formatSnoozeUntil}
                 onPick={onSnoozePick}
                 onCustom={onSnoozeCustom}
                 trigger={

@@ -10,16 +10,32 @@ export type InboxSort = "newest" | "oldest";
 // Triage actions the bulk endpoint accepts for a multi-selection.
 export type InboxBulkActionType = "archive" | "unarchive" | "read" | "unread" | "snooze";
 
+export interface InboxActorOption {
+  id: number;
+  name: string;
+}
+
 // Work Inbox: the actionable slice of the user's notifications, plus the
 // triage actions (read / archive) the dedicated inbox page drives.
 export const inboxAPI = {
   list: async (
-    params: { status?: InboxStatus; category?: string | null; unreadOnly?: boolean; sort?: InboxSort; skip?: number; limit?: number } = {}
+    params: {
+      status?: InboxStatus;
+      category?: string | null;
+      unreadOnly?: boolean;
+      search?: string;
+      actorId?: number | null;
+      sort?: InboxSort;
+      skip?: number;
+      limit?: number;
+    } = {}
   ): Promise<Notification[]> => {
     const search = new URLSearchParams();
     search.set("status", params.status ?? "open");
     if (params.category) search.set("category", params.category);
     if (params.unreadOnly) search.set("unread_only", "true");
+    if (params.search?.trim()) search.set("search", params.search.trim());
+    if (params.actorId) search.set("actor_id", String(params.actorId));
     if (params.sort) search.set("sort", params.sort);
     search.set("skip", String(params.skip ?? 0));
     search.set("limit", String(params.limit ?? 50));
@@ -29,6 +45,18 @@ export const inboxAPI = {
 
   summary: async (): Promise<InboxSummary> => {
     const response = await api.get("/inbox/summary");
+    return response.data;
+  },
+
+  actors: async (
+    params: { status?: InboxStatus; category?: string | null; unreadOnly?: boolean; search?: string } = {}
+  ): Promise<InboxActorOption[]> => {
+    const search = new URLSearchParams();
+    search.set("status", params.status ?? "open");
+    if (params.category) search.set("category", params.category);
+    if (params.unreadOnly) search.set("unread_only", "true");
+    if (params.search?.trim()) search.set("search", params.search.trim());
+    const response = await api.get(`/inbox/actors?${search.toString()}`);
     return response.data;
   },
 
@@ -49,6 +77,11 @@ export const inboxAPI = {
 
   markAllRead: async (category?: string | null): Promise<{ marked_count: number }> => {
     const response = await api.post(`/inbox/mark-all-read${category ? `?category=${encodeURIComponent(category)}` : ""}`);
+    return response.data;
+  },
+
+  unsnoozeAll: async (category?: string | null): Promise<{ unsnoozed_count: number }> => {
+    const response = await api.post(`/inbox/unsnooze-all${category ? `?category=${encodeURIComponent(category)}` : ""}`);
     return response.data;
   },
 

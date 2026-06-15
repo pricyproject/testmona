@@ -20,10 +20,13 @@ export function NotificationRedirect() {
 
   useEffect(() => {
     let cancelled = false;
+    const fallback = (messageKey: string) => {
+      navigate('/inbox', { replace: true, state: { notificationRedirectError: messageKey } });
+    };
     const go = async () => {
       const notificationId = Number(id);
       if (!Number.isFinite(notificationId) || notificationId < 1) {
-        navigate('/inbox', { replace: true });
+        fallback('notificationRedirectInvalid');
         return;
       }
       try {
@@ -32,9 +35,10 @@ export function NotificationRedirect() {
         api.put(`/notifications/${notificationId}`, { is_read: true }).catch(() => {});
         const target = await resolveNotificationTarget(data);
         if (cancelled) return;
-        navigate(target || '/inbox', { replace: true });
+        if (target) navigate(target, { replace: true });
+        else fallback('notificationRedirectUnavailable');
       } catch {
-        if (!cancelled) navigate('/inbox', { replace: true });
+        if (!cancelled) fallback('notificationRedirectUnavailable');
       }
     };
     void go();
