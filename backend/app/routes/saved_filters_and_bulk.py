@@ -13,7 +13,8 @@ from .. import crud, models, rbac, schemas
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
-from .requirements_defects_plans import notify_defect_assignee
+from ..services import notification_engine
+from .requirements_defects_plans import notify_defect_assignee, notify_defect_status_change
 
 logger = logging.getLogger(__name__)
 
@@ -369,9 +370,11 @@ def register_saved_filters_and_bulk_routes(app) -> None:
         skipped: List[int] = []
         write_cache: dict[int, bool] = {}
         assignee_project_cache: dict[int, bool] = {}
-        # (defect, prior_assigned_to) for defects handed to a new assignee — they
-        # are notified after the commit so a failed write never sends a stray alert.
+        # (defect, prior_assigned_to) for defects handed to a new assignee, and
+        # (defect, prior_status) for defects whose status moved — both notified
+        # after the commit so a failed write never sends a stray alert.
         newly_assigned: List[tuple] = []
+        status_changed: List[tuple] = []
 
         for defect_id in ids:
             defect = defect_by_id.get(defect_id)
@@ -407,7 +410,10 @@ def register_saved_filters_and_bulk_routes(app) -> None:
             # serialize correctly; assigning ``.value`` would write the
             # lowercase string and break subsequent reads.
             if payload.status is not None:
+                prior_status = defect.status
                 defect.status = payload.status
+                if defect.status != prior_status:
+                    status_changed.append((defect, prior_status))
             if payload.severity is not None:
                 defect.severity = payload.severity
             if payload.priority is not None:
@@ -416,8 +422,20 @@ def register_saved_filters_and_bulk_routes(app) -> None:
 
         if updated:
             safe_commit(db)
+            # One batch across the whole bulk op: intents for different defects key
+            # on distinct entities so they never collide, while a defect that was
+            # both reassigned and status-changed de-dupes via the ladder (ASSIGNMENT
+            # outranks STATUS for the new assignee; the reporter still gets STATUS).
+            batch = notification_engine.NotificationBatch()
             for defect, prior_assigned_to in newly_assigned:
-                notify_defect_assignee(db, defect, current_user, previous_assigned_to=prior_assigned_to)
+                notify_defect_assignee(
+                    db, defect, current_user, previous_assigned_to=prior_assigned_to, batch=batch
+                )
+            for defect, prior_status in status_changed:
+                notify_defect_status_change(
+                    db, defect, current_user, previous_status=prior_status, batch=batch
+                )
+            batch.flush(db)
         return schemas.BulkUpdateResult(updated=updated, skipped_ids=skipped)
 
     # --------------------------- Bulk: requirements ---------------------------

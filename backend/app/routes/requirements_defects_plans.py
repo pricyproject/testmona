@@ -23,6 +23,7 @@ from ..services.atlassian_document_service import fetch_requirement_source
 from ..services.tracker_import_service import fetch_requirement_from_tracker
 from ..services import feature_file_service
 from ..services import notification_engine
+from ..services import watch_service
 from ..services.doc_conversion_service import markdown_to_html, next_requirement_id
 from ..crud import (
     create_requirement, get_requirements, get_requirement, update_requirement, delete_requirement,
@@ -224,6 +225,109 @@ def notify_defect_assignee(
         logger.exception(
             "Failed to create defect assignment notification",
             extra={"defect_id": getattr(defect, "id", None), "assignee_id": assignee_id},
+        )
+
+
+# Defect statuses that represent a resolution — these earn the celebratory SUCCESS
+# styling instead of the neutral INFO used for ordinary status transitions.
+_DEFECT_RESOLVED_STATUSES = {models.DefectStatus.FIXED, models.DefectStatus.CLOSED}
+
+# Defect fields whose change is worth telling watchers about (noise like external
+# sync bookkeeping is deliberately excluded). Used to diff the watch broadcast.
+_DEFECT_WATCH_FIELDS = {
+    "title", "description", "status", "severity", "priority", "assigned_to",
+    "resolution", "root_cause", "steps_to_reproduce", "expected_result",
+    "actual_result", "environment", "fix_version", "found_in_version",
+}
+
+# Test-plan fields whose change is worth telling watchers about.
+_TEST_PLAN_WATCH_FIELDS = {
+    "title", "description", "status", "assigned_to", "milestone_id",
+    "target_start_date", "target_end_date", "test_objectives",
+    "scope_inclusions", "scope_exclusions", "entry_criteria", "exit_criteria",
+    "test_environment", "risks_assumptions",
+}
+
+
+def _defect_status_label(status) -> str:
+    """Human-readable status (``in_progress`` -> ``in progress``) for messages."""
+    raw = getattr(status, "value", status) or ""
+    return str(raw).replace("_", " ")
+
+
+def _changed_field_labels(before: dict, after, rename: Optional[dict] = None) -> list[str]:
+    """Human-readable names of the fields whose value actually changed.
+
+    ``before`` is a snapshot ``{field: old_value}`` captured before the write;
+    ``after`` is the refreshed ORM row. Enums compare by identity correctly, so a
+    no-op edit yields an empty list and the watch broadcast is suppressed upstream.
+    """
+    rename = rename or {}
+    labels: list[str] = []
+    for key, old in before.items():
+        if old != getattr(after, key, None):
+            labels.append(rename.get(key, key).replace("_", " "))
+    return labels
+
+
+def notify_defect_status_change(
+    db: Session,
+    defect: "models.Defect",
+    changed_by: Optional[schemas.User],
+    previous_status,
+    batch: Optional[notification_engine.NotificationBatch] = None,
+) -> None:
+    """Notify the reporter and current assignee when a defect's status changes.
+
+    Emits the engine's STATUS category — with SUCCESS styling when the defect was
+    just resolved (fixed/closed), INFO otherwise — so both the person who filed the
+    bug and the person who owns it learn it moved. No-op when the status is
+    unchanged. The actor is never notified of their own change (the engine excludes
+    them and drops deactivated recipients centrally). When a ``batch`` is supplied
+    the intent is added to it so a save that *also* reassigns the defect de-duplicates
+    via the ladder — the new assignee's ASSIGNMENT outranks this STATUS row, while the
+    reporter still receives STATUS; otherwise it is emitted immediately.
+    """
+    new_status = defect.status
+    if new_status == previous_status:
+        return
+    try:
+        actor_id = changed_by.id if changed_by else None
+        # Reporter + assignee; the engine de-dupes, excludes the actor, and filters
+        # deactivated accounts, so a no-op for empty input is the only guard needed.
+        recipients = [uid for uid in (defect.reported_by, defect.assigned_to) if uid]
+        if not recipients:
+            return
+        actor = notification_engine.actor_display_name(changed_by)
+        label = defect.defect_id or defect.title or f"#{defect.id}"
+        resolved = new_status in _DEFECT_RESOLVED_STATUSES
+        if resolved:
+            title = "Defect resolved"
+        elif new_status == models.DefectStatus.REOPENED:
+            title = "Defect reopened"
+        else:
+            title = "Defect status changed"
+        message = (
+            f"{actor} changed defect {label} status from "
+            f"{_defect_status_label(previous_status)} to {_defect_status_label(new_status)}."
+        )
+        target = batch or notification_engine.NotificationBatch()
+        target.add(
+            category=notification_engine.STATUS,
+            user_ids=recipients,
+            actor_id=actor_id,
+            title=title,
+            message=message,
+            type_override=models.NotificationType.SUCCESS if resolved else None,
+            related_entity_type="defect",
+            related_entity_id=defect.id,
+        )
+        if batch is None:
+            target.flush(db)
+    except Exception:
+        logger.exception(
+            "Failed to create defect status-change notification",
+            extra={"defect_id": getattr(defect, "id", None)},
         )
 
 
@@ -1839,6 +1943,13 @@ def register_requirements_defects_plans_routes(app):
         except Exception as e:
             logger.warning(f"Failed to create audit trail for defect creation: {e}")
 
+        # The reporter and (any) assignee auto-watch the new defect so they receive
+        # later change alerts without having to click the watch button.
+        watch_service.auto_watch(
+            db, entity_type=watch_service.DEFECT, entity_id=db_defect.id,
+            user_ids=[db_defect.reported_by, db_defect.assigned_to],
+        )
+
         # Tell the assignee they have a new defect (no-op when self/unassigned).
         notify_defect_assignee(db, db_defect, current_user)
 
@@ -1981,8 +2092,10 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "write", db_defect.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        # Captured before the update so we only notify on an actual re-assignment.
+        # Captured before the update so we only notify on an actual re-assignment
+        # or status transition.
         prior_assigned_to = db_defect.assigned_to
+        prior_status = db_defect.status
 
         update_data = defect.model_dump(exclude_unset=True)
         if "defect_id" in update_data and not str(update_data["defect_id"] or "").strip():
@@ -2009,6 +2122,11 @@ def register_requirements_defects_plans_routes(app):
             requirement_id=effective_requirement_id,
             assigned_to=effective_assigned_to,
         )
+        # Snapshot the watched fields before the write so we can tell watchers what
+        # actually changed (and suppress the broadcast on a no-op edit).
+        watch_before = {
+            k: getattr(db_defect, k) for k in update_data if k in _DEFECT_WATCH_FIELDS
+        }
         try:
             db_defect = update_defect(db, defect_id=defect_id, defect=defect)
         except IntegrityError as e:
@@ -2034,8 +2152,35 @@ def register_requirements_defects_plans_routes(app):
         except Exception as e:
             logger.warning(f"Failed to create audit trail for defect update: {e}")
 
-        # Notify only when this update handed the defect to a new assignee.
-        notify_defect_assignee(db, db_defect, current_user, previous_assigned_to=prior_assigned_to)
+        # A newly-assigned user starts watching the defect (so they keep getting
+        # change alerts), without re-subscribing anyone who has explicitly unwatched.
+        if db_defect.assigned_to and db_defect.assigned_to != prior_assigned_to:
+            watch_service.auto_watch(
+                db, entity_type=watch_service.DEFECT, entity_id=db_defect.id,
+                user_ids=[db_defect.assigned_to],
+            )
+
+        # One batch for the whole save so a single request that both reassigns and
+        # changes status de-duplicates via the ladder: the new assignee's ASSIGNMENT
+        # outranks the STATUS row, which in turn outranks the watch_change broadcast,
+        # while the reporter still receives STATUS. Each notify is a no-op when its
+        # field did not actually change.
+        batch = notification_engine.NotificationBatch()
+        notify_defect_assignee(db, db_defect, current_user, previous_assigned_to=prior_assigned_to, batch=batch)
+        notify_defect_status_change(db, db_defect, current_user, previous_status=prior_status, batch=batch)
+        changed = _changed_field_labels(watch_before, db_defect)
+        if changed:
+            watch_service.notify_watchers_of_change(
+                db,
+                entity_type=watch_service.DEFECT,
+                entity_id=db_defect.id,
+                label=db_defect.defect_id or db_defect.title or f"#{db_defect.id}",
+                action="updated",
+                actor_id=current_user.id,
+                changed_fields=changed,
+                batch=batch,
+            )
+        batch.flush(db)
 
         return db_defect
 
@@ -2056,7 +2201,11 @@ def register_requirements_defects_plans_routes(app):
         defect_id_val = db_defect.id
         defect_title = db_defect.title
         project_id = db_defect.project_id
-        
+
+        # Watches reference the defect by loose id (no FK); clear them so the row
+        # is removed by the delete commit below, not orphaned.
+        watch_service.clear_watches(db, watch_service.DEFECT, defect_id)
+
         delete_defect(db, defect_id=defect_id)
         
         # Create audit trail
@@ -2101,6 +2250,58 @@ def register_requirements_defects_plans_routes(app):
             .filter(models.TestResultDefectLink.defect_id == defect_id)
             .order_by(models.TestResultDefectLink.created_at.desc())
             .all()
+        )
+
+    # --------------------------- Defect watch subscriptions ---------------------
+
+    @app.get("/defects/{defect_id}/watch", response_model=schemas.WatchStatus)
+    def get_defect_watch(
+        defect_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        defect = get_defect(db, defect_id=defect_id)
+        if defect is None:
+            raise HTTPException(status_code=404, detail="Defect not found")
+        if not rbac.has_permission(current_user, "read", defect.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return schemas.WatchStatus(
+            watching=watch_service.is_watching(db, current_user.id, watch_service.DEFECT, defect.id),
+            watcher_count=watch_service.count_watchers(db, watch_service.DEFECT, defect.id),
+        )
+
+    @app.post("/defects/{defect_id}/watch", response_model=schemas.WatchStatus)
+    def watch_defect(
+        defect_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        defect = get_defect(db, defect_id=defect_id)
+        if defect is None:
+            raise HTTPException(status_code=404, detail="Defect not found")
+        if not rbac.has_permission(current_user, "read", defect.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        watch_service.add_watch(db, current_user.id, watch_service.DEFECT, defect.id)
+        return schemas.WatchStatus(
+            watching=True,
+            watcher_count=watch_service.count_watchers(db, watch_service.DEFECT, defect.id),
+        )
+
+    @app.delete("/defects/{defect_id}/watch", response_model=schemas.WatchStatus)
+    def unwatch_defect(
+        defect_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        defect = get_defect(db, defect_id=defect_id)
+        if defect is None:
+            raise HTTPException(status_code=404, detail="Defect not found")
+        if not rbac.has_permission(current_user, "read", defect.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        watch_service.remove_watch(db, current_user.id, watch_service.DEFECT, defect.id)
+        return schemas.WatchStatus(
+            watching=False,
+            watcher_count=watch_service.count_watchers(db, watch_service.DEFECT, defect.id),
         )
 
     # Test Result <-> Defect Link Endpoints
@@ -2492,6 +2693,12 @@ def register_requirements_defects_plans_routes(app):
         test_plan_data = test_plan.model_copy(update={"created_by": current_user.id})
         db_test_plan = create_test_plan(db=db, test_plan=test_plan_data)
 
+        # The creator and (any) assignee auto-watch the new plan for later changes.
+        watch_service.auto_watch(
+            db, entity_type=watch_service.TEST_PLAN, entity_id=db_test_plan.id,
+            user_ids=[db_test_plan.created_by, db_test_plan.assigned_to],
+        )
+
         notify_test_plan_assignee(db, db_test_plan, current_user)
 
         # Create audit trail
@@ -2684,15 +2891,40 @@ def register_requirements_defects_plans_routes(app):
             if assignee is None:
                 raise HTTPException(status_code=400, detail="Assigned user not found")
         prior_assigned_to = db_test_plan.assigned_to
+        # Snapshot watched fields before the write to diff the watcher broadcast.
+        watch_before = {
+            k: getattr(db_test_plan, k) for k in update_fields if k in _TEST_PLAN_WATCH_FIELDS
+        }
 
         db_test_plan = update_test_plan(db, test_plan_id=test_plan_id, test_plan=test_plan)
 
+        # A newly-assigned user starts watching (without re-subscribing an unwatcher).
+        if db_test_plan.assigned_to and db_test_plan.assigned_to != prior_assigned_to:
+            watch_service.auto_watch(
+                db, entity_type=watch_service.TEST_PLAN, entity_id=db_test_plan.id,
+                user_ids=[db_test_plan.assigned_to],
+            )
+
+        # One batch: the assignment notice and the watch broadcast de-dupe via the
+        # ladder so a newly-assigned watcher gets a single ASSIGNMENT row.
+        batch = notification_engine.NotificationBatch()
         if "assigned_to" in update_fields:
-            batch = notification_engine.NotificationBatch()
             notify_test_plan_assignee(
                 db, db_test_plan, current_user, previous_assigned_to=prior_assigned_to, batch=batch
             )
-            batch.flush(db)
+        changed = _changed_field_labels(watch_before, db_test_plan, rename={"milestone_id": "milestone"})
+        if changed:
+            watch_service.notify_watchers_of_change(
+                db,
+                entity_type=watch_service.TEST_PLAN,
+                entity_id=db_test_plan.id,
+                label=db_test_plan.title or f"#{db_test_plan.id}",
+                action="updated",
+                actor_id=current_user.id,
+                changed_fields=changed,
+                batch=batch,
+            )
+        batch.flush(db)
 
         # Create audit trail
         try:
@@ -2732,6 +2964,10 @@ def register_requirements_defects_plans_routes(app):
         plan_title = db_test_plan.title
         project_id = db_test_plan.project_id
 
+        # Watches reference the plan by loose id (no FK); clear them so the rows are
+        # removed by the delete commit below, not orphaned.
+        watch_service.clear_watches(db, watch_service.TEST_PLAN, plan_id)
+
         # Nullify test_plan_id on linked test runs so they are not orphaned.
         # delete_test_plan() commits, which finalises both the update and the delete
         # atomically (single SQLAlchemy session, single transaction).
@@ -2761,6 +2997,52 @@ def register_requirements_defects_plans_routes(app):
             logger.exception("Failed to create audit trail for test plan deletion")
 
         return {"message": "Test plan deleted successfully"}
+
+    # ------------------------- Test plan watch subscriptions -------------------
+
+    @app.get("/test-plans/{test_plan_id}/watch", response_model=schemas.WatchStatus)
+    def get_test_plan_watch(
+        test_plan_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_plan = _get_test_plan_or_404(db, test_plan_id)
+        if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return schemas.WatchStatus(
+            watching=watch_service.is_watching(db, current_user.id, watch_service.TEST_PLAN, test_plan.id),
+            watcher_count=watch_service.count_watchers(db, watch_service.TEST_PLAN, test_plan.id),
+        )
+
+    @app.post("/test-plans/{test_plan_id}/watch", response_model=schemas.WatchStatus)
+    def watch_test_plan(
+        test_plan_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_plan = _get_test_plan_or_404(db, test_plan_id)
+        if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        watch_service.add_watch(db, current_user.id, watch_service.TEST_PLAN, test_plan.id)
+        return schemas.WatchStatus(
+            watching=True,
+            watcher_count=watch_service.count_watchers(db, watch_service.TEST_PLAN, test_plan.id),
+        )
+
+    @app.delete("/test-plans/{test_plan_id}/watch", response_model=schemas.WatchStatus)
+    def unwatch_test_plan(
+        test_plan_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_plan = _get_test_plan_or_404(db, test_plan_id)
+        if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        watch_service.remove_watch(db, current_user.id, watch_service.TEST_PLAN, test_plan.id)
+        return schemas.WatchStatus(
+            watching=False,
+            watcher_count=watch_service.count_watchers(db, watch_service.TEST_PLAN, test_plan.id),
+        )
 
     @app.get("/test-plans/{test_plan_id}/requirements", response_model=schemas.TestPlanLinkedRequirementList)
     def search_test_plan_requirements(

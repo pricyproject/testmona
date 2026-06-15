@@ -11,6 +11,7 @@ from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
+from ..services import notification_engine, watch_service
 from .test_management_helpers import *
 
 logger = logging.getLogger(__name__)
@@ -321,7 +322,13 @@ def register_case_routes(app):
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             logger.warning(f"Failed to create audit trail for test case creation: {e}")
-        
+
+        # The author auto-watches the new test case for later change alerts.
+        watch_service.auto_watch(
+            db, entity_type=watch_service.TEST_CASE, entity_id=db_test_case.id,
+            user_ids=[db_test_case.created_by],
+        )
+
         return db_test_case
 
     @app.get("/test-cases", response_model=List[schemas.TestCaseWithRelations],
@@ -537,23 +544,22 @@ def register_case_routes(app):
         if db_test_case is None:
             raise HTTPException(status_code=404, detail="Test case not found")
 
+        # Diff once: drives both the revision history and the watcher broadcast.
+        def _normalize(value):
+            if value is None:
+                return ''
+            if hasattr(value, 'value'):
+                return str(value.value)
+            return str(value)
+
+        changed_fields = [
+            field
+            for field, new_value in update_fields.items()
+            if field in original_data
+            and _normalize(original_data.get(field)) != _normalize(new_value)
+        ]
+
         try:
-            def _normalize(value):
-                if value is None:
-                    return ''
-                if hasattr(value, 'value'):
-                    return str(value.value)
-                return str(value)
-
-            changed_fields = []
-            update_data = update_fields
-
-            for field, new_value in update_data.items():
-                if field not in original_data:
-                    continue
-                if _normalize(original_data.get(field)) != _normalize(new_value):
-                    changed_fields.append(field)
-
             if changed_fields:
                 revision_data = {
                     "test_case_id": test_case_id,
@@ -591,6 +597,21 @@ def register_case_routes(app):
         except Exception:
             logger.exception("Failed to create audit trail for test case update %s", test_case_id)
 
+        # Alert watchers about the change (informational; deep-links to the case).
+        if changed_fields:
+            batch = notification_engine.NotificationBatch()
+            watch_service.notify_watchers_of_change(
+                db,
+                entity_type=watch_service.TEST_CASE,
+                entity_id=db_test_case.id,
+                label=db_test_case.title or f"#{db_test_case.id}",
+                action="updated",
+                actor_id=current_user.id,
+                changed_fields=[f.replace("_", " ") for f in changed_fields],
+                batch=batch,
+            )
+            batch.flush(db)
+
         return db_test_case
 
     @app.delete("/test-cases/{test_case_id}", response_model=schemas.MessageResponse)
@@ -613,6 +634,9 @@ def register_case_routes(app):
         project_id = suite.project_id
         test_case_title = db_test_case.title
 
+        # Watches reference the case by loose id (no FK); clear them too.
+        watch_service.clear_watches(db, watch_service.TEST_CASE, test_case_id)
+
         crud.delete_test_case(db, test_case_id=test_case_id)
 
         try:
@@ -633,6 +657,57 @@ def register_case_routes(app):
             logger.exception("Failed to create audit trail for test case deletion %s", test_case_id)
 
         return {"message": "Test case deleted successfully"}
+
+    # ------------------------- Test case watch subscriptions -------------------
+
+    def _get_watchable_test_case(db: Session, test_case_id: int, current_user):
+        test_case = crud.get_test_case(db, test_case_id=test_case_id)
+        if test_case is None or getattr(test_case, "is_deleted", False):
+            raise HTTPException(status_code=404, detail="Test case not found")
+        suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
+        if not suite:
+            raise HTTPException(status_code=404, detail="Test suite not found for this test case")
+        if not rbac.has_permission(current_user, "read", suite.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to access this project")
+        return test_case
+
+    @app.get("/test-cases/{test_case_id}/watch", response_model=schemas.WatchStatus)
+    def get_test_case_watch(
+        test_case_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_case = _get_watchable_test_case(db, test_case_id, current_user)
+        return schemas.WatchStatus(
+            watching=watch_service.is_watching(db, current_user.id, watch_service.TEST_CASE, test_case.id),
+            watcher_count=watch_service.count_watchers(db, watch_service.TEST_CASE, test_case.id),
+        )
+
+    @app.post("/test-cases/{test_case_id}/watch", response_model=schemas.WatchStatus)
+    def watch_test_case(
+        test_case_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_case = _get_watchable_test_case(db, test_case_id, current_user)
+        watch_service.add_watch(db, current_user.id, watch_service.TEST_CASE, test_case.id)
+        return schemas.WatchStatus(
+            watching=True,
+            watcher_count=watch_service.count_watchers(db, watch_service.TEST_CASE, test_case.id),
+        )
+
+    @app.delete("/test-cases/{test_case_id}/watch", response_model=schemas.WatchStatus)
+    def unwatch_test_case(
+        test_case_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        test_case = _get_watchable_test_case(db, test_case_id, current_user)
+        watch_service.remove_watch(db, current_user.id, watch_service.TEST_CASE, test_case.id)
+        return schemas.WatchStatus(
+            watching=False,
+            watcher_count=watch_service.count_watchers(db, watch_service.TEST_CASE, test_case.id),
+        )
 
     @app.get("/test-cases/{test_case_id}/revisions")
     def get_test_case_revisions(

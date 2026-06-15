@@ -1,10 +1,10 @@
-"""Watch / change-notification service for docs and requirements.
+"""Watch / change-notification service for docs, requirements, and work items.
 
-A user can *watch* a doc or a requirement. When a watched entity records a new
-content version, every watcher except the person who made the change receives a
-:class:`~app.models.Notification` summarising *what* changed and *who* changed it.
-The notification deep-links to the entity's version history, where the per-field
-diff shows the reader exactly which parts changed and when.
+A user can *watch* a doc, requirement, defect, test case, or test plan. When a
+watched entity changes, every watcher except the person who made the change
+receives a :class:`~app.models.Notification` summarising *what* changed and *who*
+changed it. For versioned entities (docs/requirements) the alert deep-links to the
+version-history diff; for the others it links to the entity itself.
 
 Watch state lives in the generic :class:`~app.models.EntityWatch` table; this
 module centralises the small amount of logic the routes and the version-recording
@@ -14,7 +14,7 @@ CRUD share so neither has to know the table shape.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -24,15 +24,25 @@ from . import notification_engine
 
 logger = logging.getLogger(__name__)
 
-# The two kinds of entity a user may watch.
+# The kinds of entity a user may watch.
 DOC = "doc"
 REQUIREMENT = "requirement"
-_VALID_ENTITY_TYPES = {DOC, REQUIREMENT}
+DEFECT = "defect"
+TEST_CASE = "test_case"
+TEST_PLAN = "test_plan"
+_VALID_ENTITY_TYPES = {DOC, REQUIREMENT, DEFECT, TEST_CASE, TEST_PLAN}
 
 # Notification ``related_entity_type`` values. Distinct from the plain
-# ``"doc"``/``"requirement"`` used by comment/mention notifications so the
-# frontend can route a watch alert straight to the version-history diff.
-_CHANGE_NOTIFICATION_TYPE = {DOC: "doc_change", REQUIREMENT: "requirement_change"}
+# entity types used by comment/mention/assignment notifications so the frontend can
+# route a watch alert to the right destination (the version-history diff for
+# versioned entities, the entity detail page for the rest).
+_CHANGE_NOTIFICATION_TYPE = {
+    DOC: "doc_change",
+    REQUIREMENT: "requirement_change",
+    DEFECT: "defect_change",
+    TEST_CASE: "test_case_change",
+    TEST_PLAN: "test_plan_change",
+}
 
 _ACTION_VERB = {
     "updated": "updated",
@@ -157,13 +167,40 @@ def list_user_watches(db: Session, user_id: int) -> List[EntityWatch]:
     )
 
 
+def auto_watch(
+    db: Session,
+    *,
+    entity_type: str,
+    entity_id: int,
+    user_ids: Iterable[Optional[int]],
+) -> None:
+    """Start watching on a user's behalf for the people closest to an entity.
+
+    Used to seed watches for the natural stakeholders — a defect's reporter and
+    assignee, a test plan's creator and assignee, a test case's creator — so they
+    are kept in the loop without having to click the watch button. Idempotent and
+    best-effort: duplicates and ``None`` ids are skipped, and any failure is logged
+    and swallowed so it can never break the create/update that triggered it.
+    """
+    try:
+        _normalise_entity_type(entity_type)
+        seen: set[int] = set()
+        for uid in user_ids:
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            add_watch(db, uid, entity_type, entity_id)
+    except Exception:
+        logger.exception("Failed to auto-watch %s %s", entity_type, entity_id)
+
+
 def notify_watchers_of_change(
     db: Session,
     *,
     entity_type: str,
     entity_id: int,
     label: str,
-    version_number: int,
+    version_number: Optional[int] = None,
     action: str,
     actor_id: Optional[int],
     changed_fields: Sequence[str] | None = None,
@@ -199,11 +236,17 @@ def notify_watchers_of_change(
         note_clause = f' Note: "{change_note.strip()}".' if change_note and change_note.strip() else ""
 
         title = f"{label} was {verb}"
-        message = (
-            f"{actor_name} {verb} {label} (v{version_number})."
-            f"{changed_clause}{note_clause}"
-            " Open the version history to see exactly what changed."
-        )
+        if version_number is not None:
+            # Versioned entities (docs/requirements): point at the diff.
+            message = (
+                f"{actor_name} {verb} {label} (v{version_number})."
+                f"{changed_clause}{note_clause}"
+                " Open the version history to see exactly what changed."
+            )
+        else:
+            # Unversioned work items (defects/test cases/test plans): the alert is
+            # informational; the deep-link lands on the entity itself.
+            message = f"{actor_name} {verb} {label}.{changed_clause}{note_clause}"
         related_type = _CHANGE_NOTIFICATION_TYPE[entity_type]
 
         target = batch or notification_engine.NotificationBatch()
