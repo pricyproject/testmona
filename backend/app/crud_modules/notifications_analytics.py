@@ -233,35 +233,23 @@ def _open_inbox_clauses(now: Optional[datetime] = None):
     )
 
 
-def get_inbox_notifications(
-    db: Session,
-    user_id: int,
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _apply_inbox_filters(
+    query,
     actionable_categories: List[str],
     status: str = "open",
     category: Optional[str] = None,
     unread_only: bool = False,
-    sort: str = "newest",
-    skip: int = 0,
-    limit: int = 50,
+    search: Optional[str] = None,
+    actor_id: Optional[int] = None,
+    actor_joined: bool = False,
 ):
-    """List a user's Work Inbox items.
-
-    ``status`` is one of ``open`` (actionable, not archived, not currently
-    snoozed), ``snoozed`` (not archived, snoozed into the future), ``done``
-    (archived), or ``all``. ``category`` optionally narrows to a single actionable
-    category, and ``unread_only`` restricts to items the user hasn't seen yet.
-    ``sort`` is ``newest`` (default) or ``oldest`` — ordering by ``created_at`` so
-    "oldest first" surfaces the most-aged work and paginates correctly server-side.
-    """
-    if not actionable_categories:
-        return []
-    query = db.query(Notification).filter(
-        Notification.user_id == user_id,
-        Notification.category.in_(actionable_categories),
-    )
     if category:
         if category not in actionable_categories:
-            return []
+            return None
         query = query.filter(Notification.category == category)
     if status == "open":
         query = query.filter(*_open_inbox_clauses())
@@ -275,12 +263,94 @@ def get_inbox_notifications(
         query = query.filter(Notification.archived == True)  # noqa: E712
     if unread_only:
         query = query.filter(Notification.is_read == False)  # noqa: E712
+    if actor_id is not None:
+        query = query.filter(Notification.actor_id == actor_id)
+    if search and search.strip():
+        term = f"%{_escape_like(search.strip())}%"
+        if not actor_joined:
+            query = query.outerjoin(User, User.id == Notification.actor_id)
+        query = query.filter(
+            or_(
+                Notification.title.ilike(term, escape="\\"),
+                Notification.message.ilike(term, escape="\\"),
+                User.full_name.ilike(term, escape="\\"),
+                User.username.ilike(term, escape="\\"),
+            )
+        )
+    return query
+
+
+def get_inbox_notifications(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    status: str = "open",
+    category: Optional[str] = None,
+    unread_only: bool = False,
+    search: Optional[str] = None,
+    actor_id: Optional[int] = None,
+    sort: str = "newest",
+    skip: int = 0,
+    limit: int = 50,
+):
+    """List a user's Work Inbox items.
+
+    ``status`` is one of ``open`` (actionable, not archived, not currently
+    snoozed), ``snoozed`` (not archived, snoozed into the future), ``done``
+    (archived), or ``all``. ``category`` optionally narrows to a single actionable
+    category, ``actor_id``, ``search``, and ``unread_only`` narrow the server-side
+    result set before pagination. ``sort`` is ``newest`` (default) or ``oldest`` —
+    ordering by ``created_at`` so "oldest first" surfaces the most-aged work and
+    paginates correctly server-side.
+    """
+    if not actionable_categories:
+        return []
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+    )
+    query = _apply_inbox_filters(query, actionable_categories, status, category, unread_only, search, actor_id)
+    if query is None:
+        return []
     order = Notification.created_at.asc() if sort == "oldest" else Notification.created_at.desc()
     return (
         query.order_by(order)
         .offset(skip)
         .limit(limit)
         .all()
+    )
+
+
+def get_inbox_actor_options(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    status: str = "open",
+    category: Optional[str] = None,
+    unread_only: bool = False,
+    search: Optional[str] = None,
+):
+    """Return every actor represented in the current inbox filter, not just the page."""
+    if not actionable_categories:
+        return []
+    query = db.query(Notification).join(User, User.id == Notification.actor_id).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+        Notification.actor_id.isnot(None),
+    )
+    query = _apply_inbox_filters(
+        query, actionable_categories, status, category, unread_only, search, actor_joined=True
+    )
+    if query is None:
+        return []
+    rows = (
+        query.with_entities(User.id, User.full_name, User.username)
+        .distinct()
+        .all()
+    )
+    return sorted(
+        ((uid, full_name or username) for uid, full_name, username in rows if full_name or username),
+        key=lambda row: row[1].lower(),
     )
 
 
@@ -514,6 +584,29 @@ def mark_inbox_all_read(
     return result
 
 
+def unsnooze_inbox_notifications(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    category: Optional[str] = None,
+):
+    """Clear every future snooze in the user's inbox, optionally by category."""
+    if category is not None and category not in actionable_categories:
+        return 0
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+        Notification.archived == False,  # noqa: E712
+        Notification.snoozed_until.isnot(None),
+        Notification.snoozed_until > datetime.now(timezone.utc),
+    )
+    if category:
+        query = query.filter(Notification.category == category)
+    result = query.update({"snoozed_until": None}, synchronize_session=False)
+    safe_commit(db)
+    return result
+
+
 def snooze_notification(db: Session, notification_id: int, until: datetime):
     """Defer a single notification until ``until`` (Open → Snoozed).
 
@@ -541,24 +634,24 @@ def unsnooze_notification(db: Session, notification_id: int):
     return db_notification
 
 
-def sweep_due_snoozes(db: Session, user_id: int):
-    """Clear elapsed snoozes for a user so due items rejoin the open inbox.
+def sweep_due_snoozes(db: Session, user_id: Optional[int] = None):
+    """Clear elapsed snoozes so due items rejoin the open inbox.
 
     The open predicate already treats an elapsed snooze as open, so this is a
-    lazy-on-read tidy-up (called from the inbox list/summary) rather than a
-    correctness requirement: nulling ``snoozed_until`` keeps the dedicated
-    "Snoozed" view and its counts honest. Returns how many rows resurfaced.
+    lazy tidy-up rather than a correctness requirement: nulling
+    ``snoozed_until`` keeps the dedicated "Snoozed" view and its counts honest.
+    When ``user_id`` is omitted every elapsed snooze is swept, so inactive users do
+    not retain stale snooze timestamps indefinitely while the app is in use.
+    Returns how many rows resurfaced.
     """
     now = datetime.now(timezone.utc)
-    result = (
-        db.query(Notification)
-        .filter(
-            Notification.user_id == user_id,
-            Notification.snoozed_until.isnot(None),
-            Notification.snoozed_until <= now,
-        )
-        .update({"snoozed_until": None}, synchronize_session=False)
+    query = db.query(Notification).filter(
+        Notification.snoozed_until.isnot(None),
+        Notification.snoozed_until <= now,
     )
+    if user_id is not None:
+        query = query.filter(Notification.user_id == user_id)
+    result = query.update({"snoozed_until": None}, synchronize_session=False)
     if result:
         safe_commit(db)
     return result
@@ -596,7 +689,7 @@ def bulk_inbox_action(
         values = {"is_read": False}
     elif action == "snooze":
         if until is None:
-            return 0
+            raise ValueError("until is required when action is 'snooze'")
         values = {"snoozed_until": until, "archived": False, "done_at": None}
     else:
         return 0

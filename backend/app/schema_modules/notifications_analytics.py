@@ -121,6 +121,12 @@ class InboxBulkResult(BaseModel):
     affected_count: int
 
 
+class InboxActorOption(BaseModel):
+    """One actor available for the current Work Inbox filter."""
+    id: int
+    name: str
+
+
 class NotificationPreferencesUpdate(BaseModel):
     do_not_disturb: Optional[bool] = None
     notification_sound_enabled: Optional[bool] = None

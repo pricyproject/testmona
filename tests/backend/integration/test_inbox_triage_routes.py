@@ -80,6 +80,18 @@ def test_unsnooze_returns_to_open(client):
     assert nid in open_ids
 
 
+def test_unsnooze_all_returns_snoozed_items_to_open(client):
+    until = datetime.now(timezone.utc) + timedelta(hours=3)
+    ids = _seed_notifications(client, 3, snoozed_until=until)
+
+    resp = client.post("/inbox/unsnooze-all")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["unsnoozed_count"] == 3
+
+    open_ids = {n["id"] for n in client.get("/inbox", params={"status": "open"}).json()}
+    assert set(ids) <= open_ids
+
+
 def test_due_snooze_is_swept_back_to_open_on_read(client):
     # A snooze already in the past should resurface (and be cleared) on next read.
     past = datetime.now(timezone.utc) - timedelta(minutes=5)
@@ -89,6 +101,74 @@ def test_due_snooze_is_swept_back_to_open_on_read(client):
     assert nid in open_ids
     # And it is no longer counted as snoozed.
     assert client.get("/inbox/summary").json()["total_snoozed"] == 0
+
+
+def test_due_snooze_sweep_is_global_on_read(client):
+    from app import models
+
+    past = datetime.now(timezone.utc) - timedelta(minutes=5)
+    _seed_notifications(client, 1, snoozed_until=past)
+    db = client.SessionLocal()
+    try:
+        other = models.User(username="inactive", email="inactive@b.c", hashed_password="x", is_active=True)
+        db.add(other)
+        db.commit()
+        db.refresh(other)
+        note = models.Notification(
+            user_id=other.id,
+            title="Other due",
+            message="body",
+            category="mention",
+            snoozed_until=past,
+        )
+        db.add(note)
+        db.commit()
+        other_note_id = note.id
+    finally:
+        db.close()
+
+    assert client.get("/inbox", params={"status": "open"}).status_code == 200
+    db = client.SessionLocal()
+    try:
+        assert db.get(models.Notification, other_note_id).snoozed_until is None
+    finally:
+        db.close()
+
+
+def test_inbox_search_and_actor_filter_are_server_side(client):
+    from app import models
+
+    ids = _seed_notifications(client, 60)
+    db = client.SessionLocal()
+    try:
+        actor = models.User(username="deepactor", email="deep@b.c", hashed_password="x", full_name="Deep Actor", is_active=True)
+        db.add(actor)
+        db.commit()
+        db.refresh(actor)
+        db.query(models.Notification).filter(models.Notification.id == ids[-1]).update({
+            "title": "Needle on a later page",
+            "actor_id": actor.id,
+        })
+        db.commit()
+        actor_id = actor.id
+    finally:
+        db.close()
+
+    found = client.get("/inbox", params={"search": "Needle", "limit": 50})
+    assert found.status_code == 200, found.text
+    assert [n["id"] for n in found.json()] == [ids[-1]]
+
+    actors = client.get("/inbox/actors")
+    assert actors.status_code == 200, actors.text
+    assert {a["id"] for a in actors.json()} == {actor_id}
+
+    actor_search = client.get("/inbox/actors", params={"search": "Deep Actor"})
+    assert actor_search.status_code == 200, actor_search.text
+    assert actor_search.json() == [{"id": actor_id, "name": "Deep Actor"}]
+
+    filtered = client.get("/inbox", params={"actor_id": actor_id})
+    assert filtered.status_code == 200, filtered.text
+    assert [n["id"] for n in filtered.json()] == [ids[-1]]
 
 
 def test_bulk_archive_and_snooze(client):
@@ -119,6 +199,33 @@ def test_bulk_snooze_without_until_is_rejected(client):
     assert resp.status_code == 422
 
 
+def test_archive_all_records_audit_and_skips_snoozed(client):
+    from app import models
+
+    ids = _seed_notifications(client, 2)
+    until = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    client.post("/inbox/bulk", json={"ids": [ids[1]], "action": "snooze", "until": until})
+
+    resp = client.post("/inbox/archive-all")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["archived_count"] == 1
+
+    db = client.SessionLocal()
+    try:
+        archived = db.get(models.Notification, ids[0])
+        snoozed = db.get(models.Notification, ids[1])
+        assert archived.archived is True
+        assert snoozed.archived is False
+        audit = db.query(models.AuditTrail).filter(
+            models.AuditTrail.entity_type == models.EntityType.NOTIFICATION,
+            models.AuditTrail.description == "Work Inbox action: archive_all",
+        ).first()
+        assert audit is not None
+        assert audit.additional_metadata["affected_count"] == 1
+    finally:
+        db.close()
+
+
 def test_sort_oldest_first(client):
     # item 0 is the oldest; default newest-first returns them reversed.
     ids = _seed_notifications(client, 3, spread_age=True)
@@ -132,6 +239,11 @@ def test_sort_oldest_first(client):
 def test_sort_param_is_validated(client):
     resp = client.get("/inbox", params={"status": "open", "sort": "sideways"})
     assert resp.status_code == 422
+
+
+def test_unknown_inbox_category_is_rejected(client):
+    resp = client.get("/inbox", params={"category": "not_a_category"})
+    assert resp.status_code == 400
 
 
 def test_summary_open_total_excludes_snoozed(client):

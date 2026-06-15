@@ -174,6 +174,22 @@ def test_sweep_clears_elapsed_snoozes_only(inbox_db):
     assert still.snoozed_until is not None
 
 
+def test_sweep_without_user_clears_elapsed_snoozes_for_all_users(inbox_db):
+    inbox_db.add(models.User(id=2, username="bob", email="b@x.com",
+                             hashed_password="x", full_name="Bob", is_active=True))
+    inbox_db.commit()
+    past = datetime.now(timezone.utc) - timedelta(minutes=1)
+    mine = _notif(inbox_db, snoozed_until=past)
+    other = _notif(inbox_db, user_id=2, snoozed_until=past)
+
+    swept = crud.sweep_due_snoozes(inbox_db)
+    assert swept == 2
+    inbox_db.refresh(mine)
+    inbox_db.refresh(other)
+    assert mine.snoozed_until is None
+    assert other.snoozed_until is None
+
+
 # --- W3 (follow-up): group-by-project resolution ----------------------------
 
 
@@ -236,11 +252,11 @@ def test_bulk_archive_only_touches_owned_inbox_items(inbox_db):
 
 def test_bulk_snooze_requires_until_and_defers(inbox_db):
     n = _notif(inbox_db)
-    # Missing until is a no-op rather than a crash.
-    assert crud.bulk_inbox_action(
-        inbox_db, user_id=1, notification_ids=[n.id], action="snooze",
-        actionable_categories=ACTIONABLE,
-    ) == 0
+    with pytest.raises(ValueError, match="until is required"):
+        crud.bulk_inbox_action(
+            inbox_db, user_id=1, notification_ids=[n.id], action="snooze",
+            actionable_categories=ACTIONABLE,
+        )
 
     until = datetime.now(timezone.utc) + timedelta(days=1)
     count = crud.bulk_inbox_action(
@@ -249,6 +265,35 @@ def test_bulk_snooze_requires_until_and_defers(inbox_db):
     )
     assert count == 1
     assert n.id in _snoozed_ids(inbox_db)
+
+
+def test_server_side_inbox_search_and_actor_filter(inbox_db):
+    actor = models.User(id=2, username="reviewer", email="r@x.com",
+                        hashed_password="x", full_name="Review Boss", is_active=True)
+    inbox_db.add(actor)
+    inbox_db.commit()
+    old = _notif(inbox_db, created_at=datetime.now(timezone.utc) - timedelta(days=2))
+    needle = _notif(
+        inbox_db,
+        created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        related_entity_type="requirement",
+    )
+    needle.title = "Find this buried item"
+    needle.actor_id = actor.id
+    inbox_db.commit()
+
+    items = crud.get_inbox_notifications(
+        inbox_db, user_id=1, actionable_categories=ACTIONABLE, search="buried"
+    )
+    assert [n.id for n in items] == [needle.id]
+
+    actor_items = crud.get_inbox_notifications(
+        inbox_db, user_id=1, actionable_categories=ACTIONABLE, actor_id=actor.id
+    )
+    assert [n.id for n in actor_items] == [needle.id]
+    actors = crud.get_inbox_actor_options(inbox_db, user_id=1, actionable_categories=ACTIONABLE)
+    assert actors == [(actor.id, "Review Boss")]
+    assert old.id not in {n.id for n in actor_items}
 
 
 # --- W4: aging sort ---------------------------------------------------------
