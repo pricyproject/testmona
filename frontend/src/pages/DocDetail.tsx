@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowRightLeft,
   BarChart3,
+  ClipboardCheck,
   Check,
   CheckCircle2,
   Copy,
@@ -52,6 +53,7 @@ import { DocRequirementLinksSection } from '@/components/docs/DocRequirementLink
 import { ConvertDocDialog } from '@/components/docs/ConvertDocDialog';
 import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { DocShareDialog } from '@/components/docs/DocShareDialog';
+import { DocReviewDialog } from '@/components/docs/DocReviewDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -73,6 +75,7 @@ import type { Doc, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocRequirem
 
 const statusTone: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  in_review: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
   published: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
   archived: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
 };
@@ -103,6 +106,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [convertOpen, setConvertOpen] = useState(false);
   const [impactOpen, setImpactOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -329,6 +333,12 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
             <ArrowRightLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             {t('docConvertToRequirements')}
+          </Button>
+        )}
+        {doc.can_edit && doc.project_id != null && doc.status !== 'in_review' && (
+          <Button variant="outline" size="sm" onClick={() => setReviewOpen(true)}>
+            <ClipboardCheck className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+            {t('docRequestReview')}
           </Button>
         )}
         {doc.can_edit && (
@@ -602,6 +612,14 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       {impactOpen && (
         <DocImpactDialog doc={doc} open={impactOpen} onOpenChange={setImpactOpen} />
       )}
+
+      <DocReviewDialog
+        docId={doc.id}
+        projectId={doc.project_id ?? null}
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        onSuccess={reloadDoc}
+      />
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

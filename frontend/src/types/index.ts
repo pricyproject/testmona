@@ -859,7 +859,7 @@ export interface MilestoneStats {
 
 // ─── Doc Hub ────────────────────────────────────────────────────────────────
 
-export type DocStatus = 'draft' | 'published' | 'archived';
+export type DocStatus = 'draft' | 'in_review' | 'published' | 'archived';
 export type DocDir = 'ltr' | 'rtl' | 'auto';
 
 export interface DocSpace {

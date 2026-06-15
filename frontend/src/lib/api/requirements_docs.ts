@@ -363,6 +363,14 @@ export const docsAPI = {
   remove: async (id: number): Promise<void> => {
     await api.delete(`/docs/${id}`);
   },
+  // Move a doc into review and notify the chosen reviewers (Work Inbox "Reviews").
+  requestReview: async (
+    id: number,
+    payload: { reviewer_ids: number[]; note?: string | null }
+  ): Promise<{ message: string; doc_id: number; status: string; notified_count: number; reviewer_ids: number[] }> => {
+    const response = await api.post(`/docs/${id}/request-review`, payload);
+    return response.data;
+  },
   getPublic: async (publicId: string): Promise<DocPublicView> => {
     const response = await api.get(`/docs/public/${publicId}`);
     return response.data;

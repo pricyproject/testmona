@@ -254,6 +254,47 @@ class DocBase(BaseModel):
         return v
 
 
+class DocReviewRequest(BaseModel):
+    """Ask one or more teammates to review a document.
+
+    Mirrors ``RequirementReviewRequest``: drives the engine's REVIEW notification
+    (Work Inbox "Reviews") and moves the doc into the ``in_review`` status.
+    ``reviewer_ids`` are the people whose review is requested; ``note`` is an
+    optional message shown in the notification.
+    """
+    reviewer_ids: List[int] = Field(..., min_length=1, max_length=50)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reviewer_ids")
+    @classmethod
+    def _dedupe_reviewers(cls, v: List[int]) -> List[int]:
+        seen: set[int] = set()
+        ordered: List[int] = []
+        for uid in v:
+            if uid in seen:
+                continue
+            seen.add(uid)
+            ordered.append(uid)
+        return ordered
+
+    @field_validator("note")
+    @classmethod
+    def _clean_review_note(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class DocReviewRequestResult(BaseModel):
+    """Outcome of a doc review request: who was notified and the doc's new status."""
+    message: str
+    doc_id: int
+    status: DocStatus
+    notified_count: int
+    reviewer_ids: List[int] = []
+
+
 class DocCreate(DocBase):
     space_id: int
 

@@ -1664,6 +1664,93 @@ def register_docs_routes(app) -> None:
         batch.flush(db)
         return _doc_out(doc, current_user, db)
 
+    @app.post("/docs/{doc_id}/request-review", response_model=schemas.DocReviewRequestResult, tags=["Docs"])
+    def request_doc_review(
+        review_request: schemas.DocReviewRequest,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Ask teammates to review a document.
+
+        Moves the doc into the ``in_review`` status and emits the engine's REVIEW
+        notification (Work Inbox "Reviews") to each named reviewer. The requester is
+        never notified of their own request, and every reviewer must exist, be
+        active, and have read access to the doc — so a review request can never leak
+        a doc to someone who can't open it. Watchers are told the doc entered review
+        through the same batch, so a reviewer who also watches the doc gets the
+        single, higher-priority REVIEW row rather than a duplicate watch alert.
+        """
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+
+        reviewers = (
+            db.query(models.User)
+            .filter(
+                models.User.id.in_(review_request.reviewer_ids),
+                models.User.is_active == True,  # noqa: E712
+            )
+            .all()
+        )
+        found_by_id = {u.id: u for u in reviewers}
+        missing = [uid for uid in review_request.reviewer_ids if uid not in found_by_id]
+        if missing:
+            raise HTTPException(
+                status_code=400, detail=f"Reviewer(s) not found or inactive: {missing}"
+            )
+        no_access = [
+            uid
+            for uid in review_request.reviewer_ids
+            if not _can_access(found_by_id[uid], doc.project_id, "read", db)
+        ]
+        if no_access:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reviewer(s) do not have access to this document: {no_access}",
+            )
+
+        # Move into review and persist before notifying.
+        doc.status = models.DocStatus.IN_REVIEW
+        doc.updated_by = current_user.id
+        db.commit()
+        db.refresh(doc)
+
+        actor_name = notification_engine.actor_display_name(current_user)
+        label = doc.title or f"#{doc.id}"
+        note = review_request.note
+        note_clause = f' Note: "{note}".' if note else ""
+        batch = notification_engine.NotificationBatch()
+        batch.add(
+            category=notification_engine.REVIEW,
+            user_ids=review_request.reviewer_ids,
+            actor_id=current_user.id,
+            title="Review requested",
+            message=f'{actor_name} requested your review of "{label}".{note_clause}',
+            related_entity_type="doc",
+            related_entity_id=doc.id,
+        )
+        # Tell watchers the doc entered review; a reviewer who also watches is folded
+        # onto their higher-priority REVIEW row by the batch ladder (REVIEW outranks
+        # watch_change), so they never get two notifications for the one transition.
+        watch_service.notify_watchers_of_change(
+            db,
+            entity_type=watch_service.DOC,
+            entity_id=doc.id,
+            label=label,
+            action="review_requested",
+            actor_id=current_user.id,
+            batch=batch,
+        )
+        rows = batch.flush(db)
+        notified_ids = [r.user_id for r in rows if r.category == notification_engine.REVIEW.key]
+        return schemas.DocReviewRequestResult(
+            message=f"Requested review from {len(notified_ids)} reviewer(s)",
+            doc_id=doc.id,
+            status=doc.status,
+            notified_count=len(notified_ids),
+            reviewer_ids=notified_ids,
+        )
+
     @app.delete("/docs/{doc_id}", status_code=204, tags=["Docs"])
     def delete_doc(
         doc_id: int = Path(..., ge=1),

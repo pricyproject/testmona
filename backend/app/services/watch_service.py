@@ -48,6 +48,7 @@ _ACTION_VERB = {
     "updated": "updated",
     "restored": "restored",
     "published": "published",
+    "review_requested": "submitted for review",
 }
 
 

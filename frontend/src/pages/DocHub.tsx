@@ -104,11 +104,12 @@ const readStoredHiddenHighlights = () => {
 
 const statusTone: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
+  in_review: 'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300',
   published: 'bg-primary/10 text-primary',
   archived: 'bg-secondary text-secondary-foreground',
 };
 
-const STATUS_FILTERS: Array<DocStatus | 'all'> = ['all', 'draft', 'published', 'archived'];
+const STATUS_FILTERS: Array<DocStatus | 'all'> = ['all', 'draft', 'in_review', 'published', 'archived'];
 
 // Curated presets for space identity. Free-form values from the API still render.
 const SPACE_ICONS = ['📘', '📐', '🛠️', '🚀', '🔒', '🧪', '📋', '💡', '🌐', '📦'];

@@ -8,6 +8,7 @@ from .integrations_audit import *
 
 class DocStatus(enum.Enum):
     DRAFT = "draft"
+    IN_REVIEW = "in_review"
     PUBLISHED = "published"
     ARCHIVED = "archived"
 
