@@ -408,20 +408,31 @@ export interface Notification {
   category?: string | null;
   // Work Inbox dismissal: an archived item is "done".
   archived?: boolean;
+  // Work Inbox triage lifecycle (Plan B / W0): while snoozed_until is set and in
+  // the future the item is hidden from the open inbox; done_at records when it
+  // was archived. Both null/absent until the item is snoozed or done.
+  snoozed_until?: string | null;
+  done_at?: string | null;
   // Who triggered the notification + their resolved display name (inbox avatar/byline).
   actor_id?: number | null;
   actor_name?: string | null;
+  // Owning project, resolved per page by the inbox route (group-by-project view).
+  // Absent/null when the entity has no project or has been deleted.
+  project_id?: number | null;
+  project_name?: string | null;
   related_entity_type?: string;
   related_entity_id?: number;
   created_at: string;
   user_id: number;
 }
 
-// Work Inbox: per-category open/unread counts for the filter rail.
+// Work Inbox: per-category open/snoozed/done/unread counts for the filter rail.
 export interface InboxCategorySummary {
   key: string;
   label: string;
   open: number;
+  // Deferred (snoozed into the future) items — excluded from the open count.
+  snoozed: number;
   done: number;
   unread: number;
 }
@@ -429,6 +440,7 @@ export interface InboxCategorySummary {
 export interface InboxSummary {
   total_open: number;
   total_unread: number;
+  total_snoozed: number;
   categories: InboxCategorySummary[];
 }
 
