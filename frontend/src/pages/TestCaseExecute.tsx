@@ -14,6 +14,7 @@ import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 
 type CandidateRun = {
   id: number;
+  project_seq: number;
   name: string;
   status: string;
   hasCase: boolean;
@@ -73,6 +74,7 @@ export function TestCaseExecute() {
         );
         const runChecks = runs.map((run: any) => ({
           id: run.id,
+          project_seq: run.project_seq,
           name: run.name,
           status: run.status,
           hasCase: runIdsContainingCase.has(Number(run.id)),
@@ -119,7 +121,7 @@ export function TestCaseExecute() {
     navigate(`/test-cases/${id}`);
   };
 
-  const ensureCaseInRunAndNavigate = async (runId: number) => {
+  const ensureCaseInRunAndNavigate = async (runId: number, runSeq?: number) => {
     if (!id || !resolvedProjectId) return;
 
     const testCaseId = resolvedTcId;
@@ -135,7 +137,7 @@ export function TestCaseExecute() {
       });
     }
 
-    navigate(`/projects/${resolvedProjectId}/test-runs/${runId}/test-cases/${testCaseId}`);
+    navigate(`/projects/${resolvedProjectId}/test-runs/${runSeq ?? runId}/test-cases/${id}`);
   };
 
   const handleStartInSelectedRun = async () => {
@@ -150,7 +152,8 @@ export function TestCaseExecute() {
 
     setStarting(true);
     try {
-      await ensureCaseInRunAndNavigate(Number(selectedRunId));
+      const runSeq = candidateRuns.find((r) => r.id === Number(selectedRunId))?.project_seq;
+      await ensureCaseInRunAndNavigate(Number(selectedRunId), runSeq);
     } catch (startError) {
       console.error('Failed to start execution in selected run:', startError);
       toast({
@@ -186,7 +189,7 @@ export function TestCaseExecute() {
         priority: testCase.priority || 'medium',
       });
 
-      await ensureCaseInRunAndNavigate(newRun.id);
+      await ensureCaseInRunAndNavigate(newRun.id, newRun.project_seq);
     } catch (createError) {
       console.error('Failed to create run and start execution:', createError);
       toast({

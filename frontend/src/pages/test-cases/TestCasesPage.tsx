@@ -2302,7 +2302,8 @@ export function TestCases() {
 
         // Navigate to execute the first test case
         const firstTestCaseId = selectedTestCases[0];
-        navigate(`/projects/${projectId}/test-runs/${newRun.id}/test-cases/${firstTestCaseId}`);
+        const firstTcSeq = apiTestCases.find(tc => tc.id === firstTestCaseId)?.project_seq ?? firstTestCaseId;
+        navigate(`/projects/${projectId}/test-runs/${newRun.project_seq}/test-cases/${firstTcSeq}`);
       } catch (error) {
         console.error('Failed to create test run for bulk execution:', error);
         toast({
