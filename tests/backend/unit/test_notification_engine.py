@@ -5,6 +5,9 @@ exclusion, recipient dedupe, dropping deactivated accounts, and coalescing of
 repetitive informational notifications to fight unread pile-up.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from app import models
@@ -309,3 +312,46 @@ def test_batch_forwards_commit_flag_to_emit(users_db, monkeypatch):
 
 def test_empty_batch_flush_is_noop(users_db):
     assert ne.NotificationBatch().flush(users_db) == []
+
+
+def test_priority_ladder_matches_notification_contract():
+    assert ne.CATEGORY_PRIORITY == {
+        ne.MENTION.key: 0,
+        ne.COMMENT_REPLY.key: 1,
+        ne.REVIEW.key: 2,
+        ne.ASSIGNMENT.key: 3,
+        ne.FEEDBACK.key: 4,
+        ne.STATUS.key: 5,
+        ne.WATCH_CHANGE.key: 6,
+    }
+
+
+def test_every_registered_category_has_an_emitter():
+    """Guard the category registry from drifting beyond implemented producers."""
+    category_constant_names = {
+        ne.MENTION.key: "MENTION",
+        ne.COMMENT_REPLY.key: "COMMENT_REPLY",
+        ne.ASSIGNMENT.key: "ASSIGNMENT",
+        ne.REVIEW.key: "REVIEW",
+        ne.FEEDBACK.key: "FEEDBACK",
+        ne.WATCH_CHANGE.key: "WATCH_CHANGE",
+        ne.STATUS.key: "STATUS",
+        ne.SYSTEM.key: "SYSTEM",
+    }
+    assert set(category_constant_names) == {
+        category.key for category in ne.all_categories()
+    }
+
+    app_dir = Path(__file__).resolve().parents[3] / "backend" / "app"
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in app_dir.rglob("*.py")
+        if path.name != "notification_engine.py"
+    )
+
+    missing_emitters = [
+        category_key
+        for category_key, constant_name in category_constant_names.items()
+        if not re.search(rf"category\s*=\s*notification_engine\.{constant_name}\b", source)
+    ]
+    assert missing_emitters == []

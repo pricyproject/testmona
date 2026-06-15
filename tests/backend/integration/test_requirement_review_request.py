@@ -10,6 +10,18 @@ from conftest import make_http_client, seed_admin_project_member
 client = make_http_client(seed_fn=seed_admin_project_member)
 
 
+def _notifs(client, user_id):
+    from app import models
+
+    db = client.SessionLocal()
+    try:
+        return db.query(models.Notification).filter(
+            models.Notification.user_id == user_id
+        ).all()
+    finally:
+        db.close()
+
+
 def _create_requirement(client):
     resp = client.post("/requirements", json={
         "title": "Login must support SSO",
@@ -43,6 +55,14 @@ def test_request_review_notifies_reviewer_and_lands_in_inbox(client):
     assert item["type"].lower() == "warning"
     assert item["title"] == "Review requested"
     assert "SSO acceptance criteria" in item["message"]
+
+    persisted = _notifs(client, client.member_id)
+    assert len(persisted) == 1
+    assert persisted[0].category == "review"
+    assert persisted[0].title == "Review requested"
+    assert persisted[0].related_entity_type == "requirement"
+    assert persisted[0].related_entity_id == requirement_id
+    assert persisted[0].actor_id == 1
 
     # It is counted as an open, actionable review in the inbox summary.
     summary = client.get("/inbox/summary")

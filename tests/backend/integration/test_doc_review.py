@@ -142,8 +142,11 @@ def test_request_review_sets_status_and_notifies_reviewers(client):
     rev_rows = _notifs(client, client.ids["reviewer"])
     assert len(rev_rows) == 1
     assert rev_rows[0].category == "review"
+    assert rev_rows[0].title == "Review requested"
+    assert rev_rows[0].type == models.NotificationType.WARNING
     assert rev_rows[0].related_entity_type == "doc"
     assert rev_rows[0].related_entity_id == client.ids["doc"]
+    assert rev_rows[0].actor_id == client.ids["owner"]
 
 
 def test_requester_is_not_notified(client):

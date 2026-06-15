@@ -10,6 +10,21 @@ from conftest import make_http_client, seed_admin_project_member
 client = make_http_client(seed_fn=seed_admin_project_member)
 
 
+def _notifs(client, user_id):
+    from app import models
+
+    db = client.SessionLocal()
+    try:
+        return (
+            db.query(models.Notification)
+            .filter(models.Notification.user_id == user_id)
+            .order_by(models.Notification.id)
+            .all()
+        )
+    finally:
+        db.close()
+
+
 def test_core_backend_crud_permissions_and_relationship_edges(client):
     from app import models
 
@@ -161,3 +176,56 @@ def test_core_backend_crud_permissions_and_relationship_edges(client):
     assert client.post("/requirements", json={"title": "Blocked", "project_id": client.project_id, "created_by": viewer_id}).status_code == 403
     assert client.put(f"/test-plans/{plan_id}", json={"title": "Blocked"}).status_code == 403
     assert client.post(f"/projects/{client.project_id}/test-asset-health/detect").status_code == 403
+
+
+def test_test_run_notifications_keep_assignment_and_completion_contract(client):
+    from app import models
+
+    milestone = client.post("/milestones", json={
+        "title": "Run notification milestone",
+        "project_id": client.project_id,
+    })
+    assert milestone.status_code == 200, milestone.text
+    milestone_id = milestone.json()["id"]
+
+    db = client.SessionLocal()
+    try:
+        db.query(models.Milestone).filter(models.Milestone.id == milestone_id).update(
+            {"owner_id": client.member_id}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    run = client.post("/test-runs", json={
+        "name": "Run notification contract",
+        "project_id": client.project_id,
+        "milestone_id": milestone_id,
+        "assigned_to": client.member_id,
+    })
+    assert run.status_code == 200, run.text
+    run_id = run.json()["id"]
+
+    member_notifications = _notifs(client, client.member_id)
+    assert len(member_notifications) == 1
+    assignment = member_notifications[0]
+    assert assignment.category == "assignment"
+    assert assignment.title == "Test run assigned"
+    assert assignment.related_entity_type == "test_run"
+    assert assignment.related_entity_id == run_id
+    assert assignment.actor_id == 1
+
+    completed = client.put(f"/test-runs/{run_id}", json={"status": "completed"})
+    assert completed.status_code == 200, completed.text
+
+    member_notifications = _notifs(client, client.member_id)
+    assert [notification.category for notification in member_notifications] == [
+        "assignment",
+        "status",
+    ]
+    status = member_notifications[1]
+    assert status.title == "Test run completed"
+    assert status.type == models.NotificationType.SUCCESS
+    assert status.related_entity_type == "test_run"
+    assert status.related_entity_id == run_id
+    assert status.actor_id == 1

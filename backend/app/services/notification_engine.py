@@ -57,6 +57,11 @@ flushes once, and the batch keeps only the highest-priority category per
 structural — no route hand-rolls suppression sets — and the engine stays the
 single funnel where actor-exclusion, recipient dedupe, deactivated-account
 filtering and coalescing all happen.
+
+Maintenance contract: every registered category must have at least one producer in
+``backend/app`` and every ranked category must stay in :data:`CATEGORY_PRIORITY`;
+the Phase 10 guard tests assert both so new categories cannot become dead UI/API
+contracts silently.
 """
 
 from __future__ import annotations
