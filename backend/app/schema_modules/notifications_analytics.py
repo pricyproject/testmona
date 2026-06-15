@@ -70,6 +70,88 @@ class NotificationPreferencesUpdate(BaseModel):
     mute_duration_hours: Optional[int] = None
 
 
+class NotificationCategoryInfo(BaseModel):
+    """One row of the preferences grid: a category and its current delivery flags.
+
+    ``key``/``label`` come from the engine's category registry; ``actionable`` lets
+    the Settings page group inbox categories apart from purely informational ones.
+    ``in_app``/``email`` reflect the user's saved preference, defaulting on for any
+    category they have never customised.
+    """
+    key: str
+    label: str
+    actionable: bool
+    in_app: bool = True
+    email: bool = True
+
+
+class NotificationPreferencesResponse(BaseModel):
+    """The full preferences grid for the current user (one entry per category)."""
+    categories: List[NotificationCategoryInfo]
+
+
+class NotificationCategoryPreference(BaseModel):
+    """A single category's desired delivery flags in a preferences update."""
+    category: str
+    in_app: bool = True
+    email: bool = True
+
+
+class NotificationPreferencesPut(BaseModel):
+    """Replace the current user's preference rows with the supplied set.
+
+    Each entry names a category and its desired in-app/email flags. Unknown
+    categories are rejected server-side against the engine registry so the table
+    never accumulates dead keys.
+    """
+    preferences: List[NotificationCategoryPreference] = Field(..., max_length=50)
+
+
+class AnnouncementCreate(BaseModel):
+    """An admin broadcast emitted as a bell-only SYSTEM notification.
+
+    ``audience`` is either ``"all"`` (every active user) or ``"project"`` (members
+    of ``project_id`` — its owner plus assignees). ``project_id`` is required when
+    and only when the audience is a project.
+    """
+    title: str = Field(..., min_length=1, max_length=200)
+    message: str = Field(..., min_length=1, max_length=2000)
+    audience: str = Field(default="all")
+    project_id: Optional[int] = None
+
+    @field_validator("title", "message")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("must not be empty")
+        return cleaned
+
+    @field_validator("audience")
+    @classmethod
+    def _validate_audience(cls, v: str) -> str:
+        value = (v or "all").strip().lower()
+        if value not in {"all", "project"}:
+            raise ValueError("audience must be 'all' or 'project'")
+        return value
+
+    @model_validator(mode="after")
+    def _check_project(self):
+        if self.audience == "project" and not self.project_id:
+            raise ValueError("project_id is required when audience is 'project'")
+        if self.audience == "all":
+            self.project_id = None
+        return self
+
+
+class AnnouncementResult(BaseModel):
+    """Outcome of an announcement broadcast: how many users were notified."""
+    message: str
+    audience: str
+    project_id: Optional[int] = None
+    notified_count: int
+
+
 class Notification(NotificationBase):
     id: int
     user_id: int

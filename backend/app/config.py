@@ -41,6 +41,38 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Optional[str] = None
 
+    # --- Notification delivery channels (Phase 9) -------------------------- #
+    # Public base URL of the frontend, used to build absolute deep-links in
+    # emails / Slack messages (e.g. "https://qa.acme.com"). When unset it falls
+    # back to the first entry in ``allowed_origins``.
+    frontend_base_url: Optional[str] = None
+    # Outbound email (SMTP). Email delivery is a no-op until ``smtp_host`` is set,
+    # so the app runs fine without it; everything stays in-app.
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    # From address for outbound mail. Defaults to ``smtp_username`` when unset.
+    smtp_from: Optional[str] = None
+    smtp_use_tls: bool = True
+    # Master switch: even with SMTP configured, set False to silence all email.
+    email_notifications_enabled: bool = True
+    # Slack incoming-webhook URL for optional team-channel mirroring of
+    # actionable notifications. No-op when unset.
+    slack_webhook_url: Optional[str] = None
+    # Realtime bell push over SSE (GET /notifications/stream). In-process and
+    # best-effort; disable to fall back to the existing polling.
+    realtime_sse_enabled: bool = True
+
+    def resolved_frontend_base_url(self) -> str:
+        """Absolute frontend origin for deep-links, trailing slash stripped."""
+        base = self.frontend_base_url or self.allowed_origins.split(",")[0]
+        return (base or "http://localhost:3000").strip().rstrip("/")
+
+    @property
+    def email_configured(self) -> bool:
+        return bool(self.email_notifications_enabled and self.smtp_host)
+
     @field_validator('secret_key', mode='before')
     @classmethod
     def generate_secret_key(cls, v, info: ValidationInfo):

@@ -45,13 +45,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2, BrainCircuit, KeyRound, PlayCircle, ChevronDown, CornerDownRight, BookText } from 'lucide-react';
+import { Plus, ExternalLink, MoreHorizontal, Trash2, Globe, Shield, Database, Layout as LayoutIcon, Cpu, FileText, Link, Users, Settings as SettingsIcon, Tag, Clock, Target, Zap, Layers, Copy, Edit, TrendingUp, FolderTree, AlertCircle, CheckCircle, XCircle, Loader2, RefreshCw, History, AlertTriangle, Rows3, Maximize2, BrainCircuit, KeyRound, PlayCircle, ChevronDown, CornerDownRight, BookText, BellRing, Megaphone } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { Switch } from '@/components/ui/switch';
-import { api, auditAPI, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary, AISourceType, AIRoutingSettings, AIRoutingTarget } from '@/lib/api';
+import { api, auditAPI, testCasesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, enumsAPI, testManagementAPI, systemSettingsAPI, aiManagerAPI, AIManagerSettings, AIProviderConfig, AIProviderName, AIUsageLimitEntry, AIUsageSummary, AISourceType, AIRoutingSettings, AIRoutingTarget, notificationCategoryPrefsAPI, NotificationCategoryInfo, announcementsAPI } from '@/lib/api';
 import { defectManagementAPI, IssueTrackerIntegration } from '@/lib/defectManagementAPI';
 import { useAuthStore } from '@/stores/authStore';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -701,6 +701,76 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
     notifications_muted_until: null
   });
 
+  // Phase 8: per-category mute grid (one row per notification category). Saved
+  // immediately on toggle, independent of the page's bulk Save button.
+  const [categoryPrefs, setCategoryPrefs] = useState<NotificationCategoryInfo[]>([]);
+  const [savingCategoryPrefs, setSavingCategoryPrefs] = useState(false);
+
+  // Phase 7: admin announcement composer (admin-only card below).
+  const [announcement, setAnnouncement] = useState<{ title: string; message: string; audience: 'all' | 'project'; project_id?: number }>({
+    title: '',
+    message: '',
+    audience: 'all',
+  });
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
+
+  const persistCategoryPrefs = async (next: NotificationCategoryInfo[]) => {
+    const previous = categoryPrefs;
+    setCategoryPrefs(next); // optimistic
+    setSavingCategoryPrefs(true);
+    try {
+      const saved = await notificationCategoryPrefsAPI.update(
+        next.map((c) => ({ category: c.key, in_app: c.in_app, email: c.email }))
+      );
+      setCategoryPrefs(saved);
+    } catch (error: any) {
+      setCategoryPrefs(previous); // roll back on failure
+      toast({
+        title: t('error'),
+        description: error?.response?.data?.detail || t('failedToSave'),
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingCategoryPrefs(false);
+    }
+  };
+
+  const toggleCategoryChannel = (key: string, channel: 'in_app' | 'email', value: boolean) => {
+    persistCategoryPrefs(
+      categoryPrefs.map((c) => (c.key === key ? { ...c, [channel]: value } : c))
+    );
+  };
+
+  const sendAnnouncement = async () => {
+    if (!announcement.title.trim() || !announcement.message.trim()) {
+      toast({ title: t('error'), description: t('titleAndMessageRequired'), variant: 'destructive' });
+      return;
+    }
+    if (announcement.audience === 'project' && !announcement.project_id) {
+      toast({ title: t('error'), description: t('selectAProject'), variant: 'destructive' });
+      return;
+    }
+    setSendingAnnouncement(true);
+    try {
+      const result = await announcementsAPI.send({
+        title: announcement.title.trim(),
+        message: announcement.message.trim(),
+        audience: announcement.audience,
+        project_id: announcement.audience === 'project' ? announcement.project_id : undefined,
+      });
+      toast({ title: t('announcementSent'), description: result.message });
+      setAnnouncement({ title: '', message: '', audience: announcement.audience });
+    } catch (error: any) {
+      toast({
+        title: t('error'),
+        description: error?.response?.data?.detail || t('failedToSave'),
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingAnnouncement(false);
+    }
+  };
+
   // When deep-linked with #notification-settings (e.g. from the notification
   // dropdown), scroll the card into view once the test-management tab is shown.
   useEffect(() => {
@@ -1053,17 +1123,19 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
 
       // Load settings (these will be fetched when needed)
       try {
-        const [executionSettings, notificationSettings, automationSettings, userNotificationPrefs] = await Promise.all([
+        const [executionSettings, notificationSettings, automationSettings, userNotificationPrefs, categoryPrefs] = await Promise.all([
           testManagementAPI.getTestExecutionSettings(),
           testManagementAPI.getNotificationSettings(),
           testManagementAPI.getAutomationSettings(),
-          testManagementAPI.getUserNotificationPreferences()
+          testManagementAPI.getUserNotificationPreferences(),
+          notificationCategoryPrefsAPI.get().catch(() => [])
         ]);
-        
+
         if (executionSettings) setTestExecutionSettings(executionSettings);
         if (notificationSettings) setNotificationSettings(notificationSettings);
         if (automationSettings) setAutomationSettings(automationSettings);
         if (userNotificationPrefs) setUserNotificationPrefs(userNotificationPrefs);
+        if (categoryPrefs) setCategoryPrefs(categoryPrefs);
       } catch {
         // Settings not yet created — defaults are used.
       }
@@ -3440,6 +3512,127 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
               </div>
             </CardContent>
           </Card>
+
+          {/* Notification Categories (per-user mute grid) — Phase 8 */}
+          <Card id="notification-categories" className="scroll-mt-24">
+            <CardHeader className="border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                <BellRing className="h-5 w-5 text-blue-600" />
+                <CardTitle>{t('notificationCategoriesTitle')}</CardTitle>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('notificationCategoriesDesc')}</p>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {categoryPrefs.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t('noData')}</p>
+              ) : (
+                <div className="space-y-1">
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-x-6 items-center pb-2 mb-1 border-b border-gray-100 dark:border-gray-800 text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <span>{t('category')}</span>
+                    <span className="text-center w-16">{t('inApp')}</span>
+                    <span className="text-center w-16">{t('email')}</span>
+                  </div>
+                  {categoryPrefs.map((cat) => (
+                    <div key={cat.key} className="grid grid-cols-[1fr_auto_auto] gap-x-6 items-center py-2">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-base">{cat.label}</Label>
+                        {cat.actionable && (
+                          <Badge variant="secondary" className="text-xs">{t('inbox')}</Badge>
+                        )}
+                      </div>
+                      <div className="flex justify-center w-16">
+                        <Switch
+                          checked={cat.in_app}
+                          disabled={savingCategoryPrefs}
+                          onCheckedChange={(checked) => toggleCategoryChannel(cat.key, 'in_app', checked)}
+                        />
+                      </div>
+                      <div className="flex justify-center w-16">
+                        <Switch
+                          checked={cat.email}
+                          disabled={savingCategoryPrefs}
+                          onCheckedChange={(checked) => toggleCategoryChannel(cat.key, 'email', checked)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Admin announcements — Phase 7 */}
+          {isAdminUser(user) && (
+            <Card id="admin-announcements" className="scroll-mt-24">
+              <CardHeader className="border-b border-gray-100 dark:border-gray-800">
+                <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                  <Megaphone className="h-5 w-5 text-orange-600" />
+                  <CardTitle>{t('announcementsTitle')}</CardTitle>
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('announcementsDesc')}</p>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-6">
+                <div className="space-y-2">
+                  <Label>{t('announcementTitleLabel')}</Label>
+                  <Input
+                    value={announcement.title}
+                    maxLength={200}
+                    placeholder={t('announcementTitlePlaceholder')}
+                    onChange={(e) => setAnnouncement({ ...announcement, title: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('announcementMessageLabel')}</Label>
+                  <Textarea
+                    value={announcement.message}
+                    maxLength={2000}
+                    rows={4}
+                    placeholder={t('announcementMessagePlaceholder')}
+                    onChange={(e) => setAnnouncement({ ...announcement, message: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>{t('announcementAudience')}</Label>
+                    <Select
+                      value={announcement.audience}
+                      onValueChange={(value) =>
+                        setAnnouncement({ ...announcement, audience: value as 'all' | 'project', project_id: undefined })
+                      }
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t('announcementAudienceAll')}</SelectItem>
+                        <SelectItem value="project">{t('announcementAudienceProject')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {announcement.audience === 'project' && (
+                    <div className="space-y-2">
+                      <Label>{t('project')}</Label>
+                      <Select
+                        value={announcement.project_id ? String(announcement.project_id) : ''}
+                        onValueChange={(value) => setAnnouncement({ ...announcement, project_id: Number(value) })}
+                      >
+                        <SelectTrigger><SelectValue placeholder={t('selectAProject')} /></SelectTrigger>
+                        <SelectContent>
+                          {projects.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={sendAnnouncement} disabled={sendingAnnouncement}>
+                    {sendingAnnouncement ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Megaphone className="h-4 w-4 mr-2" />}
+                    {t('sendAnnouncement')}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Automation Settings */}
           <Card>

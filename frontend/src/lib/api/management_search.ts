@@ -297,3 +297,51 @@ export const advancedSearchAPI = {
     window.URL.revokeObjectURL(url);
   },
 };
+
+// --- Notification category preferences (per-user mute grid) -----------------
+// Phase 8: a Settings grid that lets each user mute individual notification
+// categories. Distinct from the legacy /notification-settings (project email/
+// slack toggles) and the do-not-disturb /users/me/notification-preferences.
+
+export interface NotificationCategoryInfo {
+  key: string;
+  label: string;
+  actionable: boolean;
+  in_app: boolean;
+  email: boolean;
+}
+
+export const notificationCategoryPrefsAPI = {
+  get: async (): Promise<NotificationCategoryInfo[]> => {
+    const response = await api.get('/notification-preferences');
+    return response.data.categories as NotificationCategoryInfo[];
+  },
+  update: async (
+    preferences: Array<{ category: string; in_app: boolean; email: boolean }>
+  ): Promise<NotificationCategoryInfo[]> => {
+    const response = await api.put('/notification-preferences', { preferences });
+    return response.data.categories as NotificationCategoryInfo[];
+  },
+};
+
+// --- Admin announcements (Phase 7) -----------------------------------------
+// Admin-only broadcast emitted as a bell-only SYSTEM notification.
+
+export interface AnnouncementResult {
+  message: string;
+  audience: string;
+  project_id: number | null;
+  notified_count: number;
+}
+
+export const announcementsAPI = {
+  send: async (payload: {
+    title: string;
+    message: string;
+    audience: 'all' | 'project';
+    project_id?: number;
+  }): Promise<AnnouncementResult> => {
+    const response = await api.post('/admin/announcements', payload);
+    return response.data;
+  },
+};

@@ -2,18 +2,72 @@
 Notification routes for managing user notifications.
 """
 
+import queue as _queue
+import time
+
 from fastapi import Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
-from .. import crud, schemas, auth, rbac
+from .. import crud, schemas, auth, rbac, models
+from ..config import settings
 from ..database import get_db
 from ..auth import get_current_active_user
+from ..services import notification_engine, digest_service, realtime_service
 
 
 def register_notifications_routes(app):
     """Register notification routes with the FastAPI app."""
-    
+
+    # Registered before "/notifications/{notification_id}" so the literal "stream"
+    # segment is matched here rather than parsed as a (non-integer) id.
+    @app.get("/notifications/stream", tags=["Notifications"])
+    def stream_notifications(
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Server-Sent Events stream that pushes a 'refetch' ping to the bell.
+
+        Each event is contentless — it tells the client "something changed, pull
+        the latest notifications" rather than duplicating the row over the wire, so
+        the authoritative ``/notifications`` data stays the single source of truth.
+        A periodic heartbeat keeps the connection alive through proxies, and the
+        stream caps its own lifetime so worker threads recycle (the browser's
+        EventSource transparently reconnects). Realtime is a latency optimisation
+        layered on top of the existing polling, never a correctness requirement.
+        """
+        if not settings.realtime_sse_enabled:
+            raise HTTPException(status_code=404, detail="Realtime stream is disabled")
+
+        user_id = current_user.id
+        q = realtime_service.subscribe(user_id)
+
+        def event_stream():
+            # Cap a single connection at ~25 min so threadpool workers recycle;
+            # EventSource reconnects automatically and seamlessly.
+            deadline = time.monotonic() + 25 * 60
+            try:
+                yield ": connected\n\n"
+                while time.monotonic() < deadline:
+                    try:
+                        event = q.get(timeout=20)
+                        yield f"event: {event}\ndata: 1\n\n"
+                    except _queue.Empty:
+                        yield ": ping\n\n"  # heartbeat
+            finally:
+                realtime_service.unsubscribe(user_id, q)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                # Disable proxy buffering (nginx) so events flush immediately.
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.post("/notifications/", response_model=schemas.Notification)
     def create_notification(
         notification: schemas.NotificationCreate,
@@ -228,5 +282,153 @@ def register_notifications_routes(app):
         
         if db_settings.id != settings_id:
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         return crud.update_notification_settings(db, settings_id=settings_id, settings=settings)
+
+    @app.get("/notification-preferences", response_model=schemas.NotificationPreferencesResponse)
+    def get_notification_preferences(
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Return the per-category delivery grid for the current user.
+
+        Every engine category is listed; categories the user has never customised
+        default to delivered (in-app + email on). The Settings page renders this
+        directly — the registry, not the stored rows, is the source of truth for
+        *which* categories exist, so a new category appears automatically.
+        """
+        saved = {
+            p.category: p
+            for p in db.query(models.NotificationPreference)
+            .filter(models.NotificationPreference.user_id == current_user.id)
+            .all()
+        }
+        categories = []
+        for cat in notification_engine.all_categories():
+            pref = saved.get(cat.key)
+            categories.append(
+                schemas.NotificationCategoryInfo(
+                    key=cat.key,
+                    label=cat.label,
+                    actionable=cat.actionable,
+                    in_app=pref.in_app if pref is not None else True,
+                    email=pref.email if pref is not None else True,
+                )
+            )
+        return schemas.NotificationPreferencesResponse(categories=categories)
+
+    @app.put("/notification-preferences", response_model=schemas.NotificationPreferencesResponse)
+    def update_notification_preferences(
+        payload: schemas.NotificationPreferencesPut,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Upsert the current user's per-category delivery preferences.
+
+        Each supplied category is validated against the engine registry so the
+        table never accumulates keys the engine doesn't know. Rows are upserted in
+        place; categories the user leaves at their defaults simply have no row.
+        """
+        valid_keys = {c.key for c in notification_engine.all_categories()}
+        unknown = sorted({p.category for p in payload.preferences} - valid_keys)
+        if unknown:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown notification categories: {unknown}"
+            )
+
+        existing = {
+            p.category: p
+            for p in db.query(models.NotificationPreference)
+            .filter(models.NotificationPreference.user_id == current_user.id)
+            .all()
+        }
+        for entry in payload.preferences:
+            row = existing.get(entry.category)
+            if row is None:
+                row = models.NotificationPreference(
+                    user_id=current_user.id, category=entry.category
+                )
+                db.add(row)
+                existing[entry.category] = row
+            row.in_app = entry.in_app
+            row.email = entry.email
+        db.commit()
+
+        return get_notification_preferences(db=db, current_user=current_user)
+
+    @app.post("/admin/notifications/weekly-digest", tags=["Notifications"])
+    def trigger_weekly_digest(
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Send the weekly unread-notification digest to every active user.
+
+        Admin-only. Intended to be invoked by a scheduler/cron (this app has no
+        in-process scheduler). Returns a run summary; a no-op reporting ``sent=0``
+        when email is not configured.
+        """
+        if not rbac.has_permission(current_user, "manage_users"):
+            raise HTTPException(status_code=403, detail="Only admins can run the digest")
+        summary = digest_service.send_weekly_digests(db)
+        return {"message": "Weekly digest run complete", **summary}
+
+    @app.post("/admin/announcements", response_model=schemas.AnnouncementResult)
+    def create_announcement(
+        announcement: schemas.AnnouncementCreate,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Broadcast an admin announcement as a bell-only SYSTEM notification.
+
+        Admin-only. The audience is either every active user (``all``) or the
+        members of a single project (``project`` — its owner plus assignees). The
+        SYSTEM category is informational and does not coalesce, so each announcement
+        is its own row; the engine still excludes the sender and honours each
+        recipient's per-category mute.
+        """
+        if not rbac.has_permission(current_user, "manage_users"):
+            raise HTTPException(
+                status_code=403, detail="Only admins can send announcements"
+            )
+
+        if announcement.audience == "project":
+            project = (
+                db.query(models.Project)
+                .filter(models.Project.id == announcement.project_id)
+                .first()
+            )
+            if project is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            assignee_ids = [
+                uid
+                for (uid,) in db.query(models.ProjectAssignment.user_id)
+                .filter(models.ProjectAssignment.project_id == project.id)
+                .all()
+            ]
+            recipient_ids = set(assignee_ids)
+            if project.owner_id:
+                recipient_ids.add(project.owner_id)
+        else:
+            recipient_ids = {
+                uid
+                for (uid,) in db.query(models.User.id)
+                .filter(models.User.is_active == True)  # noqa: E712
+                .all()
+            }
+
+        rows = notification_engine.emit(
+            db,
+            category=notification_engine.SYSTEM,
+            user_ids=list(recipient_ids),
+            actor_id=current_user.id,
+            title=announcement.title,
+            message=announcement.message,
+            related_entity_type=("project" if announcement.audience == "project" else None),
+            related_entity_id=(announcement.project_id if announcement.audience == "project" else None),
+        )
+        return schemas.AnnouncementResult(
+            message=f"Announcement sent to {len(rows)} user(s)",
+            audience=announcement.audience,
+            project_id=announcement.project_id,
+            notified_count=len(rows),
+        )

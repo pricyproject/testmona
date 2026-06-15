@@ -26,6 +26,10 @@ Two product rules also live here so every feature inherits them for free:
 * **No notifications for deactivated accounts.** Recipients are filtered to users
   who are not explicitly deactivated, so a disabled account never accrues unread
   rows it can never read.
+* **Per-user category mute.** After the deactivated filter, recipients are checked
+  against :class:`~app.models.NotificationPreference`: a user with an explicit
+  ``in_app == False`` row for the emitted category is dropped. Preferences are
+  opt-out (categories default on), so a user with no row is unaffected.
 * **Coalescing to fight notification fatigue.** Repetitive *informational*
   categories (a watched doc edited eight times in an hour, a run's status churning)
   set ``coalesce=True``. Instead of stacking eight unread bell items for the same
@@ -64,7 +68,7 @@ from typing import Dict, Iterable, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..models import Notification, NotificationType, User
+from ..models import Notification, NotificationPreference, NotificationType, User
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +317,7 @@ def emit(
     correctness.
     """
     recipients = _active_recipients(db, _dedupe_recipients(user_ids, actor_id))
+    recipients = _preference_allowed(db, recipients, category)
     if not recipients:
         return []
 
@@ -343,6 +348,18 @@ def emit(
             db.commit()
             for row in rows:
                 db.refresh(row)
+            # Post-commit only: now that the rows are durable, fan them out to the
+            # side delivery channels (realtime/email/Slack). Best-effort and
+            # imported lazily to keep the engine's import graph minimal. The
+            # ``commit=False`` path (version-save watch broadcast) intentionally
+            # skips this — its caller owns the commit, and those rows are
+            # informational, so the bell poll covers them.
+            try:
+                from . import notification_channels
+
+                notification_channels.dispatch(db, rows, category)
+            except Exception:
+                logger.exception("Notification channel dispatch failed for %s", category.key)
         return rows
     except Exception:
         logger.exception(
@@ -460,6 +477,40 @@ def _active_recipients(db: Session, recipients: List[int]) -> List[int]:
         .all()
     }
     return [uid for uid in recipients if uid not in inactive]
+
+
+def _preference_allowed(
+    db: Session, recipients: List[int], category: NotificationCategory
+) -> List[int]:
+    """Drop recipients who muted in-app delivery of this category, preserving order.
+
+    Per-category preferences are opt-*out*: a category defaults on, so only users
+    with an explicit ``notification_preferences`` row of ``in_app == False`` for
+    this category are removed. Users with no row keep receiving the notification.
+    Only the in-app channel is gated here — that is the bell/inbox surface the
+    engine actually writes to; the ``email`` flag is stored for a future channel.
+    A lookup failure (e.g. the table not yet migrated) is swallowed so a preference
+    query can never suppress or break a notification.
+    """
+    if not recipients:
+        return []
+    try:
+        muted = {
+            uid
+            for (uid,) in db.query(NotificationPreference.user_id)
+            .filter(
+                NotificationPreference.user_id.in_(recipients),
+                NotificationPreference.category == category.key,
+                NotificationPreference.in_app == False,  # noqa: E712
+            )
+            .all()
+        }
+    except Exception:
+        logger.exception("Failed to read notification preferences for %s", category.key)
+        return recipients
+    if not muted:
+        return recipients
+    return [uid for uid in recipients if uid not in muted]
 
 
 def actor_display_name(actor: Optional[User]) -> str:

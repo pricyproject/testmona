@@ -178,10 +178,28 @@ export function Navbar({
     window.addEventListener('notifications:refresh', refresh);
     const interval = setInterval(() => { fetchUnreadCount(); fetchInboxCount(); }, 60000);
     const prefsInterval = setInterval(fetchPrefs, 300000);
+
+    // Realtime bell push (Phase 9): an SSE ping just says "something changed";
+    // we refetch the authoritative counts. The 60s poll above stays as a
+    // backstop, so the bell still works if SSE is disabled or the connection
+    // drops. EventSource reconnects on its own; we only close it on cleanup.
+    let eventSource: EventSource | null = null;
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      eventSource = new EventSource(`${apiBase}/notifications/stream`, { withCredentials: true });
+      eventSource.addEventListener('notification', () => {
+        fetchUnreadCount();
+        fetchInboxCount();
+      });
+    } catch {
+      // EventSource unavailable (very old browser) — polling covers it.
+    }
+
     return () => {
       window.removeEventListener('notifications:refresh', refresh);
       clearInterval(interval);
       clearInterval(prefsInterval);
+      eventSource?.close();
     };
   }, [user]);
 

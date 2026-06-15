@@ -40,6 +40,35 @@ class Notification(Base):
     user = relationship("User", back_populates="notifications")
 
 
+class NotificationPreference(Base):
+    """A user's per-category mute switch for notification delivery.
+
+    One row per ``(user_id, category)`` the user has *customised*; the absence of a
+    row means "deliver" (categories default on). The notification engine consults
+    this table after dropping deactivated accounts, so a user with ``in_app=False``
+    for a category never accrues those rows. ``email`` is stored for the eventual
+    email channel; today only ``in_app`` is enforced, since the bell/inbox is the
+    only delivery surface. ``category`` is an engine category key (see
+    ``notification_engine.all_categories``) — a loose string, not an FK, so the
+    registry can evolve without a migration.
+    """
+    __tablename__ = "notification_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String(50), nullable=False)
+    in_app = Column(Boolean, default=True, nullable=False)
+    email = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "category", name="uq_notification_preference"),
+    )
+
+    user = relationship("User")
+
+
 class EntityWatch(Base):
     """A user's subscription to change notifications for a single entity.
 
