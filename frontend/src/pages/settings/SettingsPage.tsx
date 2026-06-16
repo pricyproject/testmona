@@ -3535,7 +3535,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                   {categoryPrefs.map((cat) => (
                     <div key={cat.key} className="grid grid-cols-[1fr_auto_auto] gap-x-6 items-center py-2">
                       <div className="flex items-center gap-2">
-                        <Label className="text-base">{cat.label}</Label>
+                        <Label className="text-base">{t(`inboxCat_${cat.key}`) || cat.label}</Label>
                         {cat.actionable && (
                           <Badge variant="secondary" className="text-xs">{t('inbox')}</Badge>
                         )}
@@ -3626,7 +3626,7 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                 </div>
                 <div className="flex justify-end">
                   <Button onClick={sendAnnouncement} disabled={sendingAnnouncement}>
-                    {sendingAnnouncement ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Megaphone className="h-4 w-4 mr-2" />}
+                    {sendingAnnouncement ? <Loader2 className="h-4 w-4 animate-spin ms-2" /> : <Megaphone className="h-4 w-4 ms-2" />}
                     {t('sendAnnouncement')}
                   </Button>
                 </div>

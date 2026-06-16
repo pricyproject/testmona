@@ -35,6 +35,9 @@ export const en = {
   inboxCat_assignment: 'Assignments',
   inboxCat_review: 'Reviews',
   inboxCat_feedback: 'Feedback',
+  inboxCat_watch_change: 'Watched changes',
+  inboxCat_status: 'Status updates',
+  inboxCat_system: 'System',
   // W1 — Snooze
   inboxStatusSnoozed: 'Snoozed',
   inboxSnooze: 'Snooze',
