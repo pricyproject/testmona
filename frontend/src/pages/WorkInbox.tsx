@@ -7,12 +7,9 @@ import {
   ClipboardCheck,
   MessageSquareReply,
   MessageSquareWarning,
-  CheckCheck,
   Archive,
   ArchiveRestore,
   RefreshCw,
-  Eye,
-  EyeOff,
   ChevronRight,
   Search,
   X,
@@ -23,7 +20,6 @@ import {
   Layers,
   ArrowDownUp,
   User as UserIcon,
-  ExternalLink,
   Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -47,9 +43,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { inboxAPI, type InboxStatus, type InboxSort, type InboxBulkActionType, type InboxActorOption } from '@/lib/api/inbox';
+import { inboxAPI, type InboxStatus, type InboxSort, type InboxBulkActionType, type InboxActorOption, type InboxProjectOption } from '@/lib/api/inbox';
 import { useInboxViewStore, type InboxGroupBy } from '@/stores/inboxViewStore';
-import { openNotification, resolveNotificationTarget } from '@/lib/notificationNavigation';
+import { openNotification } from '@/lib/notificationNavigation';
 import { requirementsAPI } from '@/lib/api/requirements_docs';
 import { Notification, InboxSummary } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -185,7 +181,8 @@ export function WorkInbox() {
   // preferences. Reading individual fields keeps re-renders tight.
   const status = useInboxViewStore((s) => s.status);
   const activeCategory = useInboxViewStore((s) => s.activeCategory);
-  const unreadOnly = useInboxViewStore((s) => s.unreadOnly);
+  const persistedUnreadOnly = useInboxViewStore((s) => s.unreadOnly);
+  const unreadOnly = false;
   const groupBy = useInboxViewStore((s) => s.groupBy);
   const sort = useInboxViewStore((s) => s.sort);
   const setView = useInboxViewStore((s) => s.setView);
@@ -194,7 +191,6 @@ export function WorkInbox() {
   // ever sneaks in (the rail only exposes open/snoozed/done).
   const setStatus = (s: InboxStatus) => setView({ status: s });
   const setActiveCategory = (c: string | null) => setView({ activeCategory: c });
-  const setUnreadOnly = (v: boolean) => setView({ unreadOnly: v });
   const setGroupBy = (g: InboxGroupBy) => setView({ groupBy: g });
   const setSort = (s: InboxSort) => setView({ sort: s });
 
@@ -207,10 +203,13 @@ export function WorkInbox() {
   const deferredSearch = useDeferredValue(search.trim());
   const [actorFilter, setActorFilter] = useState<number | null>(null);
   const [actorOptions, setActorOptions] = useState<InboxActorOption[]>([]);
+  const [projectFilter, setProjectFilter] = useState<number | null>(null);
+  const [projectOptions, setProjectOptions] = useState<InboxProjectOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [focusIndex, setFocusIndex] = useState(-1);
   const [confirmArchiveAll, setConfirmArchiveAll] = useState(false);
+  const [confirmUnsnoozeAll, setConfirmUnsnoozeAll] = useState(false);
   // When set, the custom-snooze dialog is open and will apply to these ids.
   const [customSnooze, setCustomSnooze] = useState<{ ids: number[] } | null>(null);
 
@@ -240,6 +239,7 @@ export function WorkInbox() {
         unreadOnly,
         search: deferredSearch,
         actorId: actorFilter,
+        projectId: projectFilter,
         sort,
         skip: 0,
         limit: PAGE_SIZE,
@@ -251,17 +251,27 @@ export function WorkInbox() {
     } finally {
       setLoading(false);
     }
-  }, [status, activeCategory, unreadOnly, deferredSearch, actorFilter, sort]);
+  }, [status, activeCategory, unreadOnly, deferredSearch, actorFilter, projectFilter, sort]);
 
   const fetchActors = useCallback(async () => {
     try {
-      const data = await inboxAPI.actors({ status, category: activeCategory, unreadOnly, search: deferredSearch });
+      const data = await inboxAPI.actors({ status, category: activeCategory, unreadOnly, search: deferredSearch, projectId: projectFilter });
       setActorOptions(data);
       setActorFilter((current) => (current && !data.some((actor) => actor.id === current) ? null : current));
     } catch (error) {
       console.error('Failed to load inbox actors:', error);
     }
-  }, [status, activeCategory, unreadOnly, deferredSearch]);
+  }, [status, activeCategory, unreadOnly, deferredSearch, projectFilter]);
+
+  const fetchProjects = useCallback(async () => {
+    try {
+      const data = await inboxAPI.projects({ status, category: activeCategory, unreadOnly, search: deferredSearch, actorId: actorFilter });
+      setProjectOptions(data);
+      setProjectFilter((current) => (current && !data.some((project) => project.id === current) ? null : current));
+    } catch (error) {
+      console.error('Failed to load inbox projects:', error);
+    }
+  }, [status, activeCategory, unreadOnly, deferredSearch, actorFilter]);
 
   // Offset paging keyed off the loaded count. Archiving/restoring removes an item
   // from both the local list and the server-side set, so skip=items.length stays
@@ -276,6 +286,7 @@ export function WorkInbox() {
         unreadOnly,
         search: deferredSearch,
         actorId: actorFilter,
+        projectId: projectFilter,
         sort,
         skip: items.length,
         limit: PAGE_SIZE,
@@ -304,6 +315,11 @@ export function WorkInbox() {
 
   useEffect(() => {
     if (!user) return;
+    fetchProjects();
+  }, [user, fetchProjects]);
+
+  useEffect(() => {
+    if (!user) return;
     fetchSummary();
   }, [user, fetchSummary]);
 
@@ -311,7 +327,11 @@ export function WorkInbox() {
   useEffect(() => {
     setSelected(new Set());
     setFocusIndex(-1);
-  }, [status, activeCategory, unreadOnly, sort, deferredSearch, actorFilter]);
+  }, [status, activeCategory, unreadOnly, sort, deferredSearch, actorFilter, projectFilter]);
+
+  useEffect(() => {
+    if (persistedUnreadOnly) setView({ unreadOnly: false });
+  }, [setView, persistedUnreadOnly]);
 
   useEffect(() => {
     const state = location.state as { notificationRedirectError?: string } | null;
@@ -345,17 +365,6 @@ export function WorkInbox() {
       else broadcast();
     } catch (error) {
       console.error('Failed to mark read:', error);
-      fetchItems();
-    }
-  };
-
-  const markUnread = async (id: number) => {
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: false } : n)));
-    try {
-      await inboxAPI.markUnread(id);
-      await afterMutation();
-    } catch (error) {
-      console.error('Failed to mark unread:', error);
       fetchItems();
     }
   };
@@ -397,25 +406,6 @@ export function WorkInbox() {
     }
   };
 
-  // W6 "Open & mark done": deep-link to the entity (reusing notificationNavigation)
-  // and clear the item. The target is resolved *first* so a dead link never
-  // silently marks work done, and we mark done before navigating since the inbox
-  // unmounts on route change.
-  const openAndDone = async (notification: Notification) => {
-    let target: string | null = null;
-    try {
-      target = await resolveNotificationTarget(notification);
-    } catch (error) {
-      console.error('Failed to resolve inbox target:', error);
-    }
-    if (!target) {
-      toast({ title: t('inboxItemUnavailable'), variant: 'destructive' });
-      return;
-    }
-    await archive(notification.id);
-    navigate(target);
-  };
-
   // W6 inline resolution: the mutation goes through the entity's *own* API
   // (requirement update); the inbox merely marks the item done afterwards and
   // never emits a notification itself.
@@ -449,18 +439,6 @@ export function WorkInbox() {
     }
   };
 
-  const markAllRead = async () => {
-    setBusy(true);
-    try {
-      const { marked_count } = await inboxAPI.markAllRead(activeCategory);
-      await fetchItems();
-      await afterMutation();
-      if (marked_count > 0) toast({ title: t('inboxMarkedReadToast', { count: marked_count }) });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const archiveAll = async () => {
     setBusy(true);
     try {
@@ -478,6 +456,7 @@ export function WorkInbox() {
     setBusy(true);
     try {
       const { unsnoozed_count } = await inboxAPI.unsnoozeAll(activeCategory);
+      setConfirmUnsnoozeAll(false);
       await fetchItems();
       await afterMutation();
       if (unsnoozed_count > 0) toast({ title: t('inboxUnsnoozedToast', { count: unsnoozed_count }) });
@@ -497,7 +476,7 @@ export function WorkInbox() {
       return next;
     });
 
-  const runBulk = async (action: Exclude<InboxBulkActionType, 'snooze'>) => {
+  const runBulk = async (action: Exclude<InboxBulkActionType, 'snooze' | 'read' | 'unread'>) => {
     const ids = [...selected];
     if (ids.length === 0) return;
     setBusy(true);
@@ -506,14 +485,7 @@ export function WorkInbox() {
       clearSelection();
       await fetchItems();
       await afterMutation();
-      const key =
-        action === 'read'
-          ? 'inboxMarkedReadToast'
-          : action === 'unread'
-            ? 'inboxMarkedUnreadToast'
-            : action === 'unarchive'
-              ? 'inboxRestoredToast'
-              : 'inboxArchivedToast';
+      const key = action === 'unarchive' ? 'inboxRestoredToast' : 'inboxArchivedToast';
       if (affected_count > 0) toast({ title: t(key, { count: affected_count }) });
     } finally {
       setBusy(false);
@@ -529,6 +501,7 @@ export function WorkInbox() {
   );
 
   const actorFilterLabel = actorOptions.find((actor) => actor.id === actorFilter)?.name;
+  const projectFilterLabel = projectOptions.find((project) => project.id === projectFilter)?.name;
   const visibleItems = items;
 
   // Grouped sections (W3). Date is the default; category / entity regroup the
@@ -573,11 +546,11 @@ export function WorkInbox() {
   // over first-render handlers (stale status/items).
   const kbd = useRef({
     orderedItems, focusIndex, status,
-    archive, unarchive, markRead, markUnread, applySnooze, toggleSelected, openAndDone,
+    archive, unarchive, applySnooze, toggleSelected, handleOpen,
   });
   kbd.current = {
     orderedItems, focusIndex, status,
-    archive, unarchive, markRead, markUnread, applySnooze, toggleSelected, openAndDone,
+    archive, unarchive, applySnooze, toggleSelected, handleOpen,
   };
 
   useEffect(() => {
@@ -604,21 +577,13 @@ export function WorkInbox() {
           if (current) { e.preventDefault(); k.toggleSelected(current.id); }
           break;
         case 'Enter':
-          // Open & mark done — the in-context resolution path (W6).
-          if (current) { e.preventDefault(); k.openAndDone(current); }
+          if (current) { e.preventDefault(); k.handleOpen(current); }
           break;
         case 'e':
           if (current) {
             e.preventDefault();
             if (k.status === 'done') k.unarchive(current.id);
             else k.archive(current.id);
-          }
-          break;
-        case 'u':
-          if (current) {
-            e.preventDefault();
-            if (current.is_read) k.markUnread(current.id);
-            else k.markRead(current.id);
           }
           break;
         case 's':
@@ -637,14 +602,16 @@ export function WorkInbox() {
   }, []);
 
   const totalOpen = summary?.total_open ?? 0;
-  const totalUnread = summary?.total_unread ?? 0;
   const totalSnoozed = summary?.total_snoozed ?? 0;
   const totalDone = summary?.categories.reduce((sum, c) => sum + c.done, 0) ?? 0;
   const countFor = (s: InboxStatus) => (s === 'open' ? totalOpen : s === 'snoozed' ? totalSnoozed : totalDone);
-  const hasTransientFilter = Boolean(deferredSearch || actorFilter);
+  const hasTransientFilter = Boolean(deferredSearch || actorFilter || projectFilter);
   const archiveAllCount = activeCategory
     ? summary?.categories.find((c) => c.key === activeCategory)?.open ?? 0
     : totalOpen;
+  const unsnoozeAllCount = activeCategory
+    ? summary?.categories.find((c) => c.key === activeCategory)?.snoozed ?? 0
+    : totalSnoozed;
 
   const catCount = (c: InboxSummary['categories'][number]) =>
     status === 'open' ? c.open : status === 'snoozed' ? c.snoozed : c.done;
@@ -666,9 +633,9 @@ export function WorkInbox() {
     { key: 'snoozed', labelKey: 'inboxViewSnoozed', status: 'snoozed', category: null, Icon: Clock },
     { key: 'done', labelKey: 'inboxViewDone', status: 'done', category: null, Icon: Archive },
   ];
-  const activeSmartView = SMART_VIEWS.find((v) => v.status === status && v.category === activeCategory && !unreadOnly)?.key;
+  const activeSmartView = SMART_VIEWS.find((v) => v.status === status && v.category === activeCategory)?.key;
 
-  const emptyKind = search.trim() || actorFilter ? 'search' : unreadOnly ? 'unread' : status;
+  const emptyKind = search.trim() || actorFilter || projectFilter ? 'search' : status;
   const selectionCount = selected.size;
   const allVisibleSelected = visibleItems.length > 0 && visibleItems.every((n) => selected.has(n.id));
 
@@ -679,11 +646,6 @@ export function WorkInbox() {
         <div className="flex items-center gap-3.5">
           <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-600/25">
             <Inbox className="h-6 w-6" />
-            {totalUnread > 0 && (
-              <span className="absolute -top-1 -end-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-950">
-                {totalUnread > 99 ? '99+' : totalUnread}
-              </span>
-            )}
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-[28px]">
@@ -708,10 +670,6 @@ export function WorkInbox() {
           </Button>
           {status === 'open' && items.length > 0 && !hasTransientFilter && (
             <>
-              <Button variant="outline" size="sm" onClick={markAllRead} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
-                <CheckCheck className="h-4 w-4" />
-                <span className="hidden sm:inline">{t('markAllRead')}</span>
-              </Button>
               <Button size="sm" onClick={() => setConfirmArchiveAll(true)} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
                 <Archive className="h-4 w-4" />
                 <span className="hidden sm:inline">{t('inboxArchiveAll')}</span>
@@ -719,7 +677,7 @@ export function WorkInbox() {
             </>
           )}
           {status === 'snoozed' && items.length > 0 && !hasTransientFilter && (
-            <Button variant="outline" size="sm" onClick={unsnoozeAll} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
+            <Button variant="outline" size="sm" onClick={() => setConfirmUnsnoozeAll(true)} disabled={busy} className="h-9 gap-1.5 rounded-xl px-3 text-sm">
               <AlarmClockOff className="h-4 w-4" />
               <span className="hidden sm:inline">{t('inboxUnsnoozeAll')}</span>
             </Button>
@@ -780,24 +738,6 @@ export function WorkInbox() {
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setUnreadOnly(!unreadOnly)}
-            className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-              unreadOnly
-                ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300'
-                : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900'
-            }`}
-          >
-            <span className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${unreadOnly ? 'border-blue-600 bg-blue-600' : 'border-slate-300 dark:border-slate-600'}`}>
-              {unreadOnly && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-            </span>
-            <span className="flex-1 text-start">{t('inboxUnreadOnly')}</span>
-            {totalUnread > 0 && (
-              <span className="text-xs font-semibold text-blue-600 dark:text-blue-300">{totalUnread}</span>
-            )}
-          </button>
-
           <nav className="space-y-1">
             <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               {t('inboxCategories')}
@@ -807,7 +747,7 @@ export function WorkInbox() {
               label={t('inboxAll')}
               icon={<Inbox className="h-4 w-4" />}
               count={countFor(status)}
-              unread={status === 'open' ? totalUnread : 0}
+              unread={0}
               onClick={() => setActiveCategory(null)}
             />
             {railCategories.map((cat) => {
@@ -819,7 +759,7 @@ export function WorkInbox() {
                   label={categoryLabel(cat.key, cat.label)}
                   icon={<visual.Icon className="h-4 w-4" />}
                   count={catCount(cat)}
-                  unread={status === 'open' ? cat.unread : 0}
+                  unread={0}
                   onClick={() => setActiveCategory(cat.key)}
                 />
               );
@@ -878,6 +818,28 @@ export function WorkInbox() {
               </DropdownMenu>
             )}
 
+            {/* Project filter (server-side, covers all pages, not just loaded rows) */}
+            {projectOptions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">
+                    <Layers className="h-4 w-4 text-slate-400" />
+                    <span className="max-w-[140px] truncate">{projectFilterLabel ?? t('inboxFilterProjectAll')}</span>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-72 w-56 overflow-y-auto">
+                  <DropdownMenuLabel>{t('inboxFilterProject')}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuRadioGroup value={projectFilter ? String(projectFilter) : '__all__'} onValueChange={(v) => setProjectFilter(v === '__all__' ? null : Number(v))}>
+                    <DropdownMenuRadioItem value="__all__">{t('inboxFilterProjectAll')}</DropdownMenuRadioItem>
+                    {projectOptions.map((project) => (
+                      <DropdownMenuRadioItem key={project.id} value={String(project.id)}>{project.name}</DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
             {/* Sort by age (W4) */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -921,9 +883,6 @@ export function WorkInbox() {
                 {t('inboxSelected', { count: selectionCount })}
               </span>
               <div className="ms-auto flex flex-wrap items-center gap-1.5">
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => runBulk('read')} className="h-8 gap-1.5 rounded-lg px-2.5 text-xs">
-                  <Eye className="h-3.5 w-3.5" /> {t('inboxBulkRead')}
-                </Button>
                 {status !== 'done' && (
                   <SnoozeMenu
                     t={t}
@@ -998,14 +957,11 @@ export function WorkInbox() {
                           focused={globalIndex === focusIndex}
                           onToggleSelect={() => toggleSelected(notification.id)}
                           onOpen={() => handleOpen(notification)}
-                          onMarkRead={() => markRead(notification.id)}
-                          onMarkUnread={() => markUnread(notification.id)}
                           onArchive={() => archive(notification.id)}
                           onUnarchive={() => unarchive(notification.id)}
                           onUnsnooze={() => unsnooze(notification.id)}
                           onSnoozePick={(date) => applySnooze([notification.id], date)}
                           onSnoozeCustom={() => setCustomSnooze({ ids: [notification.id] })}
-                          onOpenAndDone={() => openAndDone(notification)}
                           onResolveReview={() => resolveReview(notification)}
                           canResolveReview={canResolveReview(notification)}
                         />
@@ -1053,6 +1009,20 @@ export function WorkInbox() {
           <DialogFooter className="mt-2">
             <Button variant="outline" onClick={() => setConfirmArchiveAll(false)}>{t('inboxCancel')}</Button>
             <Button onClick={archiveAll} disabled={busy}>{t('inboxArchiveAllConfirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmUnsnoozeAll} onOpenChange={setConfirmUnsnoozeAll}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('inboxUnsnoozeAllConfirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('inboxUnsnoozeAllConfirmDesc', { count: unsnoozeAllCount })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setConfirmUnsnoozeAll(false)}>{t('inboxCancel')}</Button>
+            <Button onClick={unsnoozeAll} disabled={busy}>{t('inboxUnsnoozeAllConfirm')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1218,14 +1188,11 @@ function InboxRow({
   focused,
   onToggleSelect,
   onOpen,
-  onMarkRead,
-  onMarkUnread,
   onArchive,
   onUnarchive,
   onUnsnooze,
   onSnoozePick,
   onSnoozeCustom,
-  onOpenAndDone,
   onResolveReview,
   canResolveReview,
 }: {
@@ -1241,19 +1208,15 @@ function InboxRow({
   focused: boolean;
   onToggleSelect: () => void;
   onOpen: () => void;
-  onMarkRead: () => void;
-  onMarkUnread: () => void;
   onArchive: () => void;
   onUnarchive: () => void;
   onUnsnooze: () => void;
   onSnoozePick: (date: Date) => void;
   onSnoozeCustom: () => void;
-  onOpenAndDone: () => void;
   onResolveReview: () => void;
   canResolveReview: boolean;
 }) {
   const visual = visualFor(notification.category);
-  const isUnread = !notification.is_read;
   const actorInitials = initials(notification.actor_name);
   const catLabel = notification.category ? categoryLabel(notification.category, notification.category) : '';
   const aging = agingFor(notification.created_at, notification.category, status);
@@ -1264,17 +1227,11 @@ function InboxRow({
       data-inbox-index={index}
       aria-current={focused ? 'true' : undefined}
       className={`group relative flex gap-3 border-b border-slate-100 px-5 py-4 transition-colors last:border-b-0 dark:border-slate-900 ${
-        selected
-          ? 'bg-blue-50/70 dark:bg-blue-950/25'
-          : isUnread
-            ? 'bg-blue-50/40 dark:bg-blue-950/15'
-            : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'
+        selected ? 'bg-blue-50/70 dark:bg-blue-950/25' : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'
       } ${focused ? 'ring-2 ring-inset ring-blue-500' : ''}`}
     >
-      {/* Left accent: unread (blue) takes priority, else an aging signal (amber). */}
-      {isUnread ? (
-        <span className="absolute inset-y-0 start-0 w-1 bg-blue-500" aria-hidden />
-      ) : aging.level === 'overdue' ? (
+      {/* Left accent: Work Inbox uses task aging, not bell read state. */}
+      {aging.level === 'overdue' ? (
         <span className="absolute inset-y-0 start-0 w-1 bg-amber-500" aria-hidden />
       ) : aging.level === 'stale' ? (
         <span className="absolute inset-y-0 start-0 w-1 bg-amber-300 dark:bg-amber-700" aria-hidden />
@@ -1304,7 +1261,7 @@ function InboxRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
           <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-start">
-            <h3 className={`truncate text-sm ${isUnread ? 'font-semibold text-slate-950 dark:text-white' : 'font-medium text-slate-700 dark:text-slate-200'}`}>
+            <h3 className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
               {decode(notification.title)}
             </h3>
           </button>
@@ -1377,17 +1334,6 @@ function InboxRow({
           </div>
 
           <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-            {notification.is_read ? (
-              <IconAction icon={<EyeOff className="h-4 w-4" />} title={t('markAsUnread')} onClick={onMarkUnread} />
-            ) : (
-              <IconAction icon={<Eye className="h-4 w-4" />} title={t('markAsRead')} onClick={onMarkRead} tone="blue" />
-            )}
-
-            {/* W6 "Open & mark done": deep-link then clear (open/snoozed only). */}
-            {status !== 'done' && notification.related_entity_type && (
-              <IconAction icon={<ExternalLink className="h-4 w-4" />} title={t('inboxOpenAndDone')} onClick={onOpenAndDone} />
-            )}
-
             {status === 'snoozed' ? (
               <IconAction icon={<AlarmClockOff className="h-4 w-4" />} title={t('inboxUnsnooze')} onClick={onUnsnooze} />
             ) : status === 'open' ? (
@@ -1504,7 +1450,6 @@ function InboxSkeleton() {
 function EmptyState({ kind, t }: { kind: string; t: (k: string) => string }) {
   const config: Record<string, { Icon: typeof Inbox; tint: string; title: string; desc: string }> = {
     search: { Icon: Search, tint: 'bg-slate-100 text-slate-400 dark:bg-slate-800', title: 'inboxNoMatches', desc: 'inboxNoMatchesDesc' },
-    unread: { Icon: CheckCheck, tint: 'bg-blue-50 text-blue-500 dark:bg-blue-950/40 dark:text-blue-300', title: 'inboxNoUnread', desc: 'inboxNoUnreadDesc' },
     snoozed: { Icon: Clock, tint: 'bg-indigo-50 text-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300', title: 'inboxNoSnoozed', desc: 'inboxNoSnoozedDesc' },
     done: { Icon: Archive, tint: 'bg-slate-100 text-slate-400 dark:bg-slate-800', title: 'inboxNoDone', desc: 'inboxNoDoneDesc' },
     open: { Icon: Sparkles, tint: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-300', title: 'inboxZeroTitle', desc: 'inboxZeroDesc' },

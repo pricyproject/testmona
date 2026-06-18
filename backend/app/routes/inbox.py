@@ -34,6 +34,7 @@ def register_inbox_routes(app):
         unread_only: bool = False,
         search: Optional[str] = Query(None, min_length=1, max_length=200),
         actor_id: Optional[int] = Query(None, ge=1),
+        project_id: Optional[int] = Query(None, ge=1),
         sort: str = Query("newest", pattern="^(newest|oldest)$"),
         skip: int = Query(0, ge=0),
         limit: int = Query(50, ge=1, le=100),
@@ -52,6 +53,7 @@ def register_inbox_routes(app):
             unread_only=unread_only,
             search=search,
             actor_id=actor_id,
+            project_id=project_id,
             sort=sort,
             skip=skip,
             limit=limit,
@@ -66,6 +68,7 @@ def register_inbox_routes(app):
         category: Optional[str] = None,
         unread_only: bool = False,
         search: Optional[str] = Query(None, min_length=1, max_length=200),
+        project_id: Optional[int] = Query(None, ge=1),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
@@ -79,8 +82,33 @@ def register_inbox_routes(app):
             category=category,
             unread_only=unread_only,
             search=search,
+            project_id=project_id,
         )
         return [schemas.InboxActorOption(id=uid, name=name) for uid, name in rows]
+
+    @app.get("/inbox/projects", response_model=list[schemas.InboxProjectOption])
+    def inbox_projects(
+        status: str = Query("open", pattern="^(open|snoozed|done|all)$"),
+        category: Optional[str] = None,
+        unread_only: bool = False,
+        search: Optional[str] = Query(None, min_length=1, max_length=200),
+        actor_id: Optional[int] = Query(None, ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _validate_category(category)
+        crud.sweep_due_snoozes(db)
+        rows = crud.get_inbox_project_options(
+            db,
+            user_id=current_user.id,
+            actionable_categories=_actionable_keys(),
+            status=status,
+            category=category,
+            unread_only=unread_only,
+            search=search,
+            actor_id=actor_id,
+        )
+        return [schemas.InboxProjectOption(id=pid, name=name) for pid, name in rows]
 
     @app.get("/inbox/summary", response_model=schemas.InboxSummary)
     def inbox_summary(
@@ -174,6 +202,20 @@ def register_inbox_routes(app):
             metadata={"category": category},
         )
         return {"message": f"Unsnoozed {count} items", "unsnoozed_count": count}
+
+    @app.delete("/inbox/cleanup-done")
+    def cleanup_done_inbox(
+        days_old: int = Query(90, ge=1, le=3650),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        count = crud.delete_old_done_inbox_notifications(
+            db,
+            user_id=current_user.id,
+            actionable_categories=_actionable_keys(),
+            days_old=days_old,
+        )
+        return {"message": f"Deleted {count} old done inbox items", "deleted_count": count}
 
     @app.post("/inbox/{notification_id}/archive", response_model=schemas.Notification)
     def archive_inbox_item(

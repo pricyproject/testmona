@@ -14,6 +14,12 @@ class NotificationType(enum.Enum):
 class Notification(Base):
     __tablename__ = "notifications"
 
+    __table_args__ = (
+        Index("ix_notifications_user_category_archived_created", "user_id", "category", "archived", "created_at"),
+        Index("ix_notifications_user_snoozed", "user_id", "snoozed_until"),
+        Index("ix_notifications_user_done", "user_id", "done_at"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     title = Column(String(200), nullable=False)

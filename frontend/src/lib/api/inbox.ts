@@ -15,6 +15,11 @@ export interface InboxActorOption {
   name: string;
 }
 
+export interface InboxProjectOption {
+  id: number;
+  name: string;
+}
+
 // Work Inbox: the actionable slice of the user's notifications, plus the
 // triage actions (read / archive) the dedicated inbox page drives.
 export const inboxAPI = {
@@ -25,6 +30,7 @@ export const inboxAPI = {
       unreadOnly?: boolean;
       search?: string;
       actorId?: number | null;
+      projectId?: number | null;
       sort?: InboxSort;
       skip?: number;
       limit?: number;
@@ -36,6 +42,7 @@ export const inboxAPI = {
     if (params.unreadOnly) search.set("unread_only", "true");
     if (params.search?.trim()) search.set("search", params.search.trim());
     if (params.actorId) search.set("actor_id", String(params.actorId));
+    if (params.projectId) search.set("project_id", String(params.projectId));
     if (params.sort) search.set("sort", params.sort);
     search.set("skip", String(params.skip ?? 0));
     search.set("limit", String(params.limit ?? 50));
@@ -49,14 +56,28 @@ export const inboxAPI = {
   },
 
   actors: async (
-    params: { status?: InboxStatus; category?: string | null; unreadOnly?: boolean; search?: string } = {}
+    params: { status?: InboxStatus; category?: string | null; unreadOnly?: boolean; search?: string; projectId?: number | null } = {}
   ): Promise<InboxActorOption[]> => {
     const search = new URLSearchParams();
     search.set("status", params.status ?? "open");
     if (params.category) search.set("category", params.category);
     if (params.unreadOnly) search.set("unread_only", "true");
     if (params.search?.trim()) search.set("search", params.search.trim());
+    if (params.projectId) search.set("project_id", String(params.projectId));
     const response = await api.get(`/inbox/actors?${search.toString()}`);
+    return response.data;
+  },
+
+  projects: async (
+    params: { status?: InboxStatus; category?: string | null; unreadOnly?: boolean; search?: string; actorId?: number | null } = {}
+  ): Promise<InboxProjectOption[]> => {
+    const search = new URLSearchParams();
+    search.set("status", params.status ?? "open");
+    if (params.category) search.set("category", params.category);
+    if (params.unreadOnly) search.set("unread_only", "true");
+    if (params.search?.trim()) search.set("search", params.search.trim());
+    if (params.actorId) search.set("actor_id", String(params.actorId));
+    const response = await api.get(`/inbox/projects?${search.toString()}`);
     return response.data;
   },
 

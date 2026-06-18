@@ -123,8 +123,12 @@ def register_notifications_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        """Delete all notifications for the current user"""
-        deleted_count = crud.delete_all_notifications(db, user_id=current_user.id)
+        """Delete bell notification history without removing active inbox work."""
+        deleted_count = crud.delete_all_notifications(
+            db,
+            user_id=current_user.id,
+            protected_categories=notification_engine.actionable_category_keys(),
+        )
         return {"message": f"Deleted {deleted_count} notifications", "deleted_count": deleted_count}
 
     @app.delete("/notifications/cleanup")
@@ -155,7 +159,12 @@ def register_notifications_routes(app):
         if len(request.notification_ids) > 100:
             raise HTTPException(status_code=400, detail="Cannot delete more than 100 notifications at once")
 
-        deleted_count = crud.bulk_delete_notifications(db, user_id=current_user.id, notification_ids=request.notification_ids)
+        deleted_count = crud.bulk_delete_notifications(
+            db,
+            user_id=current_user.id,
+            notification_ids=request.notification_ids,
+            protected_categories=notification_engine.actionable_category_keys(),
+        )
         return {"message": f"Deleted {deleted_count} notifications", "deleted_count": deleted_count}
 
     @app.delete("/notifications/{notification_id}")
@@ -174,6 +183,14 @@ def register_notifications_routes(app):
 
         if db_notification.user_id != current_user.id and not current_user.is_superuser:
             raise HTTPException(status_code=403, detail="Access denied")
+
+        if crud.is_active_inbox_notification(
+            db_notification, notification_engine.actionable_category_keys()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Active Work Inbox items must be marked done from the inbox before deletion",
+            )
 
         crud.delete_notification(db, notification_id=notification_id)
         return {"message": "Notification deleted successfully"}

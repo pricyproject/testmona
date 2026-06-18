@@ -176,7 +176,13 @@ export function Navbar({
     fetchUnreadCount();
     fetchInboxCount();
     window.addEventListener('notifications:refresh', refresh);
-    const interval = setInterval(() => { fetchUnreadCount(); fetchInboxCount(); }, 60000);
+    const sseHealthyRef = { current: false };
+    const interval = setInterval(() => {
+      if (!sseHealthyRef.current) {
+        fetchUnreadCount();
+        fetchInboxCount();
+      }
+    }, 60000);
     const prefsInterval = setInterval(fetchPrefs, 300000);
 
     // Realtime bell push (Phase 9): an SSE ping just says "something changed";
@@ -187,6 +193,8 @@ export function Navbar({
     try {
       const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       eventSource = new EventSource(`${apiBase}/notifications/stream`, { withCredentials: true });
+      eventSource.onopen = () => { sseHealthyRef.current = true; };
+      eventSource.onerror = () => { sseHealthyRef.current = false; };
       eventSource.addEventListener('notification', () => {
         fetchUnreadCount();
         fetchInboxCount();

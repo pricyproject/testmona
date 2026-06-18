@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.orm.attributes import set_committed_value
-from sqlalchemy import and_, case, func, or_, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
@@ -89,6 +89,20 @@ def update_notification(db: Session, notification_id: int, notification: Notific
     return db_notification
 
 
+def is_active_inbox_notification(notification: "Notification", actionable_categories: List[str]) -> bool:
+    """Return whether a notification is active Work Inbox work.
+
+    Bell cleanup/delete actions must not remove actionable work before the user
+    deliberately marks it done in the inbox. Done items are archived, so they may
+    still be removed from notification history.
+    """
+    return bool(
+        notification
+        and notification.category in actionable_categories
+        and notification.archived is False
+    )
+
+
 def delete_notification(db: Session, notification_id: int):
     db_notification = db.query(Notification).filter(Notification.id == notification_id).first()
     if db_notification:
@@ -120,6 +134,31 @@ def delete_old_notifications(db: Session, user_id: int, days_old: int = 30):
     return result
 
 
+def delete_old_done_inbox_notifications(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    days_old: int = 90,
+):
+    """Delete old done Work Inbox items for a user.
+
+    This is separate from generic read-notification cleanup because inbox work is
+    finished by ``archived/done_at``, not by ``is_read``.
+    """
+    if not actionable_categories:
+        return 0
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_old)
+    result = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+        Notification.archived == True,  # noqa: E712
+        Notification.done_at.isnot(None),
+        Notification.done_at < cutoff_date,
+    ).delete(synchronize_session=False)
+    safe_commit(db)
+    return result
+
+
 def mark_notification_as_unread(db: Session, notification_id: int):
     """Mark a specific notification as unread"""
     db_notification = db.query(Notification).filter(Notification.id == notification_id).first()
@@ -130,9 +169,22 @@ def mark_notification_as_unread(db: Session, notification_id: int):
     return db_notification
 
 
-def delete_all_notifications(db: Session, user_id: int):
-    """Delete all notifications for a user"""
-    result = db.query(Notification).filter(Notification.user_id == user_id).delete()
+def delete_all_notifications(
+    db: Session,
+    user_id: int,
+    protected_categories: Optional[List[str]] = None,
+):
+    """Delete all bell notifications while preserving active Work Inbox items."""
+    query = db.query(Notification).filter(Notification.user_id == user_id)
+    if protected_categories:
+        query = query.filter(
+            or_(
+                Notification.category.is_(None),
+                Notification.category.notin_(protected_categories),
+                Notification.archived == True,  # noqa: E712
+            )
+        )
+    result = query.delete(synchronize_session=False)
     safe_commit(db)
     return result
 
@@ -200,12 +252,26 @@ def bulk_update_notifications(db: Session, user_id: int, notification_ids: List[
     return result
 
 
-def bulk_delete_notifications(db: Session, user_id: int, notification_ids: List[int]):
-    """Bulk delete notifications"""
-    result = db.query(Notification).filter(
+def bulk_delete_notifications(
+    db: Session,
+    user_id: int,
+    notification_ids: List[int],
+    protected_categories: Optional[List[str]] = None,
+):
+    """Bulk delete bell notifications, skipping active Work Inbox items."""
+    query = db.query(Notification).filter(
         Notification.user_id == user_id,
         Notification.id.in_(notification_ids)
-    ).delete()
+    )
+    if protected_categories:
+        query = query.filter(
+            or_(
+                Notification.category.is_(None),
+                Notification.category.notin_(protected_categories),
+                Notification.archived == True,  # noqa: E712
+            )
+        )
+    result = query.delete(synchronize_session=False)
     safe_commit(db)
     return result
 
@@ -245,6 +311,7 @@ def _apply_inbox_filters(
     unread_only: bool = False,
     search: Optional[str] = None,
     actor_id: Optional[int] = None,
+    project_id: Optional[int] = None,
     actor_joined: bool = False,
 ):
     if category:
@@ -265,6 +332,8 @@ def _apply_inbox_filters(
         query = query.filter(Notification.is_read == False)  # noqa: E712
     if actor_id is not None:
         query = query.filter(Notification.actor_id == actor_id)
+    if project_id is not None:
+        query = _apply_inbox_project_filter(query, project_id)
     if search and search.strip():
         term = f"%{_escape_like(search.strip())}%"
         if not actor_joined:
@@ -280,6 +349,31 @@ def _apply_inbox_filters(
     return query
 
 
+def _apply_inbox_project_filter(query, project_id: int):
+    """Narrow notifications to a related entity owned by ``project_id``.
+
+    Notifications intentionally store loose entity references, so project scoping
+    is expressed as a small OR ladder over the entity tables the inbox supports.
+    """
+    models = _inbox_project_models()
+    clauses = [
+        and_(
+            Notification.related_entity_type == "project",
+            Notification.related_entity_id == project_id,
+        )
+    ]
+    for entity_type, model in models.items():
+        clauses.append(
+            and_(
+                Notification.related_entity_type.in_((entity_type, f"{entity_type}_change")),
+                Notification.related_entity_id.in_(
+                    select(model.id).where(model.project_id == project_id)
+                ),
+            )
+        )
+    return query.filter(or_(*clauses))
+
+
 def get_inbox_notifications(
     db: Session,
     user_id: int,
@@ -289,6 +383,7 @@ def get_inbox_notifications(
     unread_only: bool = False,
     search: Optional[str] = None,
     actor_id: Optional[int] = None,
+    project_id: Optional[int] = None,
     sort: str = "newest",
     skip: int = 0,
     limit: int = 50,
@@ -309,7 +404,9 @@ def get_inbox_notifications(
         Notification.user_id == user_id,
         Notification.category.in_(actionable_categories),
     )
-    query = _apply_inbox_filters(query, actionable_categories, status, category, unread_only, search, actor_id)
+    query = _apply_inbox_filters(
+        query, actionable_categories, status, category, unread_only, search, actor_id, project_id
+    )
     if query is None:
         return []
     order = Notification.created_at.asc() if sort == "oldest" else Notification.created_at.desc()
@@ -329,6 +426,7 @@ def get_inbox_actor_options(
     category: Optional[str] = None,
     unread_only: bool = False,
     search: Optional[str] = None,
+    project_id: Optional[int] = None,
 ):
     """Return every actor represented in the current inbox filter, not just the page."""
     if not actionable_categories:
@@ -339,7 +437,7 @@ def get_inbox_actor_options(
         Notification.actor_id.isnot(None),
     )
     query = _apply_inbox_filters(
-        query, actionable_categories, status, category, unread_only, search, actor_joined=True
+        query, actionable_categories, status, category, unread_only, search, project_id=project_id, actor_joined=True
     )
     if query is None:
         return []
@@ -352,6 +450,36 @@ def get_inbox_actor_options(
         ((uid, full_name or username) for uid, full_name, username in rows if full_name or username),
         key=lambda row: row[1].lower(),
     )
+
+
+def get_inbox_project_options(
+    db: Session,
+    user_id: int,
+    actionable_categories: List[str],
+    status: str = "open",
+    category: Optional[str] = None,
+    unread_only: bool = False,
+    search: Optional[str] = None,
+    actor_id: Optional[int] = None,
+):
+    """Return projects represented in the current inbox filter."""
+    if not actionable_categories:
+        return []
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category.in_(actionable_categories),
+    )
+    query = _apply_inbox_filters(query, actionable_categories, status, category, unread_only, search, actor_id)
+    if query is None:
+        return []
+    notifications = query.all()
+    resolve_inbox_projects(db, notifications)
+    projects = {
+        n.project_id: n.project_name
+        for n in notifications
+        if getattr(n, "project_id", None) is not None and getattr(n, "project_name", None)
+    }
+    return sorted(projects.items(), key=lambda row: row[1].lower())
 
 
 def resolve_actor_names(db: Session, notifications: List["Notification"]) -> None:

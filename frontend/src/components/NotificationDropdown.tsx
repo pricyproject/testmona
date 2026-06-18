@@ -6,8 +6,6 @@ import {
   CheckCheck,
   Trash2,
   Settings,
-  Search,
-  X,
   RefreshCw,
   Volume2,
   VolumeX,
@@ -19,18 +17,15 @@ import {
   Eye,
   EyeOff,
   MoreVertical,
-  ListChecks,
   ChevronRight,
   Inbox,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
 import { openNotification } from '@/lib/notificationNavigation';
@@ -48,11 +43,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const [isOpen, setIsOpen] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(0);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<string | null>(null);
-  const [unreadOnly, setUnreadOnly] = useState(false);
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -61,7 +51,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     notification_sound_enabled: true,
     notifications_muted_until: null as string | null
   });
-  const [searchDebounceTimer, setSearchDebounceTimer] = useState<NodeJS.Timeout | null>(null);
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const { t, isRTL, language } = useTranslation();
@@ -95,28 +84,15 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
 
   const fetchNotifications = async (
     pageNum: number = 0,
-    append: boolean = false,
-    overrides?: { search?: string; filter?: string | null }
+    append: boolean = false
   ) => {
     if (!user) return;
-
-    // Use overrides when provided so callers aren't bitten by stale closures
-    // (e.g. the debounced search timer captures the value before state updates).
-    const effectiveSearch = overrides && 'search' in overrides ? overrides.search : searchQuery;
-    const effectiveFilter = overrides && 'filter' in overrides ? overrides.filter : filterType;
 
     setLoading(true);
     try {
       const limit = 50;
       const skip = pageNum * limit;
       let url = `/notifications/?skip=${skip}&limit=${limit}`;
-
-      if (effectiveSearch && effectiveSearch.trim()) {
-        url += `&search=${encodeURIComponent(effectiveSearch.trim())}`;
-      }
-      if (effectiveFilter) {
-        url += `&notification_type=${effectiveFilter}`;
-      }
 
       const response = await api.get(url);
 
@@ -133,24 +109,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleSearchChange = (value: string) => {
-    setSearchQuery(value);
-    setPage(0);
-
-    // Clear existing timer
-    if (searchDebounceTimer) {
-      clearTimeout(searchDebounceTimer);
-    }
-
-    // Set new timer for debounced search. Pass the latest value explicitly so we
-    // don't fetch with the previous keystroke's searchQuery from a stale closure.
-    const timer = setTimeout(() => {
-      fetchNotifications(0, false, { search: value });
-    }, 300);
-
-    setSearchDebounceTimer(timer);
   };
 
   const markAsRead = async (notificationId: number) => {
@@ -189,25 +147,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     }
   };
 
-  const deleteNotification = async (notificationId: number) => {
-    // Validate notification ID
-    if (!notificationId || notificationId < 1) {
-      console.error('Invalid notification ID:', notificationId);
-      return;
-    }
-
-    try {
-      await api.delete(`/notifications/${notificationId}`);
-      const wasUnread = notifications.find(n => n.id === notificationId)?.is_read === false;
-      setNotifications(prev => prev.filter(notif => notif.id !== notificationId));
-      if (wasUnread) {
-        onUnreadCountChange(Math.max(0, unreadCount - 1));
-      }
-    } catch (error) {
-      console.error('Failed to delete notification:', error);
-    }
-  };
-
   const loadMore = () => {
     if (loading || !hasMore) return;
     const nextPage = page + 1;
@@ -240,77 +179,12 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
   const clearAll = async () => {
     try {
       await api.delete('/notifications/all');
-      setNotifications([]);
-      onUnreadCountChange(0);
+      setPage(0);
+      await fetchNotifications(0, false);
+      window.dispatchEvent(new CustomEvent('notifications:refresh'));
       setShowClearConfirm(false);
     } catch (error) {
       console.error('Failed to clear all notifications:', error);
-    }
-  };
-
-  const toggleBulkMode = () => {
-    setBulkMode(!bulkMode);
-    setSelectedIds(new Set());
-  };
-
-  const toggleSelect = (id: number) => {
-    const newSelected = new Set(selectedIds);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedIds(newSelected);
-  };
-
-  const selectAll = () => {
-    setSelectedIds(new Set(notifications.map(n => n.id)));
-  };
-
-  const bulkMarkRead = async () => {
-    if (selectedIds.size === 0) return;
-    try {
-      await api.post('/notifications/bulk-update', {
-        notification_ids: Array.from(selectedIds),
-        is_read: true
-      });
-      setNotifications(prev =>
-        prev.map(notif =>
-          selectedIds.has(notif.id) ? { ...notif, is_read: true } : notif
-        )
-      );
-      const unreadInSelection = notifications.filter(n => selectedIds.has(n.id) && !n.is_read).length;
-      onUnreadCountChange(Math.max(0, unreadCount - unreadInSelection));
-      setSelectedIds(new Set());
-    } catch (error) {
-      console.error('Failed to bulk mark as read:', error);
-      alert('Failed to mark notifications as read. Please try again.');
-    }
-  };
-
-  const bulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    try {
-      await api.delete('/notifications/bulk-delete', {
-        data: { notification_ids: Array.from(selectedIds) }
-      });
-      const unreadInSelection = notifications.filter(n => selectedIds.has(n.id) && !n.is_read).length;
-      setNotifications(prev => prev.filter(notif => !selectedIds.has(notif.id)));
-      onUnreadCountChange(Math.max(0, unreadCount - unreadInSelection));
-      setSelectedIds(new Set());
-    } catch (error) {
-      console.error('Failed to bulk delete:', error);
-      alert('Failed to delete notifications. Please try again.');
-    }
-  };
-
-  const loadAll = async () => {
-    try {
-      const response = await api.get('/notifications/?skip=0&limit=100');
-      setNotifications(response.data);
-      setHasMore(false);
-    } catch (error) {
-      console.error('Failed to load all notifications:', error);
     }
   };
 
@@ -349,30 +223,18 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     return () => {
       if (interval) clearInterval(interval);
     };
-    // Re-arm when the active filter/search changes so the timer closure stays fresh.
-  }, [autoRefresh, isOpen, filterType, searchQuery]);
+  }, [autoRefresh, isOpen]);
 
-  // Fetch the first page whenever the dropdown opens or the active filter
-  // changes. Pagination (loadMore/loadAll) manages its own fetches, so `page`
+  // Fetch the first page whenever the dropdown opens. Pagination manages its own fetches, so `page`
   // is intentionally NOT a dependency here — otherwise appending a page would
   // immediately clobber the list with a fresh non-append fetch.
   useEffect(() => {
     if (!isOpen) return;
     setPage(0);
     setHasMore(true);
-    setSelectedIds(new Set());
     setNotifications([]);
-    fetchNotifications(0, false, { filter: filterType });
-  }, [isOpen, filterType, user]);
-
-  // Cleanup debounce timer on unmount
-  useEffect(() => {
-    return () => {
-      if (searchDebounceTimer) {
-        clearTimeout(searchDebounceTimer);
-      }
-    };
-  }, [searchDebounceTimer]);
+    fetchNotifications(0, false);
+  }, [isOpen, user]);
 
   // Per-type visual language: a single source of truth for the icon + tint used
   // by the avatar, so each row reads at a glance without a separate text badge.
@@ -438,33 +300,14 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     return groups;
   };
 
-  // "Unread" is a client-side view filter layered on top of the server-side type
-  // filter, so it doesn't need its own fetch round-trip.
-  const visibleNotifications = unreadOnly
-    ? notifications.filter((n) => !n.is_read)
-    : notifications;
+  const visibleNotifications = notifications;
 
-  const filterOptions = [
-    { value: null, label: t('filterAll') },
-    { value: 'info', label: t('info') },
-    { value: 'success', label: t('success') },
-    { value: 'warning', label: t('warning') },
-    { value: 'error', label: t('error') },
-  ];
-
-  // Open-only side effects. The list fetch lives in the [isOpen, filterType]
-  // effect above; here we just reset transient UI state and load prefs. The
-  // filter is reset on close (not open) so reopening doesn't trigger a second
-  // fetch from a filterType change colliding with the open fetch.
+  // Open-only side effects. The list fetch lives in the [isOpen] effect above;
+  // here we just reset transient UI state and load prefs.
   useEffect(() => {
     if (isOpen) {
-      setSearchQuery('');
-      setBulkMode(false);
-      setUnreadOnly(false);
       setShowMenu(false);
       fetchNotificationPrefs();
-    } else {
-      setFilterType(null);
     }
   }, [isOpen]);
 
@@ -523,7 +366,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                 className="h-8 gap-1.5 rounded-full px-2.5 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
               >
                 <CheckCheck className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{t('markAllRead')}</span>
+                <span className="hidden sm:inline">{t('markBellRead')}</span>
               </Button>
             )}
 
@@ -554,16 +397,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                     </button>
 
                     <div className="my-1.5 h-px bg-slate-100 dark:bg-slate-800" />
-
-                    <button
-                      type="button"
-                      onClick={() => { toggleBulkMode(); setShowMenu(false); }}
-                      className={menuItemClass}
-                    >
-                      <ListChecks className="h-4 w-4 text-slate-400" />
-                      <span className="flex-1">{t('bulkSelectMode')}</span>
-                      {bulkMode && <span className="h-2 w-2 rounded-full bg-blue-500" />}
-                    </button>
 
                     <button
                       type="button"
@@ -641,79 +474,6 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
           </div>
         </div>
 
-        {/* Search + filters */}
-        <div className="px-4 pb-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              type="text"
-              placeholder={t('searchNotifications')}
-              value={searchQuery}
-              onChange={(event) => handleSearchChange(event.target.value)}
-              className="h-9 rounded-xl border-slate-200 bg-slate-50 ps-9 pe-8 text-sm dark:border-slate-800 dark:bg-slate-900"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-                  setSearchQuery('');
-                  setPage(0);
-                  fetchNotifications(0, false, { search: '' });
-                }}
-                className="absolute end-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                aria-label={t('clearSearch')}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-0.5">
-            <button
-              type="button"
-              onClick={() => setUnreadOnly((v) => !v)}
-              className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${unreadOnly ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}
-            >
-              {t('unreadFilter')}
-            </button>
-            <span className="h-4 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
-            {filterOptions.map((option) => {
-              const active = filterType === option.value;
-              return (
-                <button
-                  key={option.value ?? 'all'}
-                  type="button"
-                  onClick={() => { setFilterType(option.value); setPage(0); }}
-                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors ${active ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-950' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Bulk action bar */}
-        {bulkMode && notifications.length > 0 && (
-          <div className="flex items-center justify-between gap-2 border-y border-blue-100 bg-blue-50/80 px-4 py-2 dark:border-blue-900/60 dark:bg-blue-950/30">
-            <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
-              {t('selectedCount', { count: selectedIds.size })}
-            </span>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" onClick={selectAll} className="h-7 rounded-full px-2.5 text-xs text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-900/40">
-                {t('selectAll')}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={bulkMarkRead} disabled={selectedIds.size === 0} className="h-7 rounded-full px-2.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-40 dark:text-blue-200 dark:hover:bg-blue-900/40">
-                {t('markRead')}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={bulkDelete} disabled={selectedIds.size === 0} className="h-7 rounded-full px-2.5 text-xs text-red-700 hover:bg-red-100 disabled:opacity-40 dark:text-red-300 dark:hover:bg-red-950/40">
-                {t('delete')}
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* List */}
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-slate-100 dark:border-slate-900">
           {loading && notifications.length === 0 ? (
@@ -727,7 +487,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                 <Bell className="h-7 w-7 text-slate-400" />
               </div>
               <p className="text-sm font-semibold text-slate-950 dark:text-white">
-                {unreadOnly ? t('noUnreadNotifications') : t('noNotificationsYet')}
+                {t('noNotificationsYet')}
               </p>
               <p className="mt-1 max-w-xs text-xs leading-5 text-slate-500 dark:text-slate-400">
                 {t('noNotificationsDesc')}
@@ -741,29 +501,17 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                 </div>
 
                 {groupNotifs.map((notification) => {
-                  const isSelected = selectedIds.has(notification.id);
                   const isUnread = !notification.is_read;
                   const { Icon, wrap, dot } = getNotificationVisuals(notification.type);
 
                   return (
                     <div
                       key={notification.id}
-                      onClick={() => { if (bulkMode) toggleSelect(notification.id); }}
-                      className={`group relative flex gap-3 px-4 py-3 transition-colors ${bulkMode ? 'cursor-pointer' : ''} ${isSelected ? 'bg-blue-50/80 dark:bg-blue-950/30' : isUnread ? 'bg-blue-50/40 hover:bg-blue-50/70 dark:bg-blue-950/15 dark:hover:bg-blue-950/25' : 'hover:bg-slate-50 dark:hover:bg-slate-900/60'}`}
+                      className={`group relative flex gap-3 px-4 py-3 transition-colors ${isUnread ? 'bg-blue-50/40 hover:bg-blue-50/70 dark:bg-blue-950/15 dark:hover:bg-blue-950/25' : 'hover:bg-slate-50 dark:hover:bg-slate-900/60'}`}
                     >
-                      {bulkMode ? (
-                        <div onClick={(event) => event.stopPropagation()} className="flex items-start pt-1">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => toggleSelect(notification.id)}
-                            aria-label={t('selectNotification')}
-                          />
-                        </div>
-                      ) : (
-                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${wrap}`}>
-                          <Icon className="h-[18px] w-[18px]" />
-                        </div>
-                      )}
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${wrap}`}>
+                        <Icon className="h-[18px] w-[18px]" />
+                      </div>
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start gap-2">
@@ -797,40 +545,29 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
                             </button>
                           ) : <span />}
 
-                          {!bulkMode && (
-                            <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                              {notification.is_read ? (
-                                <button
-                                  type="button"
-                                  onClick={(event) => { event.stopPropagation(); markAsUnread(notification.id); }}
-                                  className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
-                                  title={t('markAsUnread')}
-                                  aria-label={t('markAsUnread')}
-                                >
-                                  <EyeOff className="h-3.5 w-3.5" />
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={(event) => { event.stopPropagation(); markAsRead(notification.id); }}
-                                  className="rounded-lg p-1.5 text-blue-600 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
-                                  title={t('markAsRead')}
-                                  aria-label={t('markAsRead')}
-                                >
-                                  <Eye className="h-3.5 w-3.5" />
-                                </button>
-                              )}
+                          <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                            {notification.is_read ? (
                               <button
                                 type="button"
-                                onClick={(event) => { event.stopPropagation(); deleteNotification(notification.id); }}
-                                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-                                title={t('deleteNotificationLabel')}
-                                aria-label={t('deleteNotificationLabel')}
+                                onClick={(event) => { event.stopPropagation(); markAsUnread(notification.id); }}
+                                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
+                                title={t('markAsUnread')}
+                                aria-label={t('markAsUnread')}
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <EyeOff className="h-3.5 w-3.5" />
                               </button>
-                            </div>
-                          )}
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(event) => { event.stopPropagation(); markAsRead(notification.id); }}
+                                className="rounded-lg p-1.5 text-blue-600 transition-colors hover:bg-blue-100 hover:text-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/40"
+                                title={t('markAsRead')}
+                                aria-label={t('markAsRead')}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -841,24 +578,16 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
           )}
         </div>
 
-        {/* Load more — only when paging through the full (non-unread-filtered) list */}
-        {!unreadOnly && notifications.length > 0 && hasMore && (
-          <div className="grid grid-cols-2 border-t border-slate-100 dark:border-slate-900">
+        {/* Load more */}
+        {notifications.length > 0 && hasMore && (
+          <div className="border-t border-slate-100 dark:border-slate-900">
             <button
               type="button"
               onClick={loadMore}
               disabled={loading}
-              className="py-2.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
+              className="w-full py-2.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950/30"
             >
               {loading ? t('loading') : t('loadMore')}
-            </button>
-            <button
-              type="button"
-              onClick={loadAll}
-              disabled={loading}
-              className="border-s border-slate-100 py-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              {t('loadAll')}
             </button>
           </div>
         )}
