@@ -263,3 +263,106 @@ def _allowed_db(user, method, path, db):
     except HTTPException as exc:
         assert exc.status_code == 403
         return False
+
+
+# ---------------------------------------------------------------------------
+# Tester capability boundary: testers may delete test *content* (they hold the
+# "delete" permission) but not project *structure/config* (which routes gate on
+# "manage_projects" — a permission testers lack). See app/rbac.ROLE_PERMISSIONS.
+# ---------------------------------------------------------------------------
+
+def test_tester_role_permission_set():
+    from app.models import Role
+    from app.rbac import ROLE_PERMISSIONS
+
+    assert ROLE_PERMISSIONS[Role.TESTER] == {"read", "write", "execute", "delete"}
+    assert "manage_projects" not in ROLE_PERMISSIONS[Role.TESTER]
+
+
+def test_tester_global_permissions():
+    from app.rbac import has_permission, can
+
+    tester = _user(role="tester")
+    # Content deletion (global check) is allowed; project management is not.
+    assert has_permission(tester, "delete") is True
+    assert has_permission(tester, "write") is True
+    assert has_permission(tester, "execute") is True
+    assert has_permission(tester, "manage_projects") is False
+    # `can` is a thin alias used by serializers for capability flags.
+    assert can(tester, "delete") is True
+    assert can(tester, "manage_projects") is False
+
+
+def test_viewer_still_cannot_delete():
+    from app.rbac import has_permission
+
+    assert has_permission(_user(role="viewer"), "delete") is False
+
+
+def test_manager_can_manage_projects():
+    from app.rbac import has_permission
+
+    assert has_permission(_user(role="manager"), "manage_projects") is True
+    assert has_permission(_user(role="manager"), "delete") is True
+
+
+def test_effective_permissions_for_tester():
+    """The frontend reads this to gate controls: delete in, manage_projects out."""
+    from app.rbac import effective_permissions
+
+    tester = types.SimpleNamespace(role="tester", is_superuser=False, id=7)
+    result = effective_permissions(tester, _FakeDB())
+    assert "delete" in result["global"]
+    assert "write" in result["global"]
+    assert "manage_projects" not in result["global"]
+    assert result["projects"] == {}
+
+
+def test_effective_permissions_for_superuser_is_full_admin_set():
+    from app.models import Role
+    from app.rbac import ROLE_PERMISSIONS, effective_permissions
+
+    superuser = types.SimpleNamespace(role="viewer", is_superuser=True, id=8)
+    result = effective_permissions(superuser, _FakeDB())
+    assert set(result["global"]) == set(ROLE_PERMISSIONS[Role.ADMIN])
+
+
+def test_effective_permissions_elevated_viewer_gains_project_delete(monkeypatch):
+    """A global viewer assigned tester in a project gets delete *there* only.
+
+    The per-project set is derived from ``has_permission`` itself (so it can't
+    diverge from enforcement): the elevated viewer can delete test content within
+    that project while staying read-only globally and lacking project management.
+    """
+    import app.rbac as rbac_module
+
+    project = types.SimpleNamespace(id=42, owner_id=999)
+    assignment = types.SimpleNamespace(role="tester", user_id=7, project_id=42)
+    db = _FakeDB(assignments=[assignment], owned=[project])
+    monkeypatch.setattr(
+        rbac_module, "get_user_projects",
+        lambda user, _db: [{"project": project, "role": "tester"}],
+    )
+    result = rbac_module.effective_permissions(_viewer_with_id(), db)
+    assert "delete" not in result["global"]
+    assert "delete" in result["projects"][42]
+    assert "manage_projects" not in result["projects"][42]
+
+
+def test_effective_permissions_owner_gets_manage_in_owned_project(monkeypatch):
+    """A globally read-only/tester user who OWNS a project has manage there.
+
+    Ownership elevation lives in ``has_permission`` (not the role table), so this
+    guards against the endpoint diverging from enforcement for project owners.
+    """
+    import app.rbac as rbac_module
+
+    owned = types.SimpleNamespace(id=7, owner_id=7)
+    db = _FakeDB(assignments=[], owned=[owned])
+    monkeypatch.setattr(
+        rbac_module, "get_user_projects",
+        lambda user, _db: [{"project": owned, "role": "tester"}],
+    )
+    result = rbac_module.effective_permissions(_viewer_with_id(uid=7), db)
+    assert "manage_projects" in result["projects"][7]
+    assert "manage_projects" not in result["global"]
