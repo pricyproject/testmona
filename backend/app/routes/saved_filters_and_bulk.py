@@ -529,17 +529,19 @@ def register_saved_filters_and_bulk_routes(app) -> None:
 
         deleted = 0
         skipped: List[int] = []
-        write_cache: dict[int, bool] = {}
+        # Deleting requirements is a manager+ action (testers can edit but not
+        # delete them) — mirror the single-requirement delete route.
+        manage_cache: dict[int, bool] = {}
 
         for requirement_id in ids:
             requirement = requirement_by_id.get(requirement_id)
             if requirement is None:
                 skipped.append(requirement_id)
                 continue
-            allowed = write_cache.get(requirement.project_id)
+            allowed = manage_cache.get(requirement.project_id)
             if allowed is None:
-                allowed = rbac.has_permission(current_user, "write", requirement.project_id, db)
-                write_cache[requirement.project_id] = allowed
+                allowed = rbac.has_permission(current_user, "manage_projects", requirement.project_id, db)
+                manage_cache[requirement.project_id] = allowed
             if not allowed:
                 skipped.append(requirement_id)
                 continue

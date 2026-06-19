@@ -1676,7 +1676,7 @@ def register_analytics_dashboard_routes(app):
         db_analysis = get_root_cause_analysis(db, analysis_id)
         if not db_analysis:
             raise HTTPException(status_code=404, detail="Root cause analysis not found")
-        if not rbac.has_permission(current_user, "delete", db_analysis.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_analysis.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         analysis_title = db_analysis.analysis_title
@@ -1900,7 +1900,7 @@ def register_analytics_dashboard_routes(app):
         if not db_widget:
             raise HTTPException(status_code=404, detail="Dashboard widget not found")
 
-        if not rbac.has_permission(current_user, "delete", db_widget.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_widget.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion

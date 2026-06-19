@@ -139,7 +139,7 @@ def register_custom_fields_routes(app):
         if existing_field is None:
             raise HTTPException(status_code=404, detail="Custom field definition not found")
         
-        if not rbac.has_permission(current_user, "delete", existing_field.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", existing_field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Reuse existing CRUD function
@@ -340,7 +340,7 @@ def register_custom_fields_routes(app):
         if db_field is None:
             raise HTTPException(status_code=404, detail="Custom field definition not found")
         
-        if not rbac.has_permission(current_user, "delete", db_field.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         crud.delete_custom_field_definition(db, field_id=field_id, user_id=current_user.id)

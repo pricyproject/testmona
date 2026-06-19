@@ -898,7 +898,7 @@ def register_requirements_defects_plans_routes(app):
         db_folder = crud.get_requirement_folder(db, folder_id)
         if db_folder is None:
             raise HTTPException(status_code=404, detail="Folder not found")
-        if not rbac.has_permission(current_user, "delete", db_folder.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_folder.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         crud.delete_requirement_folder(db, folder_id)
         return {"status": "deleted"}
@@ -1860,7 +1860,7 @@ def register_requirements_defects_plans_routes(app):
         if db_requirement is None:
             raise HTTPException(status_code=404, detail="Requirement not found")
 
-        if not rbac.has_permission(current_user, "delete", db_requirement.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion
@@ -2076,6 +2076,8 @@ def register_requirements_defects_plans_routes(app):
             "test_run": test_run_summary,
             "requirement": requirement_summary,
             "result_links": result_links,
+            "can_edit": rbac.can(current_user, "write", defect.project_id, db),
+            "can_delete": rbac.can(current_user, "delete", defect.project_id, db),
         }
 
     @app.put("/defects/{defect_id}", response_model=schemas.Defect)
@@ -2956,7 +2958,7 @@ def register_requirements_defects_plans_routes(app):
         if db_test_plan is None:
             raise HTTPException(status_code=404, detail="Test plan not found")
 
-        if not rbac.has_permission(current_user, "delete", db_test_plan.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_test_plan.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion
@@ -3335,7 +3337,7 @@ def register_requirements_defects_plans_routes(app):
         if db_milestone is None:
             raise HTTPException(status_code=404, detail="Milestone not found")
 
-        if not rbac.has_permission(current_user, "delete", db_milestone.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_milestone.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         if db_milestone.test_plans:

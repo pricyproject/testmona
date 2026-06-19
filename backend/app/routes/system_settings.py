@@ -802,7 +802,7 @@ def register_system_settings_routes(app):
             if not rbac.has_global_permission(current_user, "manage_users"):
                 raise HTTPException(status_code=403, detail="Only admins can delete global parameters")
         else:
-            if not rbac.has_permission(current_user, "delete", db_parameter.project_id, db):
+            if not rbac.has_permission(current_user, "manage_projects", db_parameter.project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Store data for audit trail before deletion

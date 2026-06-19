@@ -462,6 +462,8 @@ def register_case_routes(app):
         if include_linked_requirements:
             db_test_case.linked_requirements = _get_test_case_linked_requirements(db, db_test_case, test_suite.project_id)
 
+        db_test_case.can_edit = rbac.can(current_user, "write", test_suite.project_id, db)
+        db_test_case.can_delete = rbac.can(current_user, "delete", test_suite.project_id, db)
         return db_test_case
 
     @app.put("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations)

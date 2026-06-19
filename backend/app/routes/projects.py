@@ -248,7 +248,7 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "delete", project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         existing = crud.get_project(db, project_id=project_id)
@@ -272,7 +272,7 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "delete", project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Get project name from request body

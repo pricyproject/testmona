@@ -109,7 +109,7 @@ def register_dataset_routes(app) -> None:
         dataset = crud.get_test_dataset(db, dataset_id=dataset_id)
         if dataset is None:
             raise HTTPException(status_code=404, detail="Dataset not found")
-        if not rbac.has_permission(current_user, "write", dataset.project_id, db):
+        if not rbac.has_permission(current_user, "delete", dataset.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         crud.delete_test_dataset(db, dataset_id=dataset_id)
         return

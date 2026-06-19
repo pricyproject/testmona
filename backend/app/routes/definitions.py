@@ -25,6 +25,14 @@ def register_definitions_routes(app):
         if project_id is None and not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+    def _require_project_manage(current_user, project_id, db):
+        # Definitions are project configuration: deleting them is a manager+ action
+        # (testers have write/delete on test *content*, not on config catalogs).
+        if project_id is not None and not rbac.has_permission(current_user, "manage_projects", project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if project_id is None and not rbac.has_permission(current_user, "manage_projects"):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     # Test Type Definition Endpoints
     @app.post("/test-type-definitions/", response_model=schemas.TestTypeDefinition)
     def create_test_type_definition(
@@ -85,7 +93,7 @@ def register_definitions_routes(app):
         existing = crud.get_test_type_definition(db, test_type_id=test_type_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Test type definition not found")
-        _require_project_write(current_user, existing.project_id, db)
+        _require_project_manage(current_user, existing.project_id, db)
         crud.delete_test_type_definition(db, test_type_id=test_type_id)
         return {"message": "Test type definition deleted successfully"}
 
@@ -148,6 +156,6 @@ def register_definitions_routes(app):
         existing = crud.get_priority_definition(db, priority_id=priority_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Priority definition not found")
-        _require_project_write(current_user, existing.project_id, db)
+        _require_project_manage(current_user, existing.project_id, db)
         crud.delete_priority_definition(db, priority_id=priority_id)
         return {"message": "Priority definition deleted successfully"}

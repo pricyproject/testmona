@@ -143,7 +143,7 @@ def register_remaining_routes(app):
         if db_environment is None:
             raise HTTPException(status_code=404, detail="Environment not found")
         
-        if not rbac.has_permission(current_user, "delete", db_environment.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         # Store data for audit trail before deletion
@@ -245,7 +245,7 @@ def register_remaining_routes(app):
         if db_environment is None:
             raise HTTPException(status_code=404, detail="Environment not found")
         
-        if not rbac.has_permission(current_user, "delete", db_environment.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_environment.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         crud.delete_execution_environment(db, environment_id)

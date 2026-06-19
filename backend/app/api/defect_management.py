@@ -874,12 +874,14 @@ def delete_defect_template(
     current_user: models.User = Depends(get_current_user)
 ):
     """Delete a defect template"""
-    # Check project access and delete permission
+    # Check project access. Defect templates are reusable project config (like
+    # field/test-type definitions), so deletion is a manager+ action even though
+    # testers can create/edit them.
     if not has_permission(current_user, "view", project_id, db):
         raise HTTPException(status_code=403, detail="Access denied")
-    
-    if not has_permission(current_user, "delete", project_id, db):
-        raise HTTPException(status_code=403, detail="Delete permission required")
+
+    if not has_permission(current_user, "manage_projects", project_id, db):
+        raise HTTPException(status_code=403, detail="Manage projects permission required")
 
     # Ensure the template belongs to this project
     _get_project_template_or_404(db, project_id, template_id)

@@ -424,7 +424,7 @@ def register_traceability_coverage_routes(app):
             raise HTTPException(status_code=404, detail="Traceability entry not found")
 
         requirement = crud.get_requirement(db, db_entry.requirement_id)
-        if not rbac.has_permission(current_user, "delete", requirement.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion
@@ -562,7 +562,7 @@ def register_traceability_coverage_routes(app):
         if db_report is None:
             raise HTTPException(status_code=404, detail="Coverage report not found")
 
-        if not rbac.has_permission(current_user, "delete", db_report.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_report.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion
@@ -697,7 +697,7 @@ def register_traceability_coverage_routes(app):
         if db_integration is None:
             raise HTTPException(status_code=404, detail="Jira integration not found")
 
-        if not rbac.has_permission(current_user, "delete", db_integration.project_id, db):
+        if not rbac.has_permission(current_user, "manage_projects", db_integration.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Store data for audit trail before deletion
