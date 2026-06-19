@@ -2295,7 +2295,10 @@ def register_docs_routes(app) -> None:
         )
         if not include_resolved:
             query = query.filter(models.DocFeedback.resolved.is_(False))
-        items = query.order_by(models.DocFeedback.updated_at.desc().nullslast(), models.DocFeedback.created_at.desc()).all()
+        # Newest activity first: a freshly filed item (no updated_at yet) sorts by its
+        # created_at, so it isn't pushed below older items that were merely edited.
+        recency = func.coalesce(models.DocFeedback.updated_at, models.DocFeedback.created_at)
+        items = query.order_by(recency.desc(), models.DocFeedback.id.desc()).all()
         return [_feedback_view(item) for item in items]
 
     @app.put("/docs/{doc_id}/feedback", response_model=schemas.DocFeedbackSummary, tags=["Docs"])

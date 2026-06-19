@@ -11,20 +11,15 @@ import {
   Download,
   Eye,
   FileText,
-  Flag,
   Globe,
   History,
   Link2,
   Loader2,
   Lock,
-  MessageCircleQuestion,
   MoreHorizontal,
   Pencil,
-  RotateCcw,
   Share2,
   Sparkles,
-  ThumbsDown,
-  ThumbsUp,
   Trash2,
   Users,
   X,
@@ -38,10 +33,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,6 +56,7 @@ import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { DocShareDialog } from '@/components/docs/DocShareDialog';
 import { DocReviewDialog } from '@/components/docs/DocReviewDialog';
 import { DocReviewPanel } from '@/components/docs/DocReviewPanel';
+import { DocReaderFeedback } from '@/components/docs/DocReaderFeedback';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -70,17 +64,13 @@ import { docsAPI } from '@/lib/api';
 import {
   docDetailKeys,
   useDocDetail,
-  useDocFeedback,
   useUpdateDoc,
   useDeleteDoc,
-  useSubmitDocFeedback,
-  useClearDocFeedback,
-  useResolveDocFeedback,
 } from '@/hooks/queries/docDetail';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { formatServerDateTime } from '@/utils/datetime';
-import type { Doc, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocRequirementLink, DocSpace, DocStats } from '@/types';
+import type { Doc, DocRequirementLink, DocSpace, DocStats } from '@/types';
 
 const statusTone: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
@@ -121,10 +111,6 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const [feedbackDialogType, setFeedbackDialogType] = useState<DocFeedbackType | null>(null);
-  const [feedbackComment, setFeedbackComment] = useState('');
-  const [feedbackSection, setFeedbackSection] = useState('');
-  const [feedbackIncludeResolved, setFeedbackIncludeResolved] = useState(false);
 
   const queryClient = useQueryClient();
   const docEnabled = !(projectId && docIdLoading) && !!parsedDocId;
@@ -135,23 +121,10 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const stats: DocStats | null = docQuery.data?.stats ?? null;
   const loading = (!!projectId && docIdLoading) || (docEnabled && docQuery.isLoading);
 
-  const canEditDoc = Boolean(doc?.can_edit);
-  const feedbackQuery = useDocFeedback(parsedDocId, canEditDoc, feedbackIncludeResolved, !!doc);
-  const feedback: DocFeedbackSummary | null = feedbackQuery.data?.summary ?? null;
-  const feedbackItems: DocFeedback[] = feedbackQuery.data?.items ?? [];
-  // Only the initial list load gates the controls; a background refetch (e.g.
-  // triggered by casting a helpful vote) must not disable the resolve UI.
-  const feedbackListLoading = feedbackQuery.isLoading;
-
   const updateDoc = useUpdateDoc(parsedDocId);
   const deleteDocMutation = useDeleteDoc(parsedDocId);
-  const submitFeedbackMutation = useSubmitDocFeedback(parsedDocId);
-  const clearFeedbackMutation = useClearDocFeedback(parsedDocId);
-  const resolveFeedbackMutation = useResolveDocFeedback(parsedDocId);
   const savingTitle = updateDoc.isPending;
   const deleting = deleteDocMutation.isPending;
-  const feedbackSaving = submitFeedbackMutation.isPending || clearFeedbackMutation.isPending;
-  const feedbackResolving = resolveFeedbackMutation.isPending;
 
   // Surface a load failure as a toast (mirrors the previous imperative load).
   useEffect(() => {
@@ -254,71 +227,6 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       toast({ title: t('error'), description: t('docDeleteFailed'), variant: 'destructive' });
     }
   };
-
-  // Toggling include-resolved just flips the flag; the feedback query is keyed on
-  // it and refetches automatically.
-  const toggleResolvedFeedback = () => {
-    if (feedbackListLoading) return;
-    setFeedbackIncludeResolved((prev) => !prev);
-  };
-
-  const submitFeedback = async (feedbackType: DocFeedbackType, comment?: string, sectionText?: string): Promise<boolean> => {
-    if (!doc || feedbackSaving) return false;
-    try {
-      await submitFeedbackMutation.mutateAsync({
-        feedback_type: feedbackType,
-        comment: comment?.trim() || null,
-        section_text: sectionText?.trim() || null,
-      });
-      toast({ title: t('success'), description: t('docFeedbackSaved') });
-      return true;
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docFeedbackFailed'), variant: 'destructive' });
-      return false;
-    }
-  };
-
-  const clearMyFeedback = async () => {
-    if (!doc || feedbackSaving) return;
-    try {
-      await clearFeedbackMutation.mutateAsync();
-    } catch {
-      toast({ title: t('error'), description: t('docFeedbackFailed'), variant: 'destructive' });
-    }
-  };
-
-  // The two direct-vote buttons toggle: clicking the active vote clears it rather
-  // than re-submitting the same value (which would show a misleading "saved" toast).
-  const toggleVote = (feedbackType: DocFeedbackType) => {
-    if (feedbackSaving) return;
-    if (activeFeedback === feedbackType) void clearMyFeedback();
-    else void submitFeedback(feedbackType);
-  };
-
-  const openFeedbackDialog = (feedbackType: DocFeedbackType) => {
-    setFeedbackDialogType(feedbackType);
-    setFeedbackComment('');
-    setFeedbackSection('');
-  };
-
-  const submitFeedbackDialog = async () => {
-    if (!feedbackDialogType || !feedbackComment.trim()) return;
-    const ok = await submitFeedback(feedbackDialogType, feedbackComment, feedbackSection);
-    if (ok) setFeedbackDialogType(null);
-  };
-
-  const resolveFeedback = async (item: DocFeedback, resolved: boolean) => {
-    if (!doc || feedbackResolving) return;
-    try {
-      await resolveFeedbackMutation.mutateAsync({ feedbackId: item.id, resolved });
-    } catch {
-      toast({ title: t('error'), description: t('docFeedbackResolveFailed'), variant: 'destructive' });
-    }
-  };
-
-  const feedbackLabel = (type: DocFeedbackType) => t(`docFeedback_${type}` as any);
-  const activeFeedback = feedback?.my_feedback?.feedback_type;
-  const feedbackDialogTitle = feedbackDialogType ? feedbackLabel(feedbackDialogType) : '';
 
   if (loading) {
     return (
@@ -507,113 +415,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             </div>
           )}
 
-          {hasDocContent && (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold">{t('docFeedbackTitle')}</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">{t('docFeedbackDesc')}</p>
-              </div>
-              {feedback?.my_feedback && (
-                <Button type="button" variant="ghost" size="sm" onClick={clearMyFeedback} disabled={feedbackSaving}>
-                  <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                  {t('docFeedbackClear')}
-                </Button>
-              )}
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-4">
-              <Button
-                type="button"
-                variant={activeFeedback === 'helpful' ? 'default' : 'outline'}
-                onClick={() => toggleVote('helpful')}
-                disabled={feedbackSaving}
-                className="justify-start"
-              >
-                <ThumbsUp className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('docFeedbackHelpful')}
-                <Badge variant="secondary" className="ms-auto">{feedback?.helpful ?? 0}</Badge>
-              </Button>
-              <Button
-                type="button"
-                variant={activeFeedback === 'not_helpful' ? 'default' : 'outline'}
-                onClick={() => toggleVote('not_helpful')}
-                disabled={feedbackSaving}
-                className="justify-start"
-              >
-                <ThumbsDown className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('docFeedbackNotHelpful')}
-                <Badge variant="secondary" className="ms-auto">{feedback?.not_helpful ?? 0}</Badge>
-              </Button>
-              <Button
-                type="button"
-                variant={activeFeedback === 'clarification' ? 'default' : 'outline'}
-                onClick={() => openFeedbackDialog('clarification')}
-                disabled={feedbackSaving}
-                className="justify-start"
-              >
-                <MessageCircleQuestion className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('docFeedbackClarification')}
-                <Badge variant="secondary" className="ms-auto">{feedback?.clarification ?? 0}</Badge>
-              </Button>
-              <Button
-                type="button"
-                variant={activeFeedback === 'outdated' ? 'default' : 'outline'}
-                onClick={() => openFeedbackDialog('outdated')}
-                disabled={feedbackSaving}
-                className="justify-start"
-              >
-                <Flag className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('docFeedbackOutdated')}
-                <Badge variant="secondary" className="ms-auto">{feedback?.outdated ?? 0}</Badge>
-              </Button>
-            </div>
-            {doc.can_edit && (
-              <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    {t('docFeedbackUnresolved', { n: feedback?.unresolved ?? 0 })}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={feedbackListLoading}
-                    onClick={toggleResolvedFeedback}
-                  >
-                    {feedbackIncludeResolved ? t('docFeedbackHideResolved') : t('docFeedbackShowResolved')}
-                  </Button>
-                </div>
-                {feedbackItems.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">{t('docFeedbackNoItems')}</p>
-                ) : (
-                  <div className="space-y-2">
-                    {feedbackItems.map((item) => (
-                      <div key={item.id} className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant={item.resolved ? 'secondary' : 'outline'}>{feedbackLabel(item.feedback_type)}</Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {item.user?.full_name || item.user?.username || item.user?.email || `#${item.user_id}`}
-                          </span>
-                          <span className="ms-auto" />
-                          <Button type="button" variant="ghost" size="sm" disabled={feedbackResolving} onClick={() => resolveFeedback(item, !item.resolved)}>
-                            <CheckCircle2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                            {item.resolved ? t('docFeedbackReopen') : t('docFeedbackResolve')}
-                          </Button>
-                        </div>
-                        {item.comment && <p className="mt-2 whitespace-pre-wrap text-slate-700 dark:text-slate-200">{item.comment}</p>}
-                        {item.section_text && (
-                          <blockquote className="mt-2 border-s-2 border-primary/40 ps-3 text-xs text-muted-foreground">
-                            {item.section_text}
-                          </blockquote>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          )}
+          {hasDocContent && <DocReaderFeedback docId={doc.id} canEdit={doc.can_edit} />}
         </TabsContent>
 
         <TabsContent value="revisions" className="mt-4">
@@ -717,43 +519,6 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         />
       )}
 
-      <Dialog open={!!feedbackDialogType} onOpenChange={(open) => { if (!open) setFeedbackDialogType(null); }}>
-        <DialogContent dir={isRTL ? 'rtl' : 'ltr'}>
-          <DialogHeader>
-            <DialogTitle>{feedbackDialogTitle}</DialogTitle>
-            <DialogDescription>{t('docFeedbackDialogDesc')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('docFeedbackComment')}</label>
-              <Textarea
-                value={feedbackComment}
-                onChange={(e) => setFeedbackComment(e.target.value)}
-                maxLength={2000}
-                rows={4}
-                placeholder={t('docFeedbackCommentPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t('docFeedbackSection')}</label>
-              <Textarea
-                value={feedbackSection}
-                onChange={(e) => setFeedbackSection(e.target.value)}
-                maxLength={1000}
-                rows={2}
-                placeholder={t('docFeedbackSectionPlaceholder')}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setFeedbackDialogType(null)} disabled={feedbackSaving}>{t('cancel')}</Button>
-            <Button type="button" onClick={submitFeedbackDialog} disabled={feedbackSaving || !feedbackComment.trim()}>
-              {feedbackSaving && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
-              {t('submit')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
