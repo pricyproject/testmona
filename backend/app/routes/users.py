@@ -349,6 +349,21 @@ def register_user_routes(app):
         
         return {"message": "Account deleted successfully"}
 
+    @app.get("/users/me/permissions")
+    def get_my_permissions(
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Effective permission sets for the current user.
+
+        Returns ``{"global": [...perms], "projects": {<project_id>: [...perms]}}``
+        computed from the RBAC role table plus ownership/assignments. The frontend
+        uses this as the source of truth for gating write/delete/manage controls
+        (instead of hardcoding the role table client-side), so a Tester sees delete
+        on test content but not on project structure, etc.
+        """
+        return rbac.effective_permissions(current_user, db)
+
     @app.get("/users/me/statistics")
     async def get_user_statistics(
         db: Session = Depends(get_db),

@@ -114,7 +114,7 @@ def enforce_viewer_read_only(
 ROLE_PERMISSIONS = {
     Role.ADMIN: {"read", "write", "delete", "execute", "manage_users", "manage_projects"},
     Role.MANAGER: {"read", "write", "delete", "execute", "manage_projects"},
-    Role.TESTER: {"read", "write", "execute"},
+    Role.TESTER: {"read", "write", "execute", "delete"},
     Role.VIEWER: {"read"},
 }
 
@@ -197,6 +197,51 @@ def has_permission(user: User, permission: str, project_id: int = None, db: Sess
     assignment_role = normalize_role(assignment.role)
     assignment_permissions = ROLE_PERMISSIONS.get(assignment_role, set())
     return permission in assignment_permissions
+
+
+def can(user: User, permission: str, project_id: int = None, db: Session = None) -> bool:
+    """Public capability check — thin alias for :func:`has_permission`.
+
+    Use this from route serializers to populate ``can_edit``/``can_delete``
+    capability flags on responses (the pattern Doc Hub established), so the
+    frontend can gate controls on exactly what the backend will allow.
+    """
+    return has_permission(user, permission, project_id, db)
+
+
+# Every distinct permission known to the RBAC table — the universe to probe when
+# computing a user's effective set for the frontend.
+ALL_PERMISSIONS = frozenset().union(*ROLE_PERMISSIONS.values())
+
+
+def effective_permissions(user: User, db: Session) -> dict:
+    """Return the user's effective permission sets for the frontend.
+
+    Shape: ``{"global": [...perms], "projects": {<project_id>: [...perms]}}``.
+    ``global`` is the blanket (project-independent) set. ``projects`` lists *only*
+    the projects whose effective permissions differ from ``global`` — e.g. a
+    project a tester *owns* (ownership grants manage_projects) or a globally
+    read-only viewer elevated in one project. For any project not present the
+    client falls back to ``global``. This keeps the payload small for
+    admins/managers (uniform across every project) while still surfacing elevation.
+
+    Both sets are derived from :func:`has_permission` itself, so this endpoint can
+    never diverge from what the routes actually enforce (incl. owner elevation).
+    """
+    global_perms = {p for p in ALL_PERMISSIONS if has_permission(user, p)}
+
+    projects: dict = {}
+    # Admins/managers/superusers have uniform (== global) perms across every
+    # project, so there is nothing project-specific to enumerate.
+    is_superuser = bool(getattr(user, "is_superuser", False))
+    if not is_superuser and normalize_role(getattr(user, "role", None)) not in {Role.ADMIN, Role.MANAGER}:
+        for entry in get_user_projects(user, db):
+            project_id = entry["project"].id
+            perms = {p for p in ALL_PERMISSIONS if has_permission(user, p, project_id, db)}
+            if perms != global_perms:
+                projects[project_id] = sorted(perms)
+
+    return {"global": sorted(global_perms), "projects": projects}
 
 
 def require_permission(permission: str, project_id_param: str = None):

@@ -342,6 +342,10 @@ class TestCaseWithRelations(TestCaseBase):
     custom_field_values: List['CustomFieldValue'] = []
     creator: Optional['User'] = None
     linked_requirements: List[TestCaseLinkedRequirement] = Field(default_factory=list)
+    # Per-request capability flags for the current user (Doc Hub pattern); the
+    # frontend gates Edit/Delete controls on these. Populated by the read route.
+    can_edit: Optional[bool] = None
+    can_delete: Optional[bool] = None
 
     class Config:
         from_attributes = True

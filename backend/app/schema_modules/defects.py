@@ -263,6 +263,10 @@ class DefectDetail(BaseModel):
     test_run: Optional[DefectEntitySummary] = None
     requirement: Optional[DefectEntitySummary] = None
     result_links: List[TestResultDefectLink] = Field(default_factory=list)
+    # Per-request capability flags for the current user (Doc Hub pattern); the
+    # frontend gates Edit/Delete controls on these. Populated by the detail route.
+    can_edit: Optional[bool] = None
+    can_delete: Optional[bool] = None
 
 
 class TestRunDefectCoverage(BaseModel):
