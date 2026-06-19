@@ -15,7 +15,7 @@ interface ProjectGuardProps {
 
 export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
   const navigate = useNavigate();
-  const { projects } = useProjectStore();
+  const { projects, setSelectedProject } = useProjectStore();
   const { projectId } = useParams<{ projectId: string }>();
   const { t } = useTranslation();
   const { appName } = useAppName(false);
@@ -44,17 +44,34 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
       setProjectError(t('invalidProjectId'));
       return;
     }
-    if (projects.some((project) => project.id === numericProjectId)) {
+    // Keep the navbar's selected project in sync with the URL so deep links
+    // (Work Inbox, notification bell, bookmarks) switch the active project to
+    // the one being viewed instead of leaving a stale selection. `selectedProject`
+    // is read via getState (not a hook dep) so adopting it can't retrigger this
+    // effect and loop the getById fallback below.
+    const adopt = (project: { id: number } | null | undefined) => {
+      if (project && useProjectStore.getState().selectedProject?.id !== project.id) {
+        setSelectedProject(project as Parameters<typeof setSelectedProject>[0]);
+      }
+    };
+    const known = projects.find((project) => project.id === numericProjectId);
+    if (known) {
       setProjectError(null);
+      adopt(known);
       return;
     }
     setCheckingProject(true);
     setProjectError(null);
     projectsAPI.getById(numericProjectId)
-      .then(() => setProjectError(null))
+      .then((project) => {
+        setProjectError(null);
+        // Not in the locally cached list yet (deep link to a project not loaded
+        // this session): still adopt it so the navbar reflects what's on screen.
+        adopt(project);
+      })
       .catch((err) => setProjectError(getApiErrorMessage(err, t('projectGuardProjectUnavailable'))))
       .finally(() => setCheckingProject(false));
-  }, [projectId, numericProjectId, projects, t]);
+  }, [projectId, numericProjectId, projects, setSelectedProject, t]);
 
   if (checkingProject) {
     return (
