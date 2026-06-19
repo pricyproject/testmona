@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Installation Guide.** A dedicated [docs/INSTALLATION.md](docs/INSTALLATION.md) covering
+  prerequisites, scripted and manual setup, the first-run setup wizard, database options,
+  Docker, a configuration reference, updating, and troubleshooting; linked from the README.
+
 ## [0.5.5] - 2026-06-13
 
 ### Added

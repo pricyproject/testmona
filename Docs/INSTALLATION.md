@@ -1,0 +1,194 @@
+# Installation Guide
+
+This guide walks you through installing and running TestMona, from a zero-config
+local setup to Docker and production-grade databases. TestMona is a React
+frontend talking to a FastAPI backend, with SQLite as the default datastore.
+
+## Contents
+
+- [Prerequisites](#prerequisites)
+- [Quick install (script)](#quick-install-script)
+- [Manual install](#manual-install)
+- [First-run setup wizard](#first-run-setup-wizard)
+- [Where everything lives](#where-everything-lives)
+- [Database options](#database-options)
+- [Docker install](#docker-install)
+- [Configuration reference](#configuration-reference)
+- [Updating an existing install](#updating-an-existing-install)
+- [Troubleshooting](#troubleshooting)
+
+## Prerequisites
+
+Install these before you begin:
+
+| Requirement | Version | Notes |
+| --- | --- | --- |
+| Python | 3.13 or higher | The installer checks `python3.13` down to `python3`. |
+| Node.js | 18 or higher | Ships with npm. |
+| npm | Bundled with Node.js | Used to install and build the frontend. |
+| Git | Any recent version | To clone the repository. |
+
+A database server is optional. SQLite is the default and needs nothing installed.
+MariaDB/MySQL or PostgreSQL are supported if you want a heavier engine — see
+[Database options](#database-options).
+
+## Quick install (script)
+
+The bundled script provisions the backend virtual environment, installs all
+dependencies, creates a `.env` with a generated `SECRET_KEY`, initializes the
+database schema, and builds the frontend.
+
+```bash
+git clone https://github.com/pricyproject/testmona.git
+cd testmona
+./install.sh
+```
+
+To install against MariaDB/MySQL or PostgreSQL instead of SQLite, preset
+`DATABASE_URL` when you run the script. The target database is auto-created on
+first start if it does not already exist.
+
+```bash
+DATABASE_URL="mysql+pymysql://root:password@localhost:3306/test_management?charset=utf8mb4" ./install.sh
+```
+
+When the script finishes, start the two servers as described in
+[Where everything lives](#where-everything-lives).
+
+## Manual install
+
+Prefer to run the steps yourself? Do the backend and frontend in turn.
+
+### Backend
+
+```bash
+cd backend
+python3.13 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Create `backend/.env` (copy from the example at the repo root) and set a
+`SECRET_KEY`. Generate one with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Then initialize the schema. This applies the Alembic migrations and, for server
+databases, auto-provisions the database if it is missing:
+
+```bash
+python -c "from app.database import init_db; init_db()"
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+## First-run setup wizard
+
+No credentials are seeded. On first launch the app routes you to `/setup`, where
+you create the administrator account. After the first account is created, public
+signup is closed and the new account becomes the admin.
+
+## Where everything lives
+
+Start the backend:
+
+```bash
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Start the frontend in a second terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Once both are running:
+
+| What | Where |
+| --- | --- |
+| App | [http://localhost:3000](http://localhost:3000) |
+| API | [http://localhost:8000](http://localhost:8000) |
+| API docs (Swagger) | [http://localhost:8000/api-docs](http://localhost:8000/api-docs) |
+| Setup wizard | [http://localhost:3000/setup](http://localhost:3000/setup) |
+
+## Database options
+
+SQLite works out of the box with nothing to configure. To use a different engine,
+point `DATABASE_URL` at it and TestMona creates the database for you on first
+start.
+
+| Engine | `DATABASE_URL` | Driver |
+| --- | --- | --- |
+| SQLite | *(default, leave it unset)* | built-in |
+| MariaDB / MySQL | `mysql+pymysql://user:password@localhost:3306/test_management?charset=utf8mb4` | PyMySQL (already bundled) |
+| PostgreSQL | `postgresql+psycopg2://user:password@localhost:5432/test_management` | psycopg2 |
+
+## Docker install
+
+If you prefer containers, copy the example environment file and bring the stack
+up. Pick the command that matches your database.
+
+```bash
+cp .env.docker.example .env
+```
+
+| Command | What it runs |
+| --- | --- |
+| `docker compose up --build` | The app on SQLite (default) |
+| `docker compose --profile mariadb up` | The app plus a bundled MariaDB service |
+
+When using the bundled MariaDB service, set `DATABASE_URL` to point at the
+`mariadb` service host:
+
+```
+DATABASE_URL=mysql+pymysql://root:changeme@mariadb:3306/test_management?charset=utf8mb4
+```
+
+## Configuration reference
+
+The backend reads these from `backend/.env`. The Docker stack reads its own `.env`
+at the repository root.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | SQLite file | Connection string for the datastore. |
+| `SECRET_KEY` | *(generated by installer)* | Signing key for auth/encryption. Required in production. |
+| `ALGORITHM` | `HS256` | JWT signing algorithm. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `480` | Access-token lifetime. |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh-token lifetime. |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | CORS allow-list for the frontend. |
+| `ENVIRONMENT` | `development` | When `production`/`staging`, the backend refuses to start without `SECRET_KEY`. |
+
+## Updating an existing install
+
+Pull the latest code, refresh dependencies, apply any new migrations, and rebuild
+the frontend:
+
+```bash
+git pull
+cd backend && source venv/bin/activate && pip install -r requirements.txt && alembic upgrade head && cd ..
+cd frontend && npm install && npm run build && cd ..
+```
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| `Python 3.13+ is required` | Install Python 3.13 or higher and re-run `./install.sh`. |
+| `Node.js is required` | Install Node.js 18 or higher (it includes npm). |
+| Backend refuses to start in production | Set a `SECRET_KEY` in `backend/.env`; it is mandatory when `ENVIRONMENT` is `production`/`staging`. |
+| CORS errors in the browser | Add the frontend origin to `ALLOWED_ORIGINS`. |
+| Unstamped non-empty database error | The schema is managed solely by Alembic; run `alembic upgrade head` from `backend` against a database that was created by TestMona. |
+| Cannot reach the API from the frontend | Confirm the backend is on port 8000 and `VITE_API_URL` points at it. |

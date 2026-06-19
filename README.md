@@ -8,27 +8,29 @@ reports) into one place, and adds a built-in Doc Hub, a powerful query language,
 and a helping hand from AI when you need it. Under the hood it's a React frontend
 talking to a FastAPI backend.
 
-<img src="Docs/Screenshot-2.png" alt="TestMona dashboard" width="50%" />
+<img src="docs/images/Screenshot-2.png" alt="TestMona dashboard" width="49%" />
+<img src="docs/images/Screenshot.png" alt="TestMona dashboard" width="49%" />
+
 
 ## What you can do with it
 
-| | Feature | What it gives you |
-| :---: | --- | --- |
-| 🤖 | **AI Test-Case Generation** | Point the AI at a requirement and get a full set of draft test cases back, complete with steps and expected results, ready to review and save. |
-| ✨ | **AI Requirement Assistant** | Get suggested titles, descriptions, and acceptance criteria while you write, so a rough idea turns into a clear requirement in seconds. |
-| 💬 | **Ask Your Project (AI Chat)** | Hold a conversation with your project: ask questions across requirements, test cases, and docs, and regenerate an answer whenever you want a fresh take. |
-| 🪄 | **AI Doc Hub** | Convert documents into requirements, enhance drafts in place, and get an optional AI risk assessment on a doc change before you publish it. |
-| 🔁 | **AI Duplicate Detection** | Built-in similarity scoring quietly flags near-duplicate cases as they're generated, so you're not writing the same test twice. |
-| 🔌 | **Bring-Your-Own AI Provider** | A pluggable multi-provider AI manager with model-routing settings lets you wire in your own provider and pick the right model per task. |
-| 📚 | **Doc Hub (Docs-as-Code)** | Versioned spaces and documents with a rich editor, `@mentions`, and shareable public links; turn any doc into a requirement in a single click. |
-| 🔍 | **Advanced Search & TQL** | A JQL-style query language that lets you slice across defects, requirements, and test cases from one dedicated search workspace. |
-| 🔗 | **Requirements & Traceability** | Organize requirements into folders, leave review comments, pull in items from external trackers, and trace the thread from requirement to test case to defect. |
-| ▶️ | **Test Execution** | Record step-by-step outcomes with built-in timers, spin up runs in bulk, filter by environment, assign work, and log defects without leaving the run. |
-| 📊 | **Reports & Analytics** | One analytics workspace, printable run reports, and public links you can hand straight to stakeholders. |
-| 🎯 | **Milestones & Test Plans** | Portfolio views that roll status up automatically, with plan and test links you manage in place. |
-| 🧪 | **Data-Driven Testing** | Reusable datasets and global parameters that resolve right inside your test-case flows. |
-| ♻️ | **Reusable Assets & Custom Fields** | Shared steps, tags, and project-level custom fields you can reuse across everything. |
-| 🌐 | **Audit & Collaboration** | Project audit trails (purge included), RTL-aware notifications, and full internationalization across languages and writing directions. |
+| Feature | What it gives you |
+| --- | --- |
+| 🤖 **AI Test-Case Generation** | Point the AI at a requirement and get a full set of draft test cases back, complete with steps and expected results, ready to review and save. |
+| ✨ **AI Requirement Assistant** | Get suggested titles, descriptions, and acceptance criteria while you write, so a rough idea turns into a clear requirement in seconds. |
+| 💬 **Ask Your Project (AI Chat)** | Hold a conversation with your project: ask questions across requirements, test cases, and docs, and regenerate an answer whenever you want a fresh take. |
+| 🪄 **AI Doc Hub** | Convert documents into requirements, enhance drafts in place, and get an optional AI risk assessment on a doc change before you publish it. |
+| 🔁 **AI Duplicate Detection** | Built-in similarity scoring quietly flags near-duplicate cases as they're generated, so you're not writing the same test twice. |
+| 🔌 **Bring-Your-Own AI Provider** | A pluggable multi-provider AI manager with model-routing settings lets you wire in your own provider and pick the right model per task. |
+| 📚 **Doc Hub (Docs-as-Code)** | Versioned spaces and documents with a rich editor, `@mentions`, and shareable public links; turn any doc into a requirement in a single click. |
+| 🔍 **Advanced Search & TQL** | A JQL-style query language that lets you slice across defects, requirements, and test cases from one dedicated search workspace. |
+| 🔗 **Requirements & Traceability** | Organize requirements into folders, leave review comments, pull in items from external trackers, and trace the thread from requirement to test case to defect. |
+| ▶️ **Test Execution** | Record step-by-step outcomes with built-in timers, spin up runs in bulk, filter by environment, assign work, and log defects without leaving the run. |
+| 📊 **Reports & Analytics** | One analytics workspace, printable run reports, and public links you can hand straight to stakeholders. |
+| 🎯 **Milestones & Test Plans** | Portfolio views that roll status up automatically, with plan and test links you manage in place. |
+| 🧪 **Data-Driven Testing** | Reusable datasets and global parameters that resolve right inside your test-case flows. |
+| ♻️ **Reusable Assets & Custom Fields** | Shared steps, tags, and project-level custom fields you can reuse across everything. |
+| 🌐 **Audit & Collaboration** | Project audit trails (purge included), RTL-aware notifications, and full internationalization across languages and writing directions. |
 
 
 ## Quick Start
@@ -54,6 +56,9 @@ cd frontend
 npm run dev
 ```
 
+Need the full walkthrough — prerequisites, manual setup, Docker, databases, and
+troubleshooting? See the [Installation Guide](docs/INSTALLATION.md).
+
 That's it. Here's where everything lives once it's running:
 
 | What | Where |
@@ -64,6 +69,7 @@ That's it. Here's where everything lives once it's running:
 
 ## Documentation
 
+- [Installation Guide](docs/INSTALLATION.md) — prerequisites, manual and Docker setup, databases, and troubleshooting.
 
 [![Project Wiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pricyproject/testmona)
 
