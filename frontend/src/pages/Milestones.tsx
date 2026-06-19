@@ -62,6 +62,7 @@ import { milestonesAPI, testPlansAPI } from '@/lib/api';
 import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useTestPlanMembers, type TestPlanMember } from '@/hooks/queries/testPlans';
 
 type TFn = (key: any, params?: Record<string, string | number>) => string;
@@ -636,6 +637,8 @@ function ViewToggleButton({
 
 function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDelete }: CardProps) {
   const linked = milestone.test_plan_count > 0 || milestone.test_run_count > 0;
+  // Milestones are project planning artifacts: deletion is a manager+ action.
+  const { canManageProject } = useProjectPermissions(projectId);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -673,16 +676,20 @@ function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDel
           <FileCheck2 className="mr-2 h-3.5 w-3.5" />
           {t('viewRequirements')}
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          disabled={linked}
-          onClick={() => onDelete(milestone)}
-          className="text-red-600 focus:text-red-700 dark:text-red-400"
-          title={linked ? t('unlinkMilestoneLinksBeforeDelete') : undefined}
-        >
-          <Trash2 className="mr-2 h-3.5 w-3.5" />
-          {t('delete')}
-        </DropdownMenuItem>
+        {canManageProject && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={linked}
+              onClick={() => onDelete(milestone)}
+              className="text-red-600 focus:text-red-700 dark:text-red-400"
+              title={linked ? t('unlinkMilestoneLinksBeforeDelete') : undefined}
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              {t('delete')}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

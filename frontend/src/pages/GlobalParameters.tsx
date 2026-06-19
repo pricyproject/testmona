@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -79,6 +80,9 @@ function ParametersManager({ projectId }: ManagerProps) {
   // Who can mutate which scope. Project params: anyone who reached the (guarded)
   // project page — the backend still enforces write. Global params: admins+.
   const canManageProject = isProjectPage && canWrite;
+  // Deleting a parameter is a manager+ action even though testers can create/edit
+  // (write) them — so the delete control needs the project's manage capability.
+  const { canManageProject: canDeleteProjectParam } = useProjectPermissions(projectId);
   const canManageGlobal = isAdmin;
   // Non-admins can neither see nor edit cross-project globals.
   const canViewGlobal = isAdmin;
@@ -251,7 +255,7 @@ function ParametersManager({ projectId }: ManagerProps) {
   const displayValue = (param: GlobalParameter) =>
     param.is_encrypted && !showEncrypted ? '••••••••' : param.value;
 
-  const renderParamCard = (param: GlobalParameter, opts: { canManage: boolean; scope: ParamScope }) => {
+  const renderParamCard = (param: GlobalParameter, opts: { canManage: boolean; canDelete: boolean; scope: ParamScope }) => {
     const overridesGlobal = opts.scope === 'project' && globalParamNames.has(param.name);
     const overriddenByProject = opts.scope === 'global' && projectParamNames.has(param.name);
     return (
@@ -281,14 +285,18 @@ function ParametersManager({ projectId }: ManagerProps) {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {opts.canManage ? (
+              {opts.canManage || opts.canDelete ? (
                 <>
-                  <Button variant="outline" size="sm" onClick={() => openEdit(param)} title={t('edit')}>
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleteTarget(param)} title={t('delete')}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {opts.canManage && (
+                    <Button variant="outline" size="sm" onClick={() => openEdit(param)} title={t('edit')}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {opts.canDelete && (
+                    <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleteTarget(param)} title={t('delete')}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </>
               ) : (
                 <Badge variant="outline" className="text-gray-500">{t('readOnly')}</Badge>
@@ -318,7 +326,7 @@ function ParametersManager({ projectId }: ManagerProps) {
     description: string,
     icon: React.ReactNode,
     params: GlobalParameter[],
-    opts: { canManage: boolean; scope: ParamScope; emptyLabel: string },
+    opts: { canManage: boolean; canDelete: boolean; scope: ParamScope; emptyLabel: string },
   ) => (
     <section className="space-y-3">
       <div className="flex items-center gap-2">
@@ -333,7 +341,7 @@ function ParametersManager({ projectId }: ManagerProps) {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {params.map((param) => renderParamCard(param, { canManage: opts.canManage, scope: opts.scope }))}
+          {params.map((param) => renderParamCard(param, { canManage: opts.canManage, canDelete: opts.canDelete, scope: opts.scope }))}
         </div>
       )}
     </section>
@@ -395,7 +403,7 @@ function ParametersManager({ projectId }: ManagerProps) {
             t('globalParametersDescription'),
             <FolderKanban className="h-5 w-5 text-blue-600" />,
             filteredProjectParams,
-            { canManage: canManageProject, scope: 'project', emptyLabel: t('noProjectParametersYet') },
+            { canManage: canManageProject, canDelete: canDeleteProjectParam, scope: 'project', emptyLabel: t('noProjectParametersYet') },
           )}
           {/* Cross-project globals are visible to admins+ only. */}
           {canViewGlobal && renderSection(
@@ -403,7 +411,7 @@ function ParametersManager({ projectId }: ManagerProps) {
             t('crossProjectParametersDescription'),
             <Globe className="h-5 w-5 text-emerald-600" />,
             filteredGlobalParams,
-            { canManage: canManageGlobal, scope: 'global', emptyLabel: t('noGlobalParametersYet') },
+            { canManage: canManageGlobal, canDelete: canManageGlobal, scope: 'global', emptyLabel: t('noGlobalParametersYet') },
           )}
         </div>
       )}

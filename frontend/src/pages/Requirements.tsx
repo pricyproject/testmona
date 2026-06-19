@@ -55,6 +55,7 @@ import { TestCaseSearchBar, SearchSuggestionGroup } from '@/components/TestCases
 import { parseRequirementQuery, requirementMatchesQuery } from '@/components/requirements/requirementsSearchQuery';
 import { useAuthStore } from '@/stores/authStore';
 import { canWriteResults } from '@/utils/roles';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { ContentEditor, htmlToMarkdown, markdownToHtml } from '@/components/ui/content-editor';
 import { GherkinEditor } from '@/components/requirements/GherkinEditor';
 import { isGherkinText } from '@/components/requirements/gherkin';
@@ -77,6 +78,9 @@ export function Requirements() {
   const { user } = useAuthStore();
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   const numericProjectId = projectId ? parseInt(projectId) : null;
+  // Requirements/folders are project planning artifacts: testers can create/edit
+  // (write) but deletion is a manager+ action.
+  const { canManageProject } = useProjectPermissions(numericProjectId);
   const requirementsQuery = useRequirementsList(numericProjectId, linkedMilestoneId, numericProjectId != null);
   const foldersQuery = useRequirementFolders(numericProjectId, numericProjectId != null);
   const requirements: Requirement[] = requirementsQuery.data?.requirements ?? [];
@@ -2094,8 +2098,10 @@ export function Requirements() {
                         <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem onClick={() => openCreateFolder(folder)}><FolderPlus className="mr-2 h-3.5 w-3.5" />{t('newFolder')}</DropdownMenuItem>
                           <DropdownMenuItem onClick={() => openEditFolder(folder)}><Pencil className="mr-2 h-3.5 w-3.5" />{t('editFolder')}</DropdownMenuItem>
+                          {canManageProject && (<>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleDeleteFolder(folder)} className="text-rose-600 focus:text-rose-700 dark:text-rose-400"><Trash2 className="mr-2 h-3.5 w-3.5" />{t('delete')}</DropdownMenuItem>
+                          </>)}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -2372,10 +2378,12 @@ export function Requirements() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {canManageProject && (
           <Button variant="outline" size="sm" className="text-red-600 hover:bg-red-50 hover:text-red-700" disabled={bulkBusy} onClick={() => setIsBulkDeleteOpen(true)}>
             <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
             {t('delete')}
           </Button>
+          )}
 
           <span className="flex-1" />
           {bulkBusy && <Loader2 className="h-4 w-4 animate-spin text-blue-600" />}
@@ -2512,9 +2520,11 @@ export function Requirements() {
                           <Button variant="ghost" size="icon" className="h-8 w-8" title={t('edit')} aria-label={t('edit')} onClick={() => handleEditRequirement(requirement)}>
                             <Edit className="h-4 w-4" />
                           </Button>
+                          {canManageProject && (
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/40" title={t('delete')} aria-label={t('delete')} onClick={() => openDeleteDialog(requirement)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -2580,8 +2590,10 @@ export function Requirements() {
                       <DropdownMenuContent align="end" className="w-40">
                         <DropdownMenuItem onClick={() => handleViewRequirement(requirement)}><Eye className="mr-2 h-3.5 w-3.5" />{t('view')}</DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleEditRequirement(requirement)}><Edit className="mr-2 h-3.5 w-3.5" />{t('edit')}</DropdownMenuItem>
+                        {canManageProject && (<>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => openDeleteDialog(requirement)} className="text-rose-600 focus:text-rose-700 dark:text-rose-400"><Trash2 className="mr-2 h-3.5 w-3.5" />{t('delete')}</DropdownMenuItem>
+                        </>)}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>

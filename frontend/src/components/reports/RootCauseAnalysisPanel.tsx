@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,8 @@ export function RootCauseAnalysisPanel({ ctx }: { ctx: ReportsData }) {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const { rootCauseAnalyses, loadRootCauseAnalyses, selectedProject, error } = ctx;
+  // Deleting an RCA is a manager+ action (testers can author/edit but not delete).
+  const { canManageProject } = useProjectPermissions(selectedProject);
   const isLoading = !!ctx.loadingByTab['root-cause'];
 
   const [showDialog, setShowDialog] = useState(false);
@@ -322,6 +325,7 @@ export function RootCauseAnalysisPanel({ ctx }: { ctx: ReportsData }) {
                     <Button variant="ghost" size="sm" onClick={() => openEditDialog(analysis)} aria-label={t('reports_rcaEditAria')}>
                       <Edit className="h-4 w-4" />
                     </Button>
+                    {canManageProject && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -331,6 +335,7 @@ export function RootCauseAnalysisPanel({ ctx }: { ctx: ReportsData }) {
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                    )}
                   </div>
                 </div>
               </CardHeader>

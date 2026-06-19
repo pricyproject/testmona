@@ -46,7 +46,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { webhooksAPI, getApiErrorMessage } from '@/lib/api';
 
 interface WebhookRow {
@@ -126,7 +126,9 @@ export function Webhooks() {
   const numericProjectId = projectId ? Number(projectId) : null;
   const { t } = useTranslation();
   const { toast } = useToast();
-  const { canWrite } = usePermissions();
+  // Webhook subscriptions are project-admin config: create/edit/delete all
+  // require manage_projects (not plain write), so testers manage nothing here.
+  const { canManageProject } = useProjectPermissions(numericProjectId);
 
   const [hooks, setHooks] = useState<WebhookRow[]>([]);
   const [supportedEvents, setSupportedEvents] = useState<string[]>([]);
@@ -341,7 +343,7 @@ export function Webhooks() {
             <p className="text-sm text-muted-foreground">{t('webhooksSubtitle')}</p>
           </div>
         </div>
-        {canWrite && (
+        {canManageProject && (
           <Button
             onClick={() => {
               resetForm();
@@ -413,6 +415,7 @@ export function Webhooks() {
                         <Button size="sm" variant="ghost" onClick={() => openDeliveries(hook)} title={t('webhookViewDeliveries')}>
                           <History className="h-4 w-4" />
                         </Button>
+                        {canManageProject && (
                         <Button
                           size="sm"
                           variant="ghost"
@@ -422,6 +425,7 @@ export function Webhooks() {
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

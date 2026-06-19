@@ -40,6 +40,7 @@ import { useAppName } from '@/hooks/useAppName';
 import { getQueueSize } from '@/utils/requestQueue';
 import { projectImportExportAPI } from '@/api/projectImportExport';
 import { isAdminUser, normalizeRole, USER_ROLES } from '@/utils/roles';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAuthStore } from '@/stores/authStore';
 import { ProjectImportPreview } from '@/components/ProjectImportPreview';
 
@@ -121,6 +122,15 @@ export function Projects() {
   // Check if user has admin/manager role
   const userRole = normalizeRole(user?.role);
   const canImportExport = isAdminUser(user) || userRole === USER_ROLES.MANAGER;
+
+  // Deleting/managing a project is a manager+/owner action. Use the server's
+  // effective permission map so a project owner (incl. an elevated tester) keeps
+  // the control while a plain tester does not. Global admin/manager always can.
+  const { permissions } = usePermissions();
+  const canManageProjectById = (projectId: number) =>
+    isAdminUser(user) ||
+    userRole === USER_ROLES.MANAGER ||
+    Boolean(permissions?.projects?.[projectId]?.includes('manage_projects'));
 
   const fetchArchivedProjects = useCallback(async () => {
     setIsArchivedLoading(true);
@@ -1281,6 +1291,7 @@ export function Projects() {
                     <Archive className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                     {t('archive')} ({selectedProjects.size})
                   </Button>
+                  {(isAdminUser(user) || userRole === USER_ROLES.MANAGER) && (
                   <Button
                     variant="destructive"
                     size="sm"
@@ -1290,6 +1301,7 @@ export function Projects() {
                     <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                     {t('delete')} ({selectedProjects.size})
                   </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -1566,6 +1578,7 @@ export function Projects() {
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
+                    {canManageProjectById(project.id) && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -1578,6 +1591,7 @@ export function Projects() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1818,6 +1832,7 @@ export function Projects() {
                           >
                             <Edit className="h-3.5 w-3.5" />
                           </Button>
+                          {canManageProjectById(project.id) && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -1827,6 +1842,7 @@ export function Projects() {
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
+                          )}
                         </div>
                       </CardContent>
                     </Card>

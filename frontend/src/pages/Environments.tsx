@@ -3,6 +3,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import {
   useEnvironments,
   useCreateEnvironment,
@@ -75,6 +76,9 @@ export function Environments() {
   const routeProjectId = Number(projectId);
   const currentProjectId =
     projectId && Number.isInteger(routeProjectId) && routeProjectId > 0 ? routeProjectId : null;
+  // Environments are project config: deleting one is a manager+ action (testers
+  // can create/edit but not delete), so gate the delete control separately.
+  const { canManageProject } = useProjectPermissions(currentProjectId);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -450,14 +454,16 @@ export function Environments() {
                   >
                     <Settings className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    variant="outline" 
+                  {canManageProject && (
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={() => handleDeleteEnvironment(environment.id, environment.name)}
                     className="text-red-600 hover:text-red-700"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
+                  )}
                 </div>
               </div>
             </CardContent>

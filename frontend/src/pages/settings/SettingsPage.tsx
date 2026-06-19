@@ -72,6 +72,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { UserManagement } from '@/components/UserManagement';
 import { isAdminUser } from '@/utils/roles';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 
 // Test Management Types
 interface TestType {
@@ -332,6 +333,9 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const { appName, appLogoUrl, setAppName: setStoredAppName, setAppLogoUrl: setStoredAppLogoUrl } = useAppName(false);
   const { user } = useAuthStore();
   const { toast } = useToast();
+  // Test types / priorities (and other project config) are manager+ to delete,
+  // even though testers can create/edit them. Gate the delete controls on this.
+  const { canManageProject } = useProjectPermissions(projectId ?? null);
   // Drive the active tab from the URL so other pages can deep-link to a section
   // (e.g. the notification dropdown jumping to Notification Settings).
   const [searchParams, setSearchParams] = useSearchParams();
@@ -363,6 +367,9 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
   const [integrationToDelete, setIntegrationToDelete] = useState<IssueTrackerIntegration | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  // Issue-tracker integration management is project-scoped via the picker below;
+  // deleting one is a manager+ action.
+  const { canManageProject: canManageSelectedProject } = useProjectPermissions(selectedProjectId);
   const [projects, setProjects] = useState<any[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
 
@@ -2832,11 +2839,13 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                             <Copy className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 text-gray-500 dark:text-gray-400" />
                             <span>{t('duplicate')}</span>
                           </DropdownMenuItem>
+                          {canManageProject && (<>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleDeleteTestType(type.id)} className="rounded-lg text-red-600 hover:text-red-700 hover:bg-red-50">
                             <Trash2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
                             <span>{t('delete')}</span>
                           </DropdownMenuItem>
+                          </>)}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -3029,11 +3038,13 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                             <Copy className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 text-gray-500 dark:text-gray-400" />
                             <span>{t('duplicate')}</span>
                           </DropdownMenuItem>
+                          {canManageProject && (<>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleDeletePriority(priority.id)} className="rounded-lg text-sm text-red-600 hover:text-red-700 hover:bg-red-50">
                             <Trash2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
                             <span>{t('delete')}</span>
                           </DropdownMenuItem>
+                          </>)}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -4566,13 +4577,15 @@ export function Settings({ adminMode = false, projectId, singleTab }: { adminMod
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button 
-                              size="sm" 
+                            {canManageSelectedProject && (
+                            <Button
+                              size="sm"
                               variant="outline"
-	                              onClick={() => setIntegrationToDelete(integration)}
-	                            >
+                              onClick={() => setIntegrationToDelete(integration)}
+                            >
                               <Trash2 className="h-4 w-4" />
                             </Button>
+                            )}
                           </div>
                         </div>
                       </CardContent>

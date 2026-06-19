@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -103,6 +104,9 @@ export function CustomFields() {
   const [pastOnly, setPastOnly] = useState(false);
 
   const currentProjectId = urlProjectId && !isNaN(parseInt(urlProjectId)) ? parseInt(urlProjectId) : null;
+  // Field definitions are project config: deletion is a manager+ action (testers
+  // can create/edit but not delete).
+  const { canManageProject } = useProjectPermissions(currentProjectId);
 
   useEffect(() => {
     if (currentProjectId) {
@@ -1081,15 +1085,19 @@ export function CustomFields() {
                                 <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} aria-hidden="true" />
                                 {t('edit')}
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => handleDeleteField(field.id)}
-                                className="text-red-600"
-                                onSelect={(e) => e.preventDefault()}
-                              >
-                                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} aria-hidden="true" />
-                                {t('delete')}
-                              </DropdownMenuItem>
+                              {canManageProject && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeleteField(field.id)}
+                                    className="text-red-600"
+                                    onSelect={(e) => e.preventDefault()}
+                                  >
+                                    <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} aria-hidden="true" />
+                                    {t('delete')}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>

@@ -1,7 +1,20 @@
 import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
 import { api, resolveProjectSeq, seqAPI, getApiErrorMessage } from "./client";
 
+// Effective permission sets for the current user, computed server-side from the
+// RBAC role table + ownership/assignments. `global` is the blanket set; `projects`
+// maps project id -> the effective permission set in that project. Used by the
+// permission hooks as the source of truth for gating write/delete/manage controls.
+export interface EffectivePermissions {
+  global: string[];
+  projects: Record<number, string[]>;
+}
+
 export const usersAPI = {
+  getMyPermissions: async (): Promise<EffectivePermissions> => {
+    const response = await api.get('/users/me/permissions');
+    return response.data;
+  },
   getAll: async (skip = 0, limit = 100) => {
     const response = await api.get(`/users?skip=${skip}&limit=${limit}`);
     return response.data;

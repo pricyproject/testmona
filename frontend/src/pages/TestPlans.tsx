@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -193,6 +194,9 @@ const EXECUTION_META: Record<
 export function TestPlans() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  // Test plans are project planning artifacts: testers can create/edit but
+  // deletion is a manager+ action.
+  const { canManageProject } = useProjectPermissions(projectId ? parseInt(projectId) : null);
   const [searchParams] = useSearchParams();
   const fromMilestoneIdParam = searchParams.get('milestone_id');
   const createFromQuery = searchParams.get('create') === '1';
@@ -1546,6 +1550,7 @@ export function TestPlans() {
                           <Edit className="mr-2 h-3.5 w-3.5" />
                           {t('edit')}
                         </DropdownMenuItem>
+                        {canManageProject && (<>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
@@ -1554,6 +1559,7 @@ export function TestPlans() {
                           <Trash2 className="mr-2 h-3.5 w-3.5" />
                           {t('delete')}
                         </DropdownMenuItem>
+                        </>)}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
