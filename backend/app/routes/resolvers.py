@@ -9,7 +9,12 @@ the global ``id``; the frontend's ``getBySeq`` chains that into the existing
 
 If ``project_seq`` is NULL for a row (e.g. created by a Core-insert path that
 bypassed the allocator, or a legacy bookmark), the frontend falls back to treating
-the URL number as a global id, so nothing 500s.
+the URL number as a global id, so nothing 500s. The lookup itself mirrors that
+tolerance: when no row in the project carries the requested ``project_seq`` it
+retries against the global ``id`` (scoped to the project) before 404ing, so
+legacy/bookmarked URLs and links that still embed a global id resolve cleanly
+instead of returning a spurious 404. ``project_seq`` always wins when both match,
+and the response reports the resolved row's real ``project_seq``.
 """
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -53,22 +58,26 @@ def register_resolver_routes(app):
 
         if entity == "test-cases":
             # TestCase has no project_id column — scope via its suite.
-            row = (
-                db.query(models.TestCase.id)
+            base = (
+                db.query(models.TestCase.id, models.TestCase.project_seq)
                 .join(models.TestSuite, models.TestCase.test_suite_id == models.TestSuite.id)
-                .filter(models.TestSuite.project_id == project_id, models.TestCase.project_seq == seq)
-                .first()
+                .filter(models.TestSuite.project_id == project_id)
             )
+            row = base.filter(models.TestCase.project_seq == seq).first()
+            if row is None:
+                # Fall back to a global id (legacy/bookmarked links, or a row that
+                # predates project_seq numbering): the URL number may be the global
+                # ``id`` rather than the per-project sequence.
+                row = base.filter(models.TestCase.id == seq).first()
         else:
             model = _SEQ_MODELS.get(entity)
             if model is None:
                 raise HTTPException(status_code=404, detail="Unknown entity")
-            row = (
-                db.query(model.id)
-                .filter(model.project_id == project_id, model.project_seq == seq)
-                .first()
-            )
+            base = db.query(model.id, model.project_seq).filter(model.project_id == project_id)
+            row = base.filter(model.project_seq == seq).first()
+            if row is None:
+                row = base.filter(model.id == seq).first()
 
         if row is None:
             raise HTTPException(status_code=404, detail="Not found")
-        return {"id": row[0], "project_id": project_id, "project_seq": seq}
+        return {"id": row[0], "project_id": project_id, "project_seq": row[1]}
