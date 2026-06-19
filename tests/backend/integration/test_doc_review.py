@@ -216,3 +216,125 @@ def test_request_review_requires_write_permission(client):
         json={"reviewer_ids": [client.ids["reviewer"]]},
     )
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Review rounds: decisions, resolution, cancellation, publish gate            #
+# --------------------------------------------------------------------------- #
+
+def _request_review(client, reviewer_ids, note=None):
+    return client.post(
+        f"/docs/{client.ids['doc']}/request-review",
+        json={"reviewer_ids": reviewer_ids, "note": note},
+    )
+
+
+def test_request_review_opens_round_with_assignments(client):
+    resp = _request_review(client, [client.ids["reviewer"], client.ids["reviewer2"]])
+    assert resp.status_code == 200
+    round_id = resp.json()["round_id"]
+    assert round_id
+
+    review = client.get(f"/docs/{client.ids['doc']}/review").json()
+    assert review["doc_status"] == "in_review"
+    cur = review["current_round"]
+    assert cur["status"] == "open"
+    assert cur["pending_count"] == 2
+    assert {r["reviewer_id"] for r in cur["reviewers"]} == {client.ids["reviewer"], client.ids["reviewer2"]}
+
+
+def test_all_approvals_resolve_round_and_keep_in_review(client):
+    _request_review(client, [client.ids["reviewer"], client.ids["reviewer2"]])
+
+    client.set_current_user(client.ids["reviewer"])
+    r1 = client.post(f"/docs/{client.ids['doc']}/review/decision", json={"decision": "approved"})
+    assert r1.status_code == 200
+    # One approval is not enough; round stays open, doc stays in review.
+    assert r1.json()["current_round"]["status"] == "open"
+    assert _doc_status(client).value == "in_review"
+
+    client.set_current_user(client.ids["reviewer2"])
+    r2 = client.post(f"/docs/{client.ids['doc']}/review/decision", json={"decision": "approved"})
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["current_round"] is None  # resolved → no longer the open round
+    assert body["history"][0]["status"] == "approved"
+    # Approved doc stays in_review, ready to publish.
+    assert _doc_status(client).value == "in_review"
+    # The requester (owner) was notified of the final approval.
+    owner_rows = _notifs(client, client.ids["owner"])
+    assert any(n.title == "Review approved" for n in owner_rows)
+
+
+def test_changes_requested_kicks_doc_back_to_draft(client):
+    _request_review(client, [client.ids["reviewer"], client.ids["reviewer2"]])
+    client.set_current_user(client.ids["reviewer"])
+    resp = client.post(
+        f"/docs/{client.ids['doc']}/review/decision",
+        json={"decision": "changes_requested", "comment": "Fix the auth section"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["history"][0]["status"] == "changes_requested"
+    assert _doc_status(client).value == "draft"
+    owner_rows = _notifs(client, client.ids["owner"])
+    assert any(n.title == "Changes requested" for n in owner_rows)
+
+
+def test_non_reviewer_cannot_decide(client):
+    _request_review(client, [client.ids["reviewer"]])
+    # reviewer2 is a project member (read access) but not assigned to this round.
+    client.set_current_user(client.ids["reviewer2"])
+    resp = client.post(f"/docs/{client.ids['doc']}/review/decision", json={"decision": "approved"})
+    assert resp.status_code == 403
+
+
+def test_decision_without_open_round_conflicts(client):
+    client.set_current_user(client.ids["reviewer"])
+    resp = client.post(f"/docs/{client.ids['doc']}/review/decision", json={"decision": "approved"})
+    assert resp.status_code == 409
+
+
+def test_cancel_review_returns_doc_to_draft(client):
+    _request_review(client, [client.ids["reviewer"]])
+    resp = client.post(f"/docs/{client.ids['doc']}/review/cancel", json={"note": "Not ready"})
+    assert resp.status_code == 200
+    assert resp.json()["current_round"] is None
+    assert _doc_status(client).value == "draft"
+    # The pending reviewer is told the request was withdrawn.
+    rev_rows = _notifs(client, client.ids["reviewer"])
+    assert any(n.title == "Review withdrawn" for n in rev_rows)
+
+
+def test_new_request_supersedes_open_round(client):
+    first = _request_review(client, [client.ids["reviewer"]]).json()["round_id"]
+    second = _request_review(client, [client.ids["reviewer2"]]).json()["round_id"]
+    assert second != first
+
+    from app import models
+    db = client.SessionLocal()
+    try:
+        old = db.query(models.DocReviewRound).filter(models.DocReviewRound.id == first).first()
+        assert old.status == models.DocReviewRoundStatus.CANCELLED
+    finally:
+        db.close()
+    # Only the new round is current.
+    review = client.get(f"/docs/{client.ids['doc']}/review").json()
+    assert review["current_round"]["id"] == second
+
+
+def test_publish_blocked_while_review_open(client):
+    _request_review(client, [client.ids["reviewer"]])
+    resp = client.put(f"/docs/{client.ids['doc']}", json={"status": "published"})
+    assert resp.status_code == 409
+    assert "review" in resp.json()["detail"].lower()
+    assert _doc_status(client).value == "in_review"
+
+
+def test_publish_allowed_after_approval(client):
+    _request_review(client, [client.ids["reviewer"]])
+    client.set_current_user(client.ids["reviewer"])
+    client.post(f"/docs/{client.ids['doc']}/review/decision", json={"decision": "approved"})
+    client.set_current_user(client.ids["owner"])
+    resp = client.put(f"/docs/{client.ids['doc']}", json={"status": "published"})
+    assert resp.status_code == 200
+    assert _doc_status(client).value == "published"
