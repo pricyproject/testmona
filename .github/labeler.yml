@@ -9,7 +9,7 @@ frontend:
   - frontend/**/*
 
 documentation:
-  - Docs/**/*
+  - docs/**/*
   - CHANGELOG.md
   - README.md
   - AGENTS.md
