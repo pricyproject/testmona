@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prerequisites, scripted and manual setup, the first-run setup wizard, database options,
   Docker, a configuration reference, updating, and troubleshooting; linked from the README.
 
+### Changed
+- README: fold the feature-table emoji into the **Feature** column, dropping the separate
+  leading icon column.
+
 ## [0.5.5] - 2026-06-13
 
 ### Added
