@@ -1,7 +1,7 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
+from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus, DocReviewRoundStatus, DocReviewDecision
 import re
 import html
 
@@ -293,6 +293,88 @@ class DocReviewRequestResult(BaseModel):
     status: DocStatus
     notified_count: int
     reviewer_ids: List[int] = []
+    round_id: Optional[int] = None
+
+
+class DocReviewDecisionInput(BaseModel):
+    """A reviewer's verdict on the doc's current open review round."""
+    decision: DocReviewDecision
+    comment: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("decision")
+    @classmethod
+    def _validate_decision(cls, v: DocReviewDecision) -> DocReviewDecision:
+        # PENDING is the unanswered default and cannot be submitted as a verdict.
+        if v == DocReviewDecision.PENDING:
+            raise ValueError("decision must be 'approved' or 'changes_requested'")
+        return v
+
+    @field_validator("comment")
+    @classmethod
+    def _clean_comment(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class DocReviewCancel(BaseModel):
+    """Withdraw the doc's current open review round."""
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
+class DocReviewerView(BaseModel):
+    """A single reviewer slot inside a review round."""
+    id: int
+    reviewer_id: int
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    decision: DocReviewDecision
+    comment: Optional[str] = None
+    decided_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class DocReviewRoundView(BaseModel):
+    """A review round with its reviewers and rolled-up outcome."""
+    id: int
+    doc_id: int
+    status: DocReviewRoundStatus
+    note: Optional[str] = None
+    resolution_note: Optional[str] = None
+    requested_by: int
+    requested_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    reviewers: List[DocReviewerView] = []
+    approved_count: int = 0
+    changes_requested_count: int = 0
+    pending_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class DocReviewView(BaseModel):
+    """Everything the doc page needs to render the review panel: the current round
+    (if any), past rounds for history, and the viewer's own actionable state."""
+    doc_id: int
+    doc_status: DocStatus
+    current_round: Optional[DocReviewRoundView] = None
+    history: List[DocReviewRoundView] = []
+    # The viewer's own slot in the current open round, if they are a reviewer.
+    my_decision: Optional[DocReviewDecision] = None
+    can_decide: bool = False
+    # True when the viewer may open/cancel rounds and publish (project write access).
+    can_manage: bool = False
 
 
 class DocCreate(DocBase):

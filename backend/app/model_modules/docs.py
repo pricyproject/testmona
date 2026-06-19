@@ -121,6 +121,80 @@ class Doc(Base):
         back_populates="doc",
         cascade="all, delete-orphan",
     )
+    review_rounds = relationship(
+        "DocReviewRound",
+        back_populates="doc",
+        cascade="all, delete-orphan",
+        order_by="DocReviewRound.id.desc()",
+    )
+
+
+class DocReviewRoundStatus(enum.Enum):
+    """Lifecycle of a single review round opened on a doc.
+
+    ``OPEN`` while reviewers are still deciding; resolves to ``APPROVED`` once every
+    reviewer approves, ``CHANGES_REQUESTED`` the moment any reviewer asks for
+    changes (which kicks the doc back to draft), or ``CANCELLED`` if the requester
+    withdraws it. A superseding ``request-review`` also cancels the prior open round.
+    """
+    OPEN = "open"
+    APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
+    CANCELLED = "cancelled"
+
+
+class DocReviewDecision(enum.Enum):
+    """A single reviewer's verdict within a round."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
+
+
+class DocReviewRound(Base):
+    """A review round opened on a doc: the requester, the optional note, the named
+    reviewers (:class:`DocReviewAssignment`), and the rolled-up outcome. A doc has at
+    most one ``OPEN`` round at a time; older rounds are retained as history."""
+    __tablename__ = "doc_review_rounds"
+
+    id = Column(Integer, primary_key=True, index=True)
+    doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    note = Column(String(500))
+    status = Column(Enum(DocReviewRoundStatus), default=DocReviewRoundStatus.OPEN, nullable=False, index=True)
+    # Free-text reason recorded when a round is cancelled/superseded.
+    resolution_note = Column(String(500))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True))
+
+    doc = relationship("Doc", back_populates="review_rounds")
+    requester = relationship("User", foreign_keys=[requested_by])
+    assignments = relationship(
+        "DocReviewAssignment",
+        back_populates="round",
+        cascade="all, delete-orphan",
+        order_by="DocReviewAssignment.id",
+    )
+
+
+class DocReviewAssignment(Base):
+    """One reviewer's slot within a :class:`DocReviewRound`, carrying their decision
+    and optional comment. Unique per (round, reviewer)."""
+    __tablename__ = "doc_review_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    round_id = Column(Integer, ForeignKey("doc_review_rounds.id", ondelete="CASCADE"), nullable=False, index=True)
+    reviewer_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    decision = Column(Enum(DocReviewDecision), default=DocReviewDecision.PENDING, nullable=False)
+    comment = Column(String(2000))
+    decided_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    round = relationship("DocReviewRound", back_populates="assignments")
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+    __table_args__ = (
+        UniqueConstraint("round_id", "reviewer_id", name="uq_doc_review_assignment"),
+    )
 
 
 class DocVersion(Base):
