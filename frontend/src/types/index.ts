@@ -1119,6 +1119,45 @@ export interface DocFeedbackSummary {
   my_feedback?: DocFeedback | null;
 }
 
+export type DocReviewRoundStatus = 'open' | 'approved' | 'changes_requested' | 'cancelled';
+export type DocReviewDecision = 'pending' | 'approved' | 'changes_requested';
+
+export interface DocReviewer {
+  id: number;
+  reviewer_id: number;
+  username?: string | null;
+  full_name?: string | null;
+  decision: DocReviewDecision;
+  comment?: string | null;
+  decided_at?: string | null;
+}
+
+export interface DocReviewRound {
+  id: number;
+  doc_id: number;
+  status: DocReviewRoundStatus;
+  note?: string | null;
+  resolution_note?: string | null;
+  requested_by: number;
+  requested_by_name?: string | null;
+  created_at?: string | null;
+  resolved_at?: string | null;
+  reviewers: DocReviewer[];
+  approved_count: number;
+  changes_requested_count: number;
+  pending_count: number;
+}
+
+export interface DocReviewView {
+  doc_id: number;
+  doc_status: DocStatus;
+  current_round?: DocReviewRound | null;
+  history: DocReviewRound[];
+  my_decision?: DocReviewDecision | null;
+  can_decide: boolean;
+  can_manage: boolean;
+}
+
 export interface DocRelatedLink {
   id: number;
   doc_id: number;

@@ -1,4 +1,4 @@
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocSpaceUpdate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus, WatchStatus, WatchEntityType } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocSpaceUpdate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocReviewView, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus, WatchStatus, WatchEntityType } from "@/types";
 import { api, resolveProjectSeq, seqAPI, getApiErrorMessage } from "./client";
 
 // Watch / change-notification subscriptions, shared by docs, requirements, and
@@ -367,8 +367,26 @@ export const docsAPI = {
   requestReview: async (
     id: number,
     payload: { reviewer_ids: number[]; note?: string | null }
-  ): Promise<{ message: string; doc_id: number; status: string; notified_count: number; reviewer_ids: number[] }> => {
+  ): Promise<{ message: string; doc_id: number; status: string; notified_count: number; reviewer_ids: number[]; round_id?: number | null }> => {
     const response = await api.post(`/docs/${id}/request-review`, payload);
+    return response.data;
+  },
+  // Current review round + history + the viewer's actionable state.
+  getReview: async (id: number): Promise<DocReviewView> => {
+    const response = await api.get(`/docs/${id}/review`);
+    return response.data;
+  },
+  // Record the viewer's verdict on the open round (approve / request changes).
+  submitReviewDecision: async (
+    id: number,
+    payload: { decision: 'approved' | 'changes_requested'; comment?: string | null }
+  ): Promise<DocReviewView> => {
+    const response = await api.post(`/docs/${id}/review/decision`, payload);
+    return response.data;
+  },
+  // Withdraw the open review round (requester / project writer).
+  cancelReview: async (id: number, payload?: { note?: string | null }): Promise<DocReviewView> => {
+    const response = await api.post(`/docs/${id}/review/cancel`, payload ?? {});
     return response.data;
   },
   getPublic: async (publicId: string): Promise<DocPublicView> => {
