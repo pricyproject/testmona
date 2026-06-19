@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from sqlalchemy import desc, distinct, func, or_
@@ -1036,6 +1037,176 @@ def delete_doc(db: Session, doc: models.Doc) -> None:
     watch_service.clear_watches(db, watch_service.DOC, doc.id)
     db.delete(doc)
     safe_commit(db)
+
+
+# --------------------------------------------------------------------------- #
+# Review rounds                                                                #
+# --------------------------------------------------------------------------- #
+
+def get_current_review_round(db: Session, doc_id: int) -> Optional[models.DocReviewRound]:
+    """The doc's single OPEN review round, if one is in flight."""
+    return (
+        db.query(models.DocReviewRound)
+        .filter(
+            models.DocReviewRound.doc_id == doc_id,
+            models.DocReviewRound.status == models.DocReviewRoundStatus.OPEN,
+        )
+        .order_by(desc(models.DocReviewRound.id))
+        .first()
+    )
+
+
+def list_review_rounds(db: Session, doc_id: int) -> List[models.DocReviewRound]:
+    """All review rounds for a doc, newest first (current round included)."""
+    return (
+        db.query(models.DocReviewRound)
+        .filter(models.DocReviewRound.doc_id == doc_id)
+        .order_by(desc(models.DocReviewRound.id))
+        .all()
+    )
+
+
+def open_review_round(
+    db: Session,
+    doc: models.Doc,
+    *,
+    requester_id: int,
+    reviewer_ids: List[int],
+    note: Optional[str],
+    commit: bool = True,
+) -> models.DocReviewRound:
+    """Open a fresh review round, superseding any round still OPEN.
+
+    Any prior open round is cancelled (so a doc only ever has one live round). The
+    caller owns the doc status transition and reviewer notifications.
+    """
+    existing = get_current_review_round(db, doc.id)
+    if existing is not None:
+        existing.status = models.DocReviewRoundStatus.CANCELLED
+        existing.resolution_note = "Superseded by a new review request"
+        existing.resolved_at = datetime.now(timezone.utc)
+
+    round_ = models.DocReviewRound(
+        doc_id=doc.id,
+        requested_by=requester_id,
+        note=note,
+        status=models.DocReviewRoundStatus.OPEN,
+    )
+    db.add(round_)
+    db.flush()
+    for uid in reviewer_ids:
+        db.add(models.DocReviewAssignment(round_id=round_.id, reviewer_id=uid))
+    if commit:
+        safe_commit(db)
+        db.refresh(round_)
+    return round_
+
+
+def recompute_round_status(round_: models.DocReviewRound) -> models.DocReviewRoundStatus:
+    """Roll per-reviewer decisions up to the round status (does not commit).
+
+    Any single "changes requested" resolves the round to CHANGES_REQUESTED; a round
+    becomes APPROVED only once every reviewer has approved; otherwise it stays OPEN.
+    """
+    decisions = [a.decision for a in round_.assignments]
+    if any(d == models.DocReviewDecision.CHANGES_REQUESTED for d in decisions):
+        new_status = models.DocReviewRoundStatus.CHANGES_REQUESTED
+    elif decisions and all(d == models.DocReviewDecision.APPROVED for d in decisions):
+        new_status = models.DocReviewRoundStatus.APPROVED
+    else:
+        new_status = models.DocReviewRoundStatus.OPEN
+
+    if new_status != round_.status:
+        round_.status = new_status
+        round_.resolved_at = (
+            datetime.now(timezone.utc)
+            if new_status != models.DocReviewRoundStatus.OPEN
+            else None
+        )
+    return new_status
+
+
+def record_review_decision(
+    db: Session,
+    round_: models.DocReviewRound,
+    *,
+    reviewer_id: int,
+    decision: models.DocReviewDecision,
+    comment: Optional[str],
+    commit: bool = True,
+) -> models.DocReviewAssignment:
+    """Record one reviewer's verdict on the open round and re-roll the round status."""
+    assignment = next(
+        (a for a in round_.assignments if a.reviewer_id == reviewer_id), None
+    )
+    if assignment is None:
+        raise ValueError("Reviewer is not assigned to this review round")
+    assignment.decision = decision
+    assignment.comment = comment
+    assignment.decided_at = datetime.now(timezone.utc)
+    db.flush()
+    recompute_round_status(round_)
+    if commit:
+        safe_commit(db)
+        db.refresh(round_)
+    return assignment
+
+
+def cancel_review_round(
+    db: Session,
+    round_: models.DocReviewRound,
+    *,
+    note: Optional[str] = None,
+    commit: bool = True,
+) -> models.DocReviewRound:
+    """Withdraw an open round."""
+    round_.status = models.DocReviewRoundStatus.CANCELLED
+    round_.resolution_note = note
+    round_.resolved_at = datetime.now(timezone.utc)
+    if commit:
+        safe_commit(db)
+        db.refresh(round_)
+    return round_
+
+
+def serialize_review_round(round_: models.DocReviewRound) -> "schemas.DocReviewRoundView":
+    """Build the API view for a round, including reviewer slots and tallies."""
+    reviewers: List[schemas.DocReviewerView] = []
+    approved = changes = pending = 0
+    for a in round_.assignments:
+        if a.decision == models.DocReviewDecision.APPROVED:
+            approved += 1
+        elif a.decision == models.DocReviewDecision.CHANGES_REQUESTED:
+            changes += 1
+        else:
+            pending += 1
+        reviewers.append(
+            schemas.DocReviewerView(
+                id=a.id,
+                reviewer_id=a.reviewer_id,
+                username=getattr(a.reviewer, "username", None),
+                full_name=getattr(a.reviewer, "full_name", None),
+                decision=a.decision,
+                comment=a.comment,
+                decided_at=a.decided_at,
+            )
+        )
+    return schemas.DocReviewRoundView(
+        id=round_.id,
+        doc_id=round_.doc_id,
+        status=round_.status,
+        note=round_.note,
+        resolution_note=round_.resolution_note,
+        requested_by=round_.requested_by,
+        requested_by_name=getattr(round_.requester, "full_name", None)
+        or getattr(round_.requester, "username", None),
+        created_at=round_.created_at,
+        resolved_at=round_.resolved_at,
+        reviewers=reviewers,
+        approved_count=approved,
+        changes_requested_count=changes,
+        pending_count=pending,
+    )
 
 
 # --------------------------------------------------------------------------- #

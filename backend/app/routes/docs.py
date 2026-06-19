@@ -1642,10 +1642,24 @@ def register_docs_routes(app) -> None:
     ):
         doc = _get_doc_or_404(db, doc_id)
         _require(current_user, doc.project_id, "write", db)
+        # Publishing is gated on review: a doc with an OPEN review round must have it
+        # resolved (approved, changes-requested, or cancelled) before it can be
+        # published — so reviewers are never bypassed mid-review.
+        if (
+            payload.status == models.DocStatus.PUBLISHED
+            and doc.status != models.DocStatus.PUBLISHED
+        ):
+            open_round = crud_docs.get_current_review_round(db, doc.id)
+            if open_round is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Resolve or cancel the open review before publishing this document",
+                )
         # Snapshot before the update so mention notifications only fire for users
         # newly added since the last save (the editor autosaves frequently).
         previous_markdown = doc.content_markdown
         previous_project_id = doc.project_id
+        previous_status = doc.status
         target_space_id = doc.space_id
         if payload.space_id is not None and payload.space_id != doc.space_id:
             new_space = _get_space_or_404(db, payload.space_id)
@@ -1659,6 +1673,15 @@ def register_docs_routes(app) -> None:
         # gets a single row — the mention — rather than two.
         batch = notification_engine.NotificationBatch()
         doc = crud_docs.update_doc(db, doc, payload, actor_id=current_user.id, batch=batch)
+        # Manually moving a doc out of review (e.g. straight back to draft/archived)
+        # withdraws any still-open round so it cannot linger on a non-review doc.
+        if (
+            previous_status == models.DocStatus.IN_REVIEW
+            and doc.status != models.DocStatus.IN_REVIEW
+        ):
+            stale_round = crud_docs.get_current_review_round(db, doc.id)
+            if stale_round is not None:
+                crud_docs.cancel_review_round(db, stale_round, note="Review ended by status change")
         _reconcile_grants_after_move(db, doc, previous_project_id, current_user)
         _notify_doc_mentions(db, doc, current_user, previous_markdown, batch=batch)
         batch.flush(db)
@@ -1709,10 +1732,17 @@ def register_docs_routes(app) -> None:
                 detail=f"Reviewer(s) do not have access to this document: {no_access}",
             )
 
-        # Move into review and persist before notifying.
+        # Move into review and open a tracked round (superseding any prior open one)
+        # before notifying.
         doc.status = models.DocStatus.IN_REVIEW
         doc.updated_by = current_user.id
-        db.commit()
+        round_ = crud_docs.open_review_round(
+            db,
+            doc,
+            requester_id=current_user.id,
+            reviewer_ids=review_request.reviewer_ids,
+            note=review_request.note,
+        )
         db.refresh(doc)
 
         actor_name = notification_engine.actor_display_name(current_user)
@@ -1749,7 +1779,174 @@ def register_docs_routes(app) -> None:
             status=doc.status,
             notified_count=len(notified_ids),
             reviewer_ids=notified_ids,
+            round_id=round_.id,
         )
+
+    def _build_review_view(
+        db: Session, doc: models.Doc, current_user: models.User
+    ) -> schemas.DocReviewView:
+        """Assemble the review panel payload: current round, history, and the
+        viewer's own actionable state."""
+        rounds = crud_docs.list_review_rounds(db, doc.id)
+        current = next(
+            (r for r in rounds if r.status == models.DocReviewRoundStatus.OPEN), None
+        )
+        can_manage = _can_access(current_user, doc.project_id, "write", db)
+        my_decision = None
+        can_decide = False
+        if current is not None:
+            mine = next(
+                (a for a in current.assignments if a.reviewer_id == current_user.id),
+                None,
+            )
+            if mine is not None:
+                my_decision = mine.decision
+                can_decide = True
+        return schemas.DocReviewView(
+            doc_id=doc.id,
+            doc_status=doc.status,
+            current_round=crud_docs.serialize_review_round(current) if current else None,
+            history=[
+                crud_docs.serialize_review_round(r)
+                for r in rounds
+                if current is None or r.id != current.id
+            ],
+            my_decision=my_decision,
+            can_decide=can_decide,
+            can_manage=can_manage,
+        )
+
+    @app.get("/docs/{doc_id}/review", response_model=schemas.DocReviewView, tags=["Docs"])
+    def get_doc_review(
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Current review round, round history, and the viewer's actionable state."""
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        return _build_review_view(db, doc, current_user)
+
+    @app.post("/docs/{doc_id}/review/decision", response_model=schemas.DocReviewView, tags=["Docs"])
+    def submit_doc_review_decision(
+        decision_input: schemas.DocReviewDecisionInput,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Record the current user's verdict on a doc's open review round.
+
+        Only an assigned reviewer may decide. Once any reviewer requests changes the
+        round resolves to ``changes_requested`` and the doc drops back to ``draft``;
+        once every reviewer approves the round is ``approved`` and the doc is ready to
+        publish. The requester is notified of each verdict and of the final outcome.
+        """
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "read", db)
+        round_ = crud_docs.get_current_review_round(db, doc.id)
+        if round_ is None:
+            raise HTTPException(status_code=409, detail="This document has no open review")
+        if not any(a.reviewer_id == current_user.id for a in round_.assignments):
+            raise HTTPException(status_code=403, detail="You are not a reviewer on this document")
+
+        decision = models.DocReviewDecision(decision_input.decision.value)
+        crud_docs.record_review_decision(
+            db,
+            round_,
+            reviewer_id=current_user.id,
+            decision=decision,
+            comment=decision_input.comment,
+        )
+        db.refresh(round_)
+
+        # React to a resolved round: kick a changes-requested doc back to draft so it
+        # is editable again; an approved round leaves the doc in_review, publishable.
+        if round_.status == models.DocReviewRoundStatus.CHANGES_REQUESTED:
+            doc.status = models.DocStatus.DRAFT
+            doc.updated_by = current_user.id
+            db.commit()
+            db.refresh(doc)
+
+        actor_name = notification_engine.actor_display_name(current_user)
+        label = doc.title or f"#{doc.id}"
+        batch = notification_engine.NotificationBatch()
+        recipients = [round_.requested_by]
+        if decision == models.DocReviewDecision.APPROVED:
+            if round_.status == models.DocReviewRoundStatus.APPROVED:
+                message = f'All reviewers approved "{label}". It is ready to publish.'
+            else:
+                message = f'{actor_name} approved "{label}".'
+            title = "Review approved"
+            type_override = notification_engine.NotificationType.SUCCESS
+        else:
+            comment_clause = (
+                f' Note: "{decision_input.comment}".' if decision_input.comment else ""
+            )
+            message = f'{actor_name} requested changes on "{label}".{comment_clause}'
+            title = "Changes requested"
+            type_override = notification_engine.NotificationType.WARNING
+        # Do not notify the requester if they are also the deciding reviewer.
+        recipients = [uid for uid in recipients if uid != current_user.id]
+        if recipients:
+            batch.add(
+                category=notification_engine.REVIEW,
+                user_ids=recipients,
+                actor_id=current_user.id,
+                title=title,
+                message=message,
+                related_entity_type="doc",
+                related_entity_id=doc.id,
+                type_override=type_override,
+            )
+            batch.flush(db)
+
+        return _build_review_view(db, doc, current_user)
+
+    @app.post("/docs/{doc_id}/review/cancel", response_model=schemas.DocReviewView, tags=["Docs"])
+    def cancel_doc_review(
+        cancel_input: schemas.DocReviewCancel,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Withdraw a doc's open review round (requires write access). The doc returns
+        to ``draft`` and pending reviewers are told the request was withdrawn."""
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+        round_ = crud_docs.get_current_review_round(db, doc.id)
+        if round_ is None:
+            raise HTTPException(status_code=409, detail="This document has no open review")
+
+        pending_reviewers = [
+            a.reviewer_id
+            for a in round_.assignments
+            if a.decision == models.DocReviewDecision.PENDING
+        ]
+        crud_docs.cancel_review_round(db, round_, note=cancel_input.note)
+        if doc.status == models.DocStatus.IN_REVIEW:
+            doc.status = models.DocStatus.DRAFT
+            doc.updated_by = current_user.id
+            db.commit()
+            db.refresh(doc)
+
+        actor_name = notification_engine.actor_display_name(current_user)
+        label = doc.title or f"#{doc.id}"
+        recipients = [uid for uid in pending_reviewers if uid != current_user.id]
+        if recipients:
+            batch = notification_engine.NotificationBatch()
+            batch.add(
+                category=notification_engine.REVIEW,
+                user_ids=recipients,
+                actor_id=current_user.id,
+                title="Review withdrawn",
+                message=f'{actor_name} withdrew the review request on "{label}".',
+                related_entity_type="doc",
+                related_entity_id=doc.id,
+                type_override=notification_engine.NotificationType.INFO,
+            )
+            batch.flush(db)
+
+        return _build_review_view(db, doc, current_user)
 
     @app.delete("/docs/{doc_id}", status_code=204, tags=["Docs"])
     def delete_doc(
