@@ -92,7 +92,7 @@ export function NotificationDropdown({ unreadCount, onUnreadCountChange }: Notif
     try {
       const limit = 50;
       const skip = pageNum * limit;
-      let url = `/notifications/?skip=${skip}&limit=${limit}`;
+      const url = `/notifications/?skip=${skip}&limit=${limit}`;
 
       const response = await api.get(url);
 
