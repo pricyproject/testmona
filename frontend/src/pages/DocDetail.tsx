@@ -18,6 +18,7 @@ import {
   Loader2,
   Lock,
   MessageCircleQuestion,
+  MoreHorizontal,
   Pencil,
   RotateCcw,
   Share2,
@@ -28,7 +29,14 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +62,7 @@ import { ConvertDocDialog } from '@/components/docs/ConvertDocDialog';
 import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { DocShareDialog } from '@/components/docs/DocShareDialog';
 import { DocReviewDialog } from '@/components/docs/DocReviewDialog';
+import { DocReviewPanel } from '@/components/docs/DocReviewPanel';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -107,6 +116,8 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const [impactOpen, setImpactOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Bumped whenever a review action lands, so the review panel refetches.
+  const [reviewRefresh, setReviewRefresh] = useState(0);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -204,6 +215,22 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     }
   };
 
+
+  const publishDoc = async () => {
+    if (!doc) return;
+    try {
+      await updateDoc.mutateAsync({ status: 'published' });
+      toast({ title: t('success'), description: t('docPublishedToast') });
+      setReviewRefresh((n) => n + 1);
+    } catch (e: any) {
+      // The backend 409s when an open review must be resolved first.
+      toast({
+        title: t('error'),
+        description: e?.response?.data?.detail || t('docSaveFailed'),
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handleTabChange = (value: string) => {
     const next = value as DocTab;
@@ -306,53 +333,90 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="mb-4 flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(basePath)}>
-          <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
-          {t('docHub')}
-        </Button>
-        <span className="flex-1" />
-        <Button variant="outline" size="sm" onClick={handleExport}>
-          <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-          {t('export')}
-        </Button>
-        <WatchButton entityType="doc" entityId={doc.id} />
-        {doc.can_share && (
-          <Button variant="outline" size="sm" onClick={() => setShareOpen(true)}>
-            <Share2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            {t('share')}
-          </Button>
-        )}
-        {links.length > 0 && (
-          <Button variant="outline" size="sm" onClick={() => setImpactOpen(true)}>
-            <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            {t('docImpactAnalyze')}
-          </Button>
-        )}
-        {doc.can_edit && (
-          <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
-            <ArrowRightLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            {t('docConvertToRequirements')}
-          </Button>
-        )}
-        {doc.can_edit && doc.project_id != null && doc.status !== 'in_review' && (
-          <Button variant="outline" size="sm" onClick={() => setReviewOpen(true)}>
-            <ClipboardCheck className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            {t('docRequestReview')}
-          </Button>
-        )}
-        {doc.can_edit && (
-          <Button size="sm" onClick={() => navigate(`${basePath}/${doc.id}/edit`)}>
-            <Pencil className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            {t('edit')}
-          </Button>
-        )}
-        {doc.can_delete && (
-          <Button variant="ghost" size="icon" className="text-rose-600" onClick={() => setDeleteOpen(true)}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
+      {(() => {
+        const iconCls = `h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`;
+        // Contextual primary workflow action: publish when there's something to
+        // publish, otherwise prompt the author to send the doc for review.
+        const canRequestReview =
+          doc.can_edit && doc.project_id != null && doc.status !== 'in_review' && doc.status !== 'published';
+        const canPublish = doc.can_edit && doc.status !== 'published' && doc.status !== 'archived';
+        // Secondary actions all live behind the overflow menu to keep the bar calm.
+        const hasMenu = canRequestReview || canPublish || doc.can_edit || links.length > 0 || doc.can_share || doc.can_delete;
+        return (
+          <div className="mb-4 flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate(basePath)}>
+              <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
+              {t('docHub')}
+            </Button>
+            <span className="flex-1" />
+            <WatchButton entityType="doc" entityId={doc.id} />
+            {doc.can_edit && (
+              <Button size="sm" onClick={() => navigate(`${basePath}/${doc.id}/edit`)}>
+                <Pencil className={iconCls} />
+                {t('edit')}
+              </Button>
+            )}
+            {hasMenu && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={buttonVariants({ variant: 'outline', size: 'icon' })}
+                  aria-label={t('moreActions')}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-56">
+                  {canPublish && (
+                    <DropdownMenuItem onClick={publishDoc} disabled={updateDoc.isPending}>
+                      <CheckCircle2 className={iconCls} />
+                      {t('docPublish')}
+                    </DropdownMenuItem>
+                  )}
+                  {canRequestReview && (
+                    <DropdownMenuItem onClick={() => setReviewOpen(true)}>
+                      <ClipboardCheck className={iconCls} />
+                      {t('docRequestReview')}
+                    </DropdownMenuItem>
+                  )}
+                  {doc.can_edit && (
+                    <DropdownMenuItem onClick={() => setConvertOpen(true)}>
+                      <ArrowRightLeft className={iconCls} />
+                      {t('docConvertToRequirements')}
+                    </DropdownMenuItem>
+                  )}
+                  {links.length > 0 && (
+                    <DropdownMenuItem onClick={() => setImpactOpen(true)}>
+                      <Sparkles className={iconCls} />
+                      {t('docImpactAnalyze')}
+                    </DropdownMenuItem>
+                  )}
+                  {doc.can_share && (
+                    <DropdownMenuItem onClick={() => setShareOpen(true)}>
+                      <Share2 className={iconCls} />
+                      {t('share')}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={handleExport}>
+                    <Download className={iconCls} />
+                    {t('export')}
+                  </DropdownMenuItem>
+                  {doc.can_delete && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => setDeleteOpen(true)}
+                        className="text-rose-600 focus:text-rose-600"
+                      >
+                        <Trash2 className={iconCls} />
+                        {t('delete')}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Header */}
       <div className="mb-5">
@@ -416,6 +480,8 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           {doc.can_view_stats && <span className="flex items-center gap-1"><Eye className="h-3 w-3" />{doc.view_count ?? 0}</span>}
         </div>
       </div>
+
+      <DocReviewPanel docId={doc.id} refreshKey={reviewRefresh} onChanged={reloadDoc} />
 
       <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
@@ -618,7 +684,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
         projectId={doc.project_id ?? null}
         open={reviewOpen}
         onOpenChange={setReviewOpen}
-        onSuccess={reloadDoc}
+        onSuccess={() => { reloadDoc(); setReviewRefresh((n) => n + 1); }}
       />
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
