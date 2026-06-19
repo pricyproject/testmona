@@ -46,7 +46,7 @@ import {
 import { inboxAPI, type InboxStatus, type InboxSort, type InboxBulkActionType, type InboxActorOption, type InboxProjectOption } from '@/lib/api/inbox';
 import { useInboxViewStore, type InboxGroupBy } from '@/stores/inboxViewStore';
 import { openNotification } from '@/lib/notificationNavigation';
-import { requirementsAPI } from '@/lib/api/requirements_docs';
+import { requirementsAPI, docsAPI } from '@/lib/api/requirements_docs';
 import { Notification, InboxSummary } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
@@ -157,7 +157,11 @@ function agingFor(createdAt: string, category: string | null | undefined, status
 // item done — it never emits a notification itself). Today: approving a
 // requirement review. New inline actions slot in here as `category`+entity pairs.
 function canResolveReview(n: Notification): boolean {
-  return n.category === 'review' && n.related_entity_type === 'requirement' && n.related_entity_id != null;
+  return (
+    n.category === 'review' &&
+    (n.related_entity_type === 'requirement' || n.related_entity_type === 'doc') &&
+    n.related_entity_id != null
+  );
 }
 
 // Compact age label, e.g. "3h", "5d", "2w".
@@ -412,11 +416,15 @@ export function WorkInbox() {
   const resolveReview = async (notification: Notification) => {
     if (notification.related_entity_id == null) return;
     try {
-      await requirementsAPI.update(notification.related_entity_id, { status: 'reviewed' });
+      if (notification.related_entity_type === 'doc') {
+        await docsAPI.submitReviewDecision(notification.related_entity_id, { decision: 'approved' });
+      } else {
+        await requirementsAPI.update(notification.related_entity_id, { status: 'reviewed' });
+      }
       await archive(notification.id);
       toast({ title: t('inboxReviewApprovedToast') });
     } catch (error) {
-      console.error('Failed to mark requirement reviewed:', error);
+      console.error('Failed to approve review:', error);
       toast({ title: t('inboxActionFailed'), variant: 'destructive' });
     }
   };
