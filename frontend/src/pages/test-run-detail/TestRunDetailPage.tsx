@@ -1076,7 +1076,10 @@ export function TestRunDetail() {
     const next = sortedFilteredResults.find((r) => !isResultComplete(r.status))
       || testResults.find((r) => !isResultComplete(r.status));
     if (next?.test_case_id) {
-      navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${next.test_case_id}`);
+      // Link by the case's per-project seq (the URL identity); fall back to the
+      // global id only when the seq is unavailable. Passing the global id where a
+      // seq is expected mis-resolves to a different case when they collide.
+      navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${next.test_case?.project_seq ?? next.test_case_id}`);
     }
   };
 
@@ -2050,7 +2053,7 @@ export function TestRunDetail() {
                               className="h-auto max-w-[260px] justify-start p-0 text-left font-semibold text-blue-700 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
                               onClick={() => {
                                 if (result.test_case_id) {
-                                  navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${result.test_case_id}`);
+                                  navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${result.test_case?.project_seq ?? result.test_case_id}`);
                                 }
                               }}
                               title={testCaseTitle}
@@ -2059,7 +2062,7 @@ export function TestRunDetail() {
                             </Button>
                             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                               <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                {result.test_case_id ? `TC-${result.test_case_id}` : 'N/A'}
+                                {result.test_case_id ? `TC-${result.test_case?.project_seq ?? result.test_case_id}` : 'N/A'}
                               </span>
                               {result.test_case?.test_type && <span>{result.test_case.test_type}</span>}
                               {result.retest_needed && (
@@ -2257,7 +2260,7 @@ export function TestRunDetail() {
                               variant="outline"
                               onClick={() => {
                                 if (result.test_case_id) {
-                                  navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${result.test_case_id}`);
+                                  navigate(`/projects/${projectId}/test-runs/${id}/test-cases/${result.test_case?.project_seq ?? result.test_case_id}`);
                                 }
                               }}
                             >

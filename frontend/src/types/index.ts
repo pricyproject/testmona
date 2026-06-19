@@ -229,6 +229,8 @@ export interface TestResult {
   test_run_id: number;
   test_case?: {
     id: number;
+    project_seq?: number | null;
+    project_id?: number | null;
     title: string;
     test_type?: string;
     section?: {

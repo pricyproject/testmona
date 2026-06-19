@@ -330,6 +330,8 @@ class TestCaseLinkedRequirement(BaseModel):
 
 class TestCaseWithRelations(TestCaseBase):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
+    project_id: Optional[int] = None  # denormalised from the suite
     test_suite_id: int
     created_by: Optional[int] = None
     created_at: datetime
