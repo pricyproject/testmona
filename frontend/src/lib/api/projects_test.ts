@@ -44,6 +44,13 @@ export const projectsAPI = {
     const response = await api.get(`/projects/${id}/features`);
     return response.data;
   },
+  // The current user's projects joined with their *effective* role in each
+  // (owner/assignment/global). Used to gate write controls per project, so a
+  // globally read-only user elevated in a project sees the right affordances.
+  getMyProjects: async (): Promise<Array<{ project: Project; role: string; assigned_at: string | null }>> => {
+    const response = await api.get('/my-projects');
+    return response.data;
+  },
   updateFeatures: async (id: number, features: Record<string, boolean>) => {
     const response = await api.put(`/projects/${id}/features`, { features });
     return response.data;

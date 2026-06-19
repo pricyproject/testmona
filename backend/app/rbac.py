@@ -45,13 +45,54 @@ _VIEWER_WRITE_ALLOWLIST: List[Tuple[str, Pattern]] = [
 ]
 
 
-def enforce_viewer_read_only(user: object, method: str, path: str) -> None:
+def has_elevated_project_membership(user: object, db: Optional[Session]) -> bool:
+    """True if a global ``viewer`` has been elevated above read-only in any project.
+
+    A project manager can assign a higher role (tester/manager/…) to a globally
+    read-only user, or that user may own a project. In either case the user can
+    legitimately write *within those projects*, so they are no longer purely
+    read-only. The per-project decision is still made by ``has_permission``; this
+    only answers "is this user elevated *somewhere*" so the blanket viewer gate
+    can step aside and defer to those project-scoped checks.
+    """
+    if db is None:
+        return False
+
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return False
+
+    assignments = db.query(ProjectAssignment).filter(
+        ProjectAssignment.user_id == user_id
+    ).all()
+    for assignment in assignments:
+        assignment_role = normalize_role(assignment.role)
+        if assignment_role is None:
+            continue
+        # Any project permission beyond plain "read" counts as elevation.
+        if ROLE_PERMISSIONS.get(assignment_role, set()) - {"read"}:
+            return True
+
+    # Project owners can write within the projects they own (see ``has_permission``).
+    owns_project = db.query(Project).filter(Project.owner_id == user_id).first()
+    return owns_project is not None
+
+
+def enforce_viewer_read_only(
+    user: object, method: str, path: str, db: Optional[Session] = None
+) -> None:
     """Global read-only gate for the ``viewer`` role.
 
     No-op for superusers and any non-viewer role; viewers may issue safe (read) methods
     and the self-service writes in ``_VIEWER_WRITE_ALLOWLIST``. Everything else raises 403.
     This is defense-in-depth on top of the per-route ``has_permission`` checks: it covers
     every authenticated route because every one resolves through ``auth.get_current_user``.
+
+    A globally-read-only user who has been elevated in a project (assigned a higher
+    role by a project manager, or owning the project) is *not* blanket-blocked here:
+    the gate steps aside and lets the per-route, project-scoped ``has_permission``
+    checks decide, so they can write in the project(s) where they were elevated while
+    staying read-only everywhere else.
     """
     if getattr(user, "is_superuser", False):
         return
@@ -62,6 +103,8 @@ def enforce_viewer_read_only(user: object, method: str, path: str) -> None:
     for allowed_method, pattern in _VIEWER_WRITE_ALLOWLIST:
         if allowed_method == method.upper() and pattern.search(path):
             return
+    if has_elevated_project_membership(user, db):
+        return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Viewer role is read-only",

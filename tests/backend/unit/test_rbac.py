@@ -173,3 +173,93 @@ def test_viewer_notification_allowlist_requires_expected_path_shape():
     assert _allowed(_user(), "PUT", "/notifications/not-a-number") is False
     assert _allowed(_user(), "DELETE", "/notifications/cleanup") is True
     assert _allowed(_user(), "DELETE", "/notifications/cleanup/extra") is False
+
+
+# ---------------------------------------------------------------------------
+# Project-level elevation: a global viewer assigned a write role in a project
+# (or owning one) is no longer blanket read-only; the gate defers to the
+# per-route, project-scoped has_permission checks.
+# ---------------------------------------------------------------------------
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return self._rows
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeDB:
+    """Minimal stand-in: returns assignment rows for ProjectAssignment queries
+    and owned-project rows for Project queries."""
+
+    def __init__(self, assignments=None, owned=None):
+        self._assignments = assignments or []
+        self._owned = owned or []
+
+    def query(self, model):
+        from app.models import ProjectAssignment
+        if model is ProjectAssignment:
+            return _FakeQuery(self._assignments)
+        return _FakeQuery(self._owned)
+
+
+def _assignment(role):
+    return types.SimpleNamespace(role=role)
+
+
+def _viewer_with_id(uid=7):
+    return types.SimpleNamespace(role="viewer", is_superuser=False, id=uid)
+
+
+@pytest.mark.parametrize("role", ["tester", "manager", "admin"])
+def test_elevated_viewer_write_allowed(role):
+    """A global viewer elevated to a write role in a project is not blocked."""
+    db = _FakeDB(assignments=[_assignment(role)])
+    enforce_viewer_read_only(_viewer_with_id(), "POST", "/docs", db)
+    enforce_viewer_read_only(_viewer_with_id(), "PUT", "/docs/5", db)
+
+
+def test_viewer_with_only_viewer_assignment_still_blocked():
+    """An assignment that is itself viewer grants no write, so still blocked."""
+    db = _FakeDB(assignments=[_assignment("viewer")])
+    assert _allowed_db(_viewer_with_id(), "POST", "/docs", db) is False
+
+
+def test_viewer_with_no_assignment_blocked():
+    db = _FakeDB()
+    assert _allowed_db(_viewer_with_id(), "POST", "/docs", db) is False
+
+
+def test_project_owner_viewer_write_allowed():
+    """Owning a project elevates a global viewer for writes (defers to per-route)."""
+    db = _FakeDB(owned=[types.SimpleNamespace(id=1)])
+    enforce_viewer_read_only(_viewer_with_id(), "POST", "/docs", db)
+
+
+def test_has_elevated_project_membership_helper():
+    from app.rbac import has_elevated_project_membership
+
+    assert has_elevated_project_membership(
+        _viewer_with_id(), _FakeDB(assignments=[_assignment("tester")])
+    ) is True
+    assert has_elevated_project_membership(
+        _viewer_with_id(), _FakeDB(assignments=[_assignment("viewer")])
+    ) is False
+    # No db (e.g. token path without a session) is treated as not elevated.
+    assert has_elevated_project_membership(_viewer_with_id(), None) is False
+
+
+def _allowed_db(user, method, path, db):
+    try:
+        enforce_viewer_read_only(user, method, path, db)
+        return True
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        return False

@@ -140,7 +140,7 @@ async def get_current_user(
         api_user = get_user_for_token(db, token)
         if api_user is None:
             raise credentials_exception
-        rbac.enforce_viewer_read_only(api_user, request.method, request.url.path)
+        rbac.enforce_viewer_read_only(api_user, request.method, request.url.path, db)
         return api_user
 
     try:
@@ -155,7 +155,7 @@ async def get_current_user(
         raise credentials_exception
     if not _token_session_is_current(payload, user):
         raise credentials_exception
-    rbac.enforce_viewer_read_only(user, request.method, request.url.path)
+    rbac.enforce_viewer_read_only(user, request.method, request.url.path, db)
     return user
 
 

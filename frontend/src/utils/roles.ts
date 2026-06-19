@@ -38,3 +38,17 @@ export function canWrite(user?: { role?: string | null; is_superuser?: boolean }
  * (test execution, requirements) don't need to change.
  */
 export const canWriteResults = canWrite;
+
+/**
+ * Whether a (project-level) role grants write access. Mirrors the backend
+ * ROLE_PERMISSIONS table: admin/manager/tester can write, viewer cannot.
+ * Unknown roles default to read-only (the backend stays the source of truth).
+ */
+export function roleCanWrite(role?: string | null): boolean {
+  const normalized = normalizeRole(role);
+  return (
+    normalized === USER_ROLES.ADMIN ||
+    normalized === USER_ROLES.MANAGER ||
+    normalized === USER_ROLES.TESTER
+  );
+}

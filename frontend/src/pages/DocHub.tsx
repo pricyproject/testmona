@@ -72,7 +72,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAuthStore } from '@/stores/authStore';
 import { docsAPI, type DocListParams } from '@/lib/api';
 import { parsePositiveIntegerParam } from '@/utils/validation';
@@ -232,12 +232,14 @@ function DocCardSkeleton() {
 
 export function DocHub() {
   const { t, isRTL } = useTranslation();
-  const { canWrite } = usePermissions();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { projectId: projectIdParam } = useParams<{ projectId?: string }>();
   const projectId = parsePositiveIntegerParam(projectIdParam);
+  // Project-aware write gating: a globally read-only viewer elevated to a
+  // write role in this project should still see create/edit affordances here.
+  const { canWrite } = useProjectPermissions(projectId);
   const basePath = projectId ? `/projects/${projectId}/docs` : '/docs';
 
   const [spaces, setSpaces] = useState<DocSpace[]>([]);
