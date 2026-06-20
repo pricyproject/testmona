@@ -85,6 +85,125 @@ def _notify_rca_assignee(
         )
 
 
+RCA_STATUSES = {"open", "in_progress", "resolved", "closed"}
+RCA_SEVERITIES = {"low", "medium", "high", "critical"}
+# Structured categories for a "why did this happen" taxonomy. Free-form is still
+# accepted, but the UI offers these so analyses can be grouped and trended.
+RCA_CATEGORIES = {
+    "code_defect",
+    "requirement_gap",
+    "test_gap",
+    "environment",
+    "data",
+    "configuration",
+    "third_party",
+    "process",
+    "human_error",
+    "other",
+}
+
+
+def _user_display_name(user: "Optional[models.User]") -> Optional[str]:
+    if user is None:
+        return None
+    return user.full_name or user.username or user.email or f"User {user.id}"
+
+
+def _validate_rca_links(
+    db: Session,
+    project_id: int,
+    *,
+    defect_id: Optional[int] = None,
+    requirement_id: Optional[int] = None,
+    test_case_id: Optional[int] = None,
+    assigned_to: Optional[int] = None,
+) -> None:
+    """Reject links that point outside the analysis' project or at missing rows.
+
+    Linking an RCA to a defect/requirement/test case from another project (or a
+    deleted one) silently produces dead links in the UI, so we validate up front.
+    """
+    if defect_id is not None:
+        row = db.query(models.Defect).filter(models.Defect.id == defect_id).first()
+        if not row or row.project_id != project_id:
+            raise HTTPException(status_code=400, detail="Linked defect does not belong to this project")
+    if requirement_id is not None:
+        row = db.query(models.Requirement).filter(models.Requirement.id == requirement_id).first()
+        if not row or row.project_id != project_id:
+            raise HTTPException(status_code=400, detail="Linked requirement does not belong to this project")
+    if test_case_id is not None:
+        row = db.query(models.TestCase).filter(models.TestCase.id == test_case_id).first()
+        if not row or row.project_id != project_id:
+            raise HTTPException(status_code=400, detail="Linked test case does not belong to this project")
+    if assigned_to is not None:
+        row = db.query(models.User).filter(
+            models.User.id == assigned_to, models.User.is_active == True  # noqa: E712
+        ).first()
+        if not row:
+            raise HTTPException(status_code=400, detail="Assignee is not a valid active user")
+
+
+def _normalize_rca_analysis_data(value) -> Optional[dict]:
+    """Validate the structured analysis_data blob (category + actions).
+
+    Stored as JSON on the row; we keep only known keys and validate the category
+    so the field stays queryable rather than becoming an opaque grab-bag.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="analysis_data must be an object")
+    cleaned: dict = {}
+    category = value.get("category")
+    if category not in (None, ""):
+        if category not in RCA_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Invalid analysis category")
+        cleaned["category"] = category
+    for key in ("corrective_action", "preventive_action", "contributing_factors"):
+        text = value.get(key)
+        if text not in (None, ""):
+            cleaned[key] = str(text).strip()
+    return cleaned or None
+
+
+def _serialize_rca(analysis: "models.RootCauseAnalysis") -> dict:
+    """Rich serialization used by the list endpoints.
+
+    Includes assignee/discoverer display names and linked-entity titles so the UI
+    can render human-readable cards without N+1 follow-up requests.
+    """
+    defect = analysis.defect
+    requirement = analysis.requirement
+    test_case = analysis.test_case
+    return {
+        "id": analysis.id,
+        "project_id": analysis.project_id,
+        "analysis_title": analysis.analysis_title,
+        "root_cause": analysis.root_cause,
+        "impact_assessment": analysis.impact_assessment,
+        "resolution_time_hours": analysis.resolution_time_hours,
+        "fix_commit_hash": analysis.fix_commit_hash,
+        "status": analysis.status,
+        "severity": analysis.severity,
+        "analysis_data": analysis.analysis_data,
+        "defect_id": analysis.defect_id,
+        "requirement_id": analysis.requirement_id,
+        "test_case_id": analysis.test_case_id,
+        "assigned_to": analysis.assigned_to,
+        "discovered_by": analysis.discovered_by,
+        "assignee_name": _user_display_name(analysis.assignee),
+        "discoverer_name": _user_display_name(analysis.discoverer),
+        "defect_title": defect.title if defect else None,
+        "defect_key": defect.defect_id if defect else None,
+        "requirement_title": requirement.title if requirement else None,
+        "requirement_seq": requirement.project_seq if requirement else None,
+        "test_case_title": test_case.title if test_case else None,
+        "test_case_seq": test_case.project_seq if test_case else None,
+        "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+        "updated_at": analysis.updated_at.isoformat() if analysis.updated_at else None,
+    }
+
+
 REPORT_SECTIONS = {"kpis", "summary", "recent_activity", "trends", "team_performance", "upcoming"}
 REPORT_TYPE_SECTIONS = {
     "summary": {"kpis", "summary"},
@@ -885,31 +1004,32 @@ def register_analytics_dashboard_routes(app):
     @app.get("/analytics/root-cause-analyses")
     def get_root_cause_analyses_get(
         project_id: int,
+        defect_id: Optional[int] = Query(None, ge=1),
+        requirement_id: Optional[int] = Query(None, ge=1),
+        test_case_id: Optional[int] = Query(None, ge=1),
+        status: Optional[str] = Query(None),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        """Get root cause analyses for a project"""
+        """Get root cause analyses for a project, optionally scoped to a linked entity.
+
+        The optional filters let defect/requirement/test-case detail pages pull
+        only the analyses anchored to that record without over-fetching.
+        """
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if status is not None and status not in RCA_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
 
-        analyses = get_root_cause_analyses(db, project_id=project_id)
-        return [
-            {
-                "id": analysis.id,
-                "analysis_title": analysis.analysis_title,
-                "root_cause": analysis.root_cause,
-                "impact_assessment": analysis.impact_assessment,
-                "resolution_time_hours": analysis.resolution_time_hours,
-                "fix_commit_hash": analysis.fix_commit_hash,
-                "status": analysis.status,
-                "severity": analysis.severity,
-                "defect_id": analysis.defect_id,
-                "requirement_id": analysis.requirement_id,
-                "test_case_id": analysis.test_case_id,
-                "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
-            }
-            for analysis in analyses
-        ]
+        analyses = get_root_cause_analyses(
+            db,
+            project_id=project_id,
+            defect_id=defect_id,
+            requirement_id=requirement_id,
+            test_case_id=test_case_id,
+            status=status,
+        )
+        return [_serialize_rca(analysis) for analysis in analyses]
 
     # Dashboard Analytics
     @app.post("/analytics/dashboard")
@@ -1581,10 +1701,27 @@ def register_analytics_dashboard_routes(app):
 
         # The creator is recorded as the discoverer regardless of any client input.
         analysis.discovered_by = current_user.id
-        if not (analysis.analysis_title or "").strip():
+        analysis.analysis_title = (analysis.analysis_title or "").strip()
+        analysis.root_cause = (analysis.root_cause or "").strip()
+        if not analysis.analysis_title:
             raise HTTPException(status_code=400, detail="analysis_title is required")
-        if not (analysis.root_cause or "").strip():
+        if not analysis.root_cause:
             raise HTTPException(status_code=400, detail="root_cause is required")
+        if analysis.status not in RCA_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        if analysis.severity not in RCA_SEVERITIES:
+            raise HTTPException(status_code=400, detail="Invalid severity")
+        if analysis.resolution_time_hours is not None and analysis.resolution_time_hours < 0:
+            raise HTTPException(status_code=400, detail="resolution_time_hours cannot be negative")
+        analysis.analysis_data = _normalize_rca_analysis_data(analysis.analysis_data)
+        _validate_rca_links(
+            db,
+            analysis.project_id,
+            defect_id=analysis.defect_id,
+            requirement_id=analysis.requirement_id,
+            test_case_id=analysis.test_case_id,
+            assigned_to=analysis.assigned_to,
+        )
 
         db_analysis = create_root_cause_analysis(db=db, analysis=analysis)
 
@@ -1620,8 +1757,11 @@ def register_analytics_dashboard_routes(app):
     ):
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return get_root_cause_analyses(db, project_id, skip, limit)
+
+        # NOTE: pass skip/limit by keyword — get_root_cause_analyses takes
+        # (requirement_id, test_case_id, defect_id, status) positionally before
+        # them, so positional args here silently filtered by the wrong columns.
+        return get_root_cause_analyses(db, project_id=project_id, skip=skip, limit=limit)
 
     @app.put("/analytics/root-cause-analysis/{analysis_id}", response_model=schemas.RootCauseAnalysis)
     def update_root_cause_analysis_endpoint(
@@ -1638,8 +1778,37 @@ def register_analytics_dashboard_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         # Don't let clients overwrite identity fields.
-        for protected in ("id", "project_id", "discovered_by", "created_at"):
+        for protected in ("id", "project_id", "discovered_by", "created_at", "updated_at"):
             analysis.pop(protected, None)
+
+        if "analysis_title" in analysis:
+            analysis["analysis_title"] = (analysis["analysis_title"] or "").strip()
+            if not analysis["analysis_title"]:
+                raise HTTPException(status_code=400, detail="analysis_title cannot be empty")
+        if "root_cause" in analysis:
+            analysis["root_cause"] = (analysis["root_cause"] or "").strip()
+            if not analysis["root_cause"]:
+                raise HTTPException(status_code=400, detail="root_cause cannot be empty")
+        if "status" in analysis and analysis["status"] not in RCA_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid status")
+        if "severity" in analysis and analysis["severity"] not in RCA_SEVERITIES:
+            raise HTTPException(status_code=400, detail="Invalid severity")
+        if analysis.get("resolution_time_hours") is not None:
+            try:
+                if float(analysis["resolution_time_hours"]) < 0:
+                    raise HTTPException(status_code=400, detail="resolution_time_hours cannot be negative")
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="resolution_time_hours must be a number")
+        if "analysis_data" in analysis:
+            analysis["analysis_data"] = _normalize_rca_analysis_data(analysis["analysis_data"])
+        _validate_rca_links(
+            db,
+            db_analysis.project_id,
+            defect_id=analysis.get("defect_id"),
+            requirement_id=analysis.get("requirement_id"),
+            test_case_id=analysis.get("test_case_id"),
+            assigned_to=analysis.get("assigned_to"),
+        )
 
         prior_assigned_to = db_analysis.assigned_to
 
