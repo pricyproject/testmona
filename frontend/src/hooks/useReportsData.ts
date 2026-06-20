@@ -75,7 +75,6 @@ export function useReportsData(projectId: string | undefined) {
   const [analyticsTimeSeries, setAnalyticsTimeSeries] = useState<any>(null);
   const [granularInsights, setGranularInsights] = useState<any>(null);
   const [shareableReports, setShareableReports] = useState<any[]>([]);
-  const [rootCauseAnalyses, setRootCauseAnalyses] = useState<any[]>([]);
   const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidgetDef[]>(
     () => loadWidgetLayout(parseInt(projectId || '') || 1)
   );
@@ -201,26 +200,6 @@ export function useReportsData(projectId: string | undefined) {
     }
   };
 
-  const loadRootCauseAnalyses = async (): Promise<boolean> => {
-    if (!selectedProject) return false;
-    const seq = beginRequest('root-cause');
-    setError(null);
-    try {
-      const data = await analyticsAPI.getRootCauseAnalyses(selectedProject);
-      if (seq !== requestSeq.current) return true;
-      setRootCauseAnalyses(Array.isArray(data) ? data : []);
-      return true;
-    } catch (err) {
-      console.error('Failed to load root cause analyses:', err);
-      if (seq !== requestSeq.current) return false;
-      setRootCauseAnalyses([]);
-      setError('Failed to load root cause analyses.');
-      return false;
-    } finally {
-      endRequest('root-cause', seq);
-    }
-  };
-
   const loadTraceabilityData = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('traceability');
@@ -332,8 +311,7 @@ export function useReportsData(projectId: string | undefined) {
         const a = await loadTraceabilityData();
         const b = await loadCoverageData(generateCoverage);
         const c = await loadGranularInsights();
-        const d = await loadRootCauseAnalyses();
-        return a && b && c && d;
+        return a && b && c;
       }
       case 'activity': {
         const a = await loadActivityStatistics();
@@ -350,7 +328,7 @@ export function useReportsData(projectId: string | undefined) {
       case 'overview':
         return !!loadingByTab.dashboard;
       case 'coverage-risk':
-        return !!(loadingByTab.traceability || loadingByTab.coverage || loadingByTab.granular || loadingByTab['root-cause']);
+        return !!(loadingByTab.traceability || loadingByTab.coverage || loadingByTab.granular);
       case 'activity':
         return !!(loadingByTab.activity || loadingByTab['test-activity']);
       default:
@@ -429,7 +407,6 @@ export function useReportsData(projectId: string | undefined) {
           coverage: coverageReports,
           traceability: traceabilityData,
           granular_insights: granularInsights,
-          root_cause_analyses: rootCauseAnalyses,
         },
         filename: 'coverage-and-risk.json',
       };
@@ -501,7 +478,6 @@ export function useReportsData(projectId: string | undefined) {
     analyticsTimeSeries,
     granularInsights,
     shareableReports,
-    rootCauseAnalyses,
     dashboardWidgets,
     setDashboardWidgets,
     traceabilityData,
@@ -521,7 +497,6 @@ export function useReportsData(projectId: string | undefined) {
     loadDashboardAnalytics,
     loadGranularInsights,
     loadShareableReports,
-    loadRootCauseAnalyses,
     loadTraceabilityData,
     loadCoverageData,
     loadActivityStatistics,

@@ -48,6 +48,7 @@ const MatrixRuns = lazyPage(() => import('@/pages/MatrixRuns'), 'MatrixRuns');
 const MatrixRunDetail = lazyPage(() => import('@/pages/MatrixRunDetail'), 'MatrixRunDetail');
 const Defects = lazyPage(() => import('@/pages/Defects'), 'Defects');
 const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetail');
+const RootCauseAnalysisPage = lazyPage(() => import('@/pages/RootCauseAnalysisPage'), 'RootCauseAnalysisPage');
 const AdvancedSearch = lazyPage(() => import('@/pages/AdvancedSearch'), 'AdvancedSearch');
 const TestAssetHealth = lazyPage(() => import('@/pages/TestAssetHealth'), 'TestAssetHealth');
 const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
@@ -411,6 +412,13 @@ function AppWithRouter() {
           <ProjectGuard>
             <FeatureGuard feature="defects">
               <Defects />
+            </FeatureGuard>
+          </ProjectGuard>
+        } />
+        <Route path="/projects/:projectId/defects/root-cause-analysis" element={
+          <ProjectGuard>
+            <FeatureGuard feature="defects">
+              <RootCauseAnalysisPage />
             </FeatureGuard>
           </ProjectGuard>
         } />

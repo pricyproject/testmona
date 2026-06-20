@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, AlertCircle, BarChart3, Loader2, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react';
 import { ReportsData } from '@/hooks/useReportsData';
 import { TraceabilityMatrixPanel } from '@/components/reports/TraceabilityMatrixPanel';
-import { RootCauseAnalysisPanel } from '@/components/reports/RootCauseAnalysisPanel';
 
 export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
   const { t } = useTranslation();
@@ -330,9 +329,6 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
           </div>
         )}
       </div>
-
-      {/* Root cause analysis */}
-      <RootCauseAnalysisPanel ctx={ctx} />
     </div>
   );
 }

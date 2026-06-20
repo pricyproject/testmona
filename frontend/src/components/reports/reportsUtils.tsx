@@ -19,7 +19,6 @@ export type LoadKey =
   | 'dashboard'
   | 'granular'
   | 'shareable'
-  | 'root-cause'
   | 'traceability'
   | 'coverage'
   | 'activity'

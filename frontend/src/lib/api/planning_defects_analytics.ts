@@ -209,8 +209,16 @@ export const analyticsAPI = {
     const response = await api.put(`/analytics/dashboard-widgets/${widgetId}`, widget);
     return response.data;
   },
-  getRootCauseAnalyses: async (projectId: number) => {
-    const response = await api.get(`/analytics/root-cause-analyses?project_id=${projectId}`);
+  getRootCauseAnalyses: async (
+    projectId: number,
+    filters: { defectId?: number; requirementId?: number; testCaseId?: number; status?: string } = {},
+  ) => {
+    const params = new URLSearchParams({ project_id: String(projectId) });
+    if (filters.defectId) params.append('defect_id', String(filters.defectId));
+    if (filters.requirementId) params.append('requirement_id', String(filters.requirementId));
+    if (filters.testCaseId) params.append('test_case_id', String(filters.testCaseId));
+    if (filters.status) params.append('status', filters.status);
+    const response = await api.get(`/analytics/root-cause-analyses?${params}`);
     return response.data;
   },
   createRootCauseAnalysis: async (analysis: any) => {

@@ -25,7 +25,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
+import { DefectRootCauseCard } from '@/components/Defects/DefectRootCauseCard';
 import { WatchButton } from '@/components/WatchButton';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import {
   Select,
   SelectContent,
@@ -144,6 +146,7 @@ export function DefectDetail() {
   const updateSnapshotMutation = useUpdateDefectSnapshot(numericDefectId);
   const isSaving = updateDefect.isPending;
 
+  const { canWrite } = useProjectPermissions(projectIdValid ? numericProjectId : null);
   const requirementsQuery = useDefectEditRequirements(numericProjectId, projectIdValid);
   const membersQuery = useDefectProjectMembers(numericProjectId, projectIdValid);
   const requirements: any[] = requirementsQuery.data ?? [];
@@ -605,6 +608,12 @@ export function DefectDetail() {
               )}
             </CardContent>
           </Card>
+
+          <DefectRootCauseCard
+            projectId={numericProjectId}
+            defect={{ id: defect.id, defect_id: defect.defect_id, title: defect.title }}
+            canWrite={canWrite}
+          />
         </div>
 
         <aside className="space-y-6">

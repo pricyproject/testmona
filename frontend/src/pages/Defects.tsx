@@ -63,7 +63,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Bug, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal, MoreHorizontal, Filter, ArrowUpDown, X, Activity, ShieldAlert, Flag, Sparkles, Maximize2, Minimize2, List, Table2, Columns3 } from 'lucide-react';
+import { Plus, Bug, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Edit, Trash2, AlertTriangle, ExternalLink, Settings, RefreshCw, Loader2, CheckCircle2, AlertCircle, FileText, Link2, SlidersHorizontal, MoreHorizontal, Filter, ArrowUpDown, X, Activity, ShieldAlert, Flag, Sparkles, Maximize2, Minimize2, List, Table2, Columns3, GitBranch } from 'lucide-react';
 
 const SEVERITY_STRIPE: Record<string, string> = {
   critical: 'bg-red-500',
@@ -1647,6 +1647,10 @@ export function Defects() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => navigate(`/projects/${projectId}/defects/root-cause-analysis`)}>
+            <GitBranch className="h-4 w-4 mr-2" />
+            {t('reportsTabRootCause')}
+          </Button>
           <Dialog open={isIntegrationDialogOpen} onOpenChange={setIsIntegrationDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -3134,6 +3138,7 @@ export function Defects() {
                   <SelectItem value="open">{t('open')}</SelectItem>
                   <SelectItem value="in_progress">{t('inProgress')}</SelectItem>
                   <SelectItem value="fixed">{t('fixed')}</SelectItem>
+                  <SelectItem value="reopened">{t('reopened')}</SelectItem>
                   <SelectItem value="closed">{t('closed')}</SelectItem>
                   <SelectItem value="rejected">{t('rejected')}</SelectItem>
                 </SelectContent>
