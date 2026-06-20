@@ -8,6 +8,7 @@ legacy unscoped listing for backwards compatibility.
 """
 
 from fastapi import Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -18,6 +19,15 @@ from ..auth import get_current_active_user
 
 def register_definitions_routes(app):
     """Register definition routes with the FastAPI app."""
+
+    def _duplicate_name_error(kind: str) -> HTTPException:
+        # Definition names are unique per project (uq_*_project_name). Surface the
+        # collision as a clean 409 instead of letting the IntegrityError bubble up
+        # as an opaque 500.
+        return HTTPException(
+            status_code=409,
+            detail=f"A {kind} with this name already exists in this project",
+        )
 
     def _require_project_write(current_user, project_id, db):
         if project_id is not None and not rbac.has_permission(current_user, "write", project_id, db):
@@ -41,7 +51,10 @@ def register_definitions_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         _require_project_write(current_user, test_type.project_id, db)
-        return crud.create_test_type_definition(db=db, test_type=test_type)
+        try:
+            return crud.create_test_type_definition(db=db, test_type=test_type)
+        except IntegrityError:
+            raise _duplicate_name_error("test type")
 
     @app.get("/test-type-definitions/", response_model=List[schemas.TestTypeDefinition])
     def read_test_type_definitions(
@@ -82,7 +95,10 @@ def register_definitions_routes(app):
         if existing is None:
             raise HTTPException(status_code=404, detail="Test type definition not found")
         _require_project_write(current_user, existing.project_id, db)
-        return crud.update_test_type_definition(db, test_type_id=test_type_id, test_type=test_type)
+        try:
+            return crud.update_test_type_definition(db, test_type_id=test_type_id, test_type=test_type)
+        except IntegrityError:
+            raise _duplicate_name_error("test type")
 
     @app.delete("/test-type-definitions/{test_type_id}", response_model=schemas.MessageResponse)
     def delete_test_type_definition(
@@ -105,7 +121,10 @@ def register_definitions_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         _require_project_write(current_user, priority.project_id, db)
-        return crud.create_priority_definition(db=db, priority=priority)
+        try:
+            return crud.create_priority_definition(db=db, priority=priority)
+        except IntegrityError:
+            raise _duplicate_name_error("priority")
 
     @app.get("/priority-definitions/", response_model=List[schemas.PriorityDefinition])
     def read_priority_definitions(
@@ -145,7 +164,10 @@ def register_definitions_routes(app):
         if existing is None:
             raise HTTPException(status_code=404, detail="Priority definition not found")
         _require_project_write(current_user, existing.project_id, db)
-        return crud.update_priority_definition(db, priority_id=priority_id, priority=priority)
+        try:
+            return crud.update_priority_definition(db, priority_id=priority_id, priority=priority)
+        except IntegrityError:
+            raise _duplicate_name_error("priority")
 
     @app.delete("/priority-definitions/{priority_id}", response_model=schemas.MessageResponse)
     def delete_priority_definition(

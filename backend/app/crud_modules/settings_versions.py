@@ -351,9 +351,16 @@ def update_priority_definition(db: Session, priority_id: int, priority: Priority
     if db_priority:
         update_data = priority.model_dump(exclude_unset=True)
         
-        # If this is set as default, remove default from others
+        # If this is set as default, remove default from others *in the same
+        # project*. Scoping to project_id is essential: priority catalogs are
+        # per-project, so clearing the flag globally would wipe every other
+        # project's default (matching create_priority_definition's behavior).
         if update_data.get("is_default", False):
-            db.query(PriorityDefinition).filter(PriorityDefinition.is_default == True).filter(PriorityDefinition.id != priority_id).update({"is_default": False})
+            db.query(PriorityDefinition).filter(
+                PriorityDefinition.project_id == db_priority.project_id,
+                PriorityDefinition.is_default == True,  # noqa: E712
+                PriorityDefinition.id != priority_id,
+            ).update({"is_default": False})
         
         for field, value in update_data.items():
             setattr(db_priority, field, value)
