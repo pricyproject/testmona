@@ -394,7 +394,9 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="document"><FileText className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />{t('docTabDocument')}</TabsTrigger>
-          <TabsTrigger value="revisions"><History className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />{t('versionHistory')}</TabsTrigger>
+          {doc.revisions_enabled !== false && (
+            <TabsTrigger value="revisions"><History className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />{t('versionHistory')}</TabsTrigger>
+          )}
           <TabsTrigger value="links"><Link2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />{t('docLinkedRequirements')} {links.length > 0 && `(${links.length})`}</TabsTrigger>
           {doc.can_view_stats && <TabsTrigger value="stats"><BarChart3 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />{t('statistics')}</TabsTrigger>}
         </TabsList>
@@ -418,9 +420,11 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           {hasDocContent && <DocReaderFeedback docId={doc.id} canEdit={doc.can_edit} />}
         </TabsContent>
 
-        <TabsContent value="revisions" className="mt-4">
-          <DocVersionHistory docId={doc.id} canEdit={doc.can_edit} canClear={doc.can_delete} onRestored={reloadDoc} defaultCompare={searchParams.get('compare') === '1'} />
-        </TabsContent>
+        {doc.revisions_enabled !== false && (
+          <TabsContent value="revisions" className="mt-4">
+            <DocVersionHistory docId={doc.id} canEdit={doc.can_edit} canClear={doc.can_delete} onRestored={reloadDoc} defaultCompare={searchParams.get('compare') === '1'} />
+          </TabsContent>
+        )}
 
         <TabsContent value="links" className="mt-4">
           <DocRequirementLinksSection

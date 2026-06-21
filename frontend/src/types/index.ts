@@ -1013,6 +1013,8 @@ export interface Doc {
   can_delete: boolean;
   can_share: boolean;
   can_view_stats: boolean;
+  /** Whether revision history is enabled for this doc's project (always true for global docs). */
+  revisions_enabled?: boolean;
 }
 
 export type DocShareScope = 'private' | 'restricted' | 'public';
@@ -1235,7 +1237,9 @@ export interface DocVersion {
   id: number;
   doc_id: number;
   version_number: number;
-  action: 'created' | 'updated' | 'restored' | 'published' | string;
+  action: 'created' | 'updated' | 'restored' | 'published' | 'snapshot' | string;
+  /** Optional human label for a manually-pinned milestone revision. */
+  name?: string | null;
   title: string;
   content_markdown?: string | null;
   status?: string | null;

@@ -403,6 +403,13 @@ export const docsAPI = {
     const response = await api.get(`/docs/${id}/versions`);
     return response.data;
   },
+  createVersion: async (id: number, payload: { name?: string | null; change_note?: string | null }): Promise<DocVersion> => {
+    const response = await api.post(`/docs/${id}/versions`, {
+      name: payload.name ?? null,
+      change_note: payload.change_note ?? null,
+    });
+    return response.data;
+  },
   restoreVersion: async (id: number, versionId: number, changeNote?: string): Promise<Doc> => {
     const response = await api.post(`/docs/${id}/versions/${versionId}/restore`, { change_note: changeNote ?? null });
     return response.data;

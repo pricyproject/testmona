@@ -1,6 +1,7 @@
 import {
   FileCheck,
   BookOpen,
+  History,
   FileText,
   TestTube,
   PlayCircle,
@@ -31,6 +32,7 @@ import {
 export type ProjectFeatureKey =
   | 'requirements'
   | 'doc_hub'
+  | 'doc_revisions'
   | 'test_cases'
   | 'test_suites'
   | 'test_runs'
@@ -63,6 +65,7 @@ export const PROJECT_FEATURES: ProjectFeatureMeta[] = [
   { key: 'ask_ai', labelKey: 'navAskAi', descriptionKey: 'featureDescAskAi', icon: Sparkles, groupKey: 'main' },
   { key: 'requirements', labelKey: 'requirements', descriptionKey: 'featureDescRequirements', icon: FileCheck, groupKey: 'testing' },
   { key: 'doc_hub', labelKey: 'docHub', descriptionKey: 'featureDescDocHub', icon: BookOpen, groupKey: 'testing' },
+  { key: 'doc_revisions', labelKey: 'featureDocRevisions', descriptionKey: 'featureDescDocRevisions', icon: History, groupKey: 'testing' },
   { key: 'test_cases', labelKey: 'testCases', descriptionKey: 'featureDescTestCases', icon: FileText, groupKey: 'testing' },
   { key: 'test_suites', labelKey: 'testSuites', descriptionKey: 'featureDescTestSuites', icon: TestTube, groupKey: 'testing' },
   { key: 'test_runs', labelKey: 'testRuns', descriptionKey: 'featureDescTestRuns', icon: PlayCircle, groupKey: 'testing' },

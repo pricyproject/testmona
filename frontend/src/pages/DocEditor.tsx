@@ -17,6 +17,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  StickyNote,
   Tag,
   X,
 } from 'lucide-react';
@@ -32,6 +33,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
@@ -94,6 +103,10 @@ export function DocEditor() {
   // drives the "Saved <time> ago" hint.
   const [lastSavedAt, setLastSavedAt] = useState<string | number | null>(null);
   const [impactOpen, setImpactOpen] = useState(false);
+  // "Save with note" dialog: lets the author attach a change summary to the
+  // version snapshot this save records.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState('');
   // Impact analysis is only meaningful once the doc has linked requirements to
   // trace through; hide the entry point otherwise.
   const [hasLinkedRequirements, setHasLinkedRequirements] = useState(false);
@@ -210,7 +223,7 @@ export function DocEditor() {
     return () => { active = false; };
   }, [docProjectId]);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (changeNote?: string) => {
     if (!doc) return;
     const snapshot = currentSnapshot;
     if (snapshot === savedRef.current) return;
@@ -220,6 +233,7 @@ export function DocEditor() {
     if (!title.trim()) return;
     try {
       setSaveState('saving');
+      const note = changeNote?.trim();
       const updated = await docsAPI.update(doc.id, {
         title: title.trim(),
         content_markdown: content,
@@ -228,6 +242,9 @@ export function DocEditor() {
         tags: tags.trim() || null,
         dir,
         folder_id: folderId,
+        // A note is attached only when the author explicitly saves with one; the
+        // periodic/unmount autosaves pass nothing and snapshot silently.
+        ...(note ? { change_note: note } : {}),
       });
       setDoc(updated);
       savedRef.current = snapshot;
@@ -329,6 +346,16 @@ export function DocEditor() {
             {t('docImpactAnalyze')}
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => { setNoteText(''); setNoteOpen(true); }}
+          disabled={saveState === 'saving' || currentSnapshot === savedRef.current || !title.trim()}
+          title={t('docSaveWithNote')}
+        >
+          <StickyNote className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+          {t('docSaveWithNote')}
+        </Button>
         <Button variant="outline" size="sm" onClick={() => void save()} disabled={saveState === 'saving' || currentSnapshot === savedRef.current || !title.trim()}>
           <Save className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('save')}
@@ -547,6 +574,38 @@ export function DocEditor() {
       {impactOpen && (
         <DocImpactDialog doc={doc} open={impactOpen} onOpenChange={setImpactOpen} candidateMarkdown={content} />
       )}
+
+      <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('docSaveWithNote')}</DialogTitle>
+            <DialogDescription>{t('docSaveWithNoteDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="doc-change-note">{t('docChangeNote')}</Label>
+            <Textarea
+              id="doc-change-note"
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder={t('docChangeNotePlaceholder')}
+              maxLength={500}
+              rows={3}
+              dir="auto"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNoteOpen(false)} disabled={saveState === 'saving'}>{t('cancel')}</Button>
+            <Button
+              onClick={() => { setNoteOpen(false); void save(noteText); }}
+              disabled={saveState === 'saving' || !noteText.trim()}
+            >
+              <Save className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
