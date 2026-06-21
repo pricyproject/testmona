@@ -82,6 +82,13 @@ import {
   AlertTriangle,
   Wand2,
   Loader2,
+  Tag,
+  Link2,
+  Server,
+  SlidersHorizontal,
+  Sparkles,
+  ListChecks,
+  Info,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
@@ -159,7 +166,6 @@ export function TestCases() {
     reference: string;
     tags: string;
     test_type: string;
-    execution_type: string;
     priority: string; // Will be constrained by API options
     preconditions: string;
     steps: string;
@@ -172,7 +178,6 @@ export function TestCases() {
     reference: '',
     tags: '',
     test_type: '',
-    execution_type: '',
     priority: '', // Will be set from database default
     preconditions: '',
     steps: '',
@@ -1780,7 +1785,6 @@ export function TestCases() {
       testCaseForm.reference.trim() !== '' ||
       testCaseForm.tags.trim() !== '' ||
       testCaseForm.test_type !== '' ||
-      testCaseForm.execution_type !== '' ||
       testCaseForm.preconditions.trim() !== '' ||
       testCaseForm.steps.trim() !== '' ||
       testCaseForm.expected_result.trim() !== '' ||
@@ -1806,7 +1810,6 @@ export function TestCases() {
       reference: '',
       tags: '',
       test_type: '',
-      execution_type: '',
       priority: defaultPriorityValue,
       preconditions: '',
       steps: '',
@@ -1839,7 +1842,6 @@ export function TestCases() {
         reference: '',
         tags: '',
         test_type: '',
-        execution_type: '',
         priority: defaultPriorityValue,
         preconditions: '',
         steps: '',
@@ -1941,7 +1943,6 @@ export function TestCases() {
         reference: '',
         tags: '',
         test_type: '',
-        execution_type: '',
         priority: 'medium',
         preconditions: '',
         steps: '',
@@ -2333,7 +2334,6 @@ export function TestCases() {
       reference: testCase.reference || '',
       tags: testCase.tags || '',
       test_type: testCase.test_type,
-      execution_type: '', // execution_type not available in TestCase type yet
       priority: testCase.priority,
       preconditions: testCase.preconditions || '',
       steps: testCase.steps || '',
@@ -2580,7 +2580,6 @@ export function TestCases() {
         reference: '',
         tags: '',
         test_type: '',
-        execution_type: '',
         priority: 'medium',
         preconditions: '',
         steps: '',
@@ -2957,7 +2956,6 @@ export function TestCases() {
                 testCaseForm.reference.trim() !== '' ||
                 testCaseForm.tags.trim() !== '' ||
                 testCaseForm.test_type !== '' ||
-                testCaseForm.execution_type !== '' ||
                 testCaseForm.preconditions.trim() !== '' ||
                 testCaseForm.steps.trim() !== '' ||
                 testCaseForm.expected_result.trim() !== '' ||
@@ -2978,63 +2976,79 @@ export function TestCases() {
           }}>
             {canWrite && (
               <DialogTrigger asChild>
-                <Button>
-                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
                   {t('addNewTestCase')}
                 </Button>
               </DialogTrigger>
             )}
-            <DialogContent isRTL={isRTL} className={`sm:max-w-[900px] max-h-[80vh] overflow-y-auto ${isRTL ? 'font-vazir' : ''}`} onKeyDown={handleKeyDown}>
-              <DialogHeader>
-                <DialogTitle>{t('createNewTestCase')}</DialogTitle>
-                <DialogDescription>
-                  {t('createTestCaseDescription')}
-                </DialogDescription>
+            <DialogContent isRTL={isRTL} className={`flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[860px] ${isRTL ? 'font-vazir' : ''}`} onKeyDown={handleKeyDown}>
+              {/* Sticky gradient header */}
+              <DialogHeader className="shrink-0 space-y-0 border-b bg-gradient-to-br from-indigo-50 via-white to-white px-6 py-5 text-start dark:from-indigo-950/40 dark:via-slate-900 dark:to-slate-900">
+                <div className="flex items-start gap-3 pe-8">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/30">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <DialogTitle className="text-xl font-semibold tracking-tight">{t('createNewTestCase')}</DialogTitle>
+                    <DialogDescription className="mt-1 text-sm">
+                      {t('createTestCaseDescription')}
+                    </DialogDescription>
+                  </div>
+                </div>
                 {selectedTestSuite !== 'all' && (
-                  <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-700">
-                    <span className="text-sm text-blue-700 dark:text-blue-300">
-                      📁 {t('testCaseWillBeAddedTo')} <strong>{getSelectedScopeName()}</strong>
-                    </span>
+                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300">
+                    <Folder className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{t('testCaseWillBeAddedTo')} <strong className="font-semibold">{getSelectedScopeName()}</strong></span>
                   </div>
                 )}
               </DialogHeader>
-              <div className="grid gap-6 py-4">
+
+              {/* Scrollable body */}
+              <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
                 {/* Basic Information */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">{t('basicInformation')}</h3>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="title" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('testCaseTitle')}</Label>
-                    <div className="col-span-3 space-y-1">
+                <section className="overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md">
+                  <header className="flex items-center gap-2.5 border-b bg-muted/40 px-4 py-3">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+                      <Info className="h-4 w-4" />
+                    </span>
+                    <h3 className="text-sm font-semibold">{t('basicInformation')}</h3>
+                  </header>
+                  <div className="space-y-4 p-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="title" className="text-xs font-medium text-muted-foreground">
+                        {t('testCaseTitle')} <span className="text-red-500">*</span>
+                      </Label>
                       <Input
                         id="title"
                         ref={titleInputRef}
                         value={testCaseForm.title}
                         onChange={(e) => handleTitleChange(e.target.value)}
+                        placeholder={t('testCaseTitle')}
                         className={validationErrors.title ? 'border-red-500 focus:border-red-500' : ''}
                         maxLength={200}
                       />
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>{t('testCaseTitle')}</span>
-                        <span>{testCaseForm.title.length}/200</span>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        {validationErrors.title
+                          ? <span className="text-red-500">{validationErrors.title}</span>
+                          : <span />}
+                        <span className="ms-auto tabular-nums">{testCaseForm.title.length}/200</span>
                       </div>
-                      {validationErrors.title && (
-                        <p className="text-red-500 text-sm mt-1">{validationErrors.title}</p>
-                      )}
                     </div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="reference" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('reference')}</Label>
-                    <div className="col-span-3">
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="reference" className="text-xs font-medium text-muted-foreground">{t('reference')}</Label>
                       <ReferenceField
                         value={testCaseForm.reference}
                         onChange={(value) => handleFieldChange('reference', value)}
                         projectId={currentProjectId ?? undefined}
                       />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="tags" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('tags')}</Label>
-                    <div className="col-span-3 space-y-1">
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="tags" className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                        <Tag className="h-3.5 w-3.5" /> {t('tags')}
+                      </Label>
                       <Input
                         id="tags"
                         value={testCaseForm.tags}
@@ -3043,228 +3057,211 @@ export function TestCases() {
                         maxLength={500}
                         className={validationErrors.tags ? 'border-red-500 focus:border-red-500' : ''}
                       />
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>{t('tagsHelper')}</span>
-                        <span>{testCaseForm.tags.length}/500</span>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        {validationErrors.tags
+                          ? <span className="text-red-500">{validationErrors.tags}</span>
+                          : <span>{t('tagsHelper')}</span>}
+                        <span className="ms-auto tabular-nums">{testCaseForm.tags.length}/500</span>
                       </div>
-                      {validationErrors.tags && (
-                        <p className="text-red-500 text-sm mt-1">{validationErrors.tags}</p>
-                      )}
                     </div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="type" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('fieldTestType')} <span className="text-red-500">*</span></Label>
-                    <div className="col-span-3">
-                      <Select value={testCaseForm.test_type} onValueChange={handleTestTypeChange} disabled={isEnumsLoading}>
-                        <SelectTrigger ref={testTypeRef} className={validationErrors.test_type ? 'border-red-500 focus:border-red-500' : ''}>
-                          <SelectValue placeholder={isEnumsLoading ? t('loading') : t('selectTestType')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {testTypeOptions.length === 0 && !isEnumsLoading ? (
-                            <div className="p-2">
-                              <div className="text-sm text-gray-500 mb-2">{t('noTestTypesAvailable')}</div>
-                              {!isCreatingTestType ? (
-                                <div>
-                                  <Input
-                                    placeholder={t('enterNewTestTypeName')}
-                                    value={newTestTypeName}
-                                    onChange={(e) => setNewTestTypeName(e.target.value)}
-                                    className="mb-2"
-                                  />
-                                  <Button
-                                    onClick={handleCreateTestType}
-                                    disabled={!newTestTypeName.trim()}
-                                    size="sm"
-                                    className="w-full"
-                                  >
-                                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                    {t('createNewTestType')}
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-center py-2">
-                                  <div className={`animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 ${isRTL ? 'ml-2' : 'mr-2'}`}></div>
-                                  {t('creating')}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            testTypeOptions.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {validationErrors.test_type && (
-                        <p className="text-red-500 text-sm mt-1">{validationErrors.test_type}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="execution-type" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('fieldExecutionType')}</Label>
-                    <Select value={testCaseForm.execution_type} onValueChange={(value) => handleFieldChange('execution_type', value)}>
-                      <SelectTrigger className="col-span-3">
-                        <SelectValue placeholder={t('selectExecutionType')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="functional">{t('functionalTesting')}</SelectItem>
-                        <SelectItem value="ui">{t('uiTesting')}</SelectItem>
-                        <SelectItem value="api">{t('apiTesting')}</SelectItem>
-                        <SelectItem value="database">{t('databaseTesting')}</SelectItem>
-                        <SelectItem value="security">{t('securityTesting')}</SelectItem>
-                        <SelectItem value="performance">{t('performanceTesting')}</SelectItem>
-                        <SelectItem value="compatibility">{t('compatibilityTesting')}</SelectItem>
-                        <SelectItem value="accessibility">{t('accessibilityTesting')}</SelectItem>
-                        <SelectItem value="localization">{t('localizationTesting')}</SelectItem>
-                        <SelectItem value="user-acceptance">{t('userAcceptanceTesting')}</SelectItem>
-                        <SelectItem value="custom">{t('customMethod')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="priority" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('fieldPriority')} <span className="text-red-500">*</span></Label>
-                    <div className="col-span-3">
-                      <Select value={testCaseForm.priority} onValueChange={handlePriorityChange} disabled={isEnumsLoading}>
-                        <SelectTrigger ref={priorityRef} className={validationErrors.priority ? 'border-red-500 focus:border-red-500' : ''}>
-                          <SelectValue placeholder={isEnumsLoading ? t('loading') : t('selectPriority')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {priorityOptions.length === 0 && !isEnumsLoading ? (
-                            <div className="p-2">
-                              <div className="text-sm text-gray-500 mb-2">{t('noPrioritiesAvailable')}</div>
-                              {!isCreatingPriority ? (
-                                <div>
-                                  <Input
-                                    placeholder={t('enterNewPriorityName')}
-                                    value={newPriorityName}
-                                    onChange={(e) => setNewPriorityName(e.target.value)}
-                                    className="mb-2"
-                                  />
-                                  <div className="flex gap-2 mb-2">
-                                    <Label htmlFor="priority-value" className="text-xs">{t('value')} (1-4):</Label>
-                                    <Input
-                                      id="priority-value"
-                                      type="number"
-                                      min="1"
-                                      max="4"
-                                      value={newPriorityValue}
-                                      onChange={(e) => setNewPriorityValue(parseInt(e.target.value) || 2)}
-                                      className="w-20"
-                                    />
-                                  </div>
-                                  <Button
-                                    onClick={handleCreatePriority}
-                                    disabled={!newPriorityName.trim()}
-                                    size="sm"
-                                    className="w-full"
-                                  >
-                                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                    {t('createNewPriority')}
-                                  </Button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-center py-2">
-                                  <div className={`animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 ${isRTL ? 'ml-2' : 'mr-2'}`}></div>
-                                  {t('creating')}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            priorityOptions.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {validationErrors.priority && (
-                        <p className="text-red-500 text-sm mt-1">{validationErrors.priority}</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
 
-                {/* Environment Selection */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">{t('testEnvironment')}</h3>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="environment" className={`text-right ${isRTL ? 'text-left' : ''}`}>{t('environmentLabel')}</Label>
-                    <div className="col-span-3">
-                      {isEnvironmentsLoading ? (
-                        <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
-                      ) : (
-                        <Select value={testCaseForm.environment} onValueChange={(value) => handleFieldChange('environment', value)}>
-                          <SelectTrigger>
-                            <SelectValue placeholder={t('selectTestEnvironment')} />
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="type" className="text-xs font-medium text-muted-foreground">{t('fieldTestType')} <span className="text-red-500">*</span></Label>
+                        <Select value={testCaseForm.test_type} onValueChange={handleTestTypeChange} disabled={isEnumsLoading}>
+                          <SelectTrigger ref={testTypeRef} className={validationErrors.test_type ? 'border-red-500 focus:border-red-500' : ''}>
+                            <SelectValue placeholder={isEnumsLoading ? t('loading') : t('selectTestType')} />
                           </SelectTrigger>
                           <SelectContent>
-                            {environments.length === 0 && !isEnvironmentsLoading ? (
+                            {testTypeOptions.length === 0 && !isEnumsLoading ? (
                               <div className="p-2">
-                                <div className="text-sm text-gray-500 mb-2">{t('noEnvironmentsAvailable')}</div>
-                                {!isCreatingEnvironment ? (
+                                <div className="text-sm text-gray-500 mb-2">{t('noTestTypesAvailable')}</div>
+                                {!isCreatingTestType ? (
                                   <div>
                                     <Input
-                                      placeholder={t('enterNewEnvironmentName')}
-                                      value={newEnvironmentName}
-                                      onChange={(e) => setNewEnvironmentName(e.target.value)}
-                                      className="mb-2"
-                                    />
-                                    <Input
-                                      placeholder={t('enterDescriptionOptional')}
-                                      value={newEnvironmentDescription}
-                                      onChange={(e) => setNewEnvironmentDescription(e.target.value)}
+                                      placeholder={t('enterNewTestTypeName')}
+                                      value={newTestTypeName}
+                                      onChange={(e) => setNewTestTypeName(e.target.value)}
                                       className="mb-2"
                                     />
                                     <Button
-                                      onClick={handleCreateEnvironment}
-                                      disabled={!newEnvironmentName.trim()}
+                                      onClick={handleCreateTestType}
+                                      disabled={!newTestTypeName.trim()}
                                       size="sm"
                                       className="w-full"
                                     >
-                                      <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                      {t('createNewEnvironment')}
+                                      <Plus className="h-4 w-4 me-2" />
+                                      {t('createNewTestType')}
                                     </Button>
                                   </div>
                                 ) : (
                                   <div className="flex items-center justify-center py-2">
-                                    <div className={`animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 ${isRTL ? 'ml-2' : 'mr-2'}`}></div>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 me-2"></div>
                                     {t('creating')}
                                   </div>
                                 )}
                               </div>
                             ) : (
-                              environments.map((env) => (
-                                <SelectItem key={env.id} value={env.id}>
-                                  <div className="flex items-center gap-2">
-                                    <div className={`w-2 h-2 rounded-full ${
-                                      env.name.toLowerCase() === 'production' ? 'bg-red-500' :
-                                      env.name.toLowerCase() === 'staging' ? 'bg-yellow-500' :
-                                      env.name.toLowerCase() === 'qa' ? 'bg-purple-500' :
-                                      env.name.toLowerCase() === 'development' ? 'bg-blue-500' :
-                                      'bg-gray-500'
-                                    }`} />
-                                    <div>
-                                      <div className="font-medium">{env.name}</div>
-                                      <div className="text-xs text-gray-500">{env.description}</div>
-                                    </div>
-                                  </div>
+                              testTypeOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
                                 </SelectItem>
                               ))
                             )}
                           </SelectContent>
                         </Select>
-                      )}
+                        {validationErrors.test_type && (
+                          <p className="text-red-500 text-xs">{validationErrors.test_type}</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="priority" className="text-xs font-medium text-muted-foreground">{t('fieldPriority')} <span className="text-red-500">*</span></Label>
+                        <Select value={testCaseForm.priority} onValueChange={handlePriorityChange} disabled={isEnumsLoading}>
+                          <SelectTrigger ref={priorityRef} className={validationErrors.priority ? 'border-red-500 focus:border-red-500' : ''}>
+                            <SelectValue placeholder={isEnumsLoading ? t('loading') : t('selectPriority')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {priorityOptions.length === 0 && !isEnumsLoading ? (
+                              <div className="p-2">
+                                <div className="text-sm text-gray-500 mb-2">{t('noPrioritiesAvailable')}</div>
+                                {!isCreatingPriority ? (
+                                  <div>
+                                    <Input
+                                      placeholder={t('enterNewPriorityName')}
+                                      value={newPriorityName}
+                                      onChange={(e) => setNewPriorityName(e.target.value)}
+                                      className="mb-2"
+                                    />
+                                    <div className="flex gap-2 mb-2">
+                                      <Label htmlFor="priority-value" className="text-xs">{t('value')} (1-4):</Label>
+                                      <Input
+                                        id="priority-value"
+                                        type="number"
+                                        min="1"
+                                        max="4"
+                                        value={newPriorityValue}
+                                        onChange={(e) => setNewPriorityValue(parseInt(e.target.value) || 2)}
+                                        className="w-20"
+                                      />
+                                    </div>
+                                    <Button
+                                      onClick={handleCreatePriority}
+                                      disabled={!newPriorityName.trim()}
+                                      size="sm"
+                                      className="w-full"
+                                    >
+                                      <Plus className="h-4 w-4 me-2" />
+                                      {t('createNewPriority')}
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-center py-2">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 me-2"></div>
+                                    {t('creating')}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              priorityOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                        {validationErrors.priority && (
+                          <p className="text-red-500 text-xs">{validationErrors.priority}</p>
+                        )}
+                      </div>
+
+                      {/* Environment lives alongside the compact selects */}
+                      <div className="space-y-1.5">
+                        <Label htmlFor="environment" className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          <Server className="h-3.5 w-3.5" /> {t('environmentLabel')}
+                        </Label>
+                        {isEnvironmentsLoading ? (
+                          <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded-md animate-pulse"></div>
+                        ) : (
+                          <Select value={testCaseForm.environment} onValueChange={(value) => handleFieldChange('environment', value)}>
+                            <SelectTrigger>
+                              <SelectValue placeholder={t('selectTestEnvironment')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {environments.length === 0 && !isEnvironmentsLoading ? (
+                                <div className="p-2">
+                                  <div className="text-sm text-gray-500 mb-2">{t('noEnvironmentsAvailable')}</div>
+                                  {!isCreatingEnvironment ? (
+                                    <div>
+                                      <Input
+                                        placeholder={t('enterNewEnvironmentName')}
+                                        value={newEnvironmentName}
+                                        onChange={(e) => setNewEnvironmentName(e.target.value)}
+                                        className="mb-2"
+                                      />
+                                      <Input
+                                        placeholder={t('enterDescriptionOptional')}
+                                        value={newEnvironmentDescription}
+                                        onChange={(e) => setNewEnvironmentDescription(e.target.value)}
+                                        className="mb-2"
+                                      />
+                                      <Button
+                                        onClick={handleCreateEnvironment}
+                                        disabled={!newEnvironmentName.trim()}
+                                        size="sm"
+                                        className="w-full"
+                                      >
+                                        <Plus className="h-4 w-4 me-2" />
+                                        {t('createNewEnvironment')}
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center justify-center py-2">
+                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 me-2"></div>
+                                      {t('creating')}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                environments.map((env) => (
+                                  <SelectItem key={env.id} value={env.id}>
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-2 h-2 rounded-full ${
+                                        env.name.toLowerCase() === 'production' ? 'bg-red-500' :
+                                        env.name.toLowerCase() === 'staging' ? 'bg-yellow-500' :
+                                        env.name.toLowerCase() === 'qa' ? 'bg-purple-500' :
+                                        env.name.toLowerCase() === 'development' ? 'bg-blue-500' :
+                                        'bg-gray-500'
+                                      }`} />
+                                      <div>
+                                        <div className="font-medium">{env.name}</div>
+                                        <div className="text-xs text-gray-500">{env.description}</div>
+                                      </div>
+                                    </div>
+                                  </SelectItem>
+                                ))
+                              )}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                </section>
 
                 {/* Requirements Linking */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold">{t('requirements')}</h3>
+                <section className="overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md">
+                  <header className="flex items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-600 dark:bg-sky-950/60 dark:text-sky-400">
+                        <Link2 className="h-4 w-4" />
+                      </span>
+                      <h3 className="text-sm font-semibold">{t('requirements')}</h3>
+                      {linkedRequirements.length > 0 && (
+                        <Badge variant="secondary" className="h-5 px-1.5 text-xs">{linkedRequirements.length}</Badge>
+                      )}
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
@@ -3274,59 +3271,66 @@ export function TestCases() {
                         setIsRequirementDialogOpen(true);
                       }}
                     >
-                      <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                      <Plus className="h-4 w-4 me-2" />
                       {t('linkRequirements')}
                     </Button>
-                  </div>
-
-                  {linkedRequirements.length > 0 ? (
-                    <div className="space-y-2">
-                      {linkedRequirements.map((requirement) => (
-                        <div key={requirement.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border">
-                          <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                            <div>
-                              <p className="font-medium text-sm">{requirement.title}</p>
-                              <p className="text-xs text-gray-500">{requirement.reference}</p>
+                  </header>
+                  <div className="p-4">
+                    {linkedRequirements.length > 0 ? (
+                      <div className="space-y-2">
+                        {linkedRequirements.map((requirement) => (
+                          <div key={requirement.id} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3 transition-colors hover:bg-muted/60">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{requirement.title}</p>
+                                <p className="truncate text-xs text-muted-foreground">{requirement.reference}</p>
+                              </div>
                             </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleUnlinkRequirement(requirement.id)}
+                              className="shrink-0 text-red-500 hover:text-red-700"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleUnlinkRequirement(requirement.id)}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 text-gray-500 dark:text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-                      <FileText className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                      <p className="text-sm">{t('noRequirementsLinked')}</p>
-                      <p className="text-xs mt-1">{t('clickLinkRequirements')}</p>
-                    </div>
-                  )}
-                </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border-2 border-dashed border-muted-foreground/20 py-6 text-center text-muted-foreground">
+                        <FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
+                        <p className="text-sm">{t('noRequirementsLinked')}</p>
+                        <p className="mt-1 text-xs">{t('clickLinkRequirements')}</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
 
                 {/* Test Details */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">{t('testDetails')}</h3>
-                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 p-3 dark:border-indigo-900 dark:bg-indigo-950/30">
+                <section className="overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md">
+                  <header className="flex items-center gap-2.5 border-b bg-muted/40 px-4 py-3">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
+                      <ListChecks className="h-4 w-4" />
+                    </span>
+                    <h3 className="text-sm font-semibold">{t('testDetails')}</h3>
+                  </header>
+                  <div className="space-y-4 p-4">
+                  <div className="rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50/50 p-3 dark:border-indigo-900 dark:from-indigo-950/40 dark:to-purple-950/20">
                     <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-                      <Wand2 className="h-4 w-4 text-indigo-600" />
+                      <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
                       {t('aiTestCaseAssistant')}
                     </div>
                     {loadingAIStatus ? (
                       <div className="mb-2 rounded-md border border-slate-200 bg-white/70 p-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-300">
-                        <Loader2 className={`inline h-3.5 w-3.5 animate-spin ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                        <Loader2 className="inline h-3.5 w-3.5 animate-spin me-1" />
                         {t('loading')}
                       </div>
                     ) : aiStatus && !aiStatus.available ? (
                       <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                        <AlertTriangle className={`inline h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                        <AlertTriangle className="inline h-3.5 w-3.5 me-1" />
                         {t('aiEnabledTokenMissing')}
                       </div>
                     ) : (
@@ -3341,7 +3345,7 @@ export function TestCases() {
                         ['split_broad_case', t('splitBroadCase')],
                       ] as [AIAssistantAction, string][]).map(([action, label]) => (
                         <Button key={action} type="button" variant="outline" size="sm" onClick={() => runAIDraftAssistant(action)} disabled={aiAssistantLoading || !currentProjectId || loadingAIStatus || aiStatus?.available === false}>
-                          {aiAssistantLoading && aiAssistantAction === action ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Wand2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                          {aiAssistantLoading && aiAssistantAction === action ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : <Wand2 className="h-4 w-4 me-2" />}
                           {label}
                         </Button>
                       ))}
@@ -3368,30 +3372,27 @@ export function TestCases() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <Label htmlFor="test-steps">{t('fieldSteps')}</Label>
-                      <div className="flex items-center space-x-2 rtl:space-x-reverse">
-                        <span className="text-sm text-gray-600">{t('simple')}</span>
+                      <div className="inline-flex items-center rounded-lg border bg-muted/50 p-0.5 text-sm">
                         <button
                           type="button"
-                          onClick={() => handleMultistepToggle(!testCaseForm.is_multistep)}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            testCaseForm.is_multistep ? 'bg-blue-600' : 'bg-gray-200'
+                          onClick={() => handleMultistepToggle(false)}
+                          className={`rounded-md px-3 py-1 font-medium transition-colors ${
+                            !testCaseForm.is_multistep ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                           }`}
                         >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                              isRTL
-                                ? testCaseForm.is_multistep
-                                  ? '-translate-x-6'
-                                  : '-translate-x-1'
-                                : testCaseForm.is_multistep
-                                  ? 'translate-x-6'
-                                  : 'translate-x-1'
-                            }`}
-                          />
+                          {t('simple')}
                         </button>
-                        <span className="text-sm text-gray-600">{t('multistep')}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleMultistepToggle(true)}
+                          className={`rounded-md px-3 py-1 font-medium transition-colors ${
+                            testCaseForm.is_multistep ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {t('multistep')}
+                        </button>
                       </div>
                     </div>
                     {!testCaseForm.is_multistep ? (
@@ -3465,7 +3466,7 @@ export function TestCases() {
                             onClick={handleAddStep}
                             className="flex-1"
                           >
-                            <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                            <Plus className="h-4 w-4 me-2" />
                             {t('addStep')}
                           </Button>
                           <Button
@@ -3477,7 +3478,7 @@ export function TestCases() {
                             }}
                             className="flex-1"
                           >
-                            <Layers className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                            <Layers className="h-4 w-4 me-2" />
                             {t('insertSharedStep')}
                           </Button>
                         </div>
@@ -3496,31 +3497,38 @@ export function TestCases() {
                       />
                     </div>
                   )}
-                </div>
+                  </div>
+                </section>
 
                 {/* Custom Fields with Optimized Loading */}
                 {customFields.length > 0 && (
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold">{t('customFields')}</h3>
+                  <section className="overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md">
+                    <header className="flex items-center gap-2.5 border-b bg-muted/40 px-4 py-3">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">
+                        <SlidersHorizontal className="h-4 w-4" />
+                      </span>
+                      <h3 className="text-sm font-semibold">{t('customFields')}</h3>
+                    </header>
+                    <div className="p-4">
                     {isCustomFieldsLoading ? (
                       <div className="space-y-4">
                         {/* Show skeleton loaders while custom fields are loading */}
                         {Array.from({ length: 2 }).map((_, index) => (
-                          <div key={index} className="grid grid-cols-4 items-center gap-4">
-                            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
-                            <div className="col-span-3 h-10 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                          <div key={index} className="space-y-1.5">
+                            <div className="h-4 w-28 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                            <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="grid gap-4 sm:grid-cols-2">
                         {customFields.map((field) => (
-                          <div key={field.id} className="grid grid-cols-4 items-center gap-4">
-                            <Label className={`text-right ${isRTL ? 'text-left' : ''}`}>
+                          <div key={field.id} className="space-y-1.5">
+                            <Label className="text-xs font-medium text-muted-foreground">
                               {field.name}
-                              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+                              {field.is_required && <span className="text-red-500 ms-1">*</span>}
                             </Label>
-                            <div className="col-span-3">
+                            <div>
                               {field.field_type === 'text' && (
                                 <div>
                                   <Input
@@ -3551,7 +3559,7 @@ export function TestCases() {
                                 </div>
                               )}
                               {field.field_type === 'boolean' && (
-                                <div className="flex items-center space-x-2">
+                                <div className="flex items-center gap-2">
                                   <Checkbox
                                     id={`field-${field.id}`}
                                     checked={customFieldValues[field.id] || false}
@@ -3592,17 +3600,22 @@ export function TestCases() {
                         ))}
                       </div>
                     )}
-                  </div>
+                    </div>
+                  </section>
                 )}
               </div>
-              <DialogFooter className="flex-col sm:flex-row gap-2">
-                <div className="text-xs text-gray-500 mb-2 sm:mb-0 sm:mr-auto">
+
+              {/* Sticky footer */}
+              <DialogFooter className="shrink-0 flex-col gap-2 border-t bg-muted/30 px-6 py-4 sm:flex-row sm:items-center">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground sm:me-auto">
+                  <Info className="h-3.5 w-3.5" />
                   {t('toSubmit')}
                 </div>
                 <Button variant="outline" onClick={handleCloseModal}>
                   {t('cancel')}
                 </Button>
-                <Button onClick={handleCreateTestCase} disabled={isCreating} className="transition-all duration-200">
+                <Button onClick={handleCreateTestCase} disabled={isCreating} className="gap-2 transition-all duration-200">
+                  {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                   {isCreating ? t('creating') : t('createTestCase')}
                 </Button>
               </DialogFooter>
