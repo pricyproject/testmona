@@ -318,7 +318,7 @@ def _build_testcase_registry() -> Dict[str, FieldSpec]:
         "summary": text_field(TestCase.title),
         "title": text_field(TestCase.title),
         "description": text_field(TestCase.description),
-        "tags": tag_field(TestCase.tags),
+        "tags": tag_field(TestCase.tags_cache),  # normalized tags; search the denormalized cache
         "reference": text_field(TestCase.reference, suggest=True),
         "created": date_field(TestCase.created_at),
         "updated": date_field(TestCase.updated_at),

@@ -170,6 +170,36 @@ class PriorityDefinition(Base):
     project = relationship("Project")
 
 
+class Tag(Base):
+    """Project-scoped, normalized label for test cases.
+
+    Replaces the legacy comma-separated ``TestCase.tags`` string. ``slug`` is the
+    lowercased/normalized form of ``name`` and is what uniqueness and lookups key
+    on, so "Smoke" and "smoke" collapse to one tag per project.
+    """
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=True, index=True)
+    name = Column(String(100), nullable=False, index=True)
+    slug = Column(String(100), nullable=False, index=True)  # normalized lookup key (lowercased name)
+    color = Column(String(7), nullable=False, default="#6366F1")  # Hex color code
+    description = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('project_id', 'slug', name='uq_tags_project_slug'),
+    )
+
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+    project = relationship("Project")
+    test_cases = relationship("TestCase", secondary="test_case_tags", back_populates="tags")
+
+
 class SharedStepTemplate(Base):
     __tablename__ = "shared_step_templates"
 

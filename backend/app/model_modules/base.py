@@ -341,3 +341,11 @@ shared_step_usage = Table('shared_step_usage', Base.metadata,
     Column('test_case_id', Integer, ForeignKey('test_cases.id')),
     Column('step_order', Integer, default=0)  # Order of the shared step in the test case
 )
+
+
+# Association table linking test cases to normalized Tag rows (many-to-many).
+# Cascade on both FKs so deleting a tag or a case cleans up the link rows.
+test_case_tags = Table('test_case_tags', Base.metadata,
+    Column('test_case_id', Integer, ForeignKey('test_cases.id', ondelete='CASCADE'), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True)
+)

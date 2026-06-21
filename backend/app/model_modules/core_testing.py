@@ -92,7 +92,11 @@ class TestCase(Base):
     # Denormalised from the suite so test cases can be filtered/numbered per project
     # without a join. Kept in sync on create and whenever the suite changes.
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
-    tags = Column(String(500))
+    # Denormalized comma-separated cache of the case's tag names. The normalized
+    # `tags` relationship below is the source of truth; this column is rewritten
+    # on every tag change and exists only to keep TQL/advanced-search and CSV
+    # export fast and column-based (see crud_modules/tags.sync_tags_cache).
+    tags_cache = Column(String(500))
     order_index = Column(Integer, default=0)
     is_deleted = Column(Boolean, default=False)
     is_multistep = Column(Boolean, default=False)  # Flag to indicate multistep format
@@ -112,6 +116,7 @@ class TestCase(Base):
     revisions = relationship("TestCaseRevision", back_populates="test_case")
     versions = relationship("TestCaseVersion", back_populates="test_case")
     shared_steps = relationship("SharedStep", secondary=shared_step_usage, back_populates="test_cases")
+    tags = relationship("Tag", secondary="test_case_tags", back_populates="test_cases", lazy="selectin", order_by="Tag.name")
     test_steps = relationship("TestCaseStep", back_populates="test_case", cascade="all, delete-orphan")
     dataset = relationship("TestDataset", foreign_keys=[dataset_id])
     creator = relationship("User", foreign_keys=[created_by])
