@@ -240,6 +240,7 @@ def _doc_out(doc: models.Doc, user: models.User, db: Session) -> schemas.Doc:
     out.can_delete = _can_access(user, doc.project_id, "delete", db)
     out.can_share = out.can_edit
     out.can_view_stats = _is_admin(user)
+    out.revisions_enabled = crud_docs.doc_revisions_enabled(db, doc)
     if not out.can_view_stats:
         out.view_count = None
         out.last_viewed_at = None
@@ -2054,12 +2055,37 @@ def register_docs_routes(app) -> None:
         return [
             schemas.DocVersionView(
                 id=v.id, doc_id=v.doc_id, version_number=v.version_number, action=v.action,
-                title=v.title, content_markdown=v.content_markdown, status=v.status,
+                name=v.name, title=v.title, content_markdown=v.content_markdown, status=v.status,
                 classification=v.classification, tags=v.tags, change_note=v.change_note,
                 created_at=v.created_at, author=_author(v.author),
             )
             for v in versions
         ]
+
+    @app.post("/docs/{doc_id}/versions", response_model=schemas.DocVersionView, status_code=201, tags=["Docs"])
+    def create_doc_revision(
+        payload: schemas.DocVersionCreate,
+        doc_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Pin the doc's current content as an explicit, optionally-named milestone
+        revision (e.g. "Approved draft"). Always records, even with no edits since
+        the last snapshot. Requires edit rights and the ``doc_revisions`` feature."""
+        doc = _get_doc_or_404(db, doc_id)
+        _require(current_user, doc.project_id, "write", db)
+        _require_feature_enabled(db, doc.project_id, "doc_revisions")
+        version = crud_docs.create_named_revision(
+            db, doc, actor_id=current_user.id, name=payload.name, change_note=payload.change_note,
+        )
+        return schemas.DocVersionView(
+            id=version.id, doc_id=version.doc_id, version_number=version.version_number,
+            action=version.action, name=version.name, title=version.title,
+            content_markdown=version.content_markdown, status=version.status,
+            classification=version.classification, tags=version.tags,
+            change_note=version.change_note, created_at=version.created_at,
+            author=_author(current_user),
+        )
 
     @app.post("/docs/{doc_id}/versions/{version_id}/restore", response_model=schemas.Doc, tags=["Docs"])
     def restore_doc_version(
@@ -2071,6 +2097,7 @@ def register_docs_routes(app) -> None:
     ):
         doc = _get_doc_or_404(db, doc_id)
         _require(current_user, doc.project_id, "write", db)
+        _require_feature_enabled(db, doc.project_id, "doc_revisions")
         version = (
             db.query(models.DocVersion)
             .filter(models.DocVersion.id == version_id, models.DocVersion.doc_id == doc_id)
@@ -2093,6 +2120,7 @@ def register_docs_routes(app) -> None:
         as a fresh baseline. Destructive, so gated on the delete permission."""
         doc = _get_doc_or_404(db, doc_id)
         _require(current_user, doc.project_id, "delete", db)
+        _require_feature_enabled(db, doc.project_id, "doc_revisions")
         crud_docs.clear_doc_versions(db, doc, actor_id=current_user.id)
         return _doc_out(doc, current_user, db)
 

@@ -21,6 +21,7 @@ from typing import Dict
 PROJECT_FEATURES = (
     "requirements",
     "doc_hub",
+    "doc_revisions",
     "test_cases",
     "test_suites",
     "test_runs",

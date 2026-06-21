@@ -524,6 +524,9 @@ class Doc(DocBase):
     can_delete: bool = False
     can_share: bool = False
     can_view_stats: bool = False
+    # Whether revision history is enabled for this doc's project (always true for
+    # global docs). Drives whether the version-history UI is shown.
+    revisions_enabled: bool = True
 
     class Config:
         from_attributes = True
@@ -677,6 +680,7 @@ class DocVersionView(BaseModel):
     doc_id: int
     version_number: int
     action: str
+    name: Optional[str] = None
     title: str
     content_markdown: Optional[str] = None
     status: Optional[str] = None
@@ -688,6 +692,20 @@ class DocVersionView(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DocVersionCreate(BaseModel):
+    """Pin the doc's current content as an explicit milestone revision."""
+    name: Optional[str] = Field(default=None, max_length=200)
+    change_note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", "change_note")
+    @classmethod
+    def _strip(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
 
 
 class DocVersionRestore(BaseModel):

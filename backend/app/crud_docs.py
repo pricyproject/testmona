@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from . import models, schemas
 from .crud import safe_commit
+from .features import is_feature_enabled
 from .services import watch_service
 
 
@@ -243,43 +244,82 @@ def delete_folder(db: Session, folder: models.DocFolder) -> None:
 # Versions                                                                     #
 # --------------------------------------------------------------------------- #
 
-def record_doc_version(
-    db: Session,
-    doc: models.Doc,
-    action: str = "updated",
-    actor_id: Optional[int] = None,
-    change_note: Optional[str] = None,
-    commit: bool = True,
-    batch=None,
-) -> models.DocVersion:
-    """Snapshot the doc's current content as a new dense, 1-based version row.
+# Snapshotted fields compared between revisions to detect real changes. The
+# names match the ``changed_fields`` vocabulary watchers receive.
+_SNAPSHOT_FIELDS = ("title", "content", "status", "classification", "tags")
 
-    Routine ``updated`` saves are skipped when nothing snapshotted changed.
-    ``created``/``restored``/``published`` always record.
-    """
-    latest = (
+
+def doc_revisions_enabled(db: Session, doc: models.Doc) -> bool:
+    """Whether revision history is enabled for ``doc``.
+
+    Project-scoped docs honor the per-project ``doc_revisions`` feature toggle a
+    project admin controls; global docs (no project) always keep history."""
+    if doc.project_id is None:
+        return True
+    project = (
+        db.query(models.Project)
+        .filter(models.Project.id == doc.project_id)
+        .first()
+    )
+    return is_feature_enabled(project, "doc_revisions")
+
+
+def _latest_version(db: Session, doc: models.Doc) -> Optional[models.DocVersion]:
+    return (
         db.query(models.DocVersion)
         .filter(models.DocVersion.doc_id == doc.id)
         .order_by(models.DocVersion.version_number.desc())
         .first()
     )
 
+
+def _changed_fields(latest: Optional[models.DocVersion], doc: models.Doc, status_value) -> List[str]:
+    """Snapshotted fields that differ between ``latest`` and the doc's current
+    state. With no prior version, everything counts as changed."""
+    if latest is None:
+        return list(_SNAPSHOT_FIELDS)
+    changed: List[str] = []
+    if latest.title != doc.title:
+        changed.append("title")
+    if latest.content_markdown != doc.content_markdown:
+        changed.append("content")
+    if latest.status != status_value:
+        changed.append("status")
+    if latest.classification != doc.classification:
+        changed.append("classification")
+    if latest.tags != doc.tags:
+        changed.append("tags")
+    return changed
+
+
+def record_doc_version(
+    db: Session,
+    doc: models.Doc,
+    action: str = "updated",
+    actor_id: Optional[int] = None,
+    change_note: Optional[str] = None,
+    name: Optional[str] = None,
+    force: bool = False,
+    commit: bool = True,
+    batch=None,
+) -> Optional[models.DocVersion]:
+    """Snapshot the doc's current content as a new dense, 1-based version row.
+
+    Returns ``None`` (recording nothing) when revision history is disabled for
+    the doc's project, so callers in the normal save path stay oblivious to the
+    toggle. Routine ``updated`` saves are skipped when nothing snapshotted
+    changed; ``created``/``restored``/``published`` and ``force`` (manual named
+    revisions) always record.
+    """
+    if not doc_revisions_enabled(db, doc):
+        return None
+
+    latest = _latest_version(db, doc)
     status_value = getattr(doc.status, "value", doc.status)
     # Which snapshotted fields changed vs the previous version — used both to
     # short-circuit no-op saves and to tell watchers what actually changed.
-    changed_fields: List[str] = []
-    if latest is not None:
-        if latest.title != doc.title:
-            changed_fields.append("title")
-        if latest.content_markdown != doc.content_markdown:
-            changed_fields.append("content")
-        if latest.status != status_value:
-            changed_fields.append("status")
-        if latest.classification != doc.classification:
-            changed_fields.append("classification")
-        if latest.tags != doc.tags:
-            changed_fields.append("tags")
-    if action == "updated" and latest is not None and not changed_fields:
+    changed_fields = _changed_fields(latest, doc, status_value) if latest is not None else []
+    if action == "updated" and not force and latest is not None and not changed_fields:
         return latest
 
     last_number = latest.version_number if latest is not None else 0
@@ -287,6 +327,7 @@ def record_doc_version(
         doc_id=doc.id,
         version_number=last_number + 1,
         action=action,
+        name=name,
         title=doc.title,
         content_markdown=doc.content_markdown,
         status=status_value,
@@ -324,7 +365,31 @@ def record_doc_version(
     return version
 
 
-def clear_doc_versions(db: Session, doc: models.Doc, actor_id: Optional[int] = None) -> models.DocVersion:
+def create_named_revision(
+    db: Session,
+    doc: models.Doc,
+    actor_id: Optional[int] = None,
+    name: Optional[str] = None,
+    change_note: Optional[str] = None,
+) -> models.DocVersion:
+    """Pin the doc's current content as an explicit milestone revision.
+
+    Unlike an autosave snapshot this always records (``force``) — even when the
+    content is byte-identical to the latest version — so an author can mark a
+    point in time (e.g. "Approved draft") regardless of edit activity."""
+    return record_doc_version(
+        db,
+        doc,
+        action="snapshot",
+        actor_id=actor_id,
+        name=name,
+        change_note=change_note,
+        force=True,
+        commit=True,
+    )
+
+
+def clear_doc_versions(db: Session, doc: models.Doc, actor_id: Optional[int] = None) -> Optional[models.DocVersion]:
     """Delete a doc's entire revision history and re-seed a single baseline
     snapshot of the current content, so restore/compare stay coherent."""
     db.query(models.DocVersion).filter(models.DocVersion.doc_id == doc.id).delete(synchronize_session=False)
@@ -335,7 +400,8 @@ def clear_doc_versions(db: Session, doc: models.Doc, actor_id: Optional[int] = N
     )
     safe_commit(db)
     db.refresh(doc)
-    db.refresh(baseline)
+    if baseline is not None:
+        db.refresh(baseline)
     return baseline
 
 

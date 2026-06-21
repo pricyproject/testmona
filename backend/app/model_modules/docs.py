@@ -205,7 +205,10 @@ class DocVersion(Base):
     id = Column(Integer, primary_key=True, index=True)
     doc_id = Column(Integer, ForeignKey("docs.id", ondelete="CASCADE"), nullable=False, index=True)
     version_number = Column(Integer, nullable=False)
-    action = Column(String(20), nullable=False, default="updated")  # created, updated, restored, published
+    action = Column(String(20), nullable=False, default="updated")  # created, updated, restored, published, snapshot
+    # Optional human label for a manually-created milestone revision (action="snapshot"),
+    # e.g. "v1.0 release" or "Approved draft". NULL for routine autosave snapshots.
+    name = Column(String(200))
     title = Column(String(255), nullable=False)
     content_markdown = Column(Text)
     status = Column(String(50))
