@@ -234,7 +234,7 @@ export function TestSuites() {
       filtered = filtered.filter(tc => 
         tc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (tc.description && tc.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (tc.tags && tc.tags.toLowerCase().includes(searchQuery.toLowerCase()))
+        (tc.tags || []).some((tag) => tag.name.toLowerCase().includes(searchQuery.toLowerCase()))
       );
     }
     

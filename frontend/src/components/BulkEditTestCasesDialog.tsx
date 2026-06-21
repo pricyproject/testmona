@@ -10,7 +10,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -23,6 +22,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { bulkAPI, getApiErrorMessage } from '@/lib/api';
+import { TagChipInput } from '@/components/TestCases/TagChipInput';
 
 const UNCHANGED = '__unchanged__';
 
@@ -35,6 +35,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   ids: number[];
+  projectId: number | null;
   priorityOptions: PriorityOption[];
   testTypeOptions?: PriorityOption[];
   onApplied: (result: { updated: number; skipped_ids: number[] }) => void;
@@ -44,6 +45,7 @@ export function BulkEditTestCasesDialog({
   open,
   onOpenChange,
   ids,
+  projectId,
   priorityOptions,
   testTypeOptions,
   onApplied,
@@ -54,8 +56,8 @@ export function BulkEditTestCasesDialog({
   const [priority, setPriority] = useState(UNCHANGED);
   const [status, setStatus] = useState(UNCHANGED);
   const [testType, setTestType] = useState(UNCHANGED);
-  const [addTags, setAddTags] = useState('');
-  const [removeTags, setRemoveTags] = useState('');
+  const [addTags, setAddTags] = useState<string[]>([]);
+  const [removeTags, setRemoveTags] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -64,8 +66,8 @@ export function BulkEditTestCasesDialog({
       setPriority(UNCHANGED);
       setStatus(UNCHANGED);
       setTestType(UNCHANGED);
-      setAddTags('');
-      setRemoveTags('');
+      setAddTags([]);
+      setRemoveTags([]);
     }
   }, [open]);
 
@@ -86,8 +88,8 @@ export function BulkEditTestCasesDialog({
     if (priority !== UNCHANGED) payload.priority = priority;
     if (status !== UNCHANGED) payload.status = status;
     if (testType !== UNCHANGED) payload.test_type = testType;
-    if (addTags.trim()) payload.add_tags = addTags.trim();
-    if (removeTags.trim()) payload.remove_tags = removeTags.trim();
+    if (addTags.length) payload.add_tags = addTags;
+    if (removeTags.length) payload.remove_tags = removeTags;
 
     if (Object.keys(payload).length <= 1) {
       toast({
@@ -176,12 +178,12 @@ export function BulkEditTestCasesDialog({
 
           <div className="space-y-2">
             <Label>{t('bulkAddTags')}</Label>
-            <Input value={addTags} onChange={(e) => setAddTags(e.target.value)} placeholder={t('bulkTagsPlaceholder')} />
+            <TagChipInput projectId={projectId} value={addTags} onChange={setAddTags} placeholder={t('bulkTagsPlaceholder')} />
           </div>
 
           <div className="space-y-2">
             <Label>{t('bulkRemoveTags')}</Label>
-            <Input value={removeTags} onChange={(e) => setRemoveTags(e.target.value)} placeholder={t('bulkTagsPlaceholder')} />
+            <TagChipInput projectId={projectId} value={removeTags} onChange={setRemoveTags} placeholder={t('bulkTagsPlaceholder')} />
           </div>
         </div>
 

@@ -83,10 +83,7 @@ export function hasActiveQuery(parsed: ParsedQuery): boolean {
 }
 
 const getTestCaseTags = (testCase: TestCase): string[] =>
-  norm(testCase.tags)
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+  (testCase.tags || []).map((tag) => tag.name.toLowerCase());
 
 export function testCaseMatchesQuery(testCase: TestCase, parsed: ParsedQuery): boolean {
   if (parsed.terms.length > 0) {

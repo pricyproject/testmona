@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/TestCases/TagBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1383,16 +1384,9 @@ export function TestSuiteDetail() {
                           <Badge variant={getPriorityVariant(testCase.priority)} className="text-xs">
                             {t(testCase.priority)}
                           </Badge>
-                          {testCase.tags &&
-                            testCase.tags
-                              .split(',')
-                              .map((tag) => tag.trim())
-                              .filter(Boolean)
-                              .map((tag) => (
-                                <Badge key={tag} variant="outline" className="text-xs">
-                                  {tag}
-                                </Badge>
-                              ))}
+                          {(testCase.tags || []).map((tag) => (
+                            <TagBadge key={tag.id} tag={tag} />
+                          ))}
                         </div>
                       </div>
                     </div>

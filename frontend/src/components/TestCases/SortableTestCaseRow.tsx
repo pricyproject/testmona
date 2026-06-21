@@ -5,6 +5,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { ArrowUp, Edit, GripVertical, History, MoreHorizontal, Play, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/TestCases/TagBadge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -73,7 +74,7 @@ export function SortableTestCaseRow({
     transition,
   };
   const isSelected = selectedTestCases.includes(testCase.id);
-  const testCaseTags = (testCase.tags || '').split(',').map((tag) => tag.trim()).filter(Boolean);
+  const testCaseTags = testCase.tags || [];
   const typeBadge = getTypeBadge(testCase.test_type);
   const priorityBadge = getPriorityBadge(testCase.priority);
 
@@ -133,10 +134,8 @@ export function SortableTestCaseRow({
       </TableCell>
       <TableCell className="py-2 max-w-[180px]">
         <div className="flex flex-wrap gap-1">
-          {testCaseTags.slice(0, 3).map((tag, index) => (
-            <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
-              {tag}
-            </Badge>
+          {testCaseTags.slice(0, 3).map((tag) => (
+            <TagBadge key={tag.id} tag={tag} />
           ))}
           {testCaseTags.length > 3 && (
             <Badge variant="outline" className="text-xs">

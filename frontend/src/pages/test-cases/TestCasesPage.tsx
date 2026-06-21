@@ -101,6 +101,7 @@ import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
 import { Section } from '@/types/testCases';
 import { ImportPreview } from '@/components/ImportPreview';
 import { SortableTestCaseRow } from '@/components/TestCases/SortableTestCaseRow';
+import { TagChipInput } from '@/components/TestCases/TagChipInput';
 import { TestCaseSearchBar, SearchSuggestionGroup } from '@/components/TestCases/TestCaseSearchBar';
 import { parseSearchQuery, testCaseMatchesQuery } from '@/components/TestCases/searchQuery';
 import { SavedFilters } from '@/components/SavedFilters';
@@ -164,7 +165,7 @@ export function TestCases() {
     title: string;
     description: string;
     reference: string;
-    tags: string;
+    tags: string[];
     test_type: string;
     priority: string; // Will be constrained by API options
     preconditions: string;
@@ -176,7 +177,7 @@ export function TestCases() {
     title: '',
     description: '',
     reference: '',
-    tags: '',
+    tags: [],
     test_type: '',
     priority: '', // Will be set from database default
     preconditions: '',
@@ -1339,11 +1340,9 @@ export function TestCases() {
   const searchSuggestionGroups = useMemo<SearchSuggestionGroup[]>(() => {
     const tagCounts = new Map<string, number>();
     apiTestCases.forEach((tc) => {
-      (tc.tags || '')
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .forEach((tag) => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
+      (tc.tags || []).forEach((tag) =>
+        tagCounts.set(tag.name, (tagCounts.get(tag.name) || 0) + 1),
+      );
     });
     const topTags = Array.from(tagCounts.entries())
       .sort((a, b) => b[1] - a[1])
@@ -1452,8 +1451,8 @@ export function TestCases() {
         }
         return '';
       case 'tags':
-        if (value && value.length > 500) {
-          return t('tagLengthExceeded', { max: 500 });
+        if (Array.isArray(value) && value.length > 30) {
+          return t('tagCountExceeded', { max: 30 });
         }
         return '';
       default:
@@ -1558,12 +1557,12 @@ export function TestCases() {
 
   const handleFieldChange = (field: keyof typeof testCaseForm, value: string) => {
     setTestCaseForm(prev => ({ ...prev, [field]: value }));
-    if (field === 'tags') {
-      setValidationErrors(prev => ({
-        ...prev,
-        tags: validateField('tags', value)
-      }));
-    }
+  };
+
+  // Tags are a string[] of names (chip input); validated by count.
+  const handleTagsChange = (next: string[]) => {
+    setTestCaseForm(prev => ({ ...prev, tags: next }));
+    setValidationErrors(prev => ({ ...prev, tags: validateField('tags', next) }));
   };
 
   const handleCustomFieldChange = (fieldId: number, value: any) => {
@@ -1654,7 +1653,11 @@ export function TestCases() {
         expected_result: draft.expected_result || prev.expected_result,
         priority: draft.priority || prev.priority,
         test_type: draft.test_type || prev.test_type,
-        tags: draft.tags || prev.tags,
+        tags: Array.isArray(draft.tags)
+          ? draft.tags
+          : draft.tags
+            ? String(draft.tags).split(',').map((s: string) => s.trim()).filter(Boolean)
+            : prev.tags,
         is_multistep: Array.isArray(draft.test_steps) && draft.test_steps.length > 0 ? true : prev.is_multistep,
       }));
       if (Array.isArray(draft.test_steps) && draft.test_steps.length > 0) {
@@ -1685,7 +1688,7 @@ export function TestCases() {
         expected_result: testCaseForm.expected_result,
         priority: testCaseForm.priority || 'medium',
         test_type: testCaseForm.test_type || 'manual',
-        tags: testCaseForm.tags,
+        tags: testCaseForm.tags.join(', '),
         reference: testCaseForm.reference,
         test_steps: testSteps,
       });
@@ -1783,7 +1786,7 @@ export function TestCases() {
       testCaseForm.title.trim() !== '' ||
       testCaseForm.description.trim() !== '' ||
       testCaseForm.reference.trim() !== '' ||
-      testCaseForm.tags.trim() !== '' ||
+      testCaseForm.tags.length > 0 ||
       testCaseForm.test_type !== '' ||
       testCaseForm.preconditions.trim() !== '' ||
       testCaseForm.steps.trim() !== '' ||
@@ -1808,7 +1811,7 @@ export function TestCases() {
       title: '',
       description: '',
       reference: '',
-      tags: '',
+      tags: [],
       test_type: '',
       priority: defaultPriorityValue,
       preconditions: '',
@@ -1840,7 +1843,7 @@ export function TestCases() {
         title: '',
         description: '',
         reference: '',
-        tags: '',
+        tags: [],
         test_type: '',
         priority: defaultPriorityValue,
         preconditions: '',
@@ -1905,7 +1908,7 @@ export function TestCases() {
       title: testCaseForm.title,
       description: testCaseForm.description,
       reference: testCaseForm.reference,
-      tags: testCaseForm.tags.trim(),
+      tags: testCaseForm.tags,
       preconditions: testCaseForm.preconditions,
       steps: testCaseForm.steps,
       expected_result: testCaseForm.expected_result,
@@ -1941,7 +1944,7 @@ export function TestCases() {
         title: '',
         description: '',
         reference: '',
-        tags: '',
+        tags: [],
         test_type: '',
         priority: 'medium',
         preconditions: '',
@@ -2081,7 +2084,7 @@ export function TestCases() {
           tc.priority || 'medium',
           tc.status || 'active',
           tc.reference || '',
-          tc.tags || '',
+          (tc.tags || []).map((tag) => tag.name).join(','),
           tc.test_suite_id || currentTestSuiteId || '',
           tc.section_id || '',
           tc.order_index || 0,
@@ -2332,7 +2335,7 @@ export function TestCases() {
       title: testCase.title,
       description: testCase.description || '',
       reference: testCase.reference || '',
-      tags: testCase.tags || '',
+      tags: (testCase.tags || []).map((tag) => tag.name),
       test_type: testCase.test_type,
       priority: testCase.priority,
       preconditions: testCase.preconditions || '',
@@ -2578,7 +2581,7 @@ export function TestCases() {
         title: '',
         description: '',
         reference: '',
-        tags: '',
+        tags: [],
         test_type: '',
         priority: 'medium',
         preconditions: '',
@@ -2954,7 +2957,7 @@ export function TestCases() {
                 testCaseForm.title.trim() !== '' ||
                 testCaseForm.description.trim() !== '' ||
                 testCaseForm.reference.trim() !== '' ||
-                testCaseForm.tags.trim() !== '' ||
+                testCaseForm.tags.length > 0 ||
                 testCaseForm.test_type !== '' ||
                 testCaseForm.preconditions.trim() !== '' ||
                 testCaseForm.steps.trim() !== '' ||
@@ -3049,19 +3052,17 @@ export function TestCases() {
                       <Label htmlFor="tags" className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                         <Tag className="h-3.5 w-3.5" /> {t('tags')}
                       </Label>
-                      <Input
+                      <TagChipInput
                         id="tags"
+                        projectId={currentProjectId ?? null}
                         value={testCaseForm.tags}
-                        onChange={(e) => handleFieldChange('tags', e.target.value)}
-                        placeholder={t('enterTagsSeparatedByCommas')}
-                        maxLength={500}
-                        className={validationErrors.tags ? 'border-red-500 focus:border-red-500' : ''}
+                        onChange={handleTagsChange}
+                        className={validationErrors.tags ? '[&>div]:border-red-500' : ''}
                       />
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                         {validationErrors.tags
                           ? <span className="text-red-500">{validationErrors.tags}</span>
                           : <span>{t('tagsHelper')}</span>}
-                        <span className="ms-auto tabular-nums">{testCaseForm.tags.length}/500</span>
                       </div>
                     </div>
 
@@ -4512,12 +4513,11 @@ export function TestCases() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-tags">{t('tags')}</Label>
-              <Input
+              <TagChipInput
                 id="edit-tags"
+                projectId={currentProjectId ?? null}
                 value={testCaseForm.tags}
-                onChange={(e) => handleFieldChange('tags', e.target.value)}
-                placeholder={t('enterTagsSeparatedByCommas')}
-                maxLength={500}
+                onChange={handleTagsChange}
               />
               {validationErrors.tags && (
                 <p className="text-sm text-red-500">{validationErrors.tags}</p>
@@ -4900,6 +4900,7 @@ export function TestCases() {
         open={bulkEditOpen}
         onOpenChange={setBulkEditOpen}
         ids={selectedTestCases}
+        projectId={currentProjectId ?? null}
         priorityOptions={priorityOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
         testTypeOptions={testTypes.map((tt) => ({
           value: tt,

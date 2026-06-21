@@ -19,6 +19,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { TagBadge } from '@/components/TestCases/TagBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -416,21 +417,7 @@ export function TestCaseDetail() {
     return ids.size;
   }, [testRunHistory]);
 
-  const testCaseTags = testCase?.tags;
-  const tags = useMemo(() => {
-    if (!testCaseTags) return [];
-    const seen = new Set<string>();
-    return testCaseTags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter((tag) => {
-        if (!tag) return false;
-        const key = tag.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  }, [testCaseTags]);
+  const tags = testCase?.tags ?? [];
   const hasReference = Boolean(testCase?.reference?.trim());
 
   const customFieldRows = useMemo<CustomFieldDisplayRow[]>(() => {
@@ -941,7 +928,7 @@ export function TestCaseDetail() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    {tags.map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+                    {tags.map((tag) => <TagBadge key={tag.id} tag={tag} />)}
                   </div>
                 </CardContent>
               </Card>
