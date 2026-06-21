@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { entityKey } from '@/lib/utils';
 import { TestCase } from '@/types';
 
@@ -57,6 +58,7 @@ export function SortableTestCaseRow({
 }: SortableTestCaseRowProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { formatDate } = useDateFormat();
   const {
     attributes,
     listeners,
@@ -143,7 +145,7 @@ export function SortableTestCaseRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="text-xs text-gray-500 py-2">{new Date(testCase.created_at).toLocaleDateString()}</TableCell>
+      <TableCell className="text-xs text-gray-500 py-2">{formatDate(testCase.created_at)}</TableCell>
       <TableCell className="py-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

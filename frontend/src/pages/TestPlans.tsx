@@ -29,6 +29,8 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { DateField } from '@/components/ui/DateField';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -169,17 +171,6 @@ const dateInputToIso = (value: string): string | null => {
   return `${value}T12:00:00.000Z`;
 };
 
-const formatDate = (value: string | null | undefined, fallback: string): string => {
-  if (!value) return fallback;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (parts) {
-    const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
-    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-  }
-  const fallbackDate = new Date(value);
-  return Number.isFinite(fallbackDate.getTime()) ? fallbackDate.toLocaleDateString() : fallback;
-};
-
 const EXECUTION_META: Record<
   ExecutionStatus,
   { labelKey: string; className: string; dot: string }
@@ -202,6 +193,16 @@ export function TestPlans() {
   const createFromQuery = searchParams.get('create') === '1';
   const editIdFromQuery = searchParams.get('edit');
   const { t, isRTL } = useTranslation();
+  const { formatDate: fmtDate } = useDateFormat();
+  const formatDate = (value: string | null | undefined, fallback: string): string => {
+    if (!value) return fallback;
+    const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (parts) {
+      const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
+      return fmtDate(date, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) || fallback;
+    }
+    return fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) || fallback;
+  };
   const { canWrite } = usePermissions();
 
   const numericProjectId = useMemo(() => {
@@ -955,22 +956,20 @@ export function TestPlans() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="fp-start">{t('targetStartDate')}</Label>
-              <Input
+              <DateField
                 id="fp-start"
-                type="date"
                 value={form.startDate}
                 max={form.endDate || undefined}
-                onChange={(e) => setField('startDate', e.target.value)}
+                onChange={(value) => setField('startDate', value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="fp-end">{t('targetEndDate')}</Label>
-              <Input
+              <DateField
                 id="fp-end"
-                type="date"
                 value={form.endDate}
                 min={form.startDate || undefined}
-                onChange={(e) => setField('endDate', e.target.value)}
+                onChange={(value) => setField('endDate', value)}
                 className={validationErrors.endDate ? 'border-red-400 focus-visible:ring-red-300' : ''}
               />
               {validationErrors.endDate && (
@@ -987,22 +986,20 @@ export function TestPlans() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="fp-actual-start">{t('actualStartDate')}</Label>
-              <Input
+              <DateField
                 id="fp-actual-start"
-                type="date"
                 value={form.actualStartDate}
                 max={form.actualEndDate || undefined}
-                onChange={(e) => setField('actualStartDate', e.target.value)}
+                onChange={(value) => setField('actualStartDate', value)}
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="fp-actual-end">{t('actualEndDate')}</Label>
-              <Input
+              <DateField
                 id="fp-actual-end"
-                type="date"
                 value={form.actualEndDate}
                 min={form.actualStartDate || undefined}
-                onChange={(e) => setField('actualEndDate', e.target.value)}
+                onChange={(value) => setField('actualEndDate', value)}
               />
             </div>
           </div>

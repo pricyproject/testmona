@@ -55,6 +55,7 @@ import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { TestCase, TestSuite } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { SectionTree, SectionTreeNode } from '@/components/SectionTree';
 
 const TEST_CASES_PER_PAGE = 10;
@@ -201,6 +202,7 @@ export function TestSuiteDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const { formatDate } = useDateFormat();
 
   const numericProjectId = useMemo(() => {
     if (!projectId) return null;
@@ -1024,12 +1026,12 @@ export function TestSuiteDetail() {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
               <div className="flex items-center">
                 <Calendar className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                {t('createdLabel')} {new Date(testSuite.created_at).toLocaleDateString()}
+                {t('createdLabel')} {formatDate(testSuite.created_at)}
               </div>
               {testSuite.updated_at && (
                 <div className="flex items-center">
                   <User className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                  {t('updatedLabel')} {new Date(testSuite.updated_at).toLocaleDateString()}
+                  {t('updatedLabel')} {formatDate(testSuite.updated_at)}
                 </div>
               )}
             </div>

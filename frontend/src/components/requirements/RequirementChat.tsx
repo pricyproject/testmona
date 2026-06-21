@@ -32,6 +32,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { DateField } from '@/components/ui/DateField';
 import { aiManagerAPI, AIManagerStatus, AISourceType, projectAssignmentsAPI, requirementChatAPI } from '@/lib/api';
 import { RequirementChatAskResponse, RequirementChatConversation, RequirementChatMessage } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
@@ -80,6 +82,7 @@ export function RequirementChat({
   projectId, scopeMode, variant, active, initialPublicId, onClose, headerActions,
 }: RequirementChatProps) {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -573,13 +576,8 @@ export function RequirementChat({
     }
   };
 
-  const fmtTime = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
-    }
-  };
+  const fmtTime = (iso: string) =>
+    formatDateTime(iso, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const featureDisabled = aiStatus !== null && aiStatus.requirement_chat_enabled === false;
   const aiUnavailable = aiStatus !== null && (!aiStatus.available || featureDisabled);
@@ -1041,7 +1039,7 @@ export function RequirementChat({
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">{t('reqChatShareExpiry')}</label>
-            <Input type="date" min={tomorrowDate()} value={shareExpiry} onChange={(e) => setShareExpiry(e.target.value)} />
+            <DateField min={tomorrowDate()} value={shareExpiry} onChange={setShareExpiry} />
           </div>
           {shareScope === 'restricted' && (
             <div>

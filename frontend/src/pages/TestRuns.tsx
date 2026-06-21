@@ -48,6 +48,7 @@ import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testRe
 import { TestRun, TestCase } from '@/types';
 import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -88,6 +89,7 @@ export function TestRuns() {
   const { projectId } = useParams<{ projectId?: string }>();
   const [searchParams] = useSearchParams();
   const { t, isRTL } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
   const { canWrite } = usePermissions();
   const { user: currentUser } = useAuthStore();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -230,7 +232,7 @@ export function TestRuns() {
 
   const getCompletionLabel = (run: TestRun) => {
     if (run.completed_at) {
-      return new Date(run.completed_at).toLocaleString();
+      return fmtDateTime(run.completed_at);
     }
 
     return run.status === 'completed' ? t('completionTimeMissing') : t('notCompleted');
@@ -252,7 +254,7 @@ export function TestRuns() {
   };
 
   const formatDateTime = (date?: string) => (
-    date ? new Date(date).toLocaleString() : t('notStarted')
+    date ? fmtDateTime(date) || t('notStarted') : t('notStarted')
   );
 
   const getRunStartedAt = (run: TestRun) => {
@@ -1442,7 +1444,7 @@ export function TestRuns() {
                           <Calendar className="h-3.5 w-3.5" />
                           {t('started')}
                         </div>
-                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100" title={startedAt ? new Date(startedAt).toLocaleString() : t('notStarted')}>
+                        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100" title={startedAt ? fmtDateTime(startedAt) : t('notStarted')}>
                           {formatDateTime(startedAt)}
                         </p>
                       </div>

@@ -13,7 +13,7 @@ import {
   AlertCircle,
   Edit3
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { TestCaseVersion, VersionComparisonResponse } from '../../types/versioning';
 
 interface VersionComparisonProps {
@@ -59,9 +59,8 @@ export const VersionComparison: React.FC<VersionComparisonProps> = ({
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return formatDistanceToNow(new Date(dateString), { addSuffix: true });
-  };
+  const { formatRelative } = useDateFormat();
+  const formatDate = (dateString: string) => formatRelative(dateString);
 
   const renderFieldDiff = (fieldName: string, diff: { from: any; to: any; diff?: string }) => {
     const label = fieldLabels[fieldName] || fieldName;

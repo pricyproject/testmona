@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 import { SharedStep, SharedStepCreate } from '@/types';
 import {
@@ -71,15 +72,11 @@ const normalizeSharedStepPayload = (formData: SharedStepFormData, projectId: num
   project_id: projectId,
 });
 
-const formatDateTime = (value?: string, fallback = '') => {
-  if (!value) return fallback;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString();
-};
-
 export function SharedSteps() {
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
+  const formatDateTime = (value?: string, fallback = '') => (value ? fmtDateTime(value) || fallback : fallback);
   const { canWrite } = usePermissions();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);

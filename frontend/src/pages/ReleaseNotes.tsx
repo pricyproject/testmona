@@ -44,6 +44,8 @@ import { markdownToHtml } from '@/components/ui/content-editor';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { DateField } from '@/components/ui/DateField';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { docsAPI } from '@/lib/api';
 import type {
@@ -77,6 +79,7 @@ interface GenerateOptions {
 
 export function ReleaseNotes() {
   const { t, isRTL } = useTranslation();
+  const { formatDate, language } = useDateFormat();
   const { toast } = useToast();
   const navigate = useNavigate();
   const { projectId: projectIdParam } = useParams<{ projectId?: string }>();
@@ -147,7 +150,7 @@ export function ReleaseNotes() {
     setGenerating(true);
     try {
       const preview = await docsAPI.generateReleaseNotes(
-        { project_id: projectId, since, until, include_ai: opts.includeAi },
+        { project_id: projectId, since, until, include_ai: opts.includeAi, lang: language },
         controller.signal,
       );
       if (!mountedRef.current || controller.signal.aborted) return;
@@ -340,7 +343,7 @@ export function ReleaseNotes() {
                     </div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
                       {note.version && <span className="font-mono">{note.version}</span>}
-                      <span>{formatRange(note.range_start, note.range_end)}</span>
+                      <span>{formatRange(note.range_start, note.range_end, formatDate)}</span>
                     </div>
                   </button>
                 </li>
@@ -370,7 +373,7 @@ export function ReleaseNotes() {
               {/* Meta + actions */}
               <div className="flex flex-wrap items-center gap-3">
                 <StatusBadge status={draft.status} t={t} />
-                <span className="text-xs text-muted-foreground">{formatRange(draft.range_start, draft.range_end)}</span>
+                <span className="text-xs text-muted-foreground">{formatRange(draft.range_start, draft.range_end, formatDate)}</span>
                 <span className="flex-1" />
                 <Button variant="ghost" size="sm" onClick={handleCopy} title={t('releaseNotesCopy')}>
                   <Copy className="h-4 w-4" />
@@ -518,11 +521,11 @@ function GenerateDialog({
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <div>
                   <Label className="mb-1 block text-[11px] text-muted-foreground">{t('releaseNotesFrom')}</Label>
-                  <Input type="date" value={since} max={until} onChange={(e) => setSince(e.target.value)} />
+                  <DateField value={since} max={until} onChange={setSince} />
                 </div>
                 <div>
                   <Label className="mb-1 block text-[11px] text-muted-foreground">{t('releaseNotesTo')}</Label>
-                  <Input type="date" value={until} min={since} onChange={(e) => setUntil(e.target.value)} />
+                  <DateField value={until} min={since} onChange={setUntil} />
                 </div>
               </div>
             )}
@@ -599,10 +602,11 @@ function EditView({
 }
 
 function ReadView({ draft, previewHtml, t }: { draft: Draft; previewHtml: string; t: (k: string) => string }) {
+  const { formatDate } = useDateFormat();
   // The Markdown body already carries the title as its H1, so we don't repeat it
   // here — just a publish byline above the rendered content.
   const byline = draft.published_at
-    ? `${t('releaseNotesPublishedOn')} ${new Date(draft.published_at).toLocaleDateString()}${draft.publisher ? ` · ${draft.publisher}` : ''}`
+    ? `${t('releaseNotesPublishedOn')} ${formatDate(draft.published_at)}${draft.publisher ? ` · ${draft.publisher}` : ''}`
     : null;
   return (
     <div data-rich-text-editor className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
@@ -694,8 +698,12 @@ function noteToDraft(note: ReleaseNote): Draft {
   };
 }
 
-function formatRange(start?: string | null, end?: string | null): string {
-  const fmt = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
+function formatRange(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  fmtDate: ReturnType<typeof useDateFormat>['formatDate'],
+): string {
+  const fmt = (v?: string | null) => (v ? fmtDate(v) || '—' : '—');
   return `${fmt(start)} → ${fmt(end)}`;
 }
 

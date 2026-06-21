@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, AlertCircle, Printer, ShieldCheck } from 'lucide-react';
 import { analyticsAPI } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 
 const activityValue = (activity: any, key: string, legacyKey?: string) =>
   activity?.[key] ?? (legacyKey ? activity?.[legacyKey] : undefined) ?? 0;
@@ -20,6 +21,7 @@ const upcomingCount = (upcoming: any, countKey: string, listKey: string) =>
 export function SharedReportViewer() {
   const { token } = useParams<{ token: string }>();
   const { t, isRTL } = useTranslation();
+  const { formatDate, formatDateTime } = useDateFormat();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<any>(null);
@@ -125,8 +127,8 @@ export function SharedReportViewer() {
                 </>
               ) : null}
               {t('reports_previewGeneratedBy', { user: content.generated_by || 'system' })}
-              {content.generated_at ? t('reports_previewGeneratedAt', { time: new Date(content.generated_at).toLocaleString() }) : ''}
-              {report.expires_at ? ` · ${t('reports_expiresLabel')} ${new Date(report.expires_at).toLocaleDateString()}` : ''}
+              {content.generated_at ? t('reports_previewGeneratedAt', { time: formatDateTime(content.generated_at) }) : ''}
+              {report.expires_at ? ` · ${t('reports_expiresLabel')} ${formatDate(report.expires_at)}` : ''}
             </p>
           </CardContent>
         </Card>
@@ -302,7 +304,7 @@ export function SharedReportViewer() {
                 <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
                   {t('reports_upcomingMilestone', {
                     title: content.upcoming.milestone.title,
-                    date: content.upcoming.milestone.target_date ? new Date(content.upcoming.milestone.target_date).toLocaleDateString() : 'N/A',
+                    date: content.upcoming.milestone.target_date ? formatDate(content.upcoming.milestone.target_date) : 'N/A',
                   })}
                 </p>
               )}

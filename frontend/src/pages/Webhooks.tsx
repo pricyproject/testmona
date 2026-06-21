@@ -46,6 +46,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { webhooksAPI, getApiErrorMessage } from '@/lib/api';
 
@@ -72,12 +73,6 @@ interface DeliveryRow {
   delivered_at?: string | null;
   created_at: string;
 }
-
-const formatWhen = (value?: string | null): string => {
-  if (!value) return '-';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString();
-};
 
 const isPrivateWebhookHost = (host: string): boolean => {
   const normalized = host.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
@@ -125,6 +120,8 @@ export function Webhooks() {
   const navigate = useNavigate();
   const numericProjectId = projectId ? Number(projectId) : null;
   const { t } = useTranslation();
+  const { formatDateTime } = useDateFormat();
+  const formatWhen = (value?: string | null): string => (value ? formatDateTime(value) || '-' : '-');
   const { toast } = useToast();
   // Webhook subscriptions are project-admin config: create/edit/delete all
   // require manage_projects (not plain write), so testers manage nothing here.

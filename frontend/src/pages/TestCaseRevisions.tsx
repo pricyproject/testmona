@@ -10,6 +10,7 @@ import {
 import { getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 import { useTestCaseRevisions, useRestoreRevision } from '@/hooks/queries/testCaseRevisions';
 
@@ -106,6 +107,7 @@ export function TestCaseRevisions() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
   const { toast } = useToast();
   // The URL carries the per-project sequence; resolve it to the global test-case id.
   const { id: testCaseId, loading: testCaseIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
@@ -231,18 +233,10 @@ export function TestCaseRevisions() {
     return Object.keys(revision.changed_fields).filter(Boolean);
   };
 
-  const formatDateTime = (value?: string): string => {
-    if (!value) return t('nA');
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return t('nA');
-    return date.toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
+  const formatDateTime = (value?: string): string =>
+    value
+      ? fmtDateTime(value, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) || t('nA')
+      : t('nA');
 
   const formatChangeReason = (value?: string): string => {
     if (!value) return '';

@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { TraceabilityMatrixPanel } from '@/components/reports/TraceabilityMatrix
 
 export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
   const { t } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const {
     coverageReports, testExecutionStatus, handleGenerateCoverageReport, error,
     setTraceabilityFilters, setTraceabilityPage, setSearchQuery,
@@ -39,7 +41,7 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
             <h2 className="text-xl font-semibold">{t('reportsTabCoverage')}</h2>
             {coverageReports.length > 0 && latestCoverage?.generated_at && (
               <p className="text-sm text-gray-600 mt-1">
-                {t('reports_coverageLastUpdated', { time: new Date(latestCoverage.generated_at).toLocaleString() })}
+                {t('reports_coverageLastUpdated', { time: formatDateTime(latestCoverage.generated_at) })}
               </p>
             )}
           </div>

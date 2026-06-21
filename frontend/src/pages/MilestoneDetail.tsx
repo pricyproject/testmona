@@ -48,6 +48,7 @@ import {
 } from '@/components/ui/table';
 
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { milestonesAPI, testPlansAPI, getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import type { Milestone, MilestoneHealth, MilestoneStatus } from '@/types';
@@ -104,12 +105,6 @@ const STATUS_LABEL_KEY: Record<MilestoneStatus, string> = {
   cancelled: 'milestoneStatusCancelled',
 };
 
-const formatDate = (value?: string | null): string => {
-  if (!value) return '-';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString();
-};
-
 const progressTone = (value: number): string => {
   if (value >= 90) return 'bg-emerald-500';
   if (value >= 60) return 'bg-blue-500';
@@ -140,6 +135,8 @@ export function MilestoneDetail() {
   const { projectId, milestoneId } = useParams<{ projectId: string; milestoneId: string }>();
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
+  const { formatDate: fmtDate } = useDateFormat();
+  const formatDate = (value?: string | null): string => (value ? fmtDate(value) || '-' : '-');
 
   const numericProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
   // The URL carries the per-project sequence; resolve it to the global milestone id.

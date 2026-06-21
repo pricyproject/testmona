@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { User, Clock, Bug, RefreshCw, Calendar } from 'lucide-react';
 import { formatDurationSeconds } from '@/utils/timeFormat';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useExecution } from './ExecutionContext';
 import { getStatusOption, getStatusBadgeClass } from './statusConfig';
 
@@ -11,6 +12,7 @@ export function ResultSummaryCard() {
     elapsedSeconds, executionStartedAt, resultDefectLinks, retestNeeded,
     openDefectDialog, canWrite,
   } = useExecution();
+  const { formatDateTime } = useDateFormat();
 
   const option = getStatusOption(executionStatus);
   const Icon = option?.icon;
@@ -55,7 +57,7 @@ export function ResultSummaryCard() {
           <div className="flex items-center justify-between gap-2">
             <dt className="flex items-center gap-1.5 text-slate-400"><Calendar className="h-3.5 w-3.5" />{t('executionStartedLabel')}</dt>
             <dd className="truncate font-medium text-slate-700 dark:text-slate-200">
-              {executionStartedAt ? new Date(executionStartedAt).toLocaleString() : t('nA')}
+              {executionStartedAt ? formatDateTime(executionStartedAt) : t('nA')}
             </dd>
           </div>
           <div className="flex items-center justify-between gap-2">

@@ -9,14 +9,9 @@ import {
 } from '@/components/ui/select';
 import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import { Bug, Plus, Link2, Link as LinkIcon, Unlink, RefreshCw, Copy, Check, Loader2 } from 'lucide-react';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useExecution } from './ExecutionContext';
 import type { DefectLinkType } from './types';
-
-const formatSnapshotDate = (value?: string | null): string => {
-  if (!value) return '-';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
-};
 
 const DEFECT_STATUSES: { value: string; labelKey: string }[] = [
   { value: 'open', labelKey: 'open' },
@@ -35,6 +30,8 @@ export function LinkedDefectsCard() {
     handleUnlinkDefect, handleCorrectLinkSnapshot,
     updatingDefectStatusId, handleUpdateLinkedDefectStatus,
   } = useExecution();
+  const { formatDateTime } = useDateFormat();
+  const formatSnapshotDate = (value?: string | null) => (value ? formatDateTime(value) || '-' : '-');
 
   return (
     <Card className="border-slate-200 dark:border-slate-800">

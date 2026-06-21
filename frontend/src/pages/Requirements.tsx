@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter, requirementFoldersAPI } from '@/lib/api';
 import { useRequirementsList, useRequirementFolders } from '@/hooks/queries/requirements';
 import { entitySeq } from '@/lib/utils';
@@ -74,7 +75,8 @@ export function Requirements() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const { t, isRTL, language } = useTranslation();
+  const { t, isRTL } = useTranslation();
+  const { formatDate: fmtDate, formatDateTime } = useDateFormat();
   const { user } = useAuthStore();
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   const numericProjectId = projectId ? parseInt(projectId) : null;
@@ -1599,7 +1601,7 @@ export function Requirements() {
           <option value="">{t('rteCompareFrom')}</option>
           {contentVersions.map((version) => (
             <option key={version.id} value={version.id}>
-              {new Date(version.createdAt).toLocaleString()}
+              {formatDateTime(version.createdAt)}
             </option>
           ))}
         </select>
@@ -1611,7 +1613,7 @@ export function Requirements() {
           <option value="">{t('rteCompareTo')}</option>
           {contentVersions.map((version) => (
             <option key={version.id} value={version.id}>
-              {new Date(version.createdAt).toLocaleString()}
+              {formatDateTime(version.createdAt)}
             </option>
           ))}
         </select>
@@ -1883,16 +1885,7 @@ export function Requirements() {
 
   // Safe, locale-aware date formatter — guards against missing or unparsable
   // timestamps so rows never render "Invalid Date".
-  const formatReqDate = (value?: string | null): string => {
-    if (!value) return '-';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '-';
-    try {
-      return date.toLocaleDateString(language);
-    } catch {
-      return date.toLocaleDateString();
-    }
-  };
+  const formatReqDate = (value?: string | null): string => (value ? fmtDate(value) || '-' : '-');
 
   // Portfolio summary for the header strip (derived from the loaded set).
   const summary = useMemo(() => {

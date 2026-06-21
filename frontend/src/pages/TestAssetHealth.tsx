@@ -579,8 +579,8 @@ function formatRelativeTime(iso: string | null | undefined, language: string): s
     if (abs < 3600) return rtf.format(Math.round(diffSec / 60), 'minute');
     if (abs < 86400) return rtf.format(Math.round(diffSec / 3600), 'hour');
     if (abs < 2592000) return rtf.format(Math.round(diffSec / 86400), 'day');
-    return date.toLocaleDateString(language);
+    return date.toLocaleDateString(language === 'fa' ? 'fa-IR' : language);
   } catch {
-    return date.toLocaleString();
+    return date.toLocaleString(language === 'fa' ? 'fa-IR' : language);
   }
 }

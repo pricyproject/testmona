@@ -42,6 +42,7 @@ import {
 
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useAuthStore } from '@/stores/authStore';
 import { projectAssignmentsAPI, projectsAPI, usersAPI, getApiErrorMessage } from '@/lib/api';
 import { isAdminUser, normalizeRole, USER_ROLES, type UserRole } from '@/utils/roles';
@@ -93,6 +94,7 @@ export function ProjectMembers() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { formatDate: fmtDate } = useDateFormat();
   const { toast } = useToast();
   const { user: currentUser } = useAuthStore();
 
@@ -272,11 +274,7 @@ export function ProjectMembers() {
     }
   };
 
-  const formatDate = (value?: string | null) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString();
-  };
+  const formatDate = (value?: string | null) => (value ? fmtDate(value) || '-' : '-');
 
   const roleLabel = (role: string) => {
     const normalized = normalizeRole(role);

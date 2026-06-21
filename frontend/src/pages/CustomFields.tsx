@@ -4,6 +4,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DateField } from '@/components/ui/DateField';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
@@ -850,21 +851,19 @@ export function CustomFields() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="space-y-2">
                                 <Label htmlFor="min-date" className="text-xs">{t('minDate')}</Label>
-                                <Input
+                                <DateField
                                   id="min-date"
-                                  type="date"
                                   value={minDate}
-                                  onChange={(e) => setMinDate(e.target.value)}
+                                  onChange={setMinDate}
                                   className="text-sm"
                                 />
                               </div>
                               <div className="space-y-2">
                                 <Label htmlFor="max-date" className="text-xs">{t('maxDate')}</Label>
-                                <Input
+                                <DateField
                                   id="max-date"
-                                  type="date"
                                   value={maxDate}
-                                  onChange={(e) => setMaxDate(e.target.value)}
+                                  onChange={setMaxDate}
                                   className="text-sm"
                                 />
                               </div>

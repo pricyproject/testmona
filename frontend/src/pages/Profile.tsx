@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { User, Mail, Calendar, Shield, Edit2, Save, X, AlertCircle, CheckCircle2, Undo, Redo, Lock, Camera, Trash2, Key, Upload, Download } from 'lucide-react';
 import { PasswordChangeDialog } from '@/components/Profile/PasswordChangeDialog';
 import { AccountDeleteDialog } from '@/components/Profile/AccountDeleteDialog';
@@ -161,6 +162,7 @@ const validateCompany = (company: string, t: any): { valid: boolean; error?: str
 export function Profile() {
   const { user, setUser } = useAuthStore();
   const { t } = useTranslation();
+  const { formatDate } = useDateFormat();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -963,7 +965,7 @@ export function Profile() {
               </div>
               <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
                 <Calendar className="mr-2 h-4 w-4" />
-                Joined {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'N/A'}
+                Joined {user?.created_at ? formatDate(user.created_at, { month: 'long', year: 'numeric' }) : 'N/A'}
               </div>
               <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
                 <Shield className="mr-2 h-4 w-4" />

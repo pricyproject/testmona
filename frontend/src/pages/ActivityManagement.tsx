@@ -40,6 +40,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { auditAPI, getApiErrorMessage } from '@/lib/api';
 import { AuditTrail, AuditTrailFilters, AuditAction, EntityType } from '@/types';
 
@@ -149,6 +150,7 @@ const ENTITY_TYPES = Object.keys(ENTITY_LABELS) as EntityType[];
 
 export function ActivityManagement() {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
   const [auditTrails, setAuditTrails] = useState<AuditTrail[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -380,10 +382,7 @@ export function ActivityManagement() {
     auditTrail.user_full_name || auditTrail.username || `${t('auditUser')} ${auditTrail.user_id}`
   );
 
-  const formatDateTime = (value: string) => {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? t('notAvailable') : date.toLocaleString();
-  };
+  const formatDateTime = (value: string) => fmtDateTime(value) || t('notAvailable');
 
   return (
     <div className="space-y-6">

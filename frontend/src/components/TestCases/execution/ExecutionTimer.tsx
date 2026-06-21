@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Clock, PlayCircle, Pause, RotateCcw } from 'lucide-react';
 import { formatDurationSeconds } from '@/utils/timeFormat';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useExecution } from './ExecutionContext';
 
 const PHASE_DOT: Record<string, string> = {
@@ -15,6 +16,7 @@ export function ExecutionTimer() {
     t, elapsedSeconds, executionStartedAt, executionState, canWrite,
     handleStartTimer, handlePauseExecution, handleResetTimer, setShowManualTimeDialog,
   } = useExecution();
+  const { formatDateTime } = useDateFormat();
 
   const phaseLabelKey: Record<string, string> = {
     running: 'running', paused: 'paused', completed: 'phaseCompleted', idle: 'notStarted',
@@ -41,7 +43,7 @@ export function ExecutionTimer() {
             {elapsedText}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">
-            {t('executionStartedLabel')}: {executionStartedAt ? new Date(executionStartedAt).toLocaleString() : t('nA')}
+            {t('executionStartedLabel')}: {executionStartedAt ? formatDateTime(executionStartedAt) : t('nA')}
           </p>
         </div>
         <div className="flex items-center gap-2">

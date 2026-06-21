@@ -61,6 +61,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 
 interface SectionNode {
@@ -84,6 +85,7 @@ export function TestSuites() {
   const { projectId } = useParams<{ projectId?: string }>();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const { formatDate } = useDateFormat();
   const { canWrite } = usePermissions();
   
   // Dialog states
@@ -1069,7 +1071,7 @@ export function TestSuites() {
                             {t('createdLabel')}
                           </div>
                           <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
-                            {new Date(suite.created_at).toLocaleDateString()}
+                            {formatDate(suite.created_at)}
                           </p>
                         </div>
                         <div className="rounded-2xl bg-slate-50 p-3 dark:bg-slate-900">

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { DateField } from '@/components/ui/DateField';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -96,6 +98,7 @@ const upcomingCount = (upcoming: any, countKey: string, listKey: string) =>
 
 export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
   const { t, isRTL } = useTranslation();
+  const { formatDate, formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const { selectedProject, shareableReports, loadShareableReports, handleExportReport } = ctx;
   const isLoading = !!ctx.loadingByTab.shareable;
@@ -364,7 +367,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
                                     ? report.shared_with.join(', ')
                                     : t('reports_publicLinkAudience')}
                                 </p>
-                                <p>{t('reports_expiresLabel')} {report.expires_at ? new Date(report.expires_at).toLocaleDateString() : t('reports_never')}</p>
+                                <p>{t('reports_expiresLabel')} {report.expires_at ? formatDate(report.expires_at) : t('reports_never')}</p>
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button variant="outline" size="sm" onClick={() => handlePreview(report)} disabled={busy}>
@@ -462,11 +465,11 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
                       <>
                         <div>
                           <Label>{t('reports_periodStart')}</Label>
-                          <Input type="date" value={newReport.period_start} onChange={(e) => setNewReport({ ...newReport, period_start: e.target.value })} />
+                          <DateField value={newReport.period_start} onChange={(v) => setNewReport({ ...newReport, period_start: v })} />
                         </div>
                         <div>
                           <Label>{t('reports_periodEnd')}</Label>
-                          <Input type="date" value={newReport.period_end} onChange={(e) => setNewReport({ ...newReport, period_end: e.target.value })} />
+                          <DateField value={newReport.period_end} onChange={(v) => setNewReport({ ...newReport, period_end: v })} />
                         </div>
                       </>
                     )}
@@ -585,7 +588,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
 
                 <p className="text-xs text-gray-500">
                   {t('reports_previewGeneratedBy', { user: previewContent.generated_by || 'N/A' })}
-                  {previewContent.generated_at ? t('reports_previewGeneratedAt', { time: new Date(previewContent.generated_at).toLocaleString() }) : ''}
+                  {previewContent.generated_at ? t('reports_previewGeneratedAt', { time: formatDateTime(previewContent.generated_at) }) : ''}
                 </p>
 
                 {previewContent.kpis && (
@@ -726,7 +729,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
                     </div>
                     {previewContent.upcoming.milestone && (
                       <p className="mt-2 text-xs text-gray-600">
-                        {t('reports_upcomingMilestone', { title: previewContent.upcoming.milestone.title, date: previewContent.upcoming.milestone.target_date ? new Date(previewContent.upcoming.milestone.target_date).toLocaleDateString() : 'N/A' })}
+                        {t('reports_upcomingMilestone', { title: previewContent.upcoming.milestone.title, date: previewContent.upcoming.milestone.target_date ? formatDate(previewContent.upcoming.milestone.target_date) : 'N/A' })}
                       </p>
                     )}
                     {Array.isArray(previewContent.upcoming.scheduled_runs) && previewContent.upcoming.scheduled_runs.length > 0 && (

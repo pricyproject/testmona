@@ -10,6 +10,7 @@ import {
 import { customFieldsAPI, projectsAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { CustomFieldDefinition } from '@/types';
 import { formatDurationSeconds } from '@/utils/timeFormat';
 import type { TranslationKey } from '@/locales/translations';
@@ -46,6 +47,7 @@ export function TestRunReport() {
   // The URL carries the per-project sequence; resolve it to the global test-run id.
   const { id: runGlobalId, loading: runIdLoading } = useResolvedEntityId(projectId, 'test-runs', testRunId);
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const [testRun, setTestRun] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
   const [testResults, setTestResults] = useState<any[]>([]);
@@ -327,7 +329,7 @@ export function TestRunReport() {
             <p className="text-lg text-gray-700">{testRun?.name}</p>
           </div>
           <div className="text-sm text-gray-600 print:min-w-56">
-            <p>{t('generatedAt')}: {new Date().toLocaleString()}</p>
+            <p>{t('generatedAt')}: {formatDateTime(new Date())}</p>
             <p>{t('projectNameLabel')}: {project?.name || t('notAvailableShort')}</p>
             <p>{t('projectIdLabel')}: {project?.id || projectId || t('notAvailableShort')}</p>
             <p>{t('runId')}: {testRun?.id || t('notAvailableShort')}</p>
@@ -412,15 +414,15 @@ export function TestRunReport() {
             </div>
             <div>
               <p className="text-gray-600 text-xs">{t('created')}</p>
-              <p className="font-medium">{testRun?.created_at ? new Date(testRun.created_at).toLocaleString() : t('notAvailableShort')}</p>
+              <p className="font-medium">{testRun?.created_at ? formatDateTime(testRun.created_at) : t('notAvailableShort')}</p>
             </div>
             <div>
               <p className="text-gray-600 text-xs">{t('started')}</p>
-              <p className="font-medium">{testRun?.started_at ? new Date(testRun.started_at).toLocaleString() : t('notAvailableShort')}</p>
+              <p className="font-medium">{testRun?.started_at ? formatDateTime(testRun.started_at) : t('notAvailableShort')}</p>
             </div>
             <div>
               <p className="text-gray-600 text-xs">{t('completedLabel')}</p>
-              <p className="font-medium">{testRun?.completed_at ? new Date(testRun.completed_at).toLocaleString() : t('inProgress')}</p>
+              <p className="font-medium">{testRun?.completed_at ? formatDateTime(testRun.completed_at) : t('inProgress')}</p>
             </div>
           </div>
         </CardContent>
@@ -603,10 +605,10 @@ export function TestRunReport() {
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{getUserName(result.executed_by)}</td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
-                      {result.execution_started_at ? new Date(result.execution_started_at).toLocaleString() : t('notAvailableShort')}
+                      {result.execution_started_at ? formatDateTime(result.execution_started_at) : t('notAvailableShort')}
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">
-                      {result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notAvailableShort')}
+                      {result.executed_at ? formatDateTime(result.executed_at) : t('notAvailableShort')}
                     </td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{formatDurationSeconds(result.execution_time, t)}</td>
                     <td className="px-4 py-2 text-xs print:px-2 print:py-1 print:align-top">{result.comments || '-'}</td>

@@ -5,22 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { testCasesAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { formatDurationSeconds } from '@/utils/timeFormat';
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
 
 const formatLabel = (value?: string | null) => {
   if (!value) return 'Unknown';
@@ -57,6 +45,11 @@ export function TestCaseExecutionHistory() {
   const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
   const navigate = useNavigate();
   const { t, isRTL, language } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
+  const formatDateTime = (value?: string | null) =>
+    value
+      ? fmtDateTime(value, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) || 'N/A'
+      : 'N/A';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [testCase, setTestCase] = useState<any>(null);

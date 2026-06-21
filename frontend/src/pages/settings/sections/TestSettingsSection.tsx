@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { SettingsSection, SettingToggleRow } from '../components/SettingsPrimitives';
 import { TestManagementData } from '../hooks/useTestManagementData';
 
@@ -16,6 +17,7 @@ const clampInt = (raw: string, min: number, max: number, fallback: number) => {
 
 export function TestSettingsSection({ data }: { data: TestManagementData }) {
   const { t } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const exec = data.testExecutionSettings;
   const notif = data.notificationSettings;
   const autom = data.automationSettings;
@@ -110,7 +112,7 @@ export function TestSettingsSection({ data }: { data: TestManagementData }) {
           </div>
           {prefs.notifications_muted_until && (
             <div className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-              {t('notificationsMutedUntil', { date: new Date(prefs.notifications_muted_until).toLocaleString() })}
+              {t('notificationsMutedUntil', { date: formatDateTime(prefs.notifications_muted_until) })}
             </div>
           )}
         </div>

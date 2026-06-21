@@ -31,6 +31,7 @@ import { RequirementVersionHistory } from '@/components/requirements/Requirement
 import { WatchButton } from '@/components/WatchButton';
 import { RequirementComments } from '@/components/requirements/RequirementComments';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 import { aiManagerAPI, AIManagerStatus, requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
 import { sanitizeHtml } from '@/lib/sanitize';
@@ -42,17 +43,6 @@ const hasRenderableContent = (decodedHtml: string): boolean => {
   const documentValue = new DOMParser().parseFromString(decodedHtml, 'text/html');
   return Boolean(documentValue.body.textContent?.trim())
     || Boolean(documentValue.body.querySelector('img, table, hr'));
-};
-
-const formatDate = (value?: string | null): string => {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 };
 
 const getStatusBadge = (status: string) => {
@@ -226,6 +216,9 @@ export function RequirementDetail() {
   const compareDeepLink = searchParams.get('compare') === '1';
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
+  const { formatDate: fmtDate } = useDateFormat();
+  const formatDate = (value?: string | null): string =>
+    value ? fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) || 'N/A' : 'N/A';
   const { toast } = useToast();
   const [requirement, setRequirement] = useState<Requirement | null>(null);
   const [requirementRefreshKey, setRequirementRefreshKey] = useState(0);

@@ -61,6 +61,8 @@ import { useQuery } from '@tanstack/react-query';
 import { milestonesAPI, testPlansAPI } from '@/lib/api';
 import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { DateField } from '@/components/ui/DateField';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useTestPlanMembers, type TestPlanMember } from '@/hooks/queries/testPlans';
@@ -695,8 +697,23 @@ function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDel
   );
 }
 
+// Render the UTC date portion in the user's locale (Jalali for fa) without
+// tz-shifting day boundaries. `fmtDate` comes from useDateFormat().
+function formatMilestoneDate(
+  value: string,
+  fmtDate: ReturnType<typeof useDateFormat>['formatDate'],
+): string {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (parts) {
+    const utcMidday = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
+    return fmtDate(utcMidday, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
+  return fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 function MilestoneCard(props: CardProps) {
   const { milestone, t, isRTL, projectId, navigate } = props;
+  const { formatDate: fmtDate } = useDateFormat();
   const health = healthMeta(milestone.health, t);
   const status = statusMeta(milestone.status, t);
   const HealthIcon = health.icon;
@@ -760,7 +777,7 @@ function MilestoneCard(props: CardProps) {
         <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-4">
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <CalendarDays className="h-3.5 w-3.5" />
-            {milestone.target_date ? formatDate(milestone.target_date) : t('noTargetDate')}
+            {milestone.target_date ? formatMilestoneDate(milestone.target_date, fmtDate) : t('noTargetDate')}
           </span>
           {milestone.test_plan_count === 0 ? (
             <Button
@@ -899,11 +916,12 @@ function RowCount({ value, icon: Icon, label, warning = false }: { value: number
 }
 
 function ScheduleBadge({ days, milestone, t }: { days: number | null; milestone: Milestone; t: TFn }) {
+  const { formatDate: fmtDate } = useDateFormat();
   if (milestone.status === 'completed') {
     return (
       <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
         <CheckCircle2 className="h-3 w-3" />
-        {milestone.actual_date ? t('completedOn', { date: formatDate(milestone.actual_date) }) : t('completed')}
+        {milestone.actual_date ? t('completedOn', { date: formatMilestoneDate(milestone.actual_date, fmtDate) }) : t('completed')}
       </Badge>
     );
   }
@@ -1196,12 +1214,11 @@ function MilestoneFormDialog({
             <Label htmlFor="milestone-target">{t('targetDate')}</Label>
             <div className="relative">
               <CalendarDays className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
-              <Input
+              <DateField
                 id="milestone-target"
-                type="date"
                 value={form.targetDate}
                 className={isRTL ? 'pr-9' : 'pl-9'}
-                onChange={(event) => update({ targetDate: event.target.value })}
+                onChange={(value) => update({ targetDate: value })}
               />
             </div>
             <p className="text-xs text-muted-foreground">
@@ -1216,12 +1233,11 @@ function MilestoneFormDialog({
               <Label htmlFor="milestone-actual">{t('actualDate')}</Label>
               <div className="relative">
                 <CheckCircle2 className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
-                <Input
+                <DateField
                   id="milestone-actual"
-                  type="date"
                   value={form.actualDate}
                   className={isRTL ? 'pr-9' : 'pl-9'}
-                  onChange={(event) => update({ actualDate: event.target.value })}
+                  onChange={(value) => update({ actualDate: value })}
                 />
               </div>
             </div>
@@ -1439,13 +1455,3 @@ function getHealthBarClass(health: MilestoneHealth) {
   return map[health] || map.planned;
 }
 
-function formatDate(value: string) {
-  // Render the UTC date portion in the user's locale without tz-shifting day boundaries
-  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (parts) {
-    const utcMidday = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
-    return utcMidday.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-  }
-  const fallback = new Date(value);
-  return Number.isFinite(fallback.getTime()) ? fallback.toLocaleDateString() : '';
-}

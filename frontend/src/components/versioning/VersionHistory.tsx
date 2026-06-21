@@ -18,7 +18,7 @@ import {
   User,
   Calendar
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { TestCaseVersion, VersionTag } from '../../types/versioning';
 import { versioningApi } from '../../api/versioning';
 
@@ -145,9 +145,8 @@ export const VersionHistory: React.FC<VersionHistoryProps> = ({
     return selectedVersions.some(v => v.id === version.id);
   };
 
-  const formatDate = (dateString: string) => {
-    return formatDistanceToNow(new Date(dateString), { addSuffix: true });
-  };
+  const { formatRelative } = useDateFormat();
+  const formatDate = (dateString: string) => formatRelative(dateString);
 
   if (loading) {
     return (

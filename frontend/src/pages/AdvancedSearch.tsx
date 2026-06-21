@@ -41,6 +41,7 @@ import {
   type SavedSearch,
 } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 
 // Per-entity detail routes so result rows link back to the real record.
@@ -360,6 +361,7 @@ export function AdvancedSearch() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation();
+  const { formatDate: fmtDate } = useDateFormat();
   const { toast } = useToast();
 
   // A shared ?entity=/?tql= link wins; otherwise fall back to the last query the
@@ -759,7 +761,7 @@ export function AdvancedSearch() {
   const metaColumns = metaColumnsFor(entityKey);
 
   const formatDate = (value?: string) =>
-    value ? new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
+    value ? fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
 
   // The accent stripe reflects the strongest available signal on the row.
   const accentTone = (row: Record<string, any>): keyof typeof TONE =>

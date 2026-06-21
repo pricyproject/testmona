@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useAuthStore } from '@/stores/authStore';
 import { getApiErrorMessage, requirementsAPI } from '@/lib/api';
 import { useRequirementComments, useRequirementCommentMembers } from '@/hooks/queries/requirementComments';
@@ -38,6 +39,7 @@ interface Props {
 
 export function RequirementComments({ requirementId, projectId, canComment }: Props) {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const currentUser = useAuthStore((s) => s.user);
 
@@ -142,7 +144,7 @@ export function RequirementComments({ requirementId, projectId, canComment }: Pr
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold">{authorName}</span>
-                <span className="text-xs text-muted-foreground">{new Date(comment.created_at).toLocaleString()}</span>
+                <span className="text-xs text-muted-foreground">{formatDateTime(comment.created_at)}</span>
                 {comment.is_resolved && (
                   <Badge className="border-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                     <CheckCircle2 className="me-1 h-3 w-3" /> {t('resolved')}

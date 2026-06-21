@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useAuthStore } from '@/stores/authStore';
 import { getApiErrorMessage } from '@/lib/api';
 import { defectManagementAPI, type DefectComment } from '@/lib/defectManagementAPI';
@@ -41,6 +42,7 @@ interface Props {
 
 export function DefectComments({ defectId, projectId, defectLabel, canComment }: Props) {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const currentUser = useAuthStore((s) => s.user);
 
@@ -167,7 +169,7 @@ export function DefectComments({ defectId, projectId, defectLabel, canComment }:
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold">{authorName}</span>
-                <span className="text-xs text-muted-foreground">{new Date(comment.created_at).toLocaleString()}</span>
+                <span className="text-xs text-muted-foreground">{formatDateTime(comment.created_at)}</span>
                 {comment.is_internal && (
                   <Badge className="border-0 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
                     <Lock className="me-1 h-3 w-3" /> {t('internal')}

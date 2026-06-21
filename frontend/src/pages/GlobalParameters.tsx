@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useAuthStore } from '@/stores/authStore';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
@@ -68,6 +69,7 @@ interface ManagerProps {
 
 function ParametersManager({ projectId }: ManagerProps) {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const user = useAuthStore((state) => state.user);
   const { canWrite } = usePermissions();
@@ -313,7 +315,7 @@ function ParametersManager({ projectId }: ManagerProps) {
               </p>
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">
-              {t('created')}: {new Date(param.created_at).toLocaleString()}
+              {t('created')}: {formatDateTime(param.created_at)}
             </div>
           </div>
         </CardContent>

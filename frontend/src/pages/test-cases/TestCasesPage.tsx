@@ -84,6 +84,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
@@ -126,6 +127,7 @@ type AIAssistantAction = 'suggest_steps' | 'improve_expected_result' | 'add_nega
 
 export function TestCases() {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { canWrite } = usePermissions();
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
@@ -4412,7 +4414,7 @@ export function TestCases() {
                   <div className="flex items-center justify-between mb-1">
                     <Badge variant="secondary">{t('revision')} #{rev.revision_number || rev.version}</Badge>
                     <span className="text-xs text-gray-500 flex items-center">
-                      <Clock className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {new Date(rev.created_at).toLocaleString()}
+                      <Clock className={`h-3 w-3 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {formatDateTime(rev.created_at)}
                     </span>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded-lg border border-gray-100 dark:border-gray-800">

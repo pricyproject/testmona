@@ -20,6 +20,7 @@ import {
   AIUsageSummary, AISourceType, AIRoutingSettings, AIRoutingTarget,
 } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 
 const defaultAIProviders: AIProviderConfig[] = [
@@ -148,6 +149,7 @@ function AIRoutingRow({
 
 export function AIManagerTab() {
   const { t } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
 
   const [aiManagerSettings, setAIManagerSettings] = useState<AIManagerSettings>(defaultAIManagerSettings);
@@ -1037,7 +1039,7 @@ export function AIManagerTab() {
                               {t('aiProviderTokens', { count: event.total_tokens ?? 0 })}
                             </span>
                             <time className="text-xs text-gray-500 dark:text-gray-400">
-                              {event.created_at ? new Date(event.created_at).toLocaleString() : t('unknown')}
+                              {event.created_at ? formatDateTime(event.created_at) : t('unknown')}
                             </time>
                           </div>
                         ))}

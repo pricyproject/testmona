@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { DateField } from '@/components/ui/DateField';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -232,10 +233,9 @@ export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = 
     }
     if (fieldType === 'date') {
       return (
-        <Input
-          type="date"
+        <DateField
           value={draft}
-          onChange={(e) => setDraft(field.id, e.target.value)}
+          onChange={(value) => setDraft(field.id, value)}
           disabled={disabled}
         />
       );

@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { IssueTrackerIntegration } from '@/lib/defectManagementAPI';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAppName } from '@/hooks/useAppName';
 import { cn } from '@/lib/utils';
@@ -37,6 +38,7 @@ const TRACKER_TYPES: Array<{ value: string; label: string }> = [
 
 export function IntegrationsTab({ projectId }: { projectId?: number }) {
   const { t } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { appName } = useAppName();
   const data = useIntegrations(projectId);
   const { canManageProject } = useProjectPermissions(data.selectedProjectId);
@@ -146,7 +148,7 @@ export function IntegrationsTab({ projectId }: { projectId?: number }) {
                     <Badge className={cn('border-transparent', syncStatusBadgeClass(integration.sync_status))}>{integration.sync_status}</Badge>
                   </div>
                   {integration.last_sync && (
-                    <p className="text-xs text-muted-foreground">{t('lastSync')}: {new Date(integration.last_sync).toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">{t('lastSync')}: {formatDateTime(integration.last_sync)}</p>
                   )}
                   {integration.sync_error && (
                     <p className="mt-1 inline-flex items-center gap-1 text-xs text-destructive">

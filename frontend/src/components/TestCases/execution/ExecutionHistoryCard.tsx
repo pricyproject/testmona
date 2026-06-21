@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { History } from 'lucide-react';
 import { formatDurationSeconds } from '@/utils/timeFormat';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useExecution } from './ExecutionContext';
 import { formatStatusLabel } from './statusConfig';
 
@@ -9,6 +10,7 @@ export function ExecutionHistoryCard() {
   const {
     t, historyByRun, historySummary, historyLoadError, executionHistory, openRunExecution,
   } = useExecution();
+  const { formatDateTime } = useDateFormat();
 
   return (
     <Card className="border-slate-200 dark:border-slate-800">
@@ -60,7 +62,7 @@ export function ExecutionHistoryCard() {
                     <p className="mt-1 text-[11px] text-slate-400">
                       {t('lastExecutedByAt', {
                         executor: run.latestExecutor,
-                        date: run.lastExecutedAt ? new Date(run.lastExecutedAt).toLocaleString() : t('nA'),
+                        date: run.lastExecutedAt ? formatDateTime(run.lastExecutedAt) : t('nA'),
                       })}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-slate-400">
@@ -89,9 +91,9 @@ export function ExecutionHistoryCard() {
                       {t('executorLabel')}: {item.executed_by_full_name || item.executed_by || t('unknown')}
                       {item.executed_by_email ? ` (${item.executed_by_email})` : ''}
                     </p>
-                    <p>{t('executionDateLabel')}: {item.executed_at ? new Date(item.executed_at).toLocaleString() : t('nA')}</p>
+                    <p>{t('executionDateLabel')}: {item.executed_at ? formatDateTime(item.executed_at) : t('nA')}</p>
                     <p>{t('runStatusLabel')}: {item.test_run_status || t('unknown')}</p>
-                    {item.execution_started_at && <p>{t('executionStartedLabel')}: {new Date(item.execution_started_at).toLocaleString()}</p>}
+                    {item.execution_started_at && <p>{t('executionStartedLabel')}: {formatDateTime(item.execution_started_at)}</p>}
                     {item.execution_time != null && <p>{t('executionTimeLabel')}: {formatDurationSeconds(item.execution_time, t)}</p>}
                     {item.actual_result && <p>{t('actualResultLabel')}: {item.actual_result}</p>}
                     {item.comments && <p>{t('comments')}: <span className="italic">"{item.comments}"</span></p>}

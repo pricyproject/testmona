@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { FileText, TestTube, PlayCircle, TrendingUp, Users, Bug, FileCheck, Target, ExternalLink, AlertTriangle, Flag, Calendar, Loader2, CheckCircle, ShieldCheck, ArrowUpRight, ChevronRight } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { auditAPI, analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useProjectStore } from '@/stores/projectStore';
 import { AuditAction, AuditTrail, EntityType } from '@/types';
@@ -183,12 +184,6 @@ const formatEntityLabel = (entityType: EntityType | undefined, t: (key: any, par
   return labelKey ? t(labelKey as any) : humanizeToken(entityType);
 };
 
-const formatDateTime = (value?: string, fallback = '') => {
-  if (!value) return fallback;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? fallback : date.toLocaleString();
-};
-
 const ActivityIcon = ({ activity }: { activity: AuditTrail }) => {
   const action = activity.action?.toLowerCase();
   const entityType = activity.entity_type?.toLowerCase();
@@ -207,6 +202,7 @@ const ActivityIcon = ({ activity }: { activity: AuditTrail }) => {
 
 export function Dashboard() {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const navigate = useNavigate();
   const { selectedProject } = useProjectStore();
   const [recentActivities, setRecentActivities] = useState<AuditTrail[]>([]);
@@ -765,7 +761,7 @@ export function Dashboard() {
                         {activity.description && <span className="text-gray-600 dark:text-gray-400 font-normal">: {formatActivityDescription(activity.description, t)}</span>}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {formatDateTime(activity.created_at, t('unknownTime'))}
+                        {formatDateTime(activity.created_at) || t('unknownTime')}
                       </p>
                     </div>
                     <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">

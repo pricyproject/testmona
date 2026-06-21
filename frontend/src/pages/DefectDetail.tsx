@@ -38,6 +38,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { getApiErrorMessage } from '@/lib/api';
 import {
   useDefectDetail,
@@ -74,12 +75,6 @@ type DefectEditForm = {
   tags: string;
   external_issue_url: string;
   requirement_id: string;
-};
-
-const formatDateTime = (value?: string | null): string => {
-  if (!value) return '-';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
 };
 
 const splitTags = (value?: string | null): string[] =>
@@ -131,6 +126,8 @@ export function DefectDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
+  const formatDateTime = (value?: string | null): string => (value ? fmtDateTime(value) || '-' : '-');
   const [updatingLinkId, setUpdatingLinkId] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<DefectEditForm>(() => buildEditForm(null));
@@ -994,6 +991,8 @@ function ResultLinkCard({
   onClearFailingStep: () => void;
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
+  const { formatDateTime: fmtDateTime } = useDateFormat();
+  const formatDateTime = (value?: string | null): string => (value ? fmtDateTime(value) || '-' : '-');
   const result = link.result_snapshot?.test_result || {};
   const testCase = link.result_snapshot?.test_case || {};
   const testRun = link.result_snapshot?.test_run || {};

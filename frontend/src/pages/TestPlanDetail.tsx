@@ -38,6 +38,7 @@ import { WatchButton } from '@/components/WatchButton';
 import { testPlansAPI, testRunsAPI, getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { TestRun } from '@/types';
 
 type TestPlanStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'blocked' | 'completed';
@@ -97,21 +98,20 @@ const parsePositiveInteger = (value?: string): number | null => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-const formatDate = (value: string | null | undefined, fallback: string): string => {
-  if (!value) return fallback;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (parts) {
-    const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
-    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-  }
-  const fallbackDate = new Date(value);
-  return Number.isFinite(fallbackDate.getTime()) ? fallbackDate.toLocaleDateString() : fallback;
-};
-
 export function TestPlanDetail() {
   const navigate = useNavigate();
   const { projectId, testPlanId } = useParams<{ projectId: string; testPlanId: string }>();
   const { t, isRTL } = useTranslation();
+  const { formatDate: fmtDate } = useDateFormat();
+  const formatDate = (value: string | null | undefined, fallback: string): string => {
+    if (!value) return fallback;
+    const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+    if (parts) {
+      const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12));
+      return fmtDate(date, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) || fallback;
+    }
+    return fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) || fallback;
+  };
   const numericProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
   // The URL carries the per-project sequence; resolve it to the global test-plan id.
   const { id: numericPlanId, loading: planIdLoading } = useResolvedEntityId(projectId, 'test-plans', testPlanId);

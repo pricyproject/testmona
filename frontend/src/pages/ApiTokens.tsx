@@ -30,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { apiTokensAPI, getApiErrorMessage } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 
 interface TokenRow {
@@ -42,14 +43,10 @@ interface TokenRow {
   created_at: string;
 }
 
-const formatWhen = (value?: string | null, fallback = '-'): string => {
-  if (!value) return fallback;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? fallback : d.toLocaleString();
-};
-
 export function ApiTokens() {
   const { t } = useTranslation();
+  const { formatDateTime } = useDateFormat();
+  const formatWhen = (value?: string | null, fallback = '-'): string => (value ? formatDateTime(value) || fallback : fallback);
   const { toast } = useToast();
   const { canWrite } = usePermissions();
   const [tokens, setTokens] = useState<TokenRow[]>([]);

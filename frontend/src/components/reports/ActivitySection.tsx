@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -52,6 +53,7 @@ const humanize = (value: string) => String(value || '').replace(/_/g, ' ').trim(
 
 export function ActivitySection({ ctx }: { ctx: ReportsData }) {
   const { t } = useTranslation();
+  const { formatDate } = useDateFormat();
   const isAdmin = isAdminUser(useAuthStore((s) => s.user));
   const {
     activityStats, testActivity, timeRange, setTimeRange,
@@ -110,7 +112,7 @@ export function ActivitySection({ ctx }: { ctx: ReportsData }) {
     // only the last 30 (contradicting the range-scoped KPIs). The x-axis thins
     // its own ticks to stay readable.
     const points = source.map((day) => ({
-      label: new Date(day.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      label: formatDate(day.date, { month: 'short', day: 'numeric' }),
       added: Number(day.added || 0),
       modified: Number(day.modified || 0),
       executed: Number(day.executed || 0),
@@ -126,7 +128,7 @@ export function ActivitySection({ ctx }: { ctx: ReportsData }) {
     };
     const hasSignal = points.some((p) => p.added + p.modified + p.executed > 0);
     return { points, totals, hasSignal };
-  }, [testActivity]);
+  }, [testActivity, formatDate]);
 
   const refresh = () => { void loadActivityStatistics(); void loadTestActivity(); };
 

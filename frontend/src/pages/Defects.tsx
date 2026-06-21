@@ -16,6 +16,7 @@ import { SearchableTestCaseSelect } from '@/components/Defects/SearchableTestCas
 import { DefectComments } from '@/components/Defects/DefectComments';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAppName } from '@/hooks/useAppName';
 import {
@@ -103,12 +104,6 @@ const DEFECT_SEVERITY_OPTIONS = ['low', 'medium', 'high', 'critical'];
 const DEFECT_PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
 
 const isSafeHexColor = (value?: string): value is string => /^#[0-9a-f]{6}$/i.test(value || '');
-
-const formatSnapshotDate = (value?: string | null): string => {
-  if (!value) return '-';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
-};
 
 const loadAllProjectTestCases = async (numericProjectId: number) => {
   const allTestCases: any[] = [];
@@ -288,7 +283,9 @@ export function Defects() {
   const { projectId, defectId: routeDefectId } = useParams();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const { t, isRTL, language } = useTranslation();
+  const { t, isRTL } = useTranslation();
+  const { formatDate, formatDateTime } = useDateFormat();
+  const formatSnapshotDate = (value?: string | null): string => (value ? formatDateTime(value) || '-' : '-');
   const { canWrite } = usePermissions();
   const { appName } = useAppName(false);
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
@@ -1011,17 +1008,7 @@ export function Defects() {
 
   // Safe, locale-aware date formatter — guards against missing or unparsable
   // timestamps so the table/board/list never render "Invalid Date".
-  const formatDefectDate = (value?: string | null): string => {
-    if (!value) return '-';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return '-';
-    try {
-      return date.toLocaleDateString(language);
-    } catch {
-      // Bad/unsupported locale tag — fall back to the runtime default.
-      return date.toLocaleDateString();
-    }
-  };
+  const formatDefectDate = (value?: string | null): string => (value ? formatDate(value) || '-' : '-');
 
   // Bucket the filtered defects into board (kanban) columns. Any defect whose
   // status isn't one of the known lifecycle states (legacy/custom/empty values)
@@ -1703,7 +1690,7 @@ export function Defects() {
                             </div>
                             {integration.last_sync && (
                               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {t('lastSyncLabel')}: {new Date(integration.last_sync).toLocaleString()}
+                                {t('lastSyncLabel')}: {formatDateTime(integration.last_sync)}
                               </p>
                             )}
                             {integration.sync_error && (

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { requirementsAPI } from '@/lib/api';
 import type { RequirementVersion } from '@/types';
 
@@ -38,25 +39,6 @@ const stripHtml = (value?: string | null): string => {
   return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
 };
 
-const timeAgo = (iso: string): string => {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '';
-  const thresholds: Array<[number, Intl.RelativeTimeFormatUnit]> = [
-    [60, 'second'], [3600, 'minute'], [86400, 'hour'], [604800, 'day'], [2629800, 'week'], [31557600, 'month'], [Number.POSITIVE_INFINITY, 'year'],
-  ];
-  const divisors: Record<string, number> = { second: 1, minute: 60, hour: 3600, day: 86400, week: 604800, month: 2629800, year: 31557600 };
-  const seconds = Math.round((Date.now() - then) / 1000);
-  let unit: Intl.RelativeTimeFormatUnit = 'second';
-  for (const [limit, candidate] of thresholds) {
-    if (Math.abs(seconds) < limit) { unit = candidate; break; }
-  }
-  try {
-    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(-Math.round(seconds / divisors[unit]), unit);
-  } catch {
-    return new Date(iso).toLocaleString();
-  }
-};
-
 const actionMeta: Record<string, { icon: typeof Plus; tone: string }> = {
   created: { icon: Plus, tone: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
   updated: { icon: Pencil, tone: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
@@ -65,6 +47,7 @@ const actionMeta: Record<string, { icon: typeof Plus; tone: string }> = {
 
 export function RequirementVersionHistory({ requirementId, canEdit, onRestored, defaultCompare = false }: Props) {
   const { t, isRTL } = useTranslation();
+  const { formatRelative } = useDateFormat();
   const { toast } = useToast();
   const [versions, setVersions] = useState<RequirementVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,7 +176,7 @@ export function RequirementVersionHistory({ requirementId, canEdit, onRestored, 
                     {isLatest && <Badge variant="outline">{t('current')}</Badge>}
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Clock className="h-3 w-3" />
-                      {timeAgo(version.created_at)}
+                      {formatRelative(version.created_at)}
                     </span>
                     {version.author && (
                       <span className="text-xs text-muted-foreground">· {version.author.full_name || version.author.username}</span>

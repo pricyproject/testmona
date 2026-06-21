@@ -24,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { WatchButton } from '@/components/WatchButton';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
@@ -36,18 +37,6 @@ type CustomFieldDisplayRow = { field: CustomFieldDefinition | null; value: strin
 
 const SIDEBAR_VISIBLE_STORAGE_KEY = 'testCaseDetail.showSidebar';
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
 
 const formatStatusLabel = (status?: string | null) => {
   if (!status) return 'Unknown';
@@ -70,6 +59,11 @@ const getCustomFieldOptions = (field: CustomFieldDefinition): string[] => {
 
 export function TestCaseDetail() {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime: fmtDateTime } = useDateFormat();
+  const formatDateTime = (value?: string | null) =>
+    value
+      ? fmtDateTime(value, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) || 'N/A'
+      : 'N/A';
   const { toast } = useToast();
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   // The URL carries the per-project sequence; resolve it to the global test-case id.

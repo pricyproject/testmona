@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ interface WidgetMeta {
 
 export function OverviewSection({ ctx }: { ctx: ReportsData }) {
   const { t } = useTranslation();
+  const { formatDate, formatDateTime } = useDateFormat();
   const navigate = useNavigate();
   const {
     timeRange, setTimeRange, isEditMode, handleToggleEditMode, loadDashboardAnalytics,
@@ -212,7 +214,7 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
     const points = Array.isArray(analyticsTimeSeries?.points) ? analyticsTimeSeries.points : [];
     const compactPoints = points.map((point: any) => ({
       ...point,
-      label: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      label: formatDate(point.date, { month: 'short', day: 'numeric' }),
       passRate: Number(point.pass_rate || 0),
       failureRate: Number(point.failure_rate || 0),
       executed: Number(point.executed || 0),
@@ -339,7 +341,7 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
           </Button>
           {dashboardAnalytics?.generated_at && (
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              {t('reports_updatedTime', { time: new Date(dashboardAnalytics.generated_at).toLocaleTimeString() })}
+              {t('reports_updatedTime', { time: formatDateTime(dashboardAnalytics.generated_at, { timeStyle: 'medium' }) })}
             </span>
           )}
         </div>
@@ -450,7 +452,9 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span>{t('reports_releaseDeadline')}</span>
-                <Badge variant="destructive">{dashboardAnalytics?.upcoming_items?.release_deadline ?? 'N/A'}</Badge>
+                <Badge variant="destructive">{dashboardAnalytics?.upcoming_items?.milestone?.target_date
+                  ? formatDate(dashboardAnalytics.upcoming_items.milestone.target_date, { dateStyle: 'medium', timeZone: 'UTC' })
+                  : (dashboardAnalytics?.upcoming_items?.release_deadline ?? 'N/A')}</Badge>
               </div>
             </div>
           </CardContent>

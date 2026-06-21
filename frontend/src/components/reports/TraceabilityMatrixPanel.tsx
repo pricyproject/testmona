@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ import { normalizeStatus, getStatusIcon } from '@/components/reports/reportsUtil
 
 export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
   const { t } = useTranslation();
+  const { formatDate } = useDateFormat();
   const {
     traceabilityData, traceabilityFilters, setTraceabilityFilters, traceabilityPage,
     setTraceabilityPage, TRACEABILITY_PAGE_SIZE, searchQuery, setSearchQuery, selectedProject,
@@ -352,7 +354,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                                 </td>
                                 <td className="px-6 py-4 text-center">{renderDefects(tc)}</td>
                                 <td className="px-6 py-4 text-right text-sm text-gray-600 dark:text-gray-400">
-                                  {tc.last_executed ? new Date(tc.last_executed).toLocaleDateString() : t('reports_never')}
+                                  {tc.last_executed ? formatDate(tc.last_executed) : t('reports_never')}
                                 </td>
                                 <td className="px-6 py-4 text-center">
                                   <Button
@@ -407,7 +409,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                                 <span className="capitalize">{normalizedStatus.replace('_', ' ')}</span>
                               </Link>
                               <span className="text-xs text-gray-500">
-                                {tc.last_executed ? new Date(tc.last_executed).toLocaleDateString() : t('reports_never')}
+                                {tc.last_executed ? formatDate(tc.last_executed) : t('reports_never')}
                               </span>
                             </div>
                             {Number(tc.open_defects_count || 0) > 0 && (

@@ -57,6 +57,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { TestRunPieChart, TestRunBarChart, TestRunTrendChart } from '@/components/ui/chart';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { defectsAPI, environmentsAPI, getApiErrorMessage, sectionsAPI, testCasesAPI, testRunsAPI, testResultsAPI, usersAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -73,6 +74,7 @@ export function TestRunDetail() {
   const { id: runGlobalId, loading: runIdLoading } = useResolvedEntityId(projectId, 'test-runs', id);
   const navigate = useNavigate();
   const { t, isRTL, language } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const currentUser = useAuthStore((state) => state.user);
   const shouldLoadUsers = Boolean(currentUser?.is_superuser) || !isViewerRole(currentUser?.role);
   const { toast } = useToast();
@@ -1597,8 +1599,8 @@ export function TestRunDetail() {
             <div className="text-2xl font-bold">{formattedRunStatus}</div>
             <p className="text-xs text-gray-500">
               {testRun.status === 'completed'
-                ? t('completedOn', { date: testRun.completed_at ? new Date(testRun.completed_at).toLocaleString() : t('notAvailableShort') })
-                : `${t('started')}: ${testRun.created_at ? new Date(testRun.created_at).toLocaleString() : t('notAvailableShort')}`
+                ? t('completedOn', { date: testRun.completed_at ? formatDateTime(testRun.completed_at) : t('notAvailableShort') })
+                : `${t('started')}: ${testRun.created_at ? formatDateTime(testRun.created_at) : t('notAvailableShort')}`
               }
             </p>
           </CardContent>
@@ -2222,7 +2224,7 @@ export function TestRunDetail() {
                           <TableCell className="align-top">
                             <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                               <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
-                              <span className="max-w-[130px] truncate" title={result.executed_at ? new Date(result.executed_at).toLocaleString() : t('notExecuted')}>
+                              <span className="max-w-[130px] truncate" title={result.executed_at ? formatDateTime(result.executed_at) : t('notExecuted')}>
                                 {result.executed_at ? relativeTime(result.executed_at) : t('notExecuted')}
                               </span>
                             </div>

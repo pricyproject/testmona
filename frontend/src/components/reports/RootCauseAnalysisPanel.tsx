@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getApiErrorMessage } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Card, CardContent } from '@/components/ui/card';
@@ -55,6 +56,7 @@ const STATUS_LABEL_KEY: Record<string, string> = {
 
 export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
   const { t } = useTranslation();
+  const { formatDate } = useDateFormat();
   const { toast } = useToast();
   // Deleting an RCA is a manager+ action (testers can author/edit but not delete).
   const { canManageProject } = useProjectPermissions(projectId);
@@ -306,7 +308,7 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
                     )}
                     <span>
                       {t('reports_rcaRecorded')}:{' '}
-                      {analysis.created_at ? new Date(analysis.created_at).toLocaleDateString() : 'N/A'}
+                      {analysis.created_at ? formatDate(analysis.created_at) : 'N/A'}
                     </span>
                   </div>
 
