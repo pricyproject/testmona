@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, date
 from ..database import get_db
 from .. import crud, schemas, auth, rbac
+from ..crud_modules.tags import split_tag_names  # module-level: handlers shadow `crud` locally
 from ..models import Priority, Status, CustomFieldDefinition, CustomFieldValue, CustomFieldType, TestCase, TestCaseStep, TestSuite, TestCaseSection, Project, User, ImportOperation
 from ..security_utils import validate_file_size, validate_file_extension, MAX_CSV_IMPORT_SIZE
 from ..services.import_export_utils import (
@@ -237,7 +238,7 @@ async def import_test_cases(
                     'priority': cleaned_data.get('priority', 'medium'),
                     'status': cleaned_data.get('status', 'active'),
                     'reference': cleaned_data.get('reference'),
-                    'tags': cleaned_data.get('tags'),
+                    'tags': split_tag_names(cleaned_data.get('tags')),
                     'test_suite_id': test_suite_id,
                     'test_type': cleaned_data.get('test_type', 'manual'),
                     'section_id': row_section_id,
@@ -550,7 +551,7 @@ async def import_previewed_test_cases(
                     'priority': normalize_priority(row.priority),
                     'status': normalize_status(row.status),
                     'reference': normalize_text(row.reference or ''),
-                    'tags': normalize_text(row.tags or ''),
+                    'tags': split_tag_names(normalize_text(row.tags or '')),
                     'test_suite_id': payload.test_suite_id,
                     'test_type': normalize_test_type(row.test_type),
                     'section_id': section_id,
@@ -786,7 +787,7 @@ def export_test_cases(
             'priority': test_case.priority or 'medium',
             'status': test_case.status or 'active',
             'reference': test_case.reference or '',
-            'tags': test_case.tags or '',
+            'tags': test_case.tags_cache or '',
             'test_suite_id': test_case.test_suite_id,
             'section_id': test_case.section_id or '',
             'order_index': str(test_case.order_index if test_case.order_index is not None else 0),

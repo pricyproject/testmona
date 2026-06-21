@@ -233,7 +233,7 @@ async def _perform_export(
                         "expected_result": tc.expected_result or "",
                         "priority": tc.priority.value if hasattr(tc.priority, 'value') else (tc.priority or "medium"),
                         "status": tc.status.value if hasattr(tc.status, 'value') else (tc.status or "active"),
-                        "tags": tc.tags or "",
+                        "tags": tc.tags_cache or "",
                         "test_type": tc.test_type.value if hasattr(tc.test_type, 'value') else (tc.test_type or "manual"),
                         "section_id": tc.section_id,
                         "order_index": tc.order_index or 0,

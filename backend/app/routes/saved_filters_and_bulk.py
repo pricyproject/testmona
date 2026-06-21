@@ -292,8 +292,10 @@ def register_saved_filters_and_bulk_routes(app) -> None:
                 raise HTTPException(status_code=404, detail="Target section not found")
             target_section_project_id = section_row[1].project_id
 
-        add_tags = _normalize_tags(payload.add_tags)
-        remove_tags = _normalize_tags(payload.remove_tags)
+        # Test-case tags are normalized Tag rows; payloads carry name lists.
+        add_tags = payload.add_tags or []
+        remove_tags = payload.remove_tags or []
+        remove_slugs = {crud.slugify_tag(name) for name in remove_tags}
 
         updated = 0
         skipped: List[int] = []
@@ -329,9 +331,27 @@ def register_saved_filters_and_bulk_routes(app) -> None:
                 case.test_type = payload.test_type
             if payload.section_id is not None:
                 case.section_id = payload.section_id
-            new_tags = _merge_tags(case.tags, add_tags, remove_tags, payload.tags)
-            if new_tags is not None:
-                case.tags = new_tags
+
+            tags_changed = False
+            if payload.tags is not None:
+                # Replace the whole tag set.
+                case.tags = crud.resolve_or_create_tags(db, project_id, payload.tags)
+                tags_changed = True
+            else:
+                if add_tags:
+                    existing_slugs = {t.slug for t in case.tags}
+                    for tag in crud.resolve_or_create_tags(db, project_id, add_tags):
+                        if tag.slug not in existing_slugs:
+                            case.tags.append(tag)
+                            existing_slugs.add(tag.slug)
+                            tags_changed = True
+                if remove_slugs:
+                    kept = [t for t in case.tags if t.slug not in remove_slugs]
+                    if len(kept) != len(case.tags):
+                        case.tags = kept
+                        tags_changed = True
+            if tags_changed:
+                crud.sync_tags_cache(case)
             updated += 1
 
         if updated:

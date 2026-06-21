@@ -368,7 +368,7 @@ def register_project_routes(app):
                     expected_result=case.expected_result or "",
                     priority=_enum_value(case.priority, "medium"),
                     status=_enum_value(case.status, "active"),
-                    tags=case.tags,
+                    tags=crud.split_tag_names(case.tags_cache),
                     test_suite_id=new_suite.id,
                     test_type=_enum_value(case.test_type, "manual"),
                     section_id=None,

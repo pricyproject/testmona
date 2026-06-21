@@ -87,8 +87,8 @@ class VersioningService:
             steps=test_case.steps,
             expected_result=test_case.expected_result,
             priority=test_case.priority,
-            tags=test_case.tags,
-            
+            tags=test_case.tags_cache,  # version stores the comma-joined tag names
+
             # Custom fields snapshot
             custom_fields_data=self._get_custom_fields_snapshot(test_case_id),
             
@@ -188,8 +188,14 @@ class VersioningService:
             test_case.steps = version.steps
             test_case.expected_result = version.expected_result
             test_case.priority = version.priority
-            test_case.tags = version.tags
-            
+            # Resolve the version's comma-string snapshot back to normalized Tag rows.
+            from ..crud_modules.tags import resolve_or_create_tags, sync_tags_cache
+            test_case.tags = resolve_or_create_tags(
+                self.db, test_case.project_id,
+                [t.strip() for t in (version.tags or "").split(",") if t.strip()],
+            )
+            sync_tags_cache(test_case)
+
             # Update custom fields
             self._update_custom_fields_from_version(version.test_case_id, version.custom_fields_data)
         

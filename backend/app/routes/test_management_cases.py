@@ -295,7 +295,7 @@ def register_case_routes(app):
                 "steps": db_test_case.steps,
                 "expected_result": db_test_case.expected_result,
                 "priority": db_test_case.priority,
-                "tags": db_test_case.tags,
+                "tags": db_test_case.tags_cache,  # snapshot the comma-joined tag names
                 "changed_fields": {"created": "created"},
                 "change_reason": "Initial version",
                 "created_by": current_user.id,
@@ -537,10 +537,15 @@ def register_case_routes(app):
             'expected_result': original_test_case.expected_result,
             'priority': original_test_case.priority,
             'status': original_test_case.status,
-            'tags': original_test_case.tags,
+            'tags': original_test_case.tags_cache,  # old comma-joined tag names
             'section_id': original_test_case.section_id,
             'test_suite_id': original_test_case.test_suite_id,
         }
+
+        # Tags are submitted as a name list; compare against the cache string so the
+        # change diff and revision history stay accurate (mutate the local copy only).
+        if 'tags' in update_fields:
+            update_fields['tags'] = crud.tags_cache_from_names(update_fields['tags'] or [])
 
         db_test_case = crud.update_test_case(db, test_case_id=test_case_id, test_case=test_case)
         if db_test_case is None:
@@ -572,7 +577,7 @@ def register_case_routes(app):
                     "steps": db_test_case.steps,
                     "expected_result": db_test_case.expected_result,
                     "priority": db_test_case.priority,
-                    "tags": db_test_case.tags,
+                    "tags": db_test_case.tags_cache,  # snapshot the comma-joined tag names
                     "changed_fields": {field: "updated" for field in changed_fields},
                     "change_reason": f"Updated fields: {', '.join(changed_fields)}",
                     "created_by": current_user.id,
@@ -787,11 +792,17 @@ def register_case_routes(app):
             "steps": revision.steps,
             "expected_result": revision.expected_result,
             "priority": enum_value(revision.priority),
-            "tags": revision.tags,
+            # Revision snapshots store tags as a comma string; the update schema
+            # takes a name list and re-resolves them to Tag rows in the project.
+            "tags": [t.strip() for t in (revision.tags or "").split(",") if t.strip()],
         }
 
         changed_fields = []
         for field, new_value in restore_data.items():
+            if field == "tags":
+                if (db_test_case.tags_cache or "") != crud.tags_cache_from_names(new_value):
+                    changed_fields.append(field)
+                continue
             old_value = getattr(db_test_case, field)
             if str(old_value or "") != str(new_value or ""):
                 changed_fields.append(field)
@@ -817,7 +828,7 @@ def register_case_routes(app):
                 "steps": updated_test_case.steps,
                 "expected_result": updated_test_case.expected_result,
                 "priority": updated_test_case.priority,
-                "tags": updated_test_case.tags,
+                "tags": updated_test_case.tags_cache,  # snapshot the comma-joined tag names
                 "changed_fields": {field: "restored" for field in changed_fields},
                 "change_reason": f"Restored revision {revision_number}: {', '.join(changed_fields)}",
                 "created_by": current_user.id,

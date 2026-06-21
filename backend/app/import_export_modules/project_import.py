@@ -463,7 +463,7 @@ async def _perform_import(
                                                 expected_result=tc_data.get('expected_result', ''),
                                                 priority=tc_data.get('priority', 'medium'),
                                                 status=tc_data.get('status', 'active'),
-                                                tags=tc_data.get('tags'),
+                                                tags=crud.split_tag_names(tc_data.get('tags')),
                                                 test_suite_id=new_suite.id,
                                                 test_type=tc_data.get('test_type', 'manual'),
                                                 section_id=tc_data.get('section_id'),

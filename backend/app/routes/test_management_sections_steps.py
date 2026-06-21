@@ -180,7 +180,7 @@ def register_section_step_routes(app):
                     "steps": updated_case.steps,
                     "expected_result": updated_case.expected_result,
                     "priority": updated_case.priority,
-                    "tags": updated_case.tags,
+                    "tags": updated_case.tags_cache,  # snapshot the comma-joined tag names
                     "changed_fields": {"steps": "updated"},
                     "change_reason": "Updated test steps",
                     "created_by": current_user.id,

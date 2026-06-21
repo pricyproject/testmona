@@ -170,21 +170,34 @@ def get_test_cases(db: Session, test_suite_id: Optional[int] = None, section_id:
 
 
 def create_test_case(db: Session, test_case: TestCaseCreate, created_by: int):
-    # Extract test_steps from the create schema before creating the test case
+    from .tags import resolve_or_create_tags, sync_tags_cache
+
+    # Extract test_steps and tags from the create schema; both need post-insert
+    # handling (steps need the case id; tags need the denormalised project_id).
     test_steps_data = test_case.test_steps
-    test_case_dict = test_case.model_dump(exclude={'test_steps'})
-    
+    tag_names = test_case.tags
+    test_case_dict = test_case.model_dump(exclude={'test_steps', 'tags'})
+
     db_test_case = TestCase(**test_case_dict)
     db_test_case.created_by = created_by
-    
+
     # If multi-step data is provided, set is_multistep flag
     if test_steps_data and len(test_steps_data) > 0:
         db_test_case.is_multistep = True
-    
+
     db.add(db_test_case)
-    safe_commit(db)
+    safe_commit(db)  # listener denormalises project_id from the suite here
     db.refresh(db_test_case)
-    
+
+    # Resolve tag names to normalized Tag rows now that project_id is populated.
+    if tag_names:
+        db_test_case.tags = resolve_or_create_tags(
+            db, db_test_case.project_id, tag_names, created_by=created_by
+        )
+        sync_tags_cache(db_test_case)
+        safe_commit(db)
+        db.refresh(db_test_case)
+
     # Create test steps if provided (multi-step support)
     if test_steps_data and len(test_steps_data) > 0:
         for step_data in test_steps_data:
@@ -193,15 +206,28 @@ def create_test_case(db: Session, test_case: TestCaseCreate, created_by: int):
             db.add(db_step)
         safe_commit(db)
         db.refresh(db_test_case)
-    
+
     return db_test_case
 
 
 def update_test_case(db: Session, test_case_id: int, test_case: TestCaseUpdate):
+    from .tags import resolve_or_create_tags, sync_tags_cache
+
     db_test_case = db.query(TestCase).filter(TestCase.id == test_case_id).first()
     if db_test_case:
-        for key, value in test_case.model_dump(exclude_unset=True).items():
+        data = test_case.model_dump(exclude_unset=True)
+        # Tags are a relationship, not a scalar column — resolve names → Tag rows.
+        # Presence of the key (even as []) means "set to exactly this"; absence
+        # (exclude_unset) leaves the existing tags untouched.
+        tags_provided = 'tags' in data
+        tag_names = data.pop('tags', None)
+        for key, value in data.items():
             setattr(db_test_case, key, value)
+        if tags_provided:
+            db_test_case.tags = resolve_or_create_tags(
+                db, db_test_case.project_id, tag_names or []
+            )
+            sync_tags_cache(db_test_case)
         safe_commit(db)
         db.refresh(db_test_case)
     return db_test_case

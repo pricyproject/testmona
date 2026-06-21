@@ -693,9 +693,10 @@ class BulkTestCaseUpdate(BaseModel):
     status: Optional[str] = Field(default=None, max_length=20)
     test_type: Optional[str] = Field(default=None, max_length=20)
     section_id: Optional[int] = None
-    tags: Optional[str] = Field(default=None, max_length=500)
-    add_tags: Optional[str] = Field(default=None, max_length=500)
-    remove_tags: Optional[str] = Field(default=None, max_length=500)
+    # Normalized tag names. ``tags`` replaces the whole set; add/remove patch it.
+    tags: Optional[List[str]] = None
+    add_tags: Optional[List[str]] = None
+    remove_tags: Optional[List[str]] = None
 
     @field_validator("status")
     @classmethod

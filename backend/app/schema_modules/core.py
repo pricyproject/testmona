@@ -172,6 +172,46 @@ class TestSuite(TestSuiteBase):
         use_enum_values = True
 
 
+# --- Normalized tags -------------------------------------------------------
+
+class TagBase(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    color: str = Field(default="#6366F1", max_length=7)
+    description: Optional[str] = None
+
+
+class TagCreate(TagBase):
+    project_id: Optional[int] = None
+
+
+class TagUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    color: Optional[str] = Field(default=None, max_length=7)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class TagMerge(BaseModel):
+    target_id: int
+
+
+class TagOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    color: str
+    project_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TagWithUsage(TagOut):
+    usage_count: int = 0
+    description: Optional[str] = None
+    is_active: Optional[bool] = True
+
+
 class TestCaseBase(BaseModel):
     title: str
     description: Optional[str] = None
@@ -182,7 +222,9 @@ class TestCaseBase(BaseModel):
     priority: str = "medium"
     status: str = "active"
     reference: Optional[str] = None  # Reference field for requirements, JIRA tickets, etc.
-    tags: Optional[str] = Field(None, max_length=500)
+    # Input: a list of tag names (the API resolves/creates Tag rows per project).
+    # Response schemas below override this to a list of TagOut objects.
+    tags: Optional[List[str]] = None
     section_id: Optional[int] = None
     order_index: Optional[int] = 0
     is_multistep: Optional[bool] = False  # Flag to indicate multistep format
@@ -227,7 +269,7 @@ class TestCaseUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     reference: Optional[str] = None  # Reference field for requirements, JIRA tickets, etc.
-    tags: Optional[str] = Field(None, max_length=500)
+    tags: Optional[List[str]] = None  # Tag names; null = leave unchanged, [] = clear
     section_id: Optional[int] = None
     test_suite_id: Optional[int] = None
     order_index: Optional[int] = None
@@ -257,6 +299,7 @@ class TestCase(TestCaseBase):
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    tags: List[TagOut] = []  # response: full tag objects (overrides the input List[str])
 
     class Config:
         from_attributes = True
@@ -336,6 +379,7 @@ class TestCaseWithRelations(TestCaseBase):
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    tags: List[TagOut] = []  # response: full tag objects (overrides the input List[str])
     test_suite: Optional[TestSuiteNested] = None
     section: Optional[TestCaseSectionNested] = None
     test_steps: List[TestCaseStep] = []
