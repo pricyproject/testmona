@@ -51,7 +51,11 @@ const DefectDetail = lazyPage(() => import('@/pages/DefectDetail'), 'DefectDetai
 const RootCauseAnalysisPage = lazyPage(() => import('@/pages/RootCauseAnalysisPage'), 'RootCauseAnalysisPage');
 const AdvancedSearch = lazyPage(() => import('@/pages/AdvancedSearch'), 'AdvancedSearch');
 const TestAssetHealth = lazyPage(() => import('@/pages/TestAssetHealth'), 'TestAssetHealth');
-const Reports = lazyPage(() => import('@/pages/Reports'), 'Reports');
+const ReportsLayout = lazyPage(() => import('@/pages/reports/ReportsLayout'), 'ReportsLayout');
+const OverviewPage = lazyPage(() => import('@/pages/reports/OverviewPage'), 'OverviewPage');
+const CoverageRiskPage = lazyPage(() => import('@/pages/reports/CoverageRiskPage'), 'CoverageRiskPage');
+const ActivityPage = lazyPage(() => import('@/pages/reports/ActivityPage'), 'ActivityPage');
+const ReportsSectionFallback = lazyPage(() => import('@/pages/reports/ReportsSectionFallback'), 'ReportsSectionFallback');
 const SharedReportViewer = lazyPage(() => import('@/pages/SharedReportViewer'), 'SharedReportViewer');
 const Milestones = lazyPage(() => import('@/pages/Milestones'), 'Milestones');
 const MilestoneDetail = lazyPage(() => import('@/pages/MilestoneDetail'), 'MilestoneDetail');
@@ -453,21 +457,21 @@ function AppWithRouter() {
             <TestPlanDetail />
           </ProjectGuard>
         } />
+        {/* Reports: a shared layout shell with one child page per section, so each
+            section is a linkable/bookmarkable URL backed by its own page component. */}
         <Route path="/projects/:projectId/reports" element={
           <ProjectGuard>
             <FeatureGuard feature="reports">
-              <Reports />
+              <ReportsLayout />
             </FeatureGuard>
           </ProjectGuard>
-        } />
-        {/* Each reports section is its own URL so tabs are linkable/bookmarkable. */}
-        <Route path="/projects/:projectId/reports/:section" element={
-          <ProjectGuard>
-            <FeatureGuard feature="reports">
-              <Reports />
-            </FeatureGuard>
-          </ProjectGuard>
-        } />
+        }>
+          <Route index element={<OverviewPage />} />
+          <Route path="overview" element={<OverviewPage />} />
+          <Route path="coverage-risk" element={<CoverageRiskPage />} />
+          <Route path="activity" element={<ActivityPage />} />
+          <Route path="*" element={<ReportsSectionFallback />} />
+        </Route>
         <Route path="/projects/:projectId/milestones" element={
           <ProjectGuard>
             <FeatureGuard feature="milestones">

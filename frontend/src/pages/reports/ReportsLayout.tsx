@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Outlet, useNavigate, useOutletContext, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, ArrowUpRight, BarChart3, Share2 } from 'lucide-react';
-import { useReportsData } from '@/hooks/useReportsData';
+import { ReportsData, useReportsData } from '@/hooks/useReportsData';
 import { SectionNav } from '@/components/reports/SectionNav';
-import { OverviewSection } from '@/components/reports/OverviewSection';
-import { CoverageRiskSection } from '@/components/reports/CoverageRiskSection';
-import { ActivitySection } from '@/components/reports/ActivitySection';
 import { ShareExportFlow } from '@/components/reports/ShareExportFlow';
-import { isSectionKey } from '@/components/reports/reportsUtils';
+import { sectionFromPath } from '@/components/reports/reportsUtils';
 import { milestonesAPI, testPlansAPI } from '@/lib/api';
 
 type ScopedReportEntity = {
@@ -24,9 +21,18 @@ const parsePositiveId = (value: string | null): number | null => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-export function Reports() {
-  const { projectId, section } = useParams<{ projectId: string; section: string }>();
+/**
+ * Shared shell for the reports area. Owns the single `useReportsData` instance and
+ * the chrome common to every section (header actions, scope banner, section nav,
+ * error surface, share/export dialog), then renders the active section page through
+ * an <Outlet>. Each section is its own route/page and reads the shared data context
+ * via `useReportsContext()`, so the shell — and its in-flight data and open dialogs —
+ * persists across tab switches while only the section page swaps.
+ */
+export function ReportsLayout() {
+  const { projectId } = useParams<{ projectId: string }>();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { t, isRTL } = useTranslation();
   const ctx = useReportsData(projectId);
@@ -35,16 +41,14 @@ export function Reports() {
 
   const { activeSection, setActiveSection, error, sectionLoading, handleGenerateAnalytics } = ctx;
 
-  // The URL is the source of truth for the active section. An unknown/missing
-  // slug normalises to the default section so deep-links never render blank.
+  // The URL is the source of truth for the active section. Each section has its
+  // own route, so derive the active section from the current path and sync it into
+  // the data hook (which drives section-scoped loading).
   useEffect(() => {
-    if (isSectionKey(section)) {
-      if (section !== activeSection) setActiveSection(section);
-    } else if (section !== undefined) {
-      // Bad slug — rewrite the URL to the canonical default section.
-      navigate(`/projects/${projectId}/reports`, { replace: true });
-    }
-  }, [section, activeSection, setActiveSection, navigate, projectId]);
+    const next = sectionFromPath(location.pathname);
+    if (next !== activeSection) setActiveSection(next);
+  }, [location.pathname, activeSection, setActiveSection]);
+
   const isLoading = sectionLoading(activeSection);
   const numericProjectId = parsePositiveId(projectId || null);
   const testPlanId = parsePositiveId(searchParams.get('test_plan_id'));
@@ -128,11 +132,13 @@ export function Reports() {
         </div>
       )}
 
-      {activeSection === 'overview' && <OverviewSection ctx={ctx} />}
-      {activeSection === 'coverage-risk' && <CoverageRiskSection ctx={ctx} />}
-      {activeSection === 'activity' && <ActivitySection ctx={ctx} />}
+      {/* Active section page renders here and reads `ctx` via useReportsContext(). */}
+      <Outlet context={ctx} />
 
       <ShareExportFlow ctx={ctx} open={shareOpen} onOpenChange={setShareOpen} />
     </div>
   );
 }
+
+// Section pages read the shared reports data context provided by the layout's <Outlet>.
+export const useReportsContext = () => useOutletContext<ReportsData>();

@@ -13,6 +13,15 @@ export const SECTION_KEYS: SectionKey[] = ['overview', 'coverage-risk', 'activit
 export const isSectionKey = (value: string | undefined): value is SectionKey =>
   !!value && (SECTION_KEYS as string[]).includes(value);
 
+// Resolve the active section from a URL pathname. Each section is now its own
+// route (/projects/:id/reports/:section) backed by its own page component, so the
+// layout derives the active section from the location rather than from a tab state.
+// An unknown/missing slug falls back to the default section.
+export const sectionFromPath = (pathname: string): SectionKey => {
+  const slug = pathname.match(/\/reports\/([^/?#]+)/)?.[1];
+  return isSectionKey(slug) ? slug : 'overview';
+};
+
 // Fine-grained loading keys — one per backing query — so each panel can show its
 // own spinner independently of the others in the same section.
 export type LoadKey =
