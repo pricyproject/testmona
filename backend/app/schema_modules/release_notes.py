@@ -41,6 +41,9 @@ class ReleaseNotesGenerateRequest(BaseModel):
     since: Optional[datetime] = None
     until: Optional[datetime] = None
     include_ai: bool = True
+    # UI language; drives the calendar of human-facing dates in the draft
+    # (Jalali/Persian digits for "fa", Gregorian otherwise).
+    lang: str = "en"
 
 
 class ReleaseNotesChangedDoc(BaseModel):

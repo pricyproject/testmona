@@ -32,6 +32,7 @@ from .analytics_shared import (
     get_linked_requirement_test_case_ids,
 )
 from .ai_prompt_service import strip_html
+from . import date_localization
 from .doc_impact_service import _headings
 
 _DEFAULT_LOOKBACK_DAYS = 30
@@ -338,8 +339,9 @@ def gather_release_data(
     )
 
 
-def _fmt_date(value: Optional[datetime]) -> str:
-    return value.strftime("%Y-%m-%d") if value else "—"
+def _fmt_date(value: Optional[datetime], lang: str = "en") -> str:
+    # Jalali + Persian digits for fa; Gregorian ISO otherwise.
+    return date_localization.format_date(value, lang)
 
 
 def render_markdown(
@@ -347,15 +349,20 @@ def render_markdown(
     title: str,
     version: Optional[str] = None,
     summary: Optional[str] = None,
+    lang: str = "en",
 ) -> str:
-    """Render an editable Markdown draft from the gathered source data."""
+    """Render an editable Markdown draft from the gathered source data.
+
+    ``lang`` controls the calendar of the human-facing dates in the draft
+    (Jalali/Persian for ``fa``, Gregorian otherwise).
+    """
     lines: List[str] = []
     heading = title
     if version:
         heading = f"{title} ({version})"
     lines.append(f"# {heading}")
     lines.append("")
-    lines.append(f"_Covering changes from {_fmt_date(source.range_start)} to {_fmt_date(source.range_end)}._")
+    lines.append(f"_Covering changes from {_fmt_date(source.range_start, lang)} to {_fmt_date(source.range_end, lang)}._")
     lines.append("")
 
     if summary:
@@ -417,8 +424,8 @@ def render_markdown(
     return "\n".join(lines).strip() + "\n"
 
 
-def default_title(source: ReleaseSource) -> str:
-    return f"Release notes — {_fmt_date(source.range_end)}"
+def default_title(source: ReleaseSource, lang: str = "en") -> str:
+    return f"Release notes — {_fmt_date(source.range_end, lang)}"
 
 
 def ai_payload(source: ReleaseSource) -> dict:

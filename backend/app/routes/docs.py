@@ -1434,8 +1434,8 @@ def register_docs_routes(app) -> None:
         source = release_notes.gather_release_data(
             db, payload.project_id, since=payload.since, until=payload.until,
         )
-        title = release_notes.default_title(source)
-        content_markdown = release_notes.render_markdown(source, title)
+        title = release_notes.default_title(source, payload.lang)
+        content_markdown = release_notes.render_markdown(source, title, lang=payload.lang)
 
         result = schemas.ReleaseNotesPreview(
             project_id=payload.project_id,
@@ -1474,7 +1474,7 @@ def register_docs_routes(app) -> None:
                 if summary:
                     result.summary = summary
                     result.content_markdown = release_notes.render_markdown(
-                        source, title, summary=summary,
+                        source, title, summary=summary, lang=payload.lang,
                     )
                     result.ai_available = True
                     result.provider = completion.provider
