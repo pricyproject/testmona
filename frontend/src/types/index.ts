@@ -1391,6 +1391,8 @@ export interface ReleaseNotesGenerateRequest {
   since?: string | null;
   until?: string | null;
   include_ai?: boolean;
+  /** UI language — drives the calendar of dates baked into the draft. */
+  lang?: string;
 }
 
 export interface ReleaseNotesChangedDoc {

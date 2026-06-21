@@ -1,4 +1,38 @@
 /**
+ * Date/time formatting helpers.
+ *
+ * All display formatting flows through here so that the app's *language*
+ * (not the browser locale) drives the calendar and digits. In particular,
+ * Persian (`fa`) renders the **Jalali/Shamsi** calendar with Persian-Indic
+ * digits — `Intl.DateTimeFormat('fa-IR', …)` does this natively, so no extra
+ * library is needed for display.
+ *
+ * Components should prefer the `useDateFormat()` hook (which binds the current
+ * language for you) over calling these directly.
+ */
+
+import type { Language } from '@/locales/translations';
+
+/**
+ * Map the app language to a BCP-47 locale for `Intl`.
+ * - `fa` → `fa-IR` (Jalali calendar + Persian digits, both default for fa-IR)
+ * - `ar` → `ar` (Gregorian + Arabic digits)
+ * - `en`/unknown → `undefined` (use the host default; effectively Gregorian)
+ */
+export function localeForLanguage(lang?: Language | string | null): string | undefined {
+  switch (lang) {
+    case 'fa':
+      return 'fa-IR';
+    case 'ar':
+      return 'ar';
+    case 'en':
+      return 'en-US';
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Parse a timestamp coming from the backend.
  *
  * The API serializes naive UTC timestamps without a timezone designator
@@ -24,19 +58,32 @@ export function parseServerDate(value: string | number | Date | null | undefined
 /** Localized absolute date+time, or '' when unparseable. */
 export function formatServerDateTime(
   value: string | number | Date | null | undefined,
+  lang?: Language | string | null,
   options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' },
 ): string {
   const date = parseServerDate(value);
   if (!date) return '';
   try {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
+    return new Intl.DateTimeFormat(localeForLanguage(lang), options).format(date);
   } catch {
     return date.toLocaleString();
   }
 }
 
-/** Localized relative time (e.g. "3 hours ago"), or '' when unparseable. */
-export function formatRelativeTime(value: string | number | Date | null | undefined): string {
+/** Localized absolute date only (no time), or '' when unparseable. */
+export function formatServerDate(
+  value: string | number | Date | null | undefined,
+  lang?: Language | string | null,
+  options: Intl.DateTimeFormatOptions = { dateStyle: 'medium' },
+): string {
+  return formatServerDateTime(value, lang, options);
+}
+
+/** Localized relative time (e.g. "3 hours ago" / "۳ ساعت پیش"), or '' when unparseable. */
+export function formatRelativeTime(
+  value: string | number | Date | null | undefined,
+  lang?: Language | string | null,
+): string {
   const date = parseServerDate(value);
   if (!date) return '';
   const divisors: Record<string, number> = {
@@ -52,7 +99,7 @@ export function formatRelativeTime(value: string | number | Date | null | undefi
     if (Math.abs(seconds) < limit) { unit = candidate; break; }
   }
   try {
-    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(
+    return new Intl.RelativeTimeFormat(localeForLanguage(lang), { numeric: 'auto' }).format(
       -Math.round(seconds / divisors[unit]),
       unit,
     );
