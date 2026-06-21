@@ -68,7 +68,15 @@ export function useAppName(fetchOnMount = true) {
     const nextAppName = await appNameRequest;
     setAppName(nextAppName);
     return nextAppName;
+  }, [setAppName, setAppLogoUrl]);
+
+  const updateAppName = useCallback((value: string) => {
+    setAppName(normalizeAppName(value));
   }, [setAppName]);
+
+  const updateAppLogoUrl = useCallback((value: string) => {
+    setAppLogoUrl(normalizeOptionalSetting(value));
+  }, [setAppLogoUrl]);
 
   useEffect(() => {
     if (fetchOnMount) {
@@ -81,7 +89,7 @@ export function useAppName(fetchOnMount = true) {
     appLogoUrl: normalizeOptionalSetting(appLogoUrl),
     appInitials: getAppInitials(appName),
     refreshAppName,
-    setAppName: (value: string) => setAppName(normalizeAppName(value)),
-    setAppLogoUrl: (value: string) => setAppLogoUrl(normalizeOptionalSetting(value)),
+    setAppName: updateAppName,
+    setAppLogoUrl: updateAppLogoUrl,
   };
 }
