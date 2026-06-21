@@ -80,6 +80,63 @@ class AuditService:
             logger.exception("Error checking audit config; defaulting to enabled")
             return True
 
+    # Entity types whose changes surface in a project's activity feed. Used to
+    # decide whether audit logging is *effectively* off for the activity page —
+    # critical types (user/system_setting) are always audited but rarely
+    # project-scoped, so they don't keep the project feed "alive".
+    PROJECT_AUDITABLE_ENTITIES = [
+        "test_case", "test_suite", "test_run", "test_result", "test_plan",
+        "requirement", "defect", "milestone", "test_case_section",
+        "test_execution", "shared_step", "custom_field",
+    ]
+
+    def get_audit_status(self) -> dict:
+        """Return the effective audit-logging status for the activity UI.
+
+        - enabled: the global on/off flag
+        - disabled_entities: project-relevant entity types currently not logged
+        - effectively_off: True when no project activity can be recorded at all
+          (global flag off, or every project-relevant entity disabled)
+        """
+        config_data: dict = {}
+        try:
+            from ..crud import get_system_setting
+            setting = get_system_setting(self.db, key="audit_trail_config")
+            if setting and setting.value:
+                parsed = json.loads(setting.value)
+                if isinstance(parsed, dict):
+                    config_data = parsed
+        except (json.JSONDecodeError, TypeError):
+            config_data = {}
+        except Exception:
+            logger.exception("Error reading audit config for status; assuming enabled")
+            config_data = {}
+
+        global_enabled = config_data.get("enabled", True)
+        if not isinstance(global_enabled, bool):
+            global_enabled = True
+        entity_settings = config_data.get("entity_settings", {})
+        if not isinstance(entity_settings, dict):
+            entity_settings = {}
+
+        def entity_on(entity: str) -> bool:
+            value = entity_settings.get(entity, True)
+            return value if isinstance(value, bool) else True
+
+        if not global_enabled:
+            disabled = list(self.PROJECT_AUDITABLE_ENTITIES)
+        else:
+            disabled = [e for e in self.PROJECT_AUDITABLE_ENTITIES if not entity_on(e)]
+
+        effectively_off = (not global_enabled) or (
+            len(disabled) == len(self.PROJECT_AUDITABLE_ENTITIES)
+        )
+        return {
+            "enabled": global_enabled,
+            "disabled_entities": disabled,
+            "effectively_off": effectively_off,
+        }
+
     def create_audit_trail(self, audit_data: AuditTrailCreate) -> Optional[AuditTrail]:
         """Create a new audit trail entry if audit is enabled for the entity type"""
         # Check if audit is enabled for this entity type
@@ -309,6 +366,8 @@ class AuditService:
             .all()
         )
 
+        audit_status = self.get_audit_status()
+
         return ActivitySummary(
             project_id=project_id,
             days=days,
@@ -317,7 +376,10 @@ class AuditService:
             entity_counts=[EntityCount(entity_type=entity_type, count=count) for entity_type, count in entity_counts],
             date_from=date_from,
             date_to=date_to,
-            top_users=[TopUser(user_id=user_id, username=username, full_name=full_name, activity_count=activity_count) for user_id, username, full_name, activity_count in top_users]
+            top_users=[TopUser(user_id=user_id, username=username, full_name=full_name, activity_count=activity_count) for user_id, username, full_name, activity_count in top_users],
+            audit_enabled=audit_status["enabled"],
+            audit_disabled_entities=audit_status["disabled_entities"],
+            audit_effectively_off=audit_status["effectively_off"],
         )
 
     def get_recent_activities(self, limit: int = 50, project_id: Optional[int] = None) -> List[AuditTrail]:

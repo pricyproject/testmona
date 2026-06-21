@@ -113,6 +113,11 @@ class ActivitySummary(BaseModel):
     date_from: datetime
     date_to: datetime
     top_users: Optional[List[TopUser]] = None
+    # Audit-logging status, so the UI can distinguish "nothing happened" from
+    # "logging is switched off" instead of rendering misleading zeros.
+    audit_enabled: bool = True
+    audit_disabled_entities: List[str] = Field(default_factory=list)
+    audit_effectively_off: bool = False
 
 # Entity history schema
 class EntityHistory(BaseModel):
