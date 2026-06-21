@@ -82,8 +82,16 @@ export function hasActiveQuery(parsed: ParsedQuery): boolean {
   return parsed.terms.length > 0 || parsed.filters.length > 0;
 }
 
-const getTestCaseTags = (testCase: TestCase): string[] =>
-  (testCase.tags || []).map((tag) => tag.name.toLowerCase());
+const getTestCaseTags = (testCase: TestCase): string[] => {
+  if (Array.isArray(testCase.tags)) {
+    return testCase.tags.map((tag) => norm(tag.name)).filter(Boolean);
+  }
+
+  return String(testCase.tags ?? '')
+    .split(',')
+    .map(norm)
+    .filter(Boolean);
+};
 
 export function testCaseMatchesQuery(testCase: TestCase, parsed: ParsedQuery): boolean {
   if (parsed.terms.length > 0) {
@@ -91,7 +99,7 @@ export function testCaseMatchesQuery(testCase: TestCase, parsed: ParsedQuery): b
       testCase.title,
       testCase.description,
       testCase.reference,
-      testCase.tags,
+      getTestCaseTags(testCase).join(' '),
       testCase.preconditions,
       testCase.steps,
       testCase.expected_result,
