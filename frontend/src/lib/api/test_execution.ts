@@ -1,6 +1,30 @@
 import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
 import { api, resolveProjectSeq, seqAPI, getApiErrorMessage } from "./client";
 
+// Normalized, project-scoped test-case tags.
+export const tagsAPI = {
+  getAll: async (projectId: number) => {
+    const response = await api.get(`/tags?project_id=${projectId}`);
+    return response.data;
+  },
+  create: async (tag: { project_id: number; name: string; color?: string; description?: string }) => {
+    const response = await api.post('/tags', tag);
+    return response.data;
+  },
+  update: async (id: number, tag: { name?: string; color?: string; description?: string; is_active?: boolean }) => {
+    const response = await api.put(`/tags/${id}`, tag);
+    return response.data;
+  },
+  remove: async (id: number) => {
+    const response = await api.delete(`/tags/${id}`);
+    return response.data;
+  },
+  merge: async (id: number, targetId: number) => {
+    const response = await api.post(`/tags/${id}/merge`, { target_id: targetId });
+    return response.data;
+  },
+};
+
 export const testCasesAPI = {
   getAll: async (projectId?: number, testSuiteId?: number, sectionId?: number, sortBy = 'id', sortOrder = 'asc', skip = 0, limit = 100) => {
     const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString(), sort_by: sortBy, sort_order: sortOrder });

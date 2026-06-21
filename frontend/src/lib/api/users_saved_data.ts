@@ -147,7 +147,7 @@ export const globalParametersAPI = {
 
 // Bulk edit
 export const bulkAPI = {
-  testCases: async (payload: { ids: number[]; priority?: string; status?: string; test_type?: string; section_id?: number; tags?: string; add_tags?: string; remove_tags?: string }) => {
+  testCases: async (payload: { ids: number[]; priority?: string; status?: string; test_type?: string; section_id?: number; tags?: string[]; add_tags?: string[]; remove_tags?: string[] }) => {
     const response = await api.patch('/test-cases/bulk', payload);
     return response.data as { updated: number; skipped_ids: number[]; reason?: string | null };
   },

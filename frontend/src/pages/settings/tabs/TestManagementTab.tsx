@@ -9,6 +9,7 @@ import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useTestManagementData } from '../hooks/useTestManagementData';
 import { TestTypesSection } from '../sections/TestTypesSection';
 import { PrioritiesSection } from '../sections/PrioritiesSection';
+import { TagsSection } from '../sections/TagsSection';
 import { SharedStepsSection } from '../sections/SharedStepsSection';
 import { TestSettingsSection } from '../sections/TestSettingsSection';
 
@@ -21,6 +22,7 @@ export function TestManagementTab({ projectId }: { projectId?: number }) {
     <div className="space-y-6 pb-24">
       <TestTypesSection data={data} canManage={canManageProject} />
       <PrioritiesSection data={data} canManage={canManageProject} />
+      <TagsSection projectId={projectId} canManage={canManageProject} />
       <SharedStepsSection data={data} />
       <TestSettingsSection data={data} />
 

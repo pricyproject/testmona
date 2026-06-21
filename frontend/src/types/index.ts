@@ -39,6 +39,18 @@ export interface TestSuite {
   updated_at?: string;
 }
 
+// Normalized, project-scoped tag (replaces the legacy comma-separated string).
+export interface Tag {
+  id: number;
+  name: string;
+  slug?: string;
+  color: string;
+  project_id?: number | null;
+  description?: string | null;
+  is_active?: boolean;
+  usage_count?: number;
+}
+
 export interface TestCase {
   id: number;
   project_seq?: number | null;
@@ -53,7 +65,7 @@ export interface TestCase {
   test_suite_id: number;
   section_id?: number;
   section?: string;
-  tags?: string;
+  tags?: Tag[];
   reference?: string;
   order_index?: number;
   created_by?: number;
