@@ -86,6 +86,7 @@ from .routes.remaining_routes import register_remaining_routes
 from .routes.notifications import register_notifications_routes
 from .routes.inbox import register_inbox_routes
 from .routes.definitions import register_definitions_routes
+from .routes.tags import register_tags_routes
 from .routes.custom_fields import register_custom_fields_routes
 from .routes.shared_steps import register_shared_steps_routes
 from .routes.tokens_webhooks import register_tokens_and_webhooks_routes
@@ -115,6 +116,7 @@ register_remaining_routes(app)
 register_notifications_routes(app)
 register_inbox_routes(app)
 register_definitions_routes(app)
+register_tags_routes(app)
 register_custom_fields_routes(app)
 register_shared_steps_routes(app)
 register_tokens_and_webhooks_routes(app)

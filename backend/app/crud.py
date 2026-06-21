@@ -10,5 +10,6 @@ from .crud_modules.defects_planning import *
 from .crud_modules.notifications_analytics import *
 from .crud_modules.assets_execution import *
 from .crud_modules.settings_versions import *
+from .crud_modules.tags import *
 
 __all__ = [name for name in globals() if not name.startswith("_")]
