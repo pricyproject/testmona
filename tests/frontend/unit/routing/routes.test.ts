@@ -10,6 +10,7 @@ import { PROJECT_FEATURES, PROJECT_FEATURE_KEYS } from '@/lib/projectFeatures';
 const FEATURE_ROUTES: Record<string, string> = {
   requirements: '/projects/:projectId/requirements',
   doc_hub: '/projects/:projectId/docs',
+  doc_revisions: '/projects/:projectId/docs',
   test_cases: '/projects/:projectId/test-cases',
   test_suites: '/projects/:projectId/test-suites',
   test_runs: '/projects/:projectId/test-runs',
