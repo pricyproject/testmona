@@ -1335,6 +1335,23 @@ export function TestCases() {
   // filters so the per-row matcher stays cheap as the result set scales.
   const parsedSearchQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);
 
+  // Clicking a tag pill on a row drops a `tag:<name>` token into the search box
+  // (quoting names with spaces) so it filters via the same query path as typing.
+  const handleTagFilter = useCallback((tagName: string) => {
+    const trimmed = tagName.trim();
+    if (!trimmed) return;
+    const token = `tag:${/\s/.test(trimmed) ? `"${trimmed}"` : trimmed}`;
+    setSearchQuery((prev) => {
+      const existing = prev.trim();
+      const alreadyPresent = parseSearchQuery(existing).filters.some(
+        (filter) => filter.key === 'tag' && !filter.negate && filter.value === trimmed.toLowerCase(),
+      );
+      if (alreadyPresent) return existing;
+      return existing ? `${existing} ${token}` : token;
+    });
+    setCurrentPage(1);
+  }, []);
+
   // Suggestion catalog for the "/" advanced-search palette, derived from the
   // project's real priorities, types and tags so completions are always valid.
   const searchSuggestionGroups = useMemo<SearchSuggestionGroup[]>(() => {
@@ -4281,6 +4298,7 @@ export function TestCases() {
                           handleSelectTestCase={handleSelectTestCase}
                           getTypeBadge={getTypeBadge}
                           getPriorityBadge={getPriorityBadge}
+                          onTagClick={handleTagFilter}
                           isRTL={isRTL}
                         />
                       ))}

@@ -35,6 +35,7 @@ interface SortableTestCaseRowProps {
   handleSelectTestCase: (id: number, checked: boolean) => void;
   getTypeBadge: (type: string) => BadgeStyle;
   getPriorityBadge: (priority: string) => BadgeStyle;
+  onTagClick?: (tagName: string) => void;
   isRTL: boolean;
 }
 
@@ -55,6 +56,7 @@ export function SortableTestCaseRow({
   handleSelectTestCase,
   getTypeBadge,
   getPriorityBadge,
+  onTagClick,
   isRTL,
 }: SortableTestCaseRowProps) {
   const navigate = useNavigate();
@@ -135,7 +137,12 @@ export function SortableTestCaseRow({
       <TableCell className="py-2 max-w-[180px]">
         <div className="flex flex-wrap gap-1">
           {testCaseTags.slice(0, 3).map((tag) => (
-            <TagBadge key={tag.id} tag={tag} />
+            <TagBadge
+              key={tag.id}
+              tag={tag}
+              onClick={onTagClick ? () => onTagClick(tag.name) : undefined}
+              title={onTagClick ? t('filterByTag', { name: tag.name }) : undefined}
+            />
           ))}
           {testCaseTags.length > 3 && (
             <Badge variant="outline" className="text-xs">

@@ -16,20 +16,37 @@ const DEFAULT_COLOR = '#6366F1';
 export function TagBadge({
   tag,
   onRemove,
+  onClick,
   className,
   title,
 }: {
   tag: TagLike;
   onRemove?: () => void;
+  /** When provided, the pill becomes a button that filters by this tag. */
+  onClick?: () => void;
   className?: string;
   title?: string;
 }) {
   const color = tag.color || DEFAULT_COLOR;
   return (
     <span
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       title={title ?? tag.name}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       className={cn(
         'tm-badge inline-flex max-w-[14rem] items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
+        onClick && 'cursor-pointer transition-shadow hover:shadow-sm hover:brightness-95',
         className,
       )}
       style={{ backgroundColor: `${color}1f`, borderColor: `${color}55`, color }}

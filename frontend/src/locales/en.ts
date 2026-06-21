@@ -2730,6 +2730,7 @@ export const en = {
   bulkSelectMode: 'Bulk select mode',
   searchNotifications: 'Search notifications...',
   clearSearch: 'Clear search',
+  filterByTag: 'Filter by tag "{name}"',
   filterAll: 'All',
   noNotificationsYet: 'No notifications yet',
   noNotificationsDesc: "You'll see project updates, assignments, and system messages here.",

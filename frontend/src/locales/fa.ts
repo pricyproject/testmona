@@ -945,6 +945,7 @@ export const fa = {
     bulkSelectMode: 'حالت انتخاب گروهی',
     searchNotifications: 'جستجوی اعلان‌ها...',
     clearSearch: 'پاک کردن جستجو',
+    filterByTag: 'فیلتر بر اساس برچسب «{name}»',
     filterAll: 'همه',
     noNotificationsYet: 'هنوز اعلانی نیست',
     noNotificationsDesc: 'به‌روزرسانی‌های پروژه، تخصیص‌ها و پیام‌های سیستم اینجا نمایش داده می‌شوند.',

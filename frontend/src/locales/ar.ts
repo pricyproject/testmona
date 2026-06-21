@@ -944,6 +944,7 @@ export const ar = {
     bulkSelectMode: 'وضع التحديد الجماعي',
     searchNotifications: 'البحث في الإشعارات...',
     clearSearch: 'مسح البحث',
+    filterByTag: 'تصفية حسب الوسم "{name}"',
     filterAll: 'الكل',
     noNotificationsYet: 'لا توجد إشعارات بعد',
     noNotificationsDesc: 'ستظهر هنا تحديثات المشاريع والتعيينات ورسائل النظام.',
