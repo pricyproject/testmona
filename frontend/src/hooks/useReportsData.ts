@@ -70,6 +70,16 @@ export function useReportsData(projectId: string | undefined) {
     if (tabSeq.current[tab] === seq) setTabLoading(tab, false);
   };
 
+  // Is `seq` still the most recent request for `tab`? Used to discard responses
+  // from superseded requests (section switches / project changes / refreshes /
+  // time-range changes). This MUST be checked per-tab, not against the global
+  // `requestSeq`: a section can fire several sequential requests (e.g. activity
+  // loads stats then the chart), and a request for a *different* tab bumps the
+  // global seq — so a global check would wrongly discard a still-valid response
+  // (e.g. the new activity stats being thrown away because the trailing chart
+  // request advanced the global seq).
+  const isLatestRequest = (tab: LoadKey, seq: number) => tabSeq.current[tab] === seq;
+
   // Real data states
   const [dashboardAnalytics, setDashboardAnalytics] = useState<any>(null);
   const [analyticsTimeSeries, setAnalyticsTimeSeries] = useState<any>(null);
@@ -140,13 +150,13 @@ export function useReportsData(projectId: string | undefined) {
         analyticsAPI.getDashboardAnalytics(selectedProject, timeRange),
         analyticsAPI.getAnalyticsTimeSeries(selectedProject, timeRange),
       ]);
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('dashboard', seq)) return true;
       setDashboardAnalytics(data);
       setAnalyticsTimeSeries(timeSeries);
       return true;
     } catch (err) {
       console.error('Failed to load dashboard analytics:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('dashboard', seq)) return false;
       setDashboardAnalytics(null);
       setAnalyticsTimeSeries(null);
       setError('Failed to load dashboard analytics.');
@@ -166,12 +176,12 @@ export function useReportsData(projectId: string | undefined) {
         filter_type: granularFilter,
         time_range: timeRange,
       });
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('granular', seq)) return true;
       setGranularInsights(data);
       return true;
     } catch (err) {
       console.error('Failed to load granular insights:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('granular', seq)) return false;
       setGranularInsights(null);
       setError('Failed to load granular insights.');
       return false;
@@ -186,12 +196,12 @@ export function useReportsData(projectId: string | undefined) {
     setError(null);
     try {
       const data = await analyticsAPI.getShareableReports(selectedProject);
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('shareable', seq)) return true;
       setShareableReports(Array.isArray(data) ? data : []);
       return true;
     } catch (err) {
       console.error('Failed to load shareable reports:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('shareable', seq)) return false;
       setShareableReports([]);
       setError('Failed to load shareable reports.');
       return false;
@@ -213,12 +223,12 @@ export function useReportsData(projectId: string | undefined) {
         skip: traceabilityPage * TRACEABILITY_PAGE_SIZE,
         limit: TRACEABILITY_PAGE_SIZE,
       });
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('traceability', seq)) return true;
       setTraceabilityData(data);
       return true;
     } catch (err) {
       console.error('Failed to load traceability data:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('traceability', seq)) return false;
       setTraceabilityData(null);
       setError('Failed to load traceability data.');
       return false;
@@ -239,13 +249,13 @@ export function useReportsData(projectId: string | undefined) {
           : analyticsAPI.getCoverageReports(selectedProject),
         analyticsAPI.getTestExecutionStatus(selectedProject),
       ]);
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('coverage', seq)) return true;
       setCoverageReports(Array.isArray(coverage) ? coverage : [coverage]);
       setTestExecutionStatus(executionStatus);
       return true;
     } catch (err) {
       console.error('Failed to load coverage data:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('coverage', seq)) return false;
       setCoverageReports([]);
       setTestExecutionStatus(null);
       setError('Failed to load coverage data.');
@@ -262,12 +272,12 @@ export function useReportsData(projectId: string | undefined) {
     try {
       const days = timeRangeToDays(timeRange);
       const data = await auditAPI.getProjectActivitySummary(selectedProject, days);
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('activity', seq)) return true;
       setActivityStats(data);
       return true;
     } catch (err) {
       console.error('Failed to load activity statistics:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('activity', seq)) return false;
       setActivityStats(null);
       setError('Failed to load activity statistics.');
       return false;
@@ -285,12 +295,12 @@ export function useReportsData(projectId: string | undefined) {
       const endDate = new Date().toISOString();
       const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
       const data = await analyticsAPI.getTestActivity(selectedProject, startDate, endDate, 'day');
-      if (seq !== requestSeq.current) return true;
+      if (!isLatestRequest('test-activity', seq)) return true;
       setTestActivity(data);
       return true;
     } catch (err) {
       console.error('Failed to load test activity:', err);
-      if (seq !== requestSeq.current) return false;
+      if (!isLatestRequest('test-activity', seq)) return false;
       setTestActivity(null);
       setError('Failed to load test activity.');
       return false;
