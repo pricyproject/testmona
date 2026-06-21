@@ -122,6 +122,63 @@ def test_space_and_doc_crud_with_versioning(client):
     assert restored["current_version"] == 3  # restore writes a fresh version
 
 
+def _set_project_features(client, features):
+    from app import models
+    db = client.SessionLocal()
+    try:
+        project = db.query(models.Project).filter(models.Project.id == client.project_id).first()
+        project.features = features
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_create_named_milestone_revision(client):
+    psp = client.post("/docs/spaces", json={"name": "S", "project_id": client.project_id}).json()
+    doc = client.post("/docs", json={"title": "Spec", "content_markdown": "# A\n\nbody", "space_id": psp["id"]}).json()
+    assert doc["current_version"] == 1
+
+    # A named revision is forced — it records even with no content change.
+    resp = client.post(f"/docs/{doc['id']}/versions", json={"name": "Approved draft", "change_note": "Sign-off"})
+    assert resp.status_code == 201
+    rev = resp.json()
+    assert rev["action"] == "snapshot"
+    assert rev["name"] == "Approved draft"
+    assert rev["change_note"] == "Sign-off"
+    assert rev["version_number"] == 2
+
+    versions = client.get(f"/docs/{doc['id']}/versions").json()
+    assert versions[0]["name"] == "Approved draft"
+    assert versions[0]["action"] == "snapshot"
+
+
+def test_doc_revisions_feature_toggle(client):
+    psp = client.post("/docs/spaces", json={"name": "S", "project_id": client.project_id}).json()
+    doc = client.post("/docs", json={"title": "Spec", "content_markdown": "v1", "space_id": psp["id"]}).json()
+
+    _set_project_features(client, {"doc_revisions": False})
+
+    # Detail reports the toggle so the UI can hide the history.
+    detail = client.get(f"/docs/{doc['id']}").json()
+    assert detail["revisions_enabled"] is False
+
+    # Edits no longer snapshot while revisions are disabled.
+    updated = client.put(f"/docs/{doc['id']}", json={"content_markdown": "v2"}).json()
+    assert updated["content_markdown"] == "v2"
+    versions = client.get(f"/docs/{doc['id']}/versions").json()
+    assert [v["version_number"] for v in versions] == [1]
+
+    # Revision-mutating endpoints are gated.
+    assert client.post(f"/docs/{doc['id']}/versions", json={"name": "x"}).status_code == 403
+    assert client.delete(f"/docs/{doc['id']}/versions").status_code == 403
+
+    # Re-enabling resumes snapshots from the existing baseline.
+    _set_project_features(client, {"doc_revisions": True})
+    client.put(f"/docs/{doc['id']}", json={"content_markdown": "v3"})
+    versions = client.get(f"/docs/{doc['id']}/versions").json()
+    assert [v["version_number"] for v in versions] == [2, 1]
+
+
 def test_space_update_regenerates_slug_and_validates_color(client):
     a = client.post("/docs/spaces", json={"name": "Guides", "project_id": client.project_id}).json()
     b = client.post("/docs/spaces", json={"name": "Runbooks", "project_id": client.project_id}).json()
