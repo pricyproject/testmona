@@ -49,6 +49,13 @@ export default defineConfig(({ mode }) => {
     css: {
       postcss: './postcss.config.js'
     },
+    // Pre-bundle deps that are only reached through lazy routes so Vite includes
+    // them in the initial optimize pass.  Without this, Vite discovers them
+    // mid-session, re-bundles, and changes the `?v=` hash — which makes the
+    // already-loaded page fail with "error loading dynamically imported module".
+    optimizeDeps: {
+      include: ['react-multi-date-picker', 'react-date-object'],
+    },
     server: {
       port: 3000,
       hmr: {
