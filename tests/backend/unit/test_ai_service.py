@@ -7,7 +7,11 @@ No database or HTTP harness required.
 from types import SimpleNamespace
 
 from app.services import ai_manager
-from app.services.ai_prompt_service import QA_PROMPT_CHAR_CEILING, build_doc_qa_prompt
+from app.services.ai_prompt_service import (
+    QA_PROMPT_CHAR_CEILING,
+    build_doc_qa_prompt,
+    build_tql_builder_prompt,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +26,77 @@ def test_operation_task_mapping():
     assert ai_manager._operation_task("doc_change_impact") == "doc_impact"
     assert ai_manager._operation_task("doc_release_notes") == "doc_release_notes"
     assert ai_manager._operation_task("doc_convert_enhance") == "doc_convert"
+    assert ai_manager._operation_task("advanced_search_tql_build") == "tql"
     assert ai_manager._operation_task("connection_test") is None
+
+
+# ---------------------------------------------------------------------------
+# NL→TQL builder prompt + routing
+# ---------------------------------------------------------------------------
+
+def test_tql_routing_task_registered_and_resolvable():
+    assert "tql" in ai_manager.ROUTING_TASKS
+    assert ai_manager._operation_task_chain("advanced_search_tql_build") == ["tql"]
+    routing = {t: {"provider": None, "model": None} for t in ai_manager.ROUTING_TASKS}
+    routing["tql"] = {"provider": "anthropic", "model": "claude-3-5-haiku-latest"}
+    resolved = ai_manager._resolve_route(routing, "advanced_search_tql_build")
+    assert resolved["provider"] == "anthropic"
+    assert resolved["model"] == "claude-3-5-haiku-latest"
+
+
+def test_routing_payload_accepts_tql_target():
+    payload = ai_manager.RoutingSettingsPayload(tql={"provider": "openai", "model": "gpt-4o-mini"})
+    assert payload.tql.provider == "openai"
+    # Default config exposes a tql routing slot too.
+    assert "tql" in ai_manager.default_ai_config()["routing"]
+
+
+def test_build_tql_builder_prompt_lists_entities_fields_and_question():
+    entities = [
+        {
+            "key": "defects",
+            "label": "Defects",
+            "fields": [
+                {"name": "status", "kind": "enum", "operators": ["eq", "ne"], "choices": ["open", "closed"]},
+                {"name": "assignee", "kind": "user", "operators": ["eq", "ne"], "choices": []},
+                {"name": "created", "kind": "date", "operators": ["gt", "lt"], "choices": []},
+            ],
+        },
+        {
+            "key": "requirements",
+            "label": "Requirements",
+            "fields": [
+                {"name": "priority", "kind": "enum", "operators": ["eq", "ne"], "choices": ["high", "low"]},
+            ],
+        },
+    ]
+    prompt = build_tql_builder_prompt(entities, "open defects assigned to me")
+    # Both entities, their fields, enum choices, and the request all appear.
+    assert "Entity `defects` (Defects)" in prompt
+    assert "Entity `requirements` (Requirements)" in prompt
+    assert "status (enum): = !=" in prompt  # operator symbols, not internal names
+    assert "open, closed" in prompt
+    assert "currentUser()" in prompt  # surfaced for the user field
+    assert "open defects assigned to me" in prompt
+    # The model is told to choose an entity and return it in the JSON.
+    assert '"entity"' in prompt
+
+
+def test_build_tql_builder_prompt_handles_no_entities():
+    prompt = build_tql_builder_prompt([], "anything")
+    assert "(no entities available)" in prompt
+    assert "anything" in prompt
+
+
+def test_build_tql_builder_prompt_includes_current_date():
+    """The prompt must surface today's date so the model resolves 'since June 9'
+    to the current year instead of guessing (regression: it emitted 2023)."""
+    from datetime import datetime, timezone
+    fixed = datetime(2026, 6, 22, tzinfo=timezone.utc)
+    prompt = build_tql_builder_prompt([], "fixed defects since june 9", current_datetime=fixed)
+    assert "Current date: 2026-06-22" in prompt
+    # And it instructs full ISO dates with a 4-digit year.
+    assert "4-digit year" in prompt
 
 
 def test_unknown_operation_returns_none_or_raises_gracefully():

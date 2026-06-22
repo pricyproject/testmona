@@ -43,6 +43,7 @@ _GRAMMAR = r"""
 
     ?value: ESCAPED_STRING            -> string
           | RELDATE                   -> reldate
+          | DATE                      -> date_value
           | SIGNED_NUMBER             -> number
           | func
           | VALUE_TOKEN               -> bareword
@@ -65,6 +66,10 @@ _GRAMMAR = r"""
     DESC.5:  /\bdesc\b/i
 
     RELDATE.4: /[+-]\d+[dwhm]\b/
+    // Unquoted ISO date (date, or date+time): `2026-06-09`, `2026-06-09T13:20:00`.
+    // Higher priority than SIGNED_NUMBER so `2026-06-09` lexes as one date token
+    // rather than the number `2026` followed by an unparseable `-06-09`.
+    DATE.6: /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?/
     NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
     // Unquoted value: starts with a letter/underscore, may contain hyphens,
     // dots, slashes, colons — so keys like DEF-2 / REQ-10 / feature/x need no quotes.
@@ -128,6 +133,12 @@ def _build():
         def reldate(self, tok):
             text = str(tok)
             return nodes.RelDateVal(amount=int(text[:-1]), unit=text[-1])
+
+        def date_value(self, tok):
+            # Unquoted ISO date literal. Kept as a string so the date coercer
+            # parses it on date fields (and it reads as plain text elsewhere) —
+            # identical to a quoted "2026-06-09", just without the quotes.
+            return nodes.StringVal(str(tok))
 
         def func(self, name):
             return nodes.FuncVal(str(name))

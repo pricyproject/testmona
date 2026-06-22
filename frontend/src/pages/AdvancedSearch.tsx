@@ -20,6 +20,8 @@ import {
   Lightbulb,
   Users,
   Eraser,
+  Sparkles,
+  Wand2,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -34,6 +36,7 @@ import {
 } from '@/components/ui/select';
 import {
   advancedSearchAPI,
+  aiManagerAPI,
   getApiErrorMessage,
   type AdvancedSearchEntity,
   type AdvancedSearchField,
@@ -384,6 +387,17 @@ export function AdvancedSearch() {
   // Syntax help panel.
   const [showHelp, setShowHelp] = useState(false);
 
+  // Natural-language TQL builder (AI "ask in plain English"). Only offered when
+  // an AI provider is configured + available (checked once on mount), and hidden
+  // behind a trigger until the user opts in.
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [showAiBuilder, setShowAiBuilder] = useState(false);
+  const [nlQuestion, setNlQuestion] = useState('');
+  const [building, setBuilding] = useState(false);
+  const [buildExplanation, setBuildExplanation] = useState<string | null>(null);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const nlInputRef = useRef<HTMLInputElement>(null);
+
   // Saved searches.
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [saveMode, setSaveMode] = useState(false);
@@ -447,6 +461,15 @@ export function AdvancedSearch() {
       .finally(() => setEntitiesLoaded(true));
 
   }, [projectId]);
+
+  // Is an AI provider configured + reachable? Drives whether the plain-English
+  // query builder is shown. Best-effort: a failed status check just hides it.
+  useEffect(() => {
+    aiManagerAPI
+      .getStatus()
+      .then((status) => setAiAvailable(!!status.available))
+      .catch(() => setAiAvailable(false));
+  }, []);
 
   const currentEntity = useMemo(
     () => entities.find((e) => e.key === entityKey),
@@ -563,6 +586,53 @@ export function AdvancedSearch() {
     setQuery(tql);
     setSuggestOpen(false);
     void doSearch(entityKey, tql, 0);
+  };
+
+  const openAiBuilder = () => {
+    setShowAiBuilder(true);
+    requestAnimationFrame(() => nlInputRef.current?.focus());
+  };
+  const closeAiBuilder = () => {
+    setShowAiBuilder(false);
+    setBuildError(null);
+    setBuildExplanation(null);
+  };
+
+  // Plain-English -> TQL: ask the AI to both pick the best-matching entity and
+  // translate the question into a query for it. We switch the entity selector to
+  // the detected one, drop the TQL into the box, and run it when it's a usable
+  // filter. An empty-but-valid query (e.g. "show all defects", or a request the
+  // AI couldn't turn into a filter) switches the entity and shows the explanation
+  // without auto-running, so the user decides whether to view everything.
+  const buildFromNaturalLanguage = async () => {
+    if (!projectId || !nlQuestion.trim() || building) return;
+    setBuilding(true);
+    setBuildError(null);
+    setBuildExplanation(null);
+    setSuggestOpen(false);
+    try {
+      const res = await advancedSearchAPI.aiBuild(parseInt(projectId), nlQuestion.trim());
+      // Adopt the AI-detected entity (guard against one not in the enabled list).
+      const detected = entities.some((e) => e.key === res.entity) ? res.entity : entityKey;
+      setEntityKey(detected);
+      setQuery(res.tql);
+      setBuildExplanation(res.explanation || null);
+      if (res.valid && res.tql.trim()) {
+        void doSearch(detected, res.tql, 0);
+      } else if (!res.valid) {
+        setResult(null);
+        setError(null);
+        setBuildError(res.validation_error || res.explanation || t('advancedSearchAiBuilderInvalid'));
+      } else {
+        // Valid but empty (match-all / un-filterable) — surface, don't auto-run.
+        setResult(null);
+        setError(null);
+      }
+    } catch (err) {
+      setBuildError(getApiErrorMessage(err, t('advancedSearchAiBuilderError')));
+    } finally {
+      setBuilding(false);
+    }
   };
 
   // Auto-run once if the URL carried a shared query — but only after the
@@ -756,6 +826,8 @@ export function AdvancedSearch() {
     setResult(null);
     setError(null);
     setSuggestOpen(false);
+    setBuildError(null);
+    setBuildExplanation(null);
   };
 
   const metaColumns = metaColumnsFor(entityKey);
@@ -810,6 +882,86 @@ export function AdvancedSearch() {
 
       <Card>
         <CardContent className="space-y-3 pt-6">
+          {/* Plain-English query builder (AI) — hidden behind a trigger; only
+              offered when an AI provider is configured + available. */}
+          {aiAvailable && !showAiBuilder && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={openAiBuilder}
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {t('advancedSearchAiBuilderTrigger')}
+              </button>
+            </div>
+          )}
+          {aiAvailable && showAiBuilder && (
+            <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">{t('advancedSearchAiBuilderTitle')}</span>
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                  {t('advancedSearchAiBuilderBadge')}
+                </span>
+                <button
+                  type="button"
+                  onClick={closeAiBuilder}
+                  aria-label={t('advancedSearchAiBuilderClose')}
+                  title={t('advancedSearchAiBuilderClose')}
+                  className="ms-auto rounded p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  ref={nlInputRef}
+                  value={nlQuestion}
+                  onChange={(e) => setNlQuestion(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void buildFromNaturalLanguage();
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      closeAiBuilder();
+                    }
+                  }}
+                  placeholder={t('advancedSearchAiBuilderPlaceholder')}
+                  className="flex-1 text-sm"
+                  maxLength={1000}
+                  disabled={building}
+                />
+                <Button
+                  onClick={() => void buildFromNaturalLanguage()}
+                  disabled={building || !nlQuestion.trim()}
+                >
+                  {building ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wand2 className="mr-2 h-4 w-4" />
+                  )}
+                  {building ? t('advancedSearchAiBuilderBuilding') : t('advancedSearchAiBuilderRun')}
+                </Button>
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">{t('advancedSearchAiBuilderHint')}</p>
+              {buildExplanation && (
+                <p className="mt-1.5 flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/70" />
+                  <span>{buildExplanation}</span>
+                </p>
+              )}
+              {buildError && (
+                <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{buildError}</span>
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
             <Select value={entityKey} onValueChange={onEntityChange}>
               <SelectTrigger className="w-full sm:w-48">

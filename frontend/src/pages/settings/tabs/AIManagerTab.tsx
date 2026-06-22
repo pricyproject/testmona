@@ -48,6 +48,7 @@ const defaultRoutingSettings: AIRoutingSettings = {
   qa: { provider: null, model: null },
   generation: { provider: null, model: null },
   assistant: { provider: null, model: null },
+  tql: { provider: null, model: null },
   docs: { provider: null, model: null },
   doc_impact: { provider: null, model: null },
   doc_release_notes: { provider: null, model: null },
@@ -67,7 +68,7 @@ const defaultAIManagerSettings: AIManagerSettings = {
 };
 
 const AI_SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases', 'docs'];
-const AI_ROUTING_TASKS: Array<keyof AIRoutingSettings> = ['qa', 'generation', 'assistant'];
+const AI_ROUTING_TASKS: Array<keyof AIRoutingSettings> = ['qa', 'generation', 'assistant', 'tql'];
 const AI_DOC_ROUTING_SUBTASKS: Array<keyof AIRoutingSettings> = ['doc_impact', 'doc_release_notes', 'doc_convert'];
 
 const aiProviderLabels: Record<AIProviderName, string> = {
@@ -82,6 +83,7 @@ const aiOperationLabel = (operation: string, t: (k: string) => string): string =
   if (operation === 'requirement_project_qa') return t('opRequirementQa');
   if (operation === 'requirement_test_case_generation') return t('opTestCaseGeneration');
   if (operation.startsWith('test_case_assistant') || operation.startsWith('test_case_draft_assistant')) return t('opTestCaseAssistant');
+  if (operation === 'advanced_search_tql_build') return t('opTqlBuilder');
   if (operation === 'doc_change_impact') return t('opDocChangeImpact');
   if (operation === 'doc_release_notes') return t('opDocReleaseNotes');
   if (operation === 'doc_convert_enhance') return t('opDocConvertEnhance');

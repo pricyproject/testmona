@@ -24,6 +24,12 @@ from ..features import is_feature_enabled
 from ..auth import get_current_active_user
 from ..crud import safe_commit
 from ..database import get_db
+from ..services.ai_manager import AICompletionRequest, generate_ai_completion
+from ..services.ai_prompt_service import (
+    build_tql_builder_prompt,
+    clean_ai_text,
+    extract_json_object,
+)
 from ..services.tql import (
     EvalContext,
     TQLError,
@@ -32,6 +38,7 @@ from ..services.tql import (
     entity_catalog,
     execute_search,
     export_search,
+    field_catalog,
     get_entity,
     parse,
     value_suggestions,
@@ -75,6 +82,15 @@ class SavedSearchCreate(BaseModel):
     entity: str
     tql: str = Field(default="", max_length=2000)
     is_shared: bool = False
+
+
+class TqlBuildRequest(BaseModel):
+    project_id: int
+    # Optional: when omitted (the default), the AI auto-detects the best-matching
+    # entity from those enabled for the project. When provided, the build is pinned
+    # to that one entity.
+    entity: Optional[str] = None
+    question: str = Field(min_length=1, max_length=1000)
 
 
 def _saved_search_view(row: models.SavedFilter) -> dict:
@@ -150,6 +166,10 @@ def register_advanced_search_routes(app) -> None:
         ),
         limit: int = Query(50, ge=1, le=200),
         offset: int = Query(0, ge=0),
+        tz_offset: int = Query(
+            0, ge=-840, le=840,
+            description="Client timezone offset in minutes (JS getTimezoneOffset), so bare date literals match the locally-displayed dates.",
+        ),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
@@ -162,12 +182,121 @@ def register_advanced_search_routes(app) -> None:
                 entity_key=entity,
                 project_id=project_id,
                 tql=tql,
-                context=EvalContext(current_user_id=current_user.id),
+                context=EvalContext(current_user_id=current_user.id, tz_offset_minutes=tz_offset),
                 limit=limit,
                 offset=offset,
             )
         except TQLError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+
+    def _resolve_built_entity(ai_value, candidate_keys: list, candidates: list, forced):
+        """Resolve which entity the build is for.
+
+        A pinned ``forced`` entity always wins. Otherwise the AI's chosen value is
+        matched (case-insensitively) against candidate keys, then their labels;
+        anything unrecognized falls back to the first candidate so we always have a
+        real, enabled entity to compile against."""
+        if forced:
+            return forced
+        value = str(ai_value or "").strip().lower()
+        if value:
+            by_key = {c["key"].lower(): c["key"] for c in candidates}
+            if value in by_key:
+                return by_key[value]
+            by_label = {str(c.get("label") or "").lower(): c["key"] for c in candidates}
+            if value in by_label:
+                return by_label[value]
+        return candidate_keys[0]
+
+    @app.post("/advanced-search/ai-build", tags=["Advanced Search"],
+              dependencies=[Depends(require_project_feature("advanced_search"))])
+    async def build_advanced_search_query(
+        payload: TqlBuildRequest,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Turn a plain-language question into a TQL query.
+
+        By default the AI also picks the best-matching entity from those enabled for
+        the project (pass ``entity`` to pin one instead). The generated TQL is then
+        compiled against the chosen entity's field registry so the response reports
+        whether it is runnable. Spending the project's AI budget requires write
+        access (a read-only viewer cannot trigger paid calls).
+        """
+        project = _require_project_access(current_user, payload.project_id, db)
+        if not rbac.has_permission(current_user, "write", payload.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # Candidate entities = those enabled for this project (so the AI can never
+        # pick, nor a query reach, a disabled module).
+        catalog = [e for e in entity_catalog() if not _entity_disabled(project, e["key"])]
+        if payload.entity:
+            # Pinned entity: must be enabled + a real entity key.
+            _require_entity_enabled(project, payload.entity)
+            try:
+                spec = get_entity(payload.entity)
+            except TQLError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            candidates = [{"key": spec.key, "label": spec.label, "fields": field_catalog(spec.registry)}]
+        else:
+            candidates = catalog
+            if not candidates:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No searchable entities are enabled for this project",
+                )
+
+        candidate_keys = [c["key"] for c in candidates]
+        prompt = build_tql_builder_prompt(candidates, payload.question)
+        result = await generate_ai_completion(
+            db,
+            AICompletionRequest(prompt=prompt, max_tokens=500, temperature=0, timeout_seconds=60),
+            operation="advanced_search_tql_build",
+            project_id=payload.project_id,
+            user_id=current_user.id,
+            entity_type="project",
+            entity_id=payload.project_id,
+        )
+
+        try:
+            parsed = extract_json_object(result.content)
+        except Exception as exc:
+            logger.warning("Failed to parse AI TQL builder response: %s", exc)
+            raise HTTPException(status_code=502, detail="AI response could not be parsed into a query") from exc
+
+        entity_key = _resolve_built_entity(
+            parsed.get("entity"), candidate_keys, candidates, payload.entity,
+        )
+        tql = clean_ai_text(parsed.get("tql"), 2000)
+        explanation = clean_ai_text(parsed.get("explanation"), 500)
+        # The resolved entity is always one of our enabled candidates, so get_entity
+        # cannot fail here — but guard anyway so a registry surprise can't 500.
+        try:
+            spec = get_entity(entity_key)
+        except TQLError as exc:
+            raise HTTPException(status_code=502, detail="AI selected an unavailable entity") from exc
+
+        # Validate the generated query against the chosen entity so the UI can warn
+        # before running it (an invalid query is still returned so the user can fix
+        # it). An empty TQL is a valid "match everything" query for the entity.
+        valid = True
+        validation_error = None
+        if tql.strip():
+            try:
+                compile_tql(tql, spec.registry, EvalContext(current_user_id=current_user.id))
+            except TQLError as exc:
+                valid = False
+                validation_error = str(exc)
+
+        return {
+            "entity": spec.key,
+            "tql": tql,
+            "explanation": explanation,
+            "valid": valid,
+            "validation_error": validation_error,
+            "provider": result.provider,
+            "model": result.model,
+        }
 
     @app.get("/advanced-search/export", tags=["Advanced Search"],
              dependencies=[Depends(require_project_feature("advanced_search"))])
@@ -175,6 +304,7 @@ def register_advanced_search_routes(app) -> None:
         project_id: int,
         entity: str = Query(...),
         tql: Optional[str] = Query(None, max_length=2000),
+        tz_offset: int = Query(0, ge=-840, le=840),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
@@ -187,7 +317,7 @@ def register_advanced_search_routes(app) -> None:
                 entity_key=entity,
                 project_id=project_id,
                 tql=tql,
-                context=EvalContext(current_user_id=current_user.id),
+                context=EvalContext(current_user_id=current_user.id, tz_offset_minutes=tz_offset),
             )
         except TQLError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

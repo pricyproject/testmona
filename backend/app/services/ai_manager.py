@@ -74,7 +74,7 @@ class AIProviderConfigPayload(BaseModel):
 SOURCE_TYPES = ("requirements", "defects", "test_plans", "test_cases", "docs")
 # Routing task groups. "docs" is the general Doc Hub group; the three doc_*
 # groups are per-feature overrides that fall back to "docs" when unset.
-ROUTING_TASKS = ("qa", "generation", "assistant", "docs", "doc_impact", "doc_release_notes", "doc_convert")
+ROUTING_TASKS = ("qa", "generation", "assistant", "tql", "docs", "doc_impact", "doc_release_notes", "doc_convert")
 
 # Doc Hub operation → its specific (per-feature) routing task. Each resolves to
 # its own task first, then the general "docs" group, then the active provider.
@@ -127,6 +127,8 @@ class RoutingSettingsPayload(BaseModel):
     qa: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
     generation: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
     assistant: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
+    # Natural-language TQL builder (Advanced Search "ask in plain English").
+    tql: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
     # General Doc Hub group (default for every Doc Hub AI feature)...
     docs: RoutingTargetPayload = Field(default_factory=RoutingTargetPayload)
     # ...with optional per-feature overrides that fall back to ``docs`` when unset.
@@ -857,6 +859,8 @@ def _operation_task(operation: str) -> Optional[str]:
         return "generation"
     if operation.startswith("test_case_assistant") or operation.startswith("test_case_draft_assistant"):
         return "assistant"
+    if operation == "advanced_search_tql_build":
+        return "tql"
     if operation in DOC_OPERATION_TASKS:
         return DOC_OPERATION_TASKS[operation]
     if operation.startswith("doc_"):

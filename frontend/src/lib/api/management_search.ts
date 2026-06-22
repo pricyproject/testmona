@@ -221,6 +221,16 @@ export interface SavedSearch {
   is_owner: boolean;
 }
 
+export interface TqlBuildResult {
+  entity: string;
+  tql: string;
+  explanation: string;
+  valid: boolean;
+  validation_error: string | null;
+  provider: string;
+  model: string;
+}
+
 export const advancedSearchAPI = {
   getEntities: async (projectId: number): Promise<{ entities: AdvancedSearchEntity[] }> => {
     const response = await api.get(`/advanced-search/entities?project_id=${projectId}`);
@@ -238,9 +248,26 @@ export const advancedSearchAPI = {
       entity,
       limit: limit.toString(),
       offset: offset.toString(),
+      // Send the browser's UTC offset so bare date literals in the query are
+      // interpreted in the user's timezone (matching the locally-displayed dates).
+      tz_offset: new Date().getTimezoneOffset().toString(),
     });
     if (tql.trim()) params.append('tql', tql.trim());
     const response = await api.get(`/advanced-search?${params}`);
+    return response.data;
+  },
+  // Turn a plain-language question into a TQL query via the AI provider. The AI
+  // also auto-detects the best-matching entity unless `entity` is passed to pin one.
+  aiBuild: async (
+    projectId: number,
+    question: string,
+    entity?: string,
+  ): Promise<TqlBuildResult> => {
+    const response = await api.post('/advanced-search/ai-build', {
+      project_id: projectId,
+      question,
+      ...(entity ? { entity } : {}),
+    });
     return response.data;
   },
   // Distinct existing values of a field, for value autocomplete (e.g. tags).
@@ -284,7 +311,11 @@ export const advancedSearchAPI = {
   },
   // Triggers a CSV download of all matching rows (capped server-side).
   exportCsv: async (projectId: number, entity: string, tql: string): Promise<void> => {
-    const params = new URLSearchParams({ project_id: projectId.toString(), entity });
+    const params = new URLSearchParams({
+      project_id: projectId.toString(),
+      entity,
+      tz_offset: new Date().getTimezoneOffset().toString(),
+    });
     if (tql.trim()) params.append('tql', tql.trim());
     const response = await api.get(`/advanced-search/export?${params}`, { responseType: 'blob' });
     const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));

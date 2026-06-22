@@ -587,6 +587,115 @@ def build_release_notes_prompt(title: str, payload: dict[str, Any]) -> str:
     return prompt
 
 
+# Operator internal name -> the symbol a user types in TQL (mirrors the
+# front-end OP_SYMBOL map in AdvancedSearch.tsx). Used to render the field
+# reference the NL→TQL builder model sees, so it only ever emits real operators.
+_TQL_OP_SYMBOL = {
+    "eq": "=",
+    "ne": "!=",
+    "gt": ">",
+    "lt": "<",
+    "gte": ">=",
+    "lte": "<=",
+    "contains": "~",
+    "ncontains": "!~",
+}
+
+_TQL_BUILDER_INSTRUCTIONS = (
+    "You are a query builder for TQL, a JQL-style filter language used by a test "
+    "management tool's Advanced Search. Do two things with the user's plain-language "
+    "request: (1) CHOOSE the single entity (from the list below) that best matches "
+    "what the user is looking for, then (2) build ONE valid TQL expression for that "
+    "entity using ONLY that entity's fields.\n"
+    "TQL grammar:\n"
+    "  - Conditions: FIELD OP VALUE, e.g. `status = OPEN`, `priority IN (HIGH, URGENT)`.\n"
+    "  - Operators: `=` equals, `!=` not equals, `> < >= <=` ordered compare, "
+    "`~` contains, `!~` not-contains, `IN (a, b)` / `NOT IN (a, b)` membership, "
+    "`IS EMPTY` / `IS NOT EMPTY` for blank/non-blank.\n"
+    "  - Combine with `AND`, `OR`, `NOT`, and parentheses for grouping.\n"
+    "  - Functions: `currentUser()` for the signed-in user on user fields; `now()` and "
+    "relative dates like `-7d`, `-30d`, `-12h`, `2w` on date fields.\n"
+    "  - Dates: write absolute dates as full ISO `YYYY-MM-DD` (e.g. `updated > 2026-06-09`) "
+    "— always include a 4-digit year. Resolve relative or partial dates ('last week', "
+    "'since June 9', 'yesterday') against the CURRENT DATE given below: a day/month with "
+    "no year means the current year, and 'last N days/weeks' is best written as a relative "
+    "offset like `-7d`. Never output a date without a year, and never guess a past year.\n"
+    "  - Optional trailing `ORDER BY field [ASC|DESC]`.\n"
+    "  - Quote text values that contain spaces with double quotes, e.g. `summary ~ \"login page\"`.\n"
+    "  - Use ONLY field names listed for the chosen entity and, for enum/keyword fields, "
+    "ONLY their listed choices. Never invent an entity, field, or value.\n"
+    "  - An empty request, a greeting, or a request that cannot be expressed with any "
+    "listed entity's fields: still pick the most plausible entity, return an empty tql "
+    "string, and say why in the explanation.\n"
+    "  - A request with no filter conditions (e.g. \"show all defects\") is valid: pick "
+    "the entity and return an empty tql (which matches everything), noting that.\n"
+    'Return JSON only: {"entity": "the chosen entity key (exactly as listed)", '
+    '"tql": "string (the TQL expression, or empty)", '
+    '"explanation": "string (one short sentence: which entity and what the query matches)"}'
+)
+
+
+def _tql_field_lines(fields: list[dict[str, Any]]) -> str:
+    """Render one entity's field catalog as model-readable lines (name, kind,
+    operator symbols, and enum/keyword choices)."""
+    lines: list[str] = []
+    for field in fields:
+        ops = " ".join(
+            _TQL_OP_SYMBOL.get(op, op) for op in field.get("operators", [])
+        )
+        # Word operators valid on any field; surface them so the model knows them.
+        extras = "IN NOT IN IS EMPTY IS NOT EMPTY"
+        detail = f"- {field.get('name')} ({field.get('kind')}): {ops} {extras}".rstrip()
+        choices = field.get("choices") or []
+        if choices:
+            detail += f" · values: {', '.join(str(c) for c in choices)}"
+        if field.get("kind") == "user":
+            detail += " · accepts currentUser() or a user id"
+        elif field.get("kind") == "date":
+            detail += " · accepts now(), ISO date, or relative (-7d)"
+        lines.append(detail)
+    return "\n".join(lines) if lines else "(no fields available)"
+
+
+def build_tql_builder_prompt(
+    entities: list[dict[str, Any]],
+    question: str,
+    current_datetime: Optional[Any] = None,
+) -> str:
+    """Prompt for translating a natural-language request into an entity + TQL query.
+
+    ``entities`` is a list of ``{key, label, fields}`` dicts (``fields`` are
+    field-catalog dicts from :func:`app.services.tql.field_catalog`). The model is
+    asked to first pick the best-matching entity from this list, then build a query
+    using only that entity's fields — so the result is always scoped to a real,
+    enabled entity and can only reference fields that exist on it.
+
+    ``current_datetime`` (a ``datetime``; defaults to now, UTC) is surfaced so the
+    model can resolve relative/partial dates ('last week', 'since June 9') to a
+    concrete year instead of guessing one."""
+    from datetime import datetime, timezone
+
+    now = current_datetime or datetime.now(timezone.utc)
+    try:
+        now_label = now.strftime("%Y-%m-%d (%A)")
+    except Exception:  # pragma: no cover - defensive: any non-datetime falls back
+        now_label = str(now)
+
+    blocks: list[str] = []
+    for ent in entities:
+        key = ent.get("key", "")
+        label = ent.get("label") or key
+        blocks.append(f"Entity `{key}` ({label}):\n{_tql_field_lines(ent.get('fields') or [])}")
+    entity_block = "\n\n".join(blocks) if blocks else "(no entities available)"
+    question_text = clean_ai_text(question, 1000)
+    return (
+        f"{_TQL_BUILDER_INSTRUCTIONS}\n\n"
+        f"Current date: {now_label}\n\n"
+        f"Entities you may query:\n{entity_block}\n\n"
+        f"Request: {question_text}"
+    ).strip()
+
+
 def build_test_case_context(test_case: Any, steps: list[Any]) -> str:
     step_text = "\n".join(
         f"{step.step_number}. {step.action} => {step.expected_result}"

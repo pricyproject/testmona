@@ -14,7 +14,7 @@ field catalog (so the front-end can show available fields and enum choices).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, FrozenSet, Tuple
 
@@ -141,7 +141,11 @@ def date_coercer(value: nodes.Value, ctx: EvalContext) -> datetime:
         except ValueError as exc:
             raise TQLError(f"'{value.value}' is not a valid date (use ISO format or -7d).") from exc
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            # A literal with no explicit zone is the user's local wall-clock time
+            # (e.g. ``2026-06-09`` means local midnight that day). Shift it to UTC by
+            # the client offset so it lines up with the UTC-stored, locally-displayed
+            # timestamps. With the default offset of 0 this is a plain UTC reading.
+            parsed = (parsed + timedelta(minutes=ctx.tz_offset_minutes)).replace(tzinfo=timezone.utc)
         return parsed
     raise TQLError("Expected a date here (ISO string, -7d, or now()).")
 

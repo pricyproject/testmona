@@ -97,6 +97,59 @@ def test_unknown_date_function_raises():
     assert "today()" in str(exc.value)
 
 
+def test_bare_iso_date_parses_like_quoted():
+    """Regression: an unquoted ISO date (`updated > 2026-06-09`) used to fail to
+    parse — the lexer read `2026` as a number and choked on the `-06-09`. It must
+    now compile identically to the quoted form."""
+    if not _have_lark():
+        pytest.skip("lark not installed")
+    bare = _sql(compile_tql("updated > 2026-06-09", DEFECT_REGISTRY, CTX).where)
+    quoted = _sql(compile_tql('updated > "2026-06-09"', DEFECT_REGISTRY, CTX).where)
+    assert bare == quoted
+    assert "2026-06-09" in bare
+
+
+def test_bare_iso_datetime_and_combined_conditions_parse():
+    if not _have_lark():
+        pytest.skip("lark not installed")
+    # date + time, and a date condition AND'd with an enum condition.
+    compile_tql("created >= 2026-06-09T13:20:00", DEFECT_REGISTRY, CTX)
+    compile_tql("status = fixed AND updated > 2026-06-09", DEFECT_REGISTRY, CTX)
+
+
+def test_plain_numbers_and_keys_still_parse_after_date_terminal():
+    """The new DATE terminal must not shadow plain integers or hyphenated keys."""
+    if not _have_lark():
+        pytest.skip("lark not installed")
+    compile_tql("id > 2023", DEFECT_REGISTRY, CTX)
+    compile_tql("key = REQ-10", DEFECT_REGISTRY, CTX)
+
+
+def test_bare_date_literal_shifted_by_client_timezone_offset():
+    """A bare date is the user's *local* wall-clock day, shifted to UTC by the
+    client offset — so the filter lines up with the locally-displayed dates
+    (regression: `created > 2026-06-09` was always midnight UTC, so a row stored
+    06:10 UTC but displayed June 8 in UTC-7 wrongly matched)."""
+    from datetime import timezone as _tz
+    from app.services.tql.registry import date_coercer
+    val = nodes.StringVal("2026-06-09")
+    # UTC (default): local midnight == UTC midnight.
+    assert date_coercer(val, EvalContext()) == datetime(2026, 6, 9, tzinfo=_tz.utc)
+    # UTC-7 (getTimezoneOffset == 420): local midnight is 07:00 UTC.
+    assert date_coercer(val, EvalContext(tz_offset_minutes=420)) == datetime(2026, 6, 9, 7, tzinfo=_tz.utc)
+    # UTC+3:30 (getTimezoneOffset == -210): local midnight is 20:30 the prior day.
+    assert date_coercer(val, EvalContext(tz_offset_minutes=-210)) == datetime(2026, 6, 8, 20, 30, tzinfo=_tz.utc)
+
+
+def test_explicit_timezone_literal_ignores_client_offset():
+    """A literal that already carries a zone is an exact instant — the client
+    offset must not shift it again."""
+    from datetime import timezone as _tz
+    from app.services.tql.registry import date_coercer
+    val = nodes.StringVal("2026-06-09T00:00:00Z")
+    assert date_coercer(val, EvalContext(tz_offset_minutes=420)) == datetime(2026, 6, 9, tzinfo=_tz.utc)
+
+
 # ---------------------------------------------------------------------------
 # Text / LIKE escaping
 # ---------------------------------------------------------------------------

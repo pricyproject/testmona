@@ -74,6 +74,8 @@ export interface AIRoutingSettings {
   qa: AIRoutingTarget;
   generation: AIRoutingTarget;
   assistant: AIRoutingTarget;
+  // Natural-language TQL builder (Advanced Search "ask in plain English").
+  tql: AIRoutingTarget;
   // General Doc Hub group + optional per-feature overrides (fall back to `docs`).
   docs: AIRoutingTarget;
   doc_impact: AIRoutingTarget;
