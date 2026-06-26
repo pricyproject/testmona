@@ -376,6 +376,7 @@ export function useTestCaseExecution() {
           if (cancelled) return;
           setAllTestCases(results.map((r: any) => ({
             id: r.test_case_id,
+            projectSeq: r.test_case?.project_seq ?? null,
             title: r.test_case?.title || `Test Case ${r.test_case_id}`,
           })));
         }
@@ -642,7 +643,7 @@ export function useTestCaseExecution() {
   }, [executionStatus]);
 
   // --- Navigation derived state ---
-  const currentIndex = allTestCases.findIndex((tc) => tc.id.toString() === testCaseId?.toString());
+  const currentIndex = allTestCases.findIndex((tc) => Number(tc.id) === Number(tcGlobalId));
   const hasNext = currentIndex >= 0 && currentIndex < allTestCases.length - 1;
   const hasPrevious = currentIndex > 0;
 
@@ -1107,8 +1108,10 @@ export function useTestCaseExecution() {
 
   // Resolve the adjacent case ids once so both the guarded (manual nav) and
   // unguarded (post-save nav) paths share the same target.
-  const nextCaseId = hasNext && currentIndex >= 0 ? allTestCases[currentIndex + 1]?.id : undefined;
-  const prevCaseId = hasPrevious && currentIndex >= 0 ? allTestCases[currentIndex - 1]?.id : undefined;
+  const nextCase = hasNext && currentIndex >= 0 ? allTestCases[currentIndex + 1] : undefined;
+  const prevCase = hasPrevious && currentIndex >= 0 ? allTestCases[currentIndex - 1] : undefined;
+  const nextCaseId = nextCase ? nextCase.projectSeq ?? nextCase.id : undefined;
+  const prevCaseId = prevCase ? prevCase.projectSeq ?? prevCase.id : undefined;
   const navigateToCase = (caseId: number) =>
     navigate(`/projects/${projectId}/test-runs/${testRunId}/test-cases/${caseId}`);
 
