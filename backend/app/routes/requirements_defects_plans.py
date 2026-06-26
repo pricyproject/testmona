@@ -548,7 +548,7 @@ def _test_case_to_linked_response(db: Session, test_case, link_id: Optional[int]
         test_suite_id=test_case.test_suite_id,
         section_id=test_case.section_id,
         reference=test_case.reference,
-        tags=test_case.tags,
+        tags=test_case.tags_cache,
         created_at=test_case.created_at,
         updated_at=test_case.updated_at,
         suite_name=test_case.test_suite.name if test_case.test_suite else None,
@@ -2467,7 +2467,7 @@ def register_requirements_defects_plans_routes(app):
                     status_code=400,
                     detail="New defect must belong to the same project as the test result",
                 )
-            if not (new_defect.defect_id or "").strip() or not (new_defect.title or "").strip():
+            if not (new_defect.title or "").strip():
                 raise HTTPException(status_code=400, detail="Defect ID and title are required")
             _validate_defect_links(
                 db,
@@ -2477,11 +2477,21 @@ def register_requirements_defects_plans_routes(app):
                 requirement_id=new_defect.requirement_id,
                 assigned_to=new_defect.assigned_to,
             )
+            raw_defect_id = (new_defect.defect_id or "").strip()
+            if not raw_defect_id:
+                raw_defect_id = _next_project_defect_id(db, project_id)
             new_defect = new_defect.model_copy(update={
                 "reported_by": current_user.id,
-                "defect_id": new_defect.defect_id.strip(),
+                "defect_id": raw_defect_id,
                 "title": new_defect.title.strip(),
             })
+            context_updates = {}
+            if new_defect.test_case_id is None and test_result.test_case_id is not None:
+                context_updates["test_case_id"] = test_result.test_case_id
+            if new_defect.test_run_id is None and test_result.test_run_id is not None:
+                context_updates["test_run_id"] = test_result.test_run_id
+            if context_updates:
+                new_defect = new_defect.model_copy(update=context_updates)
             if _is_auto_project_defect_id(new_defect.defect_id, project_id):
                 duplicate = db.query(models.Defect.id).filter(
                     models.Defect.defect_id == new_defect.defect_id

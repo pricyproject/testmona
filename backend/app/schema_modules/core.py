@@ -240,6 +240,13 @@ class TestCaseBase(BaseModel):
                     data[key] = html.escape(value)
         return data
 
+    @field_validator('tags', mode='before')
+    @classmethod
+    def coerce_tags(cls, v):
+        if isinstance(v, str):
+            return [tag.strip() for tag in v.split(',') if tag.strip()]
+        return v
+
 
 class TestCaseCreate(TestCaseBase):
     test_suite_id: int
@@ -275,6 +282,13 @@ class TestCaseUpdate(BaseModel):
     order_index: Optional[int] = None
     is_multistep: Optional[bool] = None  # Flag to indicate multistep format
     dataset_id: Optional[int] = None  # Reusable data set this case iterates over (null detaches)
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def coerce_tags(cls, v):
+        if isinstance(v, str):
+            return [tag.strip() for tag in v.split(',') if tag.strip()]
+        return v
 
     @model_validator(mode='before')
     @classmethod

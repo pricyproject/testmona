@@ -193,18 +193,6 @@ export function useTestCaseExecution() {
       return { ...prev, [stepNumber]: status };
     });
 
-  const createExecutionDefectId = () => {
-    const numericProjectId = Number(projectId);
-    const prefix = `P${Number.isFinite(numericProjectId) ? numericProjectId : 'X'}-DEF-`;
-    const projectDefects = availableDefects.length > 0 ? availableDefects : defects;
-    const highest = projectDefects.reduce((max, defect) => {
-      const rawId = String(defect?.defect_id || '');
-      if (!rawId.startsWith(prefix)) return max;
-      const suffix = Number(rawId.slice(prefix.length));
-      return Number.isFinite(suffix) ? Math.max(max, suffix) : max;
-    }, 0);
-    return `${prefix}${String(highest + 1).padStart(3, '0')}`;
-  };
 
   const restoreTimingFromResult = useCallback((result: any) => {
     // execution_time already includes manual_time_adjustment from the backend.
@@ -1060,13 +1048,10 @@ export function useTestCaseExecution() {
     try {
       setIsCreating(true);
       const defectData: any = {
-        defect_id: createExecutionDefectId(),
         title: trimmedTitle,
         description: newDefect.description.trim(),
         severity: newDefect.severity,
         priority: newDefect.priority,
-        test_case_id: currentTestCaseId,
-        test_run_id: currentTestRunId,
         project_id: currentProjectId,
         reported_by: currentUser?.id,
         ...buildDefectContext(),
