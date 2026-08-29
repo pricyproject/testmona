@@ -1,29 +1,29 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-sqlalchemy==2.0.36
-alembic==1.14.0
-PyMySQL==1.1.1  # MariaDB/MySQL driver (used when DATABASE_URL is mysql+pymysql://)
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+alembic==1.19.1
+PyMySQL==1.2.0  # MariaDB/MySQL driver (used when DATABASE_URL is mysql+pymysql://)
 psycopg2-binary==2.9.12  # PostgreSQL driver (used when DATABASE_URL is postgresql+psycopg2://)
-pydantic[email]==2.10.0
-pydantic-settings==2.1.0
-python-jose[cryptography]==3.4.0
+pydantic[email]==2.13.5
+pydantic-settings==2.15.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
-bcrypt==3.2.2
-python-multipart==0.0.27
-requests==2.33.0
+bcrypt==4.3.0  # capped <5: passlib 1.7.4's wrap-bug probe fails on bcrypt 5.x (72-byte ValueError)
+python-multipart==0.0.32
+requests==2.34.2
 urllib3==2.7.0
-charset-normalizer==2.1.0
-chardet==5.2.0
-cryptography==46.0.7
-pytest==9.0.3
-pytest-asyncio==0.21.1
-httpx==0.25.2
-faker==20.1.0
+charset-normalizer==3.5.1
+chardet==7.6.0
+cryptography==50.0.1
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
+faker==40.37.0
 defusedxml==0.7.1
-markdown==3.8.1
-PyYAML==6.0.2
-lark==1.2.2
-json-repair==0.60.1  # tolerant fallback for malformed JSON returned by LLMs
-structlog==25.4.0  # structured logging; JSON output for log ingestion (see app/logging_config.py)
-tenacity==9.1.2  # retry/backoff for external-tracker calls + project_seq allocation (see app/retry_utils.py)
-jdatetime==5.3.0  # Jalali/Shamsi calendar for Persian (fa) date rendering (see app/services/date_localization.py)
+markdown==3.10.3
+PyYAML==6.0.3
+lark==1.3.1
+json-repair==0.63.4  # tolerant fallback for malformed JSON returned by LLMs
+structlog==26.1.0  # structured logging; JSON output for log ingestion (see app/logging_config.py)
+tenacity==9.1.4  # retry/backoff for external-tracker calls + project_seq allocation (see app/retry_utils.py)
+jdatetime==6.1.0  # Jalali/Shamsi calendar for Persian (fa) date rendering (see app/services/date_localization.py)
