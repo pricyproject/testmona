@@ -67,6 +67,7 @@ import { TestResult, TestRun, User as UserRecord } from '@/types/index';
 import { formatDurationSeconds } from '@/utils/timeFormat';
 import { useAuthStore } from '@/stores/authStore';
 import { isViewerRole } from '@/utils/roles';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 
 export function TestRunDetail() {
   const { id, projectId } = useParams<{ id: string; projectId: string }>();
@@ -77,6 +78,7 @@ export function TestRunDetail() {
   const { formatDateTime } = useDateFormat();
   const currentUser = useAuthStore((state) => state.user);
   const shouldLoadUsers = Boolean(currentUser?.is_superuser) || !isViewerRole(currentUser?.role);
+  const { canWrite } = useProjectPermissions(parseInt(projectId || '0', 10));
   const { toast } = useToast();
   const [testRun, setTestRun] = useState<TestRun | null>(null);
   const [testResults, setTestResults] = useState<TestResult[]>([]);
@@ -97,6 +99,10 @@ export function TestRunDetail() {
   const [isAssigningRun, setIsAssigningRun] = useState(false);
   const [environments, setEnvironments] = useState<any[]>([]);
   const [isSettingEnvironment, setIsSettingEnvironment] = useState(false);
+  const [isRenamingName, setIsRenamingName] = useState(false);
+  const [renameNameValue, setRenameNameValue] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Column sorting
   const [sortColumn, setSortColumn] = useState<string | null>(() => searchParams.get('sort') || null);
@@ -1343,6 +1349,44 @@ export function TestRunDetail() {
     }
   };
 
+  const startRenameName = () => {
+    setRenameNameValue(testRun?.name ?? '');
+    setIsRenamingName(true);
+  };
+
+  const cancelRenameName = () => {
+    setIsRenamingName(false);
+    setRenameNameValue('');
+    setIsSavingName(false);
+  };
+
+  const handleSaveName = async () => {
+    const trimmed = renameNameValue.trim();
+    if (!trimmed || trimmed.length > 200) {
+      toast({ title: t('error'), description: t('testRunNameRequired'), variant: 'destructive' });
+      return;
+    }
+    if (trimmed === testRun?.name) {
+      cancelRenameName();
+      return;
+    }
+    if (!runGlobalId) return;
+
+    setIsSavingName(true);
+    try {
+      const updatedRun = await testRunsAPI.update(runGlobalId, { name: trimmed });
+      setTestRun(prev => (prev ? { ...prev, ...updatedRun } : prev));
+      setIsRenamingName(false);
+      setRenameNameValue('');
+      toast({ title: t('success'), description: t('testRunRenamed') });
+    } catch (err) {
+      console.error('Failed to rename test run:', err);
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('testRunRenameFailed')), variant: 'destructive' });
+    } finally {
+      setIsSavingName(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -1419,9 +1463,66 @@ export function TestRunDetail() {
               </div>
 
               <div className="max-w-4xl space-y-2">
-                <h1 className="text-3xl font-black leading-tight tracking-tight text-slate-950 dark:text-white sm:text-4xl" title={testRun.name}>
-                  {testRun.name}
-                </h1>
+                {isRenamingName ? (
+                  <div dir={isRTL ? 'rtl' : 'ltr'} className="flex items-center gap-2">
+                    <Input
+                      ref={renameInputRef}
+                      value={renameNameValue}
+                      onChange={(e) => setRenameNameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSaveName()
+                        } else if (e.key === 'Escape') {
+                          cancelRenameName()
+                        }
+                      }}
+                      placeholder={testRun.name}
+                      maxLength={200}
+                      autoFocus
+                      disabled={isSavingName}
+                      className="h-auto max-w-2xl py-1 text-3xl font-black leading-tight tracking-tight text-slate-950 dark:text-white sm:text-4xl"
+                    />
+                    <Button
+                      type="button"
+                      size="icon"
+                      onClick={handleSaveName}
+                      disabled={isSavingName}
+                      className="h-9 w-9 shrink-0"
+                      aria-label={t('renameTestRun')}
+                    >
+                      {isSavingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={cancelRenameName}
+                      disabled={isSavingName}
+                      className="h-9 w-9 shrink-0 text-slate-500 hover:bg-slate-900/10 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                      aria-label={t('cancel')}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-3xl font-black leading-tight tracking-tight text-slate-950 dark:text-white sm:text-4xl" title={testRun.name}>
+                      {testRun.name}
+                    </h1>
+                    {canWrite && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={startRenameName}
+                        className="h-8 w-8 shrink-0 text-slate-500 hover:bg-slate-900/10 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                        aria-label={t('renameTestRun')}
+                      >
+                        <Edit className={`h-4 w-4 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} />
+                      </Button>
+                    )}
+                  </div>
+                )}
                 <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-200 sm:text-base" title={runDescription}>
                   {runDescription}
                 </p>

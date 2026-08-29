@@ -4,6 +4,7 @@
 .vscode/
 .claude/
 .mimocode/
+.omo/
 .idea/
 *.swp
 *.swo
@@ -131,3 +132,4 @@ docs/_build/
 # Backup files
 *.bak
 *.backup
+

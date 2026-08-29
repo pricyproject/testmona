@@ -31,6 +31,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronLeft,
+  Edit,
   Folder,
   FileText,
   Calendar,
@@ -50,6 +51,7 @@ import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAuthStore } from '@/stores/authStore';
 
 // Define User interface locally since it's not in types
@@ -135,6 +137,12 @@ export function TestRuns() {
     searchParams.get('environment_id') || searchParams.get('environment')
   );
   const createFromQueryHandled = useRef(false);
+
+  const { canWrite: projectCanWrite } = useProjectPermissions(currentProjectId);
+  const [renamingRun, setRenamingRun] = useState<TestRun | null>(null);
+  const [renameName, setRenameName] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(testRuns.length / itemsPerPage));
   const hasActiveTestRunFilters =
@@ -479,6 +487,42 @@ export function TestRuns() {
       setError(t('failedToCreateTestRun'));
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const openRenameDialog = (run: TestRun) => {
+    setRenamingRun(run);
+    setRenameName(run.name);
+    setRenameError('');
+  };
+
+  const handleRenameSave = async () => {
+    if (!renamingRun) return;
+
+    const trimmedName = renameName.trim();
+    if (!trimmedName || trimmedName.length > 200) {
+      setRenameError(t('testRunNameRequired'));
+      return;
+    }
+    if (trimmedName === renamingRun.name) {
+      setRenamingRun(null);
+      setRenameName('');
+      setRenameError('');
+      return;
+    }
+
+    try {
+      setIsRenaming(true);
+      setRenameError('');
+      const updatedRun = await testRunsAPI.update(renamingRun.id, { name: trimmedName });
+      setTestRuns((prev) => prev.map((run) => (run.id === updatedRun.id ? { ...run, ...updatedRun } : run)));
+      setRenamingRun(null);
+      setRenameName('');
+    } catch (err) {
+      console.error('Failed to rename test run:', err);
+      setRenameError(t('testRunRenameFailed'));
+    } finally {
+      setIsRenaming(false);
     }
   };
 
@@ -1403,10 +1447,28 @@ export function TestRuns() {
                           {run.name}
                         </CardTitle>
                       </div>
-                      <Badge variant="outline" className={`shrink-0 gap-1.5 border px-2.5 py-1 font-semibold ${statusMeta.badgeClass}`}>
-                        <StatusIcon className="h-3.5 w-3.5" />
-                        {statusMeta.label}
-                      </Badge>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <Badge variant="outline" className={`shrink-0 gap-1.5 border px-2.5 py-1 font-semibold ${statusMeta.badgeClass}`}>
+                          <StatusIcon className="h-3.5 w-3.5" />
+                          {statusMeta.label}
+                        </Badge>
+                        {projectCanWrite && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 shrink-0 rounded-lg p-0 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            aria-label={t('renameTestRun')}
+                            title={t('renameTestRun')}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openRenameDialog(run);
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -1528,6 +1590,55 @@ export function TestRuns() {
               </div>
             </div>
           </div>
+
+          <Dialog
+            open={renamingRun !== null}
+            onOpenChange={(open) => {
+              if (!open && !isRenaming) {
+                setRenamingRun(null);
+                setRenameError('');
+              }
+            }}
+          >
+            <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>{t('renameTestRun')}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="renameRunName" className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {t('runName')}
+                </Label>
+                <Input
+                  id="renameRunName"
+                  value={renameName}
+                  maxLength={200}
+                  autoFocus
+                  onChange={(e) => setRenameName(e.target.value)}
+                  placeholder={t('enterRunName')}
+                />
+                {renameError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{renameError}</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isRenaming}
+                  onClick={() => {
+                    setRenamingRun(null);
+                    setRenameError('');
+                  }}
+                >
+                  {t('cancel')}
+                </Button>
+                <Button type="button" onClick={handleRenameSave} disabled={isRenaming}>
+                  {isRenaming && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                  {t('save')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
 
