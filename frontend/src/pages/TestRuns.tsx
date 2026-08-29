@@ -44,8 +44,9 @@ import {
   Ban,
   PauseCircle,
   Grid3X3,
+  Trash2,
 } from 'lucide-react';
-import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testResultsAPI, environmentsAPI, enumsAPI } from '@/lib/api';
+import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testResultsAPI, environmentsAPI, enumsAPI, getApiErrorMessage } from '@/lib/api';
 import { TestRun, TestCase } from '@/types';
 import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -53,6 +54,7 @@ import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAuthStore } from '@/stores/authStore';
+import { useToast } from '@/hooks/use-toast';
 
 // Define User interface locally since it's not in types
 interface User {
@@ -138,11 +140,15 @@ export function TestRuns() {
   );
   const createFromQueryHandled = useRef(false);
 
-  const { canWrite: projectCanWrite } = useProjectPermissions(currentProjectId);
+  const { canWrite: projectCanWrite, canDelete: projectCanDelete } = useProjectPermissions(currentProjectId);
+  const { toast } = useToast();
   const [renamingRun, setRenamingRun] = useState<TestRun | null>(null);
   const [renameName, setRenameName] = useState('');
   const [renameError, setRenameError] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
+  const [runToDelete, setRunToDelete] = useState<TestRun | null>(null);
+  const [isDeletingRun, setIsDeletingRun] = useState(false);
+  const [deleteRunError, setDeleteRunError] = useState('');
 
   const totalPages = Math.max(1, Math.ceil(testRuns.length / itemsPerPage));
   const hasActiveTestRunFilters =
@@ -523,6 +529,24 @@ export function TestRuns() {
       setRenameError(t('testRunRenameFailed'));
     } finally {
       setIsRenaming(false);
+    }
+  };
+
+  const handleDeleteRun = async () => {
+    if (!runToDelete) return;
+
+    try {
+      setIsDeletingRun(true);
+      setDeleteRunError('');
+      await testRunsAPI.delete(runToDelete.id);
+      setTestRuns((prev) => prev.filter((run) => run.id !== runToDelete.id));
+      setRunToDelete(null);
+      toast({ title: t('success'), description: t('testRunDeletedSuccessfully') });
+    } catch (err) {
+      console.error('Failed to delete test run:', err);
+      setDeleteRunError(getApiErrorMessage(err, t('failedToDeleteTestRun')));
+    } finally {
+      setIsDeletingRun(false);
     }
   };
 
@@ -1468,6 +1492,23 @@ export function TestRuns() {
                             <Edit className="h-4 w-4" />
                           </Button>
                         )}
+                        {projectCanDelete && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 shrink-0 rounded-lg p-0 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-500 dark:hover:bg-rose-950/40 dark:hover:text-rose-400"
+                            aria-label={t('deleteTestRun')}
+                            title={t('deleteTestRun')}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRunToDelete(run);
+                              setDeleteRunError('');
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </CardHeader>
@@ -1635,6 +1676,45 @@ export function TestRuns() {
                 <Button type="button" onClick={handleRenameSave} disabled={isRenaming}>
                   {isRenaming && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
                   {t('save')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog
+            open={runToDelete !== null}
+            onOpenChange={(open) => {
+              if (!open && !isDeletingRun) {
+                setRunToDelete(null);
+                setDeleteRunError('');
+              }
+            }}
+          >
+            <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>{t('deleteTestRun')}</DialogTitle>
+                <DialogDescription>
+                  {t('confirmDeleteTestRun', { name: runToDelete?.name ?? '' })}
+                </DialogDescription>
+              </DialogHeader>
+              {deleteRunError && (
+                <p className="text-sm text-red-600 dark:text-red-400">{deleteRunError}</p>
+              )}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isDeletingRun}
+                  onClick={() => {
+                    setRunToDelete(null);
+                    setDeleteRunError('');
+                  }}
+                >
+                  {t('cancel')}
+                </Button>
+                <Button type="button" variant="destructive" onClick={handleDeleteRun} disabled={isDeletingRun}>
+                  {isDeletingRun && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                  {t('delete')}
                 </Button>
               </DialogFooter>
             </DialogContent>

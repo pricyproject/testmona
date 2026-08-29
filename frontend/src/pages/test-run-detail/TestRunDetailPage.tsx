@@ -78,7 +78,7 @@ export function TestRunDetail() {
   const { formatDateTime } = useDateFormat();
   const currentUser = useAuthStore((state) => state.user);
   const shouldLoadUsers = Boolean(currentUser?.is_superuser) || !isViewerRole(currentUser?.role);
-  const { canWrite } = useProjectPermissions(parseInt(projectId || '0', 10));
+  const { canWrite, canDelete } = useProjectPermissions(parseInt(projectId || '0', 10));
   const { toast } = useToast();
   const [testRun, setTestRun] = useState<TestRun | null>(null);
   const [testResults, setTestResults] = useState<TestResult[]>([]);
@@ -102,6 +102,8 @@ export function TestRunDetail() {
   const [isRenamingName, setIsRenamingName] = useState(false);
   const [renameNameValue, setRenameNameValue] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeletingRun, setIsDeletingRun] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Column sorting
@@ -1240,6 +1242,29 @@ export function TestRunDetail() {
     }
   };
 
+  const handleDeleteRun = async () => {
+    if (!runGlobalId) return;
+
+    try {
+      setIsDeletingRun(true);
+      await testRunsAPI.delete(runGlobalId);
+      toast({
+        title: t('success'),
+        description: t('testRunDeletedSuccessfully'),
+      });
+      navigate(`/projects/${projectId}/test-runs`);
+    } catch (error) {
+      console.error('Failed to delete test run:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToDeleteTestRun')),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeletingRun(false);
+    }
+  };
+
   const resetImportDialog = () => {
     setImportFile(null);
     setImportFormat('auto');
@@ -1650,6 +1675,17 @@ export function TestRunDetail() {
               <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {isResettingTime ? 'Resetting...' : 'Reset Time'}
             </Button>
+            {canDelete && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDeleteDialogOpen(true)}
+                className="h-11 justify-center rounded-xl border-rose-200 bg-white/80 text-rose-700 hover:bg-rose-50 hover:text-rose-950 dark:border-rose-800/30 dark:bg-rose-950/10 dark:text-rose-400 dark:hover:bg-rose-950/20 dark:hover:text-rose-300"
+              >
+                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('deleteTestRun')}
+              </Button>
+            )}
             {testRun.status === 'completed' && (
               <Button size="sm" className="h-11 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300 sm:col-span-3">
                 <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -2797,6 +2833,31 @@ export function TestRunDetail() {
           />
         </div>
       )}
+
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{t('deleteTestRun')}</DialogTitle>
+            <DialogDescription>
+              {t('confirmDeleteTestRun', { name: testRun?.name ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeletingRun}
+              onClick={() => setIsDeleteDialogOpen(false)}
+            >
+              {t('cancel')}
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDeleteRun} disabled={isDeletingRun}>
+              {isDeletingRun && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
