@@ -176,7 +176,13 @@ def _test_case_before_insert(_mapper, connection, target):
 
 
 def _test_case_before_update(_mapper, connection, target):
-    """Re-derive the denormalised ``project_id`` when a case's suite changes."""
+    """Re-derive the denormalised ``project_id`` when a case's suite changes.
+
+    ``project_seq`` is only unique *within* a project, so when the suite move
+    also moves the case into a different project, a fresh sequence must be
+    allocated there — carrying the old one over would collide with an existing
+    case on the unique ``(project_id, project_seq)`` index and 500 the update.
+    """
     from sqlalchemy.orm import attributes
 
     if not attributes.get_history(target, "test_suite_id").has_changes():
@@ -187,9 +193,13 @@ def _test_case_before_update(_mapper, connection, target):
     if suite_id is None:
         return
     suites = models.TestSuite.__table__
-    target.project_id = connection.execute(
+    new_project_id = connection.execute(
         select(suites.c.project_id).where(suites.c.id == suite_id)
     ).scalar()
+    old_project_id = getattr(target, "project_id", None)
+    target.project_id = new_project_id
+    if new_project_id is not None and new_project_id != old_project_id:
+        target.project_seq = _allocate_seq(connection, target, new_project_id)
 
 
 _REGISTERED = False
