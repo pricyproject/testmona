@@ -167,7 +167,9 @@ export function TestCaseEdit() {
               Number.isFinite(requestedProjectId) &&
               actualProjectId !== requestedProjectId
             ) {
-              navigate(`/projects/${actualProjectId}/test-cases/${numericId}/edit`, { replace: true });
+              // Project-scoped URLs carry the per-project sequence, not the global id.
+              const seq = (testCaseData as any).project_seq ?? numericId;
+              navigate(`/projects/${actualProjectId}/test-cases/${seq}/edit`, { replace: true });
               return;
             }
           } catch (suiteError) {
@@ -709,7 +711,7 @@ export function TestCaseEdit() {
   };
 
   const runAIAssistant = async (action: AIAssistantAction) => {
-    const numericId = Number(id);
+    const numericId = resolvedTcId;
     if (!Number.isFinite(numericId) || numericId <= 0) return;
     setAiAssistantAction(action);
     setAiAssistantLoading(true);
@@ -896,8 +898,11 @@ export function TestCaseEdit() {
   };
 
   const handleSave = async () => {
-    const numericId = Number(id);
-    if (!id || !Number.isFinite(numericId) || numericId <= 0) {
+    // Write against the resolved global id, never the raw URL param: that param is
+    // the per-project sequence, so PUTting to it would overwrite whichever test case
+    // happens to own that global id.
+    const numericId = resolvedTcId;
+    if (!id || tcIdLoading || !Number.isFinite(numericId) || numericId <= 0) {
       toast({
         variant: 'destructive',
         title: t('validationError'),
