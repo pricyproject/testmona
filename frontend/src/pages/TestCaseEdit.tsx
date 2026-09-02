@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
+import { TagChipInput } from '@/components/TestCases/TagChipInput';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Sparkles, ListChecks, Target, FileCode2, Split, ShieldAlert, Check, CopyPlus, ExternalLink, type LucideIcon } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
@@ -71,7 +72,7 @@ export function TestCaseEdit() {
     test_type: 'manual' as TestCaseType,
     priority: 'medium' as TestCasePriority,
     status: 'active' as TestCaseStatus,
-    tags: '',
+    tags: [] as string[],
     reference: '',
     test_suite_id: null as number | null,
     section_id: null as number | null,
@@ -208,8 +209,10 @@ export function TestCaseEdit() {
           priority: (testCaseData.priority as TestCasePriority) || 'medium',
           status: (testCaseData.status as TestCaseStatus) || 'active',
           tags: Array.isArray(testCaseData.tags)
-            ? testCaseData.tags.map((tag) => tag.name).join(', ')
-            : testCaseData.tags || '',
+            ? testCaseData.tags.map((tag) => tag.name)
+            : testCaseData.tags
+              ? String(testCaseData.tags).split(',').map((name) => name.trim()).filter(Boolean)
+              : [],
           reference: testCaseData.reference || '',
           test_suite_id: suiteId,
           section_id: sectionId,
@@ -459,6 +462,10 @@ export function TestCaseEdit() {
       
       return updated;
     });
+  };
+
+  const handleTagsChange = (next: string[]) => {
+    setFormData(prev => ({ ...prev, tags: next }));
   };
 
   // Multistep handlers
@@ -736,7 +743,7 @@ export function TestCaseEdit() {
             expected_result: formData.expected_result,
             priority: formData.priority,
             test_type: formData.test_type,
-            tags: formData.tags,
+            tags: formData.tags.join(', '),
             reference: formData.reference,
             test_steps: testSteps,
           })
@@ -922,7 +929,7 @@ export function TestCaseEdit() {
       return;
     }
 
-    if (formData.tags.length > 500) {
+    if (formData.tags.join(', ').length > 500) {
       toast({
         variant: 'destructive',
         title: t('validationError'),
@@ -1325,15 +1332,14 @@ export function TestCaseEdit() {
 
           <div>
             <Label htmlFor="tags">{t('tags')}</Label>
-            <Input
+            <TagChipInput
               id="tags"
+              projectId={currentProjectId}
               value={formData.tags}
-              onChange={(e) => handleInputChange('tags', e.target.value)}
-              placeholder={t('enterTagsSeparatedByCommas')}
-              maxLength={500}
-              className="w-full"
+              onChange={handleTagsChange}
+              className="mt-1"
             />
-            <p className="mt-1 text-xs text-muted-foreground">{formData.tags.length}/500</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t('tagsHelper')}</p>
           </div>
 
           <div>
