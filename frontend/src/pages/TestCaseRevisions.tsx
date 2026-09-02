@@ -8,6 +8,7 @@ import {
   Eye, EyeOff, RotateCcw
 } from 'lucide-react';
 import { getApiErrorMessage } from '@/lib/api';
+import { unescapeMarkdown } from '@/utils/markdown';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
@@ -86,7 +87,7 @@ const decodeHtmlEntities = (input: string): string => {
 
 const toDisplayText = (value?: string | null): string => {
   if (!value) return '';
-  const decoded = decodeHtmlEntities(decodeHtmlEntities(String(value)));
+  const decoded = unescapeMarkdown(decodeHtmlEntities(decodeHtmlEntities(String(value))));
   if (!/<[a-z][\s\S]*>/i.test(decoded)) {
     return decoded.replace(/\s+/g, ' ').trim();
   }

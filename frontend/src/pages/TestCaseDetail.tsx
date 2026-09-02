@@ -31,6 +31,7 @@ import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuite
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { entityKey } from '@/lib/utils';
 import { loadProjectParameters, paramsToMap, referencedKeys, resolveParameters } from '@/utils/parameters';
+import { unescapeMarkdown } from '@/utils/markdown';
 import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSuite } from '@/types';
 
 type SectionCrumb = { id: number; name: string };
@@ -396,8 +397,10 @@ export function TestCaseDetail() {
   }, [globalParams, testCase, displaySteps]);
 
   // Resolve ${name} placeholders to their global-parameter values for display.
+  // Unescape markdown backslash escapes (`\_`) too: this reading view prints plain text.
   const globalMap = useMemo(() => paramsToMap(globalParams), [globalParams]);
-  const resolve = (text: string | null | undefined): string => resolveParameters(text, globalMap);
+  const resolve = (text: string | null | undefined): string =>
+    unescapeMarkdown(resolveParameters(text, globalMap));
 
   const latestExecution = testRunHistory[0];
   const uniqueRunCount = new Set(
@@ -580,7 +583,7 @@ export function TestCaseDetail() {
                     {testCase.title}
                   </h1>
                   <p className="max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                    {testCase.description || t('noDescription')}
+                    {testCase.description ? unescapeMarkdown(testCase.description) : t('noDescription')}
                   </p>
                 </div>
               </div>
