@@ -1,5 +1,7 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
-import { Check, ChevronsUpDown, FolderOpen, FolderPlus, Search, X } from 'lucide-react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import axios from 'axios';
+import { useLocation } from 'react-router-dom';
+import { Check, ChevronsUpDown, FolderOpen, FolderPlus, RefreshCw, Search, X } from 'lucide-react';
 import { useProjectStore, type Project } from '@/stores/projectStore';
 import { projectsAPI } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -46,6 +48,7 @@ export function ProjectSelector({
 }: ProjectSelectorProps) {
   const { selectedProject, projects, setSelectedProject, setProjects } = useProjectStore();
   const { t } = useTranslation();
+  const location = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -55,36 +58,55 @@ export function ProjectSelector({
   const requestId = useRef(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // The URL always wins over "first project" when seeding the initial selection,
+  // so a deep link (bookmark, notification, Work Inbox) opens the project it
+  // names instead of being bounced to whichever project happens to sort first.
+  // Read from the pathname, not useParams: this renders in the Layout chrome,
+  // outside the matched route, so route params aren't available here.
+  const urlProjectIdRef = useRef<number | null>(null);
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  urlProjectIdRef.current = pathParts[0] === 'projects' && pathParts[1] ? Number(pathParts[1]) : null;
+
+  const inFlight = useRef(false);
+
+  const loadProjects = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setIsLoading(true);
+    setError(null);
+    try {
+      // Page through the list: a single request is capped server-side, so
+      // stopping at the first page would make later projects unreachable from
+      // the switcher entirely.
+      const all = await projectsAPI.getAllPaged();
+      setProjects(all);
+
+      // Seed a selection only when there is none; this is not a user-initiated
+      // switch, so `onProjectSelected` (which navigates) must not fire.
+      if (!useProjectStore.getState().selectedProject && all.length > 0) {
+        const fromUrl = urlProjectIdRef.current;
+        const initial = all.find((project) => project.id === fromUrl) || all[0];
+        setSelectedProject(initial);
+      }
+    } catch (loadError) {
+      console.error('Failed to load projects:', loadError);
+      setError(t('failedToLoadProjects'));
+      // Keep whatever list was persisted from the last successful load: wiping
+      // it here would hide the switcher entirely on a transient network error.
+      hasLoaded.current = false;
+      return;
+    } finally {
+      inFlight.current = false;
+      setIsLoading(false);
+    }
+    hasLoaded.current = true;
+  }, [setProjects, setSelectedProject, t]);
 
   // Load projects from API on component mount
   useEffect(() => {
     if (hasLoaded.current) return; // Prevent multiple calls
-
-    const loadProjects = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const projectsData = await projectsAPI.getAll();
-        setProjects(projectsData);
-
-        // If no project is selected and we have projects, select the first one
-        if (!selectedProject && projectsData.length > 0) {
-          const firstProject = projectsData[0];
-          setSelectedProject(firstProject);
-          onProjectSelected?.(firstProject);
-        }
-      } catch (error) {
-        console.error('Failed to load projects:', error);
-        setError('Failed to load projects');
-        setProjects([]);
-      } finally {
-        setIsLoading(false);
-        hasLoaded.current = true;
-      }
-    };
-
     loadProjects();
-  }, []); // Only run on mount
+  }, [loadProjects]);
 
   const handleProjectChange = async (projectId: number) => {
     const project = projects.find((p) => p.id === projectId);
@@ -112,14 +134,15 @@ export function ProjectSelector({
         return;
       }
 
-      // Update the project in the store with fresh data
-      setProjects(projects.map(p => p.id === project.id ? updatedProject : p));
+      // Update the project in the store with fresh data. Read the list from the
+      // store rather than the render closure so a concurrent refresh isn't undone.
+      const current = useProjectStore.getState().projects;
+      setProjects(current.map((p) => (p.id === project.id ? updatedProject : p)));
       setSelectedProject(updatedProject);
-      onProjectSelected?.(updatedProject);
-    } catch (error) {
-      // Ignore error if request was aborted due to new selection
-      if (error.name !== 'AbortError') {
-        console.error('Failed to refresh project data:', error);
+    } catch (refreshError) {
+      // Aborted because a newer selection superseded this one - not a failure.
+      if (!axios.isCancel(refreshError)) {
+        console.error('Failed to refresh project data:', refreshError);
         // Continue with the cached project data
       }
     }
@@ -204,9 +227,20 @@ export function ProjectSelector({
       </button>
 
       {error && (
-        <p className="mt-1 truncate text-xs text-red-500" title={error}>
-          {error}
-        </p>
+        <div className="mt-1 flex items-center gap-1.5">
+          <p className="min-w-0 flex-1 truncate text-xs text-red-500" title={error}>
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => loadProjects()}
+            disabled={isLoading}
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-xs font-medium text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
+          >
+            <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
+            {t('retry')}
+          </button>
+        </div>
       )}
 
       {open && (

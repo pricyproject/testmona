@@ -25,6 +25,7 @@ interface ProjectState {
   addProject: (project: Project) => void;
   updateProject: (project: Project) => void;
   removeProject: (projectId: number) => void;
+  removeProjects: (projectIds: number[]) => void;
   getSelectedProjectId: () => number | null;
 }
 
@@ -67,15 +68,23 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       removeProject: (projectId: number) => {
-        const currentProjects = get().projects;
-        const filteredProjects = currentProjects.filter((p) => p.id !== projectId);
-        set({ projects: filteredProjects });
+        get().removeProjects([projectId]);
+      },
 
-        // Clear selectedProject if it's the one being removed
+      /**
+       * Drop deleted/archived projects from the list. Always route removals
+       * through here rather than `setProjects`: it also clears `selectedProject`
+       * when the active project is gone, which otherwise leaves the navbar and
+       * sidebar pointing at a project the user can no longer open.
+       */
+      removeProjects: (projectIds: number[]) => {
+        if (projectIds.length === 0) return;
+        const removed = new Set(projectIds);
         const selectedProject = get().selectedProject;
-        if (selectedProject && selectedProject.id === projectId) {
-          set({ selectedProject: null });
-        }
+        set({
+          projects: get().projects.filter((p) => !removed.has(p.id)),
+          selectedProject: selectedProject && removed.has(selectedProject.id) ? null : selectedProject,
+        });
       },
 
       getSelectedProjectId: () => {

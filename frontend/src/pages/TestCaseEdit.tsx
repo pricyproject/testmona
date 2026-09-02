@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,16 @@ import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
 import { TagChipInput } from '@/components/TestCases/TagChipInput';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Sparkles, ListChecks, Target, FileCode2, Split, ShieldAlert, Check, CopyPlus, ExternalLink, type LucideIcon } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
 import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
@@ -63,6 +73,10 @@ export function TestCaseEdit() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Snapshot of the record as loaded, used to tell real edits from a pristine
+  // form so leaving the page can't silently discard work.
+  const pristineSnapshot = useRef<string | null>(null);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -131,6 +145,44 @@ export function TestCaseEdit() {
     }
   };
 
+  // A section saved against this case that the current suite's tree no longer
+  // offers (moved suite, deleted section). Rendered as an explicit option so the
+  // trigger doesn't sit blank and read as "no section" while the id is still set.
+  const orphanedSectionId = useMemo(() => {
+    if (formData.section_id === null || sectionsLoading) return null;
+    return sectionOptions.some((option) => option.id === formData.section_id)
+      ? null
+      : formData.section_id;
+  }, [formData.section_id, sectionOptions, sectionsLoading]);
+
+  // Serialized form state; compared against the load-time snapshot to detect edits.
+  const formSignature = useMemo(
+    () => JSON.stringify({ formData, testSteps, customFieldValues }),
+    [formData, testSteps, customFieldValues],
+  );
+  const isDirty = pristineSnapshot.current !== null && pristineSnapshot.current !== formSignature;
+
+  // Leaving with unsaved edits asks first; saving clears the snapshot so the
+  // post-save navigation isn't challenged.
+  const requestNavigateBack = () => {
+    if (isDirty) {
+      setShowDiscardDialog(true);
+      return;
+    }
+    navigateBack();
+  };
+
+  // Covers reloads and tab closes, which React Router never sees.
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isDirty]);
+
   const [loadError, setLoadError] = useState<string | null>(null);
   const [originalIsMultistep, setOriginalIsMultistep] = useState(false);
 
@@ -141,6 +193,7 @@ export function TestCaseEdit() {
       setLoading(true);
       setIsValidatingProject(true);
       setLoadError(null);
+      pristineSnapshot.current = null;
 
       if (tcIdLoading) return;  // wait for the seq -> id resolution
       const numericId = resolvedTcId;
@@ -157,25 +210,32 @@ export function TestCaseEdit() {
         const testCaseData = await testCasesAPI.getById(numericId);
         if (!isMounted) return;
 
-        if (projectId && testCaseData.test_suite_id) {
-          try {
-            const testSuiteData = await testSuitesAPI.getById(testCaseData.test_suite_id);
-            if (!isMounted) return;
-            const requestedProjectId = Number(projectId);
-            const actualProjectId = Number(testSuiteData?.project_id);
-            if (
-              Number.isFinite(actualProjectId) &&
-              Number.isFinite(requestedProjectId) &&
-              actualProjectId !== requestedProjectId
-            ) {
-              // Project-scoped URLs carry the per-project sequence, not the global id.
-              const seq = (testCaseData as any).project_seq ?? numericId;
-              navigate(`/projects/${actualProjectId}/test-cases/${seq}/edit`, { replace: true });
-              return;
+        // The seq resolver falls back to the global id when the project has no
+        // such sequence, so the record may belong to another project. Prefer the
+        // case's own denormalised project_id and only pay for the suite lookup
+        // when that column is missing (older rows).
+        if (projectId) {
+          let actualProjectId = Number((testCaseData as any).project_id ?? NaN);
+          if (!Number.isFinite(actualProjectId) && testCaseData.test_suite_id) {
+            try {
+              const testSuiteData = await testSuitesAPI.getById(testCaseData.test_suite_id);
+              if (!isMounted) return;
+              actualProjectId = Number(testSuiteData?.project_id);
+            } catch (suiteError) {
+              console.error('Failed to validate test case project:', suiteError);
+              // Non-blocking: fall through and let the user edit if the API recovers.
             }
-          } catch (suiteError) {
-            console.error('Failed to validate test case project:', suiteError);
-            // Surface a non-blocking warning; user can still edit if the API recovers.
+          }
+          const requestedProjectId = Number(projectId);
+          if (
+            Number.isFinite(actualProjectId) &&
+            Number.isFinite(requestedProjectId) &&
+            actualProjectId !== requestedProjectId
+          ) {
+            // Project-scoped URLs carry the per-project sequence, not the global id.
+            const seq = (testCaseData as any).project_seq ?? numericId;
+            navigate(`/projects/${actualProjectId}/test-cases/${seq}/edit`, { replace: true });
+            return;
           }
         }
 
@@ -199,7 +259,7 @@ export function TestCaseEdit() {
         const isMultistep = parseBooleanFlag((testCaseData as any).is_multistep);
 
         if (!isMounted) return;
-        setFormData({
+        const loadedFormData = {
           title: testCaseData.title || '',
           description: testCaseData.description || '',
           preconditions: testCaseData.preconditions || '',
@@ -218,22 +278,30 @@ export function TestCaseEdit() {
           section_id: sectionId,
           is_multistep: isMultistep,
           dataset_id: (testCaseData as any).dataset_id ?? null,
-        });
+        };
+        setFormData(loadedFormData);
         setCustomFieldValues(existingCustomValues.fieldValues);
         setExistingCustomFieldValueIds(existingCustomValues.valueIds);
         setOriginalIsMultistep(isMultistep);
 
+        let loadedSteps: any[] = [];
         if (isMultistep) {
           try {
             const steps = await testCasesAPI.getSteps(numericId);
-            if (isMounted) setTestSteps(Array.isArray(steps) ? steps : []);
+            loadedSteps = Array.isArray(steps) ? steps : [];
           } catch (stepsError) {
             console.error('Failed to load test steps:', stepsError);
-            if (isMounted) setTestSteps([]);
           }
-        } else if (isMounted) {
-          setTestSteps([]);
         }
+        if (!isMounted) return;
+        setTestSteps(loadedSteps);
+        // Baseline for the unsaved-changes guard, captured only once everything
+        // the form renders has been applied.
+        pristineSnapshot.current = JSON.stringify({
+          formData: loadedFormData,
+          testSteps: loadedSteps,
+          customFieldValues: existingCustomValues.fieldValues,
+        });
 
         let determinedProjectId: number | null = null;
         if (projectId) {
@@ -995,6 +1063,7 @@ export function TestCaseEdit() {
         return;
       }
 
+      pristineSnapshot.current = null;
       navigateBack();
     } catch (error) {
       console.error('Failed to save test case:', error);
@@ -1049,7 +1118,7 @@ export function TestCaseEdit() {
   return (
     <div className="container mx-auto p-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex items-center gap-4 mb-6">
-        <Button variant="ghost" size="sm" onClick={navigateBack}>
+        <Button variant="ghost" size="sm" onClick={requestNavigateBack}>
           <ArrowLeft className={`h-4 w-4 ${isRTL ? 'mr-0 ml-2' : 'mr-2'}`} />
           {t('back')}
         </Button>
@@ -1247,7 +1316,7 @@ export function TestCaseEdit() {
                 onValueChange={(value) =>
                   handleInputChange('section_id', value === 'no-section' ? null : parseInt(value, 10))
                 }
-                disabled={sectionsLoading || sectionOptions.length === 0}
+                disabled={sectionsLoading || (sectionOptions.length === 0 && formData.section_id === null)}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder={
@@ -1262,6 +1331,11 @@ export function TestCaseEdit() {
                   <SelectItem value="no-section">
                     {t('noSection')}
                   </SelectItem>
+                  {orphanedSectionId !== null && (
+                    <SelectItem value={String(orphanedSectionId)}>
+                      {t('unknownSectionOption', { id: String(orphanedSectionId) })}
+                    </SelectItem>
+                  )}
                   {sectionOptions.map((opt) => (
                     <SelectItem key={opt.id} value={String(opt.id)}>
                       {'\u00A0'.repeat(opt.indent * 2)}{opt.indent > 0 ? '↳ ' : ''}{opt.name}
@@ -1601,7 +1675,7 @@ export function TestCaseEdit() {
           )}
 
           <div className="flex justify-end gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={navigateBack}>
+            <Button type="button" variant="outline" onClick={requestNavigateBack}>
               {t('cancel')}
             </Button>
             <Button
@@ -1623,6 +1697,28 @@ export function TestCaseEdit() {
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('unsavedChangesTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('unsavedChangesModalMessage')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('keepEditingModal')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                pristineSnapshot.current = null;
+                setShowDiscardDialog(false);
+                navigateBack();
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {t('discardChanges')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
         <DialogContent isRTL={isRTL} className="max-w-3xl">

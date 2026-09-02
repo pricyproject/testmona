@@ -4857,4 +4857,28 @@ export const ar = {
     resultStatus_block: 'محظور',
     resultStatus_skip: 'متخطى',
     resultStatus_not_started: 'لم يبدأ',
+
+  // Project switching
+    failedToLoadProjects: 'فشل تحميل المشاريع',
+    projectStatusChangedTo: 'تم تغيير حالة المشروع إلى {status}.',
+
+  // Test case detail / edit
+    testCaseWrongProject: 'حالة الاختبار تنتمي إلى مشروع آخر',
+    testCaseWrongProjectDesc: 'حالة الاختبار هذه ليست جزءاً من المشروع الموجود في شريط العنوان. افتحها من مشروعها الأصلي.',
+    unknownSectionOption: 'قسم غير معروف (#{id})',
+
+  // Test case list - destructive actions
+    deleteTestCaseConfirmTitle: 'حذف حالة الاختبار هذه؟',
+    deleteTestCaseConfirmDesc: 'سيتم حذف "{title}" نهائياً. لا يمكن التراجع عن هذا الإجراء.',
+    deleteTestCasesConfirmTitle: 'حذف {count} حالة اختبار؟',
+    deleteTestCasesConfirmDesc: 'سيتم حذف {count} حالة اختبار محددة نهائياً. لا يمكن التراجع عن هذا الإجراء.',
+    deleteSectionConfirmTitle: 'حذف هذا القسم؟',
+    deleteSectionConfirmDesc: 'سيتم حذف القسم "{name}". لا يمكن حذف الأقسام التي ما زالت تحتوي على أقسام فرعية أو حالات اختبار.',
+    deletedTestCasesPartial: 'تم حذف {count} حالة اختبار، وتعذّر حذف {failed}.',
+    cannotDeleteAllTestCasesSection: 'لا يمكن حذف عرض "كل حالات الاختبار".',
+    draggingTestCase: 'جارٍ سحب {title}...',
+    bulkExecutionRunName: 'تنفيذ جماعي - {count} حالة اختبار',
+    bulkExecutionRunDescription: 'تشغيل تنفيذ لـ {count} حالة اختبار محددة',
+    tag: 'وسم',
+    automation: 'الأتمتة',
 };

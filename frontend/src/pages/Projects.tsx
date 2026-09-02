@@ -50,7 +50,7 @@ export function Projects() {
   const { toast } = useToast();
   const { t, isRTL, language } = useTranslation();
   const { appName } = useAppName(false);
-  const { selectedProject, setSelectedProject, projects: storeProjects, setProjects: setStoreProjects } = useProjectStore();
+  const { selectedProject, setSelectedProject, projects: storeProjects, setProjects: setStoreProjects, removeProjects } = useProjectStore();
   const { user } = useAuthStore();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -407,7 +407,9 @@ export function Projects() {
       const updatedArchivedProjects = archivedProjects.filter(p => p.id !== projectToDelete.id);
       setProjects(updatedProjects);
       setArchivedProjects(updatedArchivedProjects);
-      setStoreProjects(updatedProjects);
+      // Also clears the navbar selection when the deleted project was the active
+      // one, so the sidebar stops linking into a project that no longer exists.
+      removeProjects([projectToDelete.id]);
 
       toast({
         title: t('success'),
@@ -550,7 +552,7 @@ export function Projects() {
 
       const updatedProjects = projects.filter(p => !successfullyDeletedIds.includes(p.id));
       setProjects(updatedProjects);
-      setStoreProjects(updatedProjects);
+      removeProjects(successfullyDeletedIds);
 
       if (bulkResult.failureCount > 0) {
         toast({
@@ -618,7 +620,7 @@ export function Projects() {
       if (showArchivedProjects) {
         setArchivedProjects(prev => [...archivedNow, ...prev.filter(p => !successfullyArchivedIds.includes(p.id))]);
       }
-      setStoreProjects(updatedProjects);
+      removeProjects(successfullyArchivedIds);
 
       if (bulkResult.failureCount > 0) {
         toast({
@@ -686,11 +688,17 @@ export function Projects() {
 
       setProjects(updatedProjects);
       setArchivedProjects(updatedArchivedProjects);
-      setStoreProjects(updatedProjects);
+      if (newStatus === 'archived') {
+        // Archiving takes the project out of the switcher, so drop it from the
+        // active selection too instead of leaving a dead project selected.
+        removeProjects([statusProject.id]);
+      } else {
+        setStoreProjects(updatedProjects);
+      }
 
       toast({
-        title: "Success",
-        description: `Project status changed to ${newStatus}.`,
+        title: t('success'),
+        description: t('projectStatusChangedTo', { status: getProjectStatusLabel(newStatus) }),
       });
 
       setIsStatusDialogOpen(false);

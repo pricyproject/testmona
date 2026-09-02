@@ -20,6 +20,25 @@ export const projectsAPI = {
     const response = await api.get(`/projects?${params}`);
     return response.data;
   },
+  /**
+   * Every project the user can access, paged through until the server runs out.
+   * `getAll` is capped server-side, so callers that need a complete list (the
+   * project switcher) would otherwise silently lose everything past the cap.
+   */
+  getAllPaged: async (
+    filters: { status?: ProjectStatusFilter; includeArchived?: boolean } = {},
+    pageSize = 100,
+  ) => {
+    const all: any[] = [];
+    // Bounded so a server that keeps returning full pages can't spin forever.
+    for (let page = 0; page < 100; page += 1) {
+      const batch = await projectsAPI.getAll(page * pageSize, pageSize, filters);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      all.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return all;
+  },
   getById: async (id: number, signal?: AbortSignal) => {
     const response = await api.get(`/projects/${id}`, { signal });
     return response.data;

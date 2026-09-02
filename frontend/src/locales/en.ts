@@ -4880,4 +4880,28 @@ export const en = {
   resultStatus_block: 'Blocked',
   resultStatus_skip: 'Skipped',
   resultStatus_not_started: 'Not Started',
+
+  // Project switching
+  failedToLoadProjects: 'Failed to load projects',
+  projectStatusChangedTo: 'Project status changed to {status}.',
+
+  // Test case detail / edit
+  testCaseWrongProject: 'Test case belongs to another project',
+  testCaseWrongProjectDesc: 'This test case is not part of the project in the address bar. Open it from its own project instead.',
+  unknownSectionOption: 'Unknown section (#{id})',
+
+  // Test case list - destructive actions
+  deleteTestCaseConfirmTitle: 'Delete this test case?',
+  deleteTestCaseConfirmDesc: '"{title}" will be permanently deleted. This action cannot be undone.',
+  deleteTestCasesConfirmTitle: 'Delete {count} test cases?',
+  deleteTestCasesConfirmDesc: '{count} selected test cases will be permanently deleted. This action cannot be undone.',
+  deleteSectionConfirmTitle: 'Delete this section?',
+  deleteSectionConfirmDesc: 'The section "{name}" will be deleted. Sections that still contain subsections or test cases cannot be deleted.',
+  deletedTestCasesPartial: '{count} test cases deleted, {failed} could not be deleted.',
+  cannotDeleteAllTestCasesSection: 'The "All Test Cases" view cannot be deleted.',
+  draggingTestCase: 'Dragging {title}...',
+  bulkExecutionRunName: 'Bulk execution - {count} test cases',
+  bulkExecutionRunDescription: 'Execution run for {count} selected test cases',
+  tag: 'Tag',
+  automation: 'Automation',
 };

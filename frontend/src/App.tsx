@@ -294,27 +294,37 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/test-cases/:id" element={
           <ProjectGuard>
-            <TestCaseDetail />
+            <FeatureGuard feature="test_cases">
+              <TestCaseDetail />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-cases/:id/edit" element={
           <ProjectGuard>
-            <TestCaseEdit />
+            <FeatureGuard feature="test_cases">
+              <TestCaseEdit />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-cases/:id/revisions" element={
           <ProjectGuard>
-            <TestCaseRevisions />
+            <FeatureGuard feature="test_cases">
+              <TestCaseRevisions />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-cases/:id/execution-history" element={
           <ProjectGuard>
-            <TestCaseExecutionHistory />
+            <FeatureGuard feature="test_cases">
+              <TestCaseExecutionHistory />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-cases/:id/execute" element={
           <ProjectGuard>
-            <TestCaseExecute />
+            <FeatureGuard feature="test_cases">
+              <TestCaseExecute />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-runs" element={

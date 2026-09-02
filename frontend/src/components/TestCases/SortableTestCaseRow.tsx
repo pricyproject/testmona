@@ -86,7 +86,7 @@ export function SortableTestCaseRow({
         <TableCell colSpan={8} className="h-16 bg-gray-50 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
           <div className="flex items-center justify-center">
             <GripVertical className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            <span className="text-sm text-gray-500">Dragging {testCase.title}...</span>
+            <span className="text-sm text-gray-500">{t('draggingTestCase', { title: testCase.title })}</span>
           </div>
         </TableCell>
       </TableRow>
@@ -119,7 +119,7 @@ export function SortableTestCaseRow({
       <TableCell className="font-medium py-2 text-sm">
         <Button
           variant="link"
-          className="p-0 h-auto font-medium text-sm text-left hover:text-blue-800"
+          className="p-0 h-auto font-medium text-sm text-start hover:text-blue-800"
           onClick={() => navigate(getTestCaseDetailUrl(testCase.project_seq ?? testCase.id))}
         >
           {testCase.title}

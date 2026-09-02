@@ -29,7 +29,7 @@ import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
 import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
-import { entityKey } from '@/lib/utils';
+import { entityKey, entitySeq } from '@/lib/utils';
 import { loadProjectParameters, paramsToMap, referencedKeys, resolveParameters } from '@/utils/parameters';
 import { unescapeMarkdown } from '@/utils/markdown';
 import { CustomFieldDefinition, CustomFieldValue, Requirement, TestCase, TestSuite } from '@/types';
@@ -40,8 +40,10 @@ type CustomFieldDisplayRow = { field: CustomFieldDefinition | null; value: strin
 const SIDEBAR_VISIBLE_STORAGE_KEY = 'testCaseDetail.showSidebar';
 
 
-const formatStatusLabel = (status?: string | null) => {
-  if (!status) return 'Unknown';
+// `unknownLabel` is supplied by callers that have the translator in scope; the
+// em-dash default only applies where the value is already known to be present.
+const formatStatusLabel = (status: string | null | undefined, unknownLabel = '—') => {
+  if (!status) return unknownLabel;
   return status.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
@@ -92,6 +94,9 @@ export function TestCaseDetail() {
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
   const [customFieldsLoading, setCustomFieldsLoading] = useState(false);
   const [isValidatingProject, setIsValidatingProject] = useState(false);
+  // Set when the URL number resolves to a case that lives in another project
+  // (a stale bookmark, or a link that carried a global id across projects).
+  const [wrongProject, setWrongProject] = useState(false);
   const [showSidebar, setShowSidebar] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     try {
@@ -150,6 +155,7 @@ export function TestCaseDetail() {
       if (tcIdLoading) return;  // wait for the seq -> id resolution
       setLoading(true);
       setIsValidatingProject(true);
+      setWrongProject(false);
 
       const testCaseId = resolvedTcId;
       if (!testCaseId || Number.isNaN(testCaseId)) {
@@ -171,9 +177,17 @@ export function TestCaseDetail() {
           }
         }
 
-        if (projectId && testSuiteData?.project_id && Number(projectId) !== Number(testSuiteData.project_id)) {
+        // The seq resolver falls back to treating the URL number as a global id
+        // when the project has no such sequence, so a case from another project
+        // can come back here. Validate against the case's own project (and its
+        // suite's, as a fallback) before rendering anything.
+        const owningProjectId = Number(
+          (testCaseData as any).project_id ?? testSuiteData?.project_id ?? NaN,
+        );
+        if (projectId && Number.isFinite(owningProjectId) && Number(projectId) !== owningProjectId) {
           if (!isMounted) return;
           resetDetailState();
+          setWrongProject(true);
           return;
         }
 
@@ -206,19 +220,24 @@ export function TestCaseDetail() {
             const hierarchyData = await sectionsAPI.getProjectSectionHierarchy(Number(projectForSections));
             const sectionsById = new Map<number, any>();
 
-            const flattenSections = (nodes: any[] | undefined) => {
+            // The hierarchy nests suites as `{ test_suite, sections }` and each
+            // section's children under `subsections`. Walking `sections` at every
+            // level would index only the roots, so any case filed in a subsection
+            // would lose its breadcrumb.
+            const indexSections = (nodes: any[] | undefined) => {
               if (!Array.isArray(nodes)) return;
               for (const node of nodes) {
-                const subSections: any[] = Array.isArray(node?.sections) ? node.sections : [];
-                for (const candidate of subSections) {
-                  const candidateId = Number(candidate?.id);
-                  if (Number.isFinite(candidateId) && !sectionsById.has(candidateId)) {
-                    sectionsById.set(candidateId, candidate);
-                    if (Array.isArray(candidate.sections) && candidate.sections.length > 0) {
-                      flattenSections([candidate]);
-                    }
-                  }
-                }
+                const nodeId = Number(node?.id);
+                if (!Number.isFinite(nodeId) || sectionsById.has(nodeId)) continue;
+                sectionsById.set(nodeId, node);
+                indexSections(node.subsections);
+              }
+            };
+
+            const flattenSections = (suiteBlocks: any[] | undefined) => {
+              if (!Array.isArray(suiteBlocks)) return;
+              for (const block of suiteBlocks) {
+                indexSections(block?.sections);
               }
             };
 
@@ -354,6 +373,17 @@ export function TestCaseDetail() {
     return () => { cancelled = true; };
   }, [effectiveProjectId]);
 
+  // The dataset payload is user-authored; treat its collections as optional so a
+  // partially-saved row can't blow up the whole detail view.
+  const datasetParameters = useMemo(
+    () => (Array.isArray(dataset?.parameters) ? dataset.parameters : []),
+    [dataset],
+  );
+  const datasetRows = useMemo(
+    () => (Array.isArray(dataset?.rows) ? dataset.rows : []),
+    [dataset],
+  );
+
   const displaySteps = useMemo(() => {
     const parseLegacyText = (text: string | undefined | null) =>
       (parseCodeFence(text || '')?.code ?? (text || ''))
@@ -486,8 +516,10 @@ export function TestCaseDetail() {
 
   const revisionsPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.project_seq ?? testCase?.id}/revisions` : `/test-cases/${testCase?.project_seq ?? testCase?.id}/revisions`;
   const executionHistoryPath = effectiveProjectId ? `/projects/${effectiveProjectId}/test-cases/${testCase?.project_seq ?? testCase?.id}/execution-history` : `/test-cases/${testCase?.project_seq ?? testCase?.id}/execution-history`;
+  // Project-first requirement URLs carry the per-project sequence; linking by the
+  // global id opens whichever requirement happens to own that number in this project.
   const getLinkedRequirementPath = (requirement: Requirement) => (
-    effectiveProjectId ? `/projects/${effectiveProjectId}/requirements/${requirement.id}` : null
+    effectiveProjectId ? `/projects/${effectiveProjectId}/requirements/${entitySeq(requirement)}` : null
   );
   const renderReferenceValue = (reference: string) => {
     const requirementsByKey = new Map(
@@ -543,10 +575,12 @@ export function TestCaseDetail() {
       <div className="flex min-h-[60vh] items-center justify-center px-4">
         <Card className="max-w-lg text-center">
           <CardHeader>
-            <CardTitle>{t('testCaseNotFound')}</CardTitle>
+            <CardTitle>{wrongProject ? t('testCaseWrongProject') : t('testCaseNotFound')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">{t('testCaseNotFoundDesc')}</p>
+            <p className="text-sm text-muted-foreground">
+              {wrongProject ? t('testCaseWrongProjectDesc') : t('testCaseNotFoundDesc')}
+            </p>
             <Button onClick={navigateBack}>{t('backToTestCases')}</Button>
           </CardContent>
         </Card>
@@ -573,10 +607,10 @@ export function TestCaseDetail() {
                       {testCaseIdLabel}
                     </Badge>
                     <Badge className={`${getStatusBadge(testCase.status)} rounded-full px-3 py-1 text-xs font-semibold`}>
-                      {formatStatusLabel(testCase.status)}
+                      {formatStatusLabel(testCase.status, t('unknown'))}
                     </Badge>
                     <Badge className={`${getPriorityBadge(testCase.priority)} rounded-full px-3 py-1 text-xs font-semibold`}>
-                      {formatStatusLabel(testCase.priority)}
+                      {formatStatusLabel(testCase.priority, t('unknown'))}
                     </Badge>
                   </div>
                   <h1 className="max-w-4xl text-3xl font-semibold tracking-tight text-slate-950 dark:text-white lg:text-4xl">
@@ -622,7 +656,7 @@ export function TestCaseDetail() {
           <div className="grid gap-px bg-slate-200 dark:bg-slate-800 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard label={t('stepCount')} value={displaySteps.length.toString()} />
             <MetricCard label={t('totalRuns')} value={uniqueRunCount.toString()} />
-            <MetricCard label={t('latestResult')} value={latestExecution ? formatStatusLabel(latestExecution.status) : t('neverExecuted')} />
+            <MetricCard label={t('latestResult')} value={latestExecution ? formatStatusLabel(latestExecution.status, t('unknown')) : t('neverExecuted')} />
             <MetricCard label={t('revisionCount')} value={revisions.length.toString()} />
           </div>
         </div>
@@ -656,29 +690,29 @@ export function TestCaseDetail() {
                     </span>
                     {t('testDataSet')}: {dataset.name}
                     <Badge className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {t('datasetRowCount', { count: String(dataset.rows.length) })}
+                      {t('datasetRowCount', { count: String(datasetRows.length) })}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0 space-y-2">
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {t('datasetUsageHint', { params: dataset.parameters.map((p) => `\${${p}}`).join(', ') })}
+                    {t('datasetUsageHint', { params: datasetParameters.map((p) => `\${${p}}`).join(', ') })}
                   </p>
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-50 dark:bg-slate-950/60">
-                          <th className="px-3 py-2 text-left font-medium text-slate-500">#</th>
-                          {dataset.parameters.map((p) => (
-                            <th key={p} className="px-3 py-2 text-left font-mono text-xs text-slate-700 dark:text-slate-300">{p}</th>
+                          <th className="px-3 py-2 text-start font-medium text-slate-500">#</th>
+                          {datasetParameters.map((p) => (
+                            <th key={p} className="px-3 py-2 text-start font-mono text-xs text-slate-700 dark:text-slate-300">{p}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {dataset.rows.map((row, i) => (
+                        {datasetRows.map((row, i) => (
                           <tr key={i} className="border-t border-slate-200 dark:border-slate-800">
                             <td className="px-3 py-2 text-slate-400">{i + 1}</td>
-                            {dataset.parameters.map((p) => (
+                            {datasetParameters.map((p) => (
                               <td key={p} className="px-3 py-2 text-slate-700 dark:text-slate-300">{row[p] ?? ''}</td>
                             ))}
                           </tr>
@@ -706,8 +740,8 @@ export function TestCaseDetail() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-slate-50 dark:bg-slate-950/60">
-                          <th className="px-3 py-2 text-left font-mono text-xs text-slate-700 dark:text-slate-300">{t('name')}</th>
-                          <th className="px-3 py-2 text-left text-xs text-slate-500">{t('value')}</th>
+                          <th className="px-3 py-2 text-start font-mono text-xs text-slate-700 dark:text-slate-300">{t('name')}</th>
+                          <th className="px-3 py-2 text-start text-xs text-slate-500">{t('value')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -830,7 +864,7 @@ export function TestCaseDetail() {
                 <CardTitle className="text-base">{t('properties')}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <PropertyRow label={t('testType')} value={formatStatusLabel(testCase.test_type)} />
+                <PropertyRow label={t('testType')} value={formatStatusLabel(testCase.test_type, t('unknown'))} />
                 <PropertyRow
                   label={t('section')}
                   value={section?.path?.length ? (
@@ -1008,7 +1042,7 @@ export function TestCaseDetail() {
                               {result.executed_by_full_name || result.executed_by || t('unknown')} • {formatDateTime(result.executed_at || result.created_at)}
                             </p>
                           </div>
-                          <Badge className={getStatusBadgeClass(result.status)}>{formatStatusLabel(result.status)}</Badge>
+                          <Badge className={getStatusBadgeClass(result.status)}>{formatStatusLabel(result.status, t('unknown'))}</Badge>
                         </div>
                       );
                       return linkTarget ? (
@@ -1208,7 +1242,7 @@ function PropertyRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2 last:border-0 dark:border-slate-800">
       <span className="text-slate-500">{label}</span>
-      <span className="max-w-[210px] text-right font-medium text-slate-900 dark:text-white">{value}</span>
+      <span className="max-w-[210px] text-end font-medium text-slate-900 dark:text-white">{value}</span>
     </div>
   );
 }
@@ -1238,7 +1272,8 @@ function getStatusBadge(status: string | undefined | null) {
   return variants[normalized] || variants.inactive;
 }
 
-function getStatusBadgeClass(status: string) {
+function getStatusBadgeClass(status: string | undefined | null) {
+  const normalized = typeof status === 'string' ? status.toLowerCase() : '';
   const variants: Record<string, string> = {
     pass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
     passed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
@@ -1251,5 +1286,5 @@ function getStatusBadgeClass(status: string) {
     pending: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
     not_started: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
   };
-  return variants[status] || variants.pending;
+  return variants[normalized] || variants.pending;
 }

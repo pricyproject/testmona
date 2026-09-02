@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore } from '@/stores/projectStore';
 import { Card, CardContent } from '@/components/ui/card';
@@ -21,6 +21,11 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
   const { appName } = useAppName(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [checkingProject, setCheckingProject] = useState(false);
+  // Which project id the `getById` fallback has already been fired for. The
+  // effect depends on `projects`, whose identity changes on every store write,
+  // so without this a deep link to a project outside the cached list would
+  // re-request it on each refresh.
+  const fetchedProjectId = useRef<number | null>(null);
   const numericProjectId = useMemo(() => {
     if (!projectId) return null;
     const parsed = Number(projectId);
@@ -56,21 +61,38 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
     };
     const known = projects.find((project) => project.id === numericProjectId);
     if (known) {
+      fetchedProjectId.current = numericProjectId;
       setProjectError(null);
       adopt(known);
       return;
     }
+    if (fetchedProjectId.current === numericProjectId) return;
+    fetchedProjectId.current = numericProjectId;
+
+    let cancelled = false;
     setCheckingProject(true);
     setProjectError(null);
     projectsAPI.getById(numericProjectId)
       .then((project) => {
+        if (cancelled) return;
         setProjectError(null);
         // Not in the locally cached list yet (deep link to a project not loaded
         // this session): still adopt it so the navbar reflects what's on screen.
         adopt(project);
       })
-      .catch((err) => setProjectError(getApiErrorMessage(err, t('projectGuardProjectUnavailable'))))
-      .finally(() => setCheckingProject(false));
+      .catch((err) => {
+        if (cancelled) return;
+        // Let the next visit retry rather than caching the failure forever.
+        fetchedProjectId.current = null;
+        setProjectError(getApiErrorMessage(err, t('projectGuardProjectUnavailable')));
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingProject(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, numericProjectId, projects, setSelectedProject, t]);
 
   if (checkingProject) {
@@ -113,7 +135,7 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
                 <FolderOpen className="h-8 w-8 text-blue-600" />
               </div>
               <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                No Projects Found
+                {t('noProjectsFound')}
               </h2>
               <p className="text-gray-600 mb-6 leading-relaxed">
                 {t('projectGuardNoProjectsDesc', { appName })}
@@ -123,8 +145,8 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
                 <FolderOpen className="h-4 w-4 mr-2" />
-                Go to Projects
-                <ArrowRight className="h-4 w-4 ml-2" />
+                {t('goToProjects')}
+                <ArrowRight className="h-4 w-4 ml-2 rtl:rotate-180" />
               </Button>
             </div>
           </CardContent>

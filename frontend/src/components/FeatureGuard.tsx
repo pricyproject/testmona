@@ -32,6 +32,11 @@ export function FeatureGuard({ feature, children }: FeatureGuardProps) {
     if (numericId != null) {
       const found = projects.find((p) => p.id === numericId);
       if (found) return found;
+      // ProjectGuard adopts the URL's project into `selectedProject` even when it
+      // isn't in the cached list (deep links), so that is a valid source - but
+      // only while it is the same project. Mid-switch the selection still points
+      // at the previous project, whose toggles must not decide this page.
+      return selectedProject?.id === numericId ? selectedProject : null;
     }
     return selectedProject;
   }, [projectId, projects, selectedProject]);

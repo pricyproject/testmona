@@ -147,6 +147,7 @@ def _get_test_case_linked_requirements(db: Session, test_case: TestCase, project
         results.append(
             schemas.TestCaseLinkedRequirement(
                 id=requirement.id,
+                project_seq=requirement.project_seq,
                 requirement_id=requirement.requirement_id,
                 title=requirement.title,
                 status=_enum_value(requirement.status),

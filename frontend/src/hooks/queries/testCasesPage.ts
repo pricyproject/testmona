@@ -22,21 +22,33 @@ export function useProjectTestCases(
     queryKey: testCasesPageKeys.list(projectId, sortField, sortDirection),
     queryFn: async () => {
       const countResponse = await testCasesAPI.getCount(projectId as number);
-      const count = countResponse.count as number;
+      const reportedCount = Number(countResponse?.count);
       const testCases: TestCase[] = [];
-      for (let skip = 0; skip < count; skip += PAGE_SIZE) {
-        const page = await testCasesAPI.getAll(
+
+      // Page until the server returns a short page rather than trusting the
+      // count: it is a separate request, so it can be stale (or missing) and
+      // would otherwise truncate the list - or, at 0, render an empty table for
+      // a project that does have cases. MAX_PAGES bounds a misbehaving server.
+      const MAX_PAGES = 200;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const batch = await testCasesAPI.getAll(
           projectId as number,
           undefined,
           undefined,
           sortField,
           sortDirection,
-          skip,
+          page * PAGE_SIZE,
           PAGE_SIZE,
         );
-        if (Array.isArray(page)) testCases.push(...page);
+        if (!Array.isArray(batch) || batch.length === 0) break;
+        testCases.push(...batch);
+        if (batch.length < PAGE_SIZE) break;
       }
-      return { testCases, count };
+
+      return {
+        testCases,
+        count: Number.isFinite(reportedCount) ? reportedCount : testCases.length,
+      };
     },
     enabled,
   });

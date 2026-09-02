@@ -4855,4 +4855,28 @@ export const fa = {
     resultStatus_block: 'مسدود',
     resultStatus_skip: 'رد شده',
     resultStatus_not_started: 'شروع نشده',
+
+  // Project switching
+    failedToLoadProjects: 'بارگذاری پروژه‌ها ناموفق بود',
+    projectStatusChangedTo: 'وضعیت پروژه به {status} تغییر کرد.',
+
+  // Test case detail / edit
+    testCaseWrongProject: 'این مورد آزمون متعلق به پروژه دیگری است',
+    testCaseWrongProjectDesc: 'این مورد آزمون بخشی از پروژه‌ی موجود در نوار آدرس نیست. آن را از پروژه‌ی خودش باز کنید.',
+    unknownSectionOption: 'بخش ناشناخته (#{id})',
+
+  // Test case list - destructive actions
+    deleteTestCaseConfirmTitle: 'این مورد آزمون حذف شود؟',
+    deleteTestCaseConfirmDesc: '«{title}» برای همیشه حذف می‌شود. این عمل قابل بازگشت نیست.',
+    deleteTestCasesConfirmTitle: '{count} مورد آزمون حذف شود؟',
+    deleteTestCasesConfirmDesc: '{count} مورد آزمون انتخاب‌شده برای همیشه حذف می‌شوند. این عمل قابل بازگشت نیست.',
+    deleteSectionConfirmTitle: 'این بخش حذف شود؟',
+    deleteSectionConfirmDesc: 'بخش «{name}» حذف خواهد شد. بخش‌هایی که هنوز زیربخش یا مورد آزمون دارند قابل حذف نیستند.',
+    deletedTestCasesPartial: '{count} مورد آزمون حذف شد، {failed} مورد حذف نشد.',
+    cannotDeleteAllTestCasesSection: 'نمای «همه موارد آزمون» قابل حذف نیست.',
+    draggingTestCase: 'در حال جابه‌جایی {title}...',
+    bulkExecutionRunName: 'اجرای گروهی - {count} مورد آزمون',
+    bulkExecutionRunDescription: 'اجرای {count} مورد آزمون انتخاب‌شده',
+    tag: 'برچسب',
+    automation: 'خودکارسازی',
 };

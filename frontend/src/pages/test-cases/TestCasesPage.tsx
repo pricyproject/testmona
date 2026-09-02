@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { aiManagerAPI, AIManagerStatus, api, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
+import { aiManagerAPI, AIManagerStatus, api, getApiErrorMessage, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +15,16 @@ import {
   DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Select,
   SelectContent,
@@ -156,6 +166,12 @@ export function TestCases() {
   };
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  // Pending destructive actions. Deleting a test case (or a whole selection, or a
+  // section) is irreversible, so nothing is sent until the user confirms.
+  const [testCaseToDelete, setTestCaseToDelete] = useState<TestCase | null>(null);
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  const [sectionToDelete, setSectionToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -705,16 +721,22 @@ export function TestCases() {
       setTotalCount(0);
       return;
     }
-    if (testCasesQuery.data) {
-      const fetched = testCasesQuery.data.testCases;
-      setApiTestCases(fetched);
-      setTotalCount(testCasesQuery.data.count);
-      const types = Array.from(new Set([
-        ...testTypeOptions.map((option) => option.value),
-        ...extractTestTypes(fetched),
-      ])).sort();
-      setTestTypes(types);
+    if (!testCasesQuery.data) {
+      // A new project means a new query key, so `data` is undefined until the
+      // first page lands. Clear now: keeping the old array would show the
+      // previous project's test cases under the new project's URL.
+      setApiTestCases([]);
+      setTotalCount(0);
+      return;
     }
+    const fetched = testCasesQuery.data.testCases;
+    setApiTestCases(fetched);
+    setTotalCount(testCasesQuery.data.count);
+    const types = Array.from(new Set([
+      ...testTypeOptions.map((option) => option.value),
+      ...extractTestTypes(fetched),
+    ])).sort();
+    setTestTypes(types);
   }, [currentProjectId, testCasesQuery.data]);
 
   // Helper function to get all section IDs including children (recursive)
@@ -889,8 +911,9 @@ export function TestCases() {
       setSelectedTestCases([]);
       setSelectAll(false);
 
+      // The test-case list is keyed on the project in react-query and refetches
+      // itself when the key changes, so only the suites need loading here.
       await loadTestSuite();
-      await loadTestCases();
     };
 
     initializeData();
@@ -906,6 +929,18 @@ export function TestCases() {
       setMockSections([]);
     }
   }, [currentProjectId]); // Only reload when project changes, not when test cases change
+
+  // Honour `?section=<id>` deep links once the tree is in: the parameter already
+  // drives the import dialog, so a link that names a section should scope the
+  // list to it too rather than silently landing on "all".
+  const appliedUrlSectionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!urlSectionId || mockSections.length === 0) return;
+    if (appliedUrlSectionRef.current === urlSectionId) return;
+    if (!findSectionById(mockSections, urlSectionId)) return;
+    appliedUrlSectionRef.current = urlSectionId;
+    handleScopeSelection(urlSectionId);
+  }, [urlSectionId, mockSections]);
 
   // Load test suite for the current project
   const loadTestSuite = async (preferredSuiteId?: number) => {
@@ -1177,45 +1212,52 @@ export function TestCases() {
 
   const handleDeleteSection = (sectionId: string, sectionName: string) => {
     if (sectionId === 'all') {
-      alert('Cannot delete the "All Test Cases" section');
+      toast({
+        title: t('error'),
+        description: t('cannotDeleteAllTestCasesSection'),
+        variant: "destructive",
+      });
+      return;
+    }
+    setSectionToDelete({ id: sectionId, name: sectionName });
+  };
+
+  const confirmDeleteSection = async () => {
+    if (!sectionToDelete) return;
+    const numericSectionId = Number(sectionToDelete.id);
+    if (!Number.isInteger(numericSectionId) || numericSectionId <= 0) {
+      setSectionToDelete(null);
       return;
     }
 
-    if (window.confirm(`Are you sure you want to delete the section "${sectionName}" and all its subsections?`)) {
-      // Find and remove the section
-      const deleteSectionRecursive = (sections: Section[]): Section[] => {
-        return sections.filter(section => {
-          if (section.id === sectionId) {
-            return false; // Remove this section
-          }
-          if (section.children) {
-            section.children = deleteSectionRecursive(section.children);
-          }
-          return true;
-        });
-      };
+    setIsDeleting(true);
+    try {
+      // Persist the delete. Pruning only local state (as this used to) made the
+      // section reappear on the next load; the server also rejects a section that
+      // still holds subsections or test cases, which the user needs to be told.
+      await sectionsAPI.delete(numericSectionId);
 
-      const updatedSections = deleteSectionRecursive(mockSections);
-      setMockSections(updatedSections);
-
-      // Log the activity
-      const activity = {
-        id: Date.now(),
-        type: 'sectionDeleted',
-        sectionName: sectionName,
-        sectionId: sectionId,
-        timestamp: new Date().toISOString(),
-        user: 'Current User'
-      };
-
-      const existingActivities = JSON.parse(localStorage.getItem('recentActivities') || '[]');
-      existingActivities.unshift(activity);
-      localStorage.setItem('recentActivities', JSON.stringify(existingActivities.slice(0, 10)));
-
-      // Reset selection if the deleted section was selected
-      if (selectedTestSuite === sectionId) {
+      if (selectedTestSuite === sectionToDelete.id) {
         handleScopeSelection('all');
       }
+      setSectionToDelete(null);
+
+      toast({
+        title: t('success'),
+        description: t('sectionDeletedSuccessfully', { name: sectionToDelete.name }),
+      });
+
+      await loadSections();
+      await loadTestCases();
+    } catch (error) {
+      console.error('Failed to delete section:', error);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToDeleteSection')),
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1369,26 +1411,26 @@ export function TestCases() {
     return [
       {
         key: 'priority',
-        label: 'Priority',
+        label: t('priority'),
         values: priorityOptions.map((o) => ({ value: o.value.toLowerCase(), label: o.label })),
       },
       {
         key: 'type',
-        label: 'Type',
+        label: t('type'),
         values: testTypeOptions.map((o) => ({ value: o.value.toLowerCase(), label: o.label })),
       },
-      { key: 'tag', label: 'Tag', values: topTags },
+      { key: 'tag', label: t('tag'), values: topTags },
       {
         key: 'is',
-        label: 'Automation',
+        label: t('automation'),
         values: [
-          { value: 'automated', label: 'Automated' },
-          { value: 'manual', label: 'Manual' },
+          { value: 'automated', label: t('automated') },
+          { value: 'manual', label: t('manual') },
         ],
       },
-      { key: 'reference', label: 'Reference', values: [] },
+      { key: 'reference', label: t('reference'), values: [] },
     ];
-  }, [apiTestCases, priorityOptions, testTypeOptions]);
+  }, [apiTestCases, priorityOptions, testTypeOptions, t]);
 
   // Header summary counts — memoized so the strip doesn't re-scan the full list
   // on every unrelated re-render of this large component.
@@ -1451,20 +1493,20 @@ export function TestCases() {
     switch (field) {
       case 'title':
         if (!value || !value.trim()) {
-          return 'Test case title is required';
+          return t('testCaseTitleRequired');
         }
         if (value.trim().length < 3) {
-          return 'Title must be at least 3 characters long';
+          return t('titleMinLength');
         }
         return '';
       case 'test_type':
         if (!value) {
-          return 'Test type is required';
+          return t('testTypeRequired');
         }
         return '';
       case 'priority':
         if (!value) {
-          return 'Priority is required';
+          return t('priorityRequired');
         }
         return '';
       case 'tags':
@@ -1479,17 +1521,17 @@ export function TestCases() {
 
   const validateCustomField = (field: CustomFieldDefinition, value: any): string => {
     if (field.is_required && (!value || (typeof value === 'string' && !value.trim()))) {
-      return `${field.name} is required`;
+      return t('fieldRequired', { field: field.name });
     }
 
     if (field.field_type === 'number' && value && isNaN(Number(value))) {
-      return `${field.name} must be a valid number`;
+      return t('fieldMustBeNumber', { field: field.name });
     }
 
     if (field.field_type === 'select' && value && field.options) {
-      const options = field.options as string[];
-      if (!options.includes(value)) {
-        return `${field.name} must be one of: ${options.join(', ')}`;
+      const options = Array.isArray(field.options) ? (field.options as string[]) : [];
+      if (options.length > 0 && !options.includes(value)) {
+        return t('fieldMustBeOneOf', { field: field.name, options: options.join(', ') });
       }
     }
 
@@ -2253,46 +2295,54 @@ export function TestCases() {
 
   const handleSelectTestCase = (testCaseId: number, checked: boolean) => {
     if (checked) {
-      setSelectedTestCases(prev => [...prev, testCaseId]);
+      setSelectedTestCases(prev => (prev.includes(testCaseId) ? prev : [...prev, testCaseId]));
     } else {
       setSelectedTestCases(prev => prev.filter(id => id !== testCaseId));
       setSelectAll(false);
     }
   };
 
-  const handleBulkDelete = async () => {
+  const confirmBulkDelete = async () => {
     if (selectedTestCases.length === 0) return;
 
+    setIsDeleting(true);
     try {
-      // Delete all selected test cases
-      const deletePromises = selectedTestCases.map(testCaseId =>
-        testCasesAPI.delete(testCaseId)
-      );
+      // allSettled, not all: one failing row must not discard the outcome of the
+      // rows that did delete, nor leave them showing in the table.
+      const ids = [...selectedTestCases];
+      const outcomes = await Promise.allSettled(ids.map((id) => testCasesAPI.delete(id)));
+      const deletedIds = ids.filter((_, index) => outcomes[index].status === 'fulfilled');
+      const failedCount = ids.length - deletedIds.length;
 
-      await Promise.all(deletePromises);
-
-      // Remove from local state
-      setApiTestCases(prev => prev.filter(tc => !selectedTestCases.includes(tc.id)));
-
-      toast({
-        title: t('success'),
-        description: t('deletedTestCasesSuccessfully', {count: selectedTestCases.length}),
-      });
-
-      // Clear selection
-      setSelectedTestCases([]);
+      setApiTestCases(prev => prev.filter(tc => !deletedIds.includes(tc.id)));
+      setSelectedTestCases(prev => prev.filter(id => !deletedIds.includes(id)));
       setSelectAll(false);
+      setIsBulkDeleteOpen(false);
+
+      if (failedCount === 0) {
+        toast({
+          title: t('success'),
+          description: t('deletedTestCasesSuccessfully', { count: deletedIds.length }),
+        });
+      } else if (deletedIds.length === 0) {
+        toast({
+          title: t('error'),
+          description: t('failedToDeleteSomeTestCases'),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: t('partialSuccess'),
+          description: t('deletedTestCasesPartial', { count: deletedIds.length, failed: failedCount }),
+          variant: "destructive",
+        });
+      }
 
       // Reload data to refresh counts
       await loadTestCases();
       await loadSections();
-    } catch (error) {
-      console.error('Failed to delete test cases:', error);
-      toast({
-        title: t('error'),
-        description: t('failedToDeleteSomeTestCases'),
-        variant: "destructive",
-      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -2303,8 +2353,8 @@ export function TestCases() {
       try {
         // Create a new test run for the selected test cases
         const newRun = await testRunsAPI.create({
-          name: `Bulk Execution - ${selectedTestCases.length} test cases`,
-          description: `Execution run for ${selectedTestCases.length} selected test cases`,
+          name: t('bulkExecutionRunName', { count: selectedTestCases.length }),
+          description: t('bulkExecutionRunDescription', { count: selectedTestCases.length }),
           project_id: parseInt(projectId),
           status: 'in_progress',
           priority: 'medium',
@@ -2326,7 +2376,11 @@ export function TestCases() {
         // Navigate to execute the first test case
         const firstTestCaseId = selectedTestCases[0];
         const firstTcSeq = apiTestCases.find(tc => tc.id === firstTestCaseId)?.project_seq ?? firstTestCaseId;
-        navigate(`/projects/${projectId}/test-runs/${newRun.project_seq}/test-cases/${firstTcSeq}`);
+        // A run created before the sequence allocator ran has no project_seq yet;
+        // the global id still resolves, so fall back to it rather than routing to
+        // `/test-runs/undefined`.
+        const runSeq = newRun.project_seq ?? newRun.id;
+        navigate(`/projects/${projectId}/test-runs/${runSeq}/test-cases/${firstTcSeq}`);
       } catch (error) {
         console.error('Failed to create test run for bulk execution:', error);
         toast({
@@ -2531,13 +2585,25 @@ export function TestCases() {
     });
   };
 
-  const handleDelete = async (testCaseId: number) => {
+  // Row action: stage the case for deletion. The request only goes out once the
+  // confirmation dialog is accepted.
+  const handleDelete = (testCaseId: number) => {
+    const target = apiTestCases.find((tc) => tc.id === testCaseId);
+    if (!target) return;
+    setTestCaseToDelete(target);
+  };
+
+  const confirmDeleteTestCase = async () => {
+    if (!testCaseToDelete) return;
+    const testCaseId = testCaseToDelete.id;
+    setIsDeleting(true);
     try {
-      // Add actual API call to delete test case
       await testCasesAPI.delete(testCaseId);
 
       // Remove from local state
       setApiTestCases(prev => prev.filter(tc => tc.id !== testCaseId));
+      setSelectedTestCases(prev => prev.filter(id => id !== testCaseId));
+      setTestCaseToDelete(null);
 
       toast({
         title: t('success'),
@@ -2551,9 +2617,11 @@ export function TestCases() {
       console.error('Failed to delete test case:', error);
       toast({
         title: t('error'),
-        description: t('failedToDeleteTestCase'),
+        description: getApiErrorMessage(error, t('failedToDeleteTestCase')),
         variant: "destructive",
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -4085,7 +4153,7 @@ export function TestCases() {
                   <Button variant="outline" size="sm" onClick={handleExportSelected} className="text-green-600">
                     <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('exportCSV')}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={handleBulkDelete} className="text-red-600">
+                  <Button variant="outline" size="sm" onClick={() => setIsBulkDeleteOpen(true)} className="text-red-600">
                     <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} /> {t('delete')}
                   </Button>
                 </div>
@@ -4913,6 +4981,84 @@ export function TestCases() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={testCaseToDelete !== null}
+        onOpenChange={(open) => { if (!open) setTestCaseToDelete(null); }}
+      >
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              {t('deleteTestCaseConfirmTitle')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('deleteTestCaseConfirmDesc', { title: testCaseToDelete?.title ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => { event.preventDefault(); confirmDeleteTestCase(); }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? t('deleting') : t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isBulkDeleteOpen} onOpenChange={(open) => { if (!open) setIsBulkDeleteOpen(false); }}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              {t('deleteTestCasesConfirmTitle', { count: selectedTestCases.length })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('deleteTestCasesConfirmDesc', { count: selectedTestCases.length })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => { event.preventDefault(); confirmBulkDelete(); }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? t('deleting') : t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={sectionToDelete !== null}
+        onOpenChange={(open) => { if (!open) setSectionToDelete(null); }}
+      >
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              {t('deleteSectionConfirmTitle')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('deleteSectionConfirmDesc', { name: sectionToDelete?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => { event.preventDefault(); confirmDeleteSection(); }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? t('deleting') : t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <BulkEditTestCasesDialog
         open={bulkEditOpen}

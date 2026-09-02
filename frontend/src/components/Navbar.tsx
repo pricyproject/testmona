@@ -4,7 +4,7 @@ import { ChevronRight, Inbox, LayoutDashboard, LogOut, Menu, Moon, PanelLeftClos
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/stores/authStore';
 import { isAdminUser } from '@/utils/roles';
-import { useProjectStore } from '@/stores/projectStore';
+import { useProjectStore, type Project } from '@/stores/projectStore';
 import { NotificationDropdown } from '@/components/NotificationDropdown';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { api } from '@/lib/api';
@@ -109,14 +109,19 @@ export function Navbar({
 
   const breadcrumbs = buildBreadcrumbs();
 
-  const handleProjectSelected = (project: any) => {
-    if (location.pathname.startsWith('/projects/') && selectedProject?.id !== project.id) {
-      const pathParts = location.pathname.split('/');
-      if (pathParts.length >= 3) {
-        pathParts[2] = project.id.toString();
-        navigate(pathParts.join('/'));
-      }
-    }
+  // Switching projects keeps the user on the same *kind* of page, never on the
+  // same record: entity ids (and per-project sequences) are project-scoped, so
+  // carrying `/projects/1/test-cases/193` over to project 2 would open an
+  // unrelated case - or 404. Land on the section root of the new project instead,
+  // dropping any entity id, query string and hash from the old project.
+  const handleProjectSelected = (project: Project) => {
+    if (!project?.id) return;
+    const parts = location.pathname.split('/').filter(Boolean);
+    if (parts[0] !== 'projects' || parts.length < 2) return;
+    if (parts[1] === String(project.id)) return;
+
+    const section = parts[2];
+    navigate(section ? `/projects/${project.id}/${section}` : `/projects/${project.id}`);
   };
 
   const handleLogout = () => {

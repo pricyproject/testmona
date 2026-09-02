@@ -373,6 +373,10 @@ class TestCaseSectionNested(BaseModel):
 
 class TestCaseLinkedRequirement(BaseModel):
     id: int
+    # Per-project sequence: project-first requirement URLs are keyed on this, so
+    # without it a linked-requirement link has to guess with the global id and
+    # opens whichever requirement owns that number in the project.
+    project_seq: Optional[int] = None
     requirement_id: str
     title: str
     status: str
