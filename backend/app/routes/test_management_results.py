@@ -460,6 +460,10 @@ def register_result_routes(app):
             result.append({
                 "id": item.id,
                 "test_run_id": item.test_run_id,
+                # The per-project sequence is the run's identity in the UI's URLs;
+                # without it a caller has to guess, and linking by the global id
+                # resolves to a different run.
+                "test_run_project_seq": test_run.project_seq if test_run else None,
                 "test_run_name": test_run.name if test_run else None,
                 "test_run_status": test_run.status if test_run else None,
                 "test_run_priority": test_run.priority if test_run else None,

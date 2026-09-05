@@ -1123,6 +1123,7 @@ class CountResponse(BaseModel):
 class ExecutionHistoryItem(BaseModel):
     id: int
     test_run_id: Optional[int] = None
+    test_run_project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     test_run_name: Optional[str] = None
     test_run_status: Optional[str] = None
     test_run_priority: Optional[str] = None
