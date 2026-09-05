@@ -92,8 +92,16 @@ export function TestRunDetail() {
   const [isAddTestCasesOpen, setIsAddTestCasesOpen] = useState(false);
   const [selectedTestCasesForRemoval, setSelectedTestCasesForRemoval] = useState<number[]>([]);
   const [availableTestCases, setAvailableTestCases] = useState<any[]>([]);
+  const [isLoadingAvailable, setIsLoadingAvailable] = useState(false);
   const [selectedTestCasesToAdd, setSelectedTestCasesToAdd] = useState<number[]>([]);
+  const [isAddingTestCases, setIsAddingTestCases] = useState(false);
   const [searchTestCases, setSearchTestCases] = useState('');
+  // Section keys the picker has collapsed. Absent = expanded, so a freshly
+  // opened dialog shows everything and collapsing is an explicit choice.
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [isRemoveDialogOpen, setIsRemoveDialogOpen] = useState(false);
+  const [isRemovingResults, setIsRemovingResults] = useState(false);
+  const [isResetTimeDialogOpen, setIsResetTimeDialogOpen] = useState(false);
   const [sections, setSections] = useState<any[]>([]);
   const [isResettingTime, setIsResettingTime] = useState(false);
   const [isAssigningRun, setIsAssigningRun] = useState(false);
@@ -105,6 +113,8 @@ export function TestRunDetail() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeletingRun, setIsDeletingRun] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  // Set while the user holds local state a background refresh would discard.
+  const pausePollingRef = useRef(false);
 
   // Column sorting
   const [sortColumn, setSortColumn] = useState<string | null>(() => searchParams.get('sort') || null);
@@ -165,7 +175,8 @@ export function TestRunDetail() {
   const [isImporting, setIsImporting] = useState(false);
   const [importSummary, setImportSummary] = useState<any>(null);
 
-  // Prepare chart data
+  // Prepare chart data. The result is memoised at the call site below — this
+  // walks every result three times, and it used to re-run on every keystroke.
   const prepareChartData = () => {
     if (!testResults.length) {
       return { pieData: [], sectionData: [], trendData: [] };
@@ -287,7 +298,8 @@ export function TestRunDetail() {
     });
 
     return { pieData, sectionData, trendData };
-  };  
+  };
+  
   // Load defect-linking coverage rollup for traceability reporting
   useEffect(() => {
     if (!runGlobalId) return;
@@ -422,7 +434,9 @@ export function TestRunDetail() {
 
   const syncTestRunStatus = async (runData: any, resultsData: any[]) => {
     const statusPayload = getDerivedRunStatusPayload(runData, resultsData);
-    if (!statusPayload || !id) {
+    // Deriving the run status is a write. A viewer may only read, so for them we
+    // return the run untouched rather than firing a request the API will reject.
+    if (!statusPayload || !id || !canWrite) {
       return runData;
     }
 
@@ -444,7 +458,7 @@ export function TestRunDetail() {
         return;
       }
 
-      const testResultsData = await testResultsAPI.getAll(runGlobalId);
+      const testResultsData = await testResultsAPI.getAllPages(runGlobalId);
       const updatedTestRun = await syncTestRunStatus(testRunData, testResultsData);
       setTestRun(updatedTestRun);
       setTestResults(testResultsData);
@@ -478,7 +492,7 @@ export function TestRunDetail() {
         }
         
         // Load test results for this test run
-        const testResultsData = await testResultsAPI.getAll(runGlobalId);
+        const testResultsData = await testResultsAPI.getAllPages(runGlobalId);
         
         // Viewer-level users may not have permission to list all users. The run
         // detail itself should still load; user lists only enrich labels/dropdowns.
@@ -503,8 +517,17 @@ export function TestRunDetail() {
 
     loadData();
 
-    // Set up interval to check status every 5 seconds
-    const interval = setInterval(checkAndUpdateStatus, 5000);
+    // Poll for results recorded elsewhere (another tester, a CI import). The
+    // poll replaces `testResults` wholesale, so it has to stand down whenever
+    // the user has local state that a refresh would throw away — an open inline
+    // edit, a bulk action in flight, or the add-cases picker. It also pauses
+    // while the tab is hidden, where the refresh buys nothing.
+    const poll = () => {
+      if (document.hidden) return;
+      if (pausePollingRef.current) return;
+      void checkAndUpdateStatus();
+    };
+    const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, [id, projectId, runGlobalId, runIdLoading, shouldLoadUsers]);
 
@@ -570,27 +593,33 @@ export function TestRunDetail() {
     return () => { cancelled = true; };
   }, [projectId]);
 
-  // Load available test cases when dialog opens
+  // Load the project's test cases when the picker opens.
+  //
+  // Two things this must get right: the request has to be scoped to *this*
+  // project (an unscoped call returns cases from every project the user can
+  // read) and it has to walk every page (the API returns 100 rows by default,
+  // which silently hid most of the catalogue). `testResults` is deliberately
+  // not a dependency — the run polls every few seconds, and depending on it
+  // re-fetched the whole catalogue on each tick; the already-in-run cases are
+  // excluded at render time instead.
   useEffect(() => {
-    const loadAvailableTestCases = async () => {
-      if (isAddTestCasesOpen && projectId) {
-        try {
-          const allTestCases = await testCasesAPI.getAll();
-          
-          // Filter out test cases that are already in this test run
-          const existingTestCaseIds = testResults.map(r => r.test_case_id);
-          const available = allTestCases.filter(tc => !existingTestCaseIds.includes(tc.id));
-          
-          setAvailableTestCases(available);
-        } catch (err) {
-          console.error('Failed to load available test cases:', err);
-          toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestCasesForSelection')), variant: 'destructive' });
-        }
-      }
-    };
+    if (!isAddTestCasesOpen || !projectId) return;
+    const numericProjectId = parseInt(projectId, 10);
+    if (!Number.isFinite(numericProjectId)) return;
 
-    loadAvailableTestCases();
-  }, [isAddTestCasesOpen, projectId, testResults]);
+    let cancelled = false;
+    setIsLoadingAvailable(true);
+    testCasesAPI.getAllPages(numericProjectId)
+      .then((cases) => { if (!cancelled) setAvailableTestCases(Array.isArray(cases) ? cases : []); })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load available test cases:', err);
+        setAvailableTestCases([]);
+        toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestCasesForSelection')), variant: 'destructive' });
+      })
+      .finally(() => { if (!cancelled) setIsLoadingAvailable(false); });
+    return () => { cancelled = true; };
+  }, [isAddTestCasesOpen, projectId]);
 
   const normalizeStatusKey = (status?: string) => (status || '').toLowerCase().replace(/[-\s]/g, '_');
 
@@ -714,7 +743,7 @@ export function TestRunDetail() {
     return { ids: Array.from(ids), hasUnassigned };
   }, [testResults]);
 
-  const filteredResults = testResults.filter(result => {
+  const filteredResults = useMemo(() => testResults.filter(result => {
     const resultStatus = normalizeRunStatus(result.status) || 'not_started';
     if (filter !== 'all' && resultStatus !== normalizeRunStatus(filter)) return false;
 
@@ -749,9 +778,9 @@ export function TestRunDetail() {
     return searchableFields.some((field) =>
       String(field || '').toLowerCase().includes(normalizedQuery)
     );
-  });
+  }), [testResults, filter, sectionFilter, priorityFilter, assigneeFilter, attentionFilter, resultSearchQuery, flakiness, testRun?.assignee, t]);
 
-  const sortedFilteredResults = sortColumn
+  const sortedFilteredResults = useMemo(() => (sortColumn
     ? [...filteredResults].sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1;
         switch (sortColumn) {
@@ -778,12 +807,24 @@ export function TestRunDetail() {
             return 0;
         }
       })
-    : filteredResults;
+    : filteredResults), [filteredResults, sortColumn, sortDir]);
 
   // Pagination over the filtered + sorted results
   const totalPages = Math.max(1, Math.ceil(sortedFilteredResults.length / PAGE_SIZE));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const pagedResults = sortedFilteredResults.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Fold the display clamp back into state so a page number that no longer
+  // exists doesn't linger in the URL and reappear on reload.
+  useEffect(() => {
+    if (page !== currentPage) setPage(currentPage);
+  }, [page, currentPage]);
+
+  // How much of the *current filter* is selected — drives the header checkbox.
+  const selectedFilteredCount = useMemo(() => {
+    const selected = new Set(selectedTestCasesForRemoval);
+    return filteredResults.reduce((count, r) => (selected.has(r.id) ? count + 1 : count), 0);
+  }, [filteredResults, selectedTestCasesForRemoval]);
 
   const statusCounts = testResults.reduce((acc: any, result) => {
     const normalizedStatus = normalizeRunStatus(result.status) || 'not_started';
@@ -804,7 +845,10 @@ export function TestRunDetail() {
   const totalExecutionSeconds = testResults.reduce((total, result) => total + (Number(result.execution_time) || 0), 0);
   const executedResultsCount = testResults.filter((result) => isResultComplete(result.status) && result.execution_time != null).length;
   const averageExecutionSeconds = executedResultsCount > 0 ? Math.round(totalExecutionSeconds / executedResultsCount) : 0;
-  const { pieData, sectionData, trendData } = prepareChartData();
+  const { pieData, sectionData, trendData } = useMemo(
+    prepareChartData,
+    [testResults, testRun?.created_at, language, t],
+  );
   const runDescription = testRun?.description?.trim() || t('noDescriptionProvided');
   const formattedCreatedDate = testRun?.created_at
     ? new Date(testRun.created_at).toLocaleDateString(language)
@@ -816,66 +860,104 @@ export function TestRunDetail() {
     ? formatStatusLabel(testRun.status)
     : t('notAvailableShort');
 
-  // Handle adding/removing test cases
+  // Reload the run's results and re-derive its status. Used after any change
+  // that adds or removes rows.
+  const reloadResults = async () => {
+    const updatedTestResults = await testResultsAPI.getAllPages(runGlobalId);
+    const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
+    setTestResults(updatedTestResults);
+    if (updatedTestRun) {
+      setTestRun(updatedTestRun);
+    }
+    bumpDerived();
+  };
+
+  // Handle adding/removing test cases. Each case is created independently and
+  // settled separately: one rejection (a case deleted meanwhile, a duplicate)
+  // must not discard the ones that succeeded, and the user needs to be told
+  // exactly how many landed.
   const handleAddTestCases = async () => {
     if (selectedTestCasesToAdd.length === 0) {
       setIsAddTestCasesOpen(false);
       return;
     }
+    if (isAddingTestCases) return; // re-entry guard against double-submit
+    if (!Number.isFinite(runGlobalId)) return; // seq -> id not resolved yet
 
+    setIsAddingTestCases(true);
     try {
-      const testResultsPromises = selectedTestCasesToAdd.map(testCaseId =>
-        testResultsAPI.create({
-          test_run_id: runGlobalId,
-          test_case_id: testCaseId,
-          status: 'not_started',
-          actual_result: undefined,
-          comments: undefined,
-          execution_time: undefined,
-          executed_by: undefined,
-        })
+      const outcomes = await Promise.allSettled(
+        selectedTestCasesToAdd.map(testCaseId =>
+          testResultsAPI.create({
+            test_run_id: runGlobalId,
+            test_case_id: testCaseId,
+            status: 'not_started',
+            actual_result: undefined,
+            comments: undefined,
+            execution_time: undefined,
+            executed_by: undefined,
+          })
+        ),
       );
-      
-      await Promise.all(testResultsPromises);
-      
-      // Reload test results
-      const updatedTestResults = await testResultsAPI.getAll(runGlobalId);
-      const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
-      setTestResults(updatedTestResults);
-      if (updatedTestRun) {
-        setTestRun(updatedTestRun);
+      const added = outcomes.filter((o) => o.status === 'fulfilled').length;
+      const failed = outcomes.length - added;
+
+      await reloadResults();
+
+      if (failed === 0) {
+        toast({ title: t('success'), description: t('testCasesAddedToRun', { count: added }) });
+        setIsAddTestCasesOpen(false);
+        setSelectedTestCasesToAdd([]);
+      } else {
+        // Keep the dialog open with only the failures still selected, so the
+        // user can see what didn't land and retry just those.
+        const failedIds = selectedTestCasesToAdd.filter((_, i) => outcomes[i].status === 'rejected');
+        setSelectedTestCasesToAdd(failedIds);
+        toast({
+          title: t('error'),
+          description: t('testCasesAddedPartial', { ok: added, failed }),
+          variant: 'destructive',
+        });
       }
-      
-      setIsAddTestCasesOpen(false);
-      setSelectedTestCasesToAdd([]);
     } catch (err) {
       console.error('Failed to add test cases:', err);
-      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestCasesForSelection')), variant: 'destructive' });
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToAddTestCases')), variant: 'destructive' });
+    } finally {
+      setIsAddingTestCases(false);
     }
   };
 
   const handleRemoveTestCases = async () => {
     if (selectedTestCasesForRemoval.length === 0) return;
+    if (isRemovingResults) return;
 
+    setIsRemovingResults(true);
     try {
-      const deletePromises = selectedTestCasesForRemoval.map(resultId =>
-        testResultsAPI.delete(resultId)
-      );
+      const targets = [...selectedTestCasesForRemoval];
+      const outcomes = await Promise.allSettled(targets.map((resultId) => testResultsAPI.delete(resultId)));
+      const removed = outcomes.filter((o) => o.status === 'fulfilled').length;
+      const failed = outcomes.length - removed;
 
-      await Promise.all(deletePromises);
+      await reloadResults();
 
-      // Reload test results
-      const updatedTestResults = await testResultsAPI.getAll(runGlobalId);
-      const updatedTestRun = testRun ? await syncTestRunStatus(testRun, updatedTestResults) : null;
-      setTestResults(updatedTestResults);
-      if (updatedTestRun) {
-        setTestRun(updatedTestRun);
+      // Keep only the rows that failed selected, so a retry targets just those.
+      setSelectedTestCasesForRemoval(targets.filter((_, i) => outcomes[i].status === 'rejected'));
+      setIsRemoveDialogOpen(false);
+
+      if (failed === 0) {
+        toast({ title: t('success'), description: t('testResultsRemoved', { count: removed }) });
+      } else {
+        toast({
+          title: t('error'),
+          description: t('testResultsRemovedPartial', { ok: removed, failed }),
+          variant: 'destructive',
+        });
       }
-
-      setSelectedTestCasesForRemoval([]);
     } catch (err) {
       console.error('Failed to remove test cases:', err);
       toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUpdateResult')), variant: 'destructive' });
+    } finally {
+      setIsRemovingResults(false);
     }
   };
 
@@ -912,6 +994,15 @@ export function TestRunDetail() {
   const [editingResult, setEditingResult] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
 
+  // Keep the poll's stand-down flag in sync with the states whose local data a
+  // background refresh would silently discard.
+  pausePollingRef.current = editingResult !== null
+    || savingResultId !== null
+    || bulkBusy
+    || isAddTestCasesOpen
+    || isRemovingResults
+    || isRenamingName;
+
   const handleEdit = (resultId: number, field: string, value: any) => {
     setEditingResult(resultId);
     setEditValues(prev => ({ ...prev, [resultId]: { ...prev[resultId], [field]: value } }));
@@ -926,6 +1017,7 @@ export function TestRunDetail() {
       return;
     }
 
+    setSavingResultId(resultId);
     try {
       const payload = {
         ...getTimedResultPayload(result, pendingValues),
@@ -951,6 +1043,7 @@ export function TestRunDetail() {
       console.error('Failed to update test result:', err);
       toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUpdateResult')), variant: 'destructive' });
     } finally {
+      setSavingResultId(null);
       setEditingResult(null);
     }
   };
@@ -1158,8 +1251,12 @@ export function TestRunDetail() {
       t('comments'),
     ];
 
-    const rows = testResults.map((result) => [
-      result.test_case_id != null ? `TC-${result.test_case_id}` : '',
+    // Export exactly what the table is showing: filtering the view and then
+    // exporting the unfiltered set silently hands back the wrong document.
+    const rows = sortedFilteredResults.map((result) => [
+      // The per-project sequence is the id shown everywhere else in the UI;
+      // exporting the global id produces a CSV nobody can cross-reference.
+      result.test_case_id != null ? `TC-${result.test_case?.project_seq ?? result.test_case_id}` : '',
       result.test_case?.title || '',
       result.test_case?.section?.name || '',
       result.test_case?.priority || '',
@@ -1184,7 +1281,7 @@ export function TestRunDetail() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `test-run-${testRun.id}-results.csv`;
+    a.download = `test-run-${testRun.project_seq ?? testRun.id}-results.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1192,7 +1289,9 @@ export function TestRunDetail() {
 
     toast({
       title: t('exportCompleted'),
-      description: t('resultsExportedSuccessfully', { count: String(rows.length) }),
+      description: rows.length === totalTests
+        ? t('resultsExportedSuccessfully', { count: String(rows.length) })
+        : t('exportedFilteredResults', { count: String(rows.length) }),
     });
   };
 
@@ -1207,10 +1306,6 @@ export function TestRunDetail() {
 
   const handleResetTime = async () => {
     if (!runGlobalId) return;
-    
-    if (!confirm('Are you sure you want to reset all timing data for this test run? This will clear execution times for all test results.')) {
-      return;
-    }
 
     try {
       setIsResettingTime(true);
@@ -1219,13 +1314,14 @@ export function TestRunDetail() {
       // Reload test run and results to get updated data
       const [updatedTestRun, updatedTestResults] = await Promise.all([
         testRunsAPI.getById(runGlobalId),
-        testResultsAPI.getAll(runGlobalId)
+        testResultsAPI.getAllPages(runGlobalId)
       ]);
       
       const syncedTestRun = await syncTestRunStatus(updatedTestRun, updatedTestResults);
       setTestRun(syncedTestRun);
       setTestResults(updatedTestResults);
 
+      setIsResetTimeDialogOpen(false);
       toast({
         title: t('success'),
         description: t('testRunTimeResetSuccess'),
@@ -1286,7 +1382,7 @@ export function TestRunDetail() {
       // Reload run + results so the table reflects the new statuses.
       const [updatedRun, updatedResults] = await Promise.all([
         testRunsAPI.getById(runGlobalId),
-        testResultsAPI.getAll(runGlobalId),
+        testResultsAPI.getAllPages(runGlobalId),
       ]);
       const syncedRun = await syncTestRunStatus(updatedRun, updatedResults);
       setTestRun(syncedRun);
@@ -1477,7 +1573,7 @@ export function TestRunDetail() {
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-3">
                 <Badge className="border border-cyan-200 bg-cyan-100/80 px-3 py-1 text-cyan-800 shadow-xs backdrop-blur-sm dark:border-cyan-200/30 dark:bg-cyan-300/15 dark:text-cyan-50">
-                  {t('runId')}: {testRun.id}
+                  {t('runId')}: {testRun.project_seq ?? testRun.id}
                 </Badge>
                 <Badge className={`${getStatusBadge(testRun.status)} px-3 py-1 shadow-xs backdrop-blur-sm`}>
                   {formattedRunStatus}
@@ -1627,14 +1723,16 @@ export function TestRunDetail() {
           </div>
 
           <div className="grid w-full gap-2 sm:grid-cols-3 xl:w-auto xl:min-w-[520px]">
-            <Button
-              size="sm"
-              onClick={() => setIsAddTestCasesOpen(true)}
-              className="h-11 justify-center rounded-xl bg-slate-950 text-white hover:bg-slate-800 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200"
-            >
-              <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {t('addTestCases')}
-            </Button>
+            {canWrite && (
+              <Button
+                size="sm"
+                onClick={() => setIsAddTestCasesOpen(true)}
+                className="h-11 justify-center rounded-xl bg-slate-950 text-white hover:bg-slate-800 dark:bg-cyan-300 dark:text-slate-950 dark:hover:bg-cyan-200"
+              >
+                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('addTestCases')}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1644,18 +1742,20 @@ export function TestRunDetail() {
               <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('exportResults')}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                resetImportDialog();
-                setIsImportOpen(true);
-              }}
-              className="h-11 justify-center rounded-xl border-slate-200 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-950 dark:border-white/20 dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:hover:text-white"
-            >
-              <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {t('importCIResults')}
-            </Button>
+            {canWrite && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  resetImportDialog();
+                  setIsImportOpen(true);
+                }}
+                className="h-11 justify-center rounded-xl border-slate-200 bg-white/80 text-slate-700 hover:bg-white hover:text-slate-950 dark:border-white/20 dark:bg-white/10 dark:text-white dark:hover:bg-white/20 dark:hover:text-white"
+              >
+                <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('importCIResults')}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -1665,16 +1765,18 @@ export function TestRunDetail() {
               <BarChart3 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('viewReport')}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleResetTime}
-              disabled={isResettingTime}
-              className="h-11 justify-center rounded-xl border-orange-200 bg-white/80 text-orange-700 hover:bg-orange-50 hover:text-orange-950 dark:border-orange-800/30 dark:bg-orange-950/10 dark:text-orange-400 dark:hover:bg-orange-950/20 dark:hover:text-orange-300"
-            >
-              <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-              {isResettingTime ? 'Resetting...' : 'Reset Time'}
-            </Button>
+            {canWrite && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsResetTimeDialogOpen(true)}
+                disabled={isResettingTime || totalExecutionSeconds === 0}
+                className="h-11 justify-center rounded-xl border-orange-200 bg-white/80 text-orange-700 hover:bg-orange-50 hover:text-orange-950 dark:border-orange-800/30 dark:bg-orange-950/10 dark:text-orange-400 dark:hover:bg-orange-950/20 dark:hover:text-orange-300"
+              >
+                <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {isResettingTime ? t('resettingTime') : t('resetTime')}
+              </Button>
+            )}
             {canDelete && (
               <Button
                 variant="outline"
@@ -1686,40 +1788,39 @@ export function TestRunDetail() {
                 {t('deleteTestRun')}
               </Button>
             )}
-            {testRun.status === 'completed' && (
-              <Button size="sm" className="h-11 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-400 dark:text-slate-950 dark:hover:bg-emerald-300 sm:col-span-3">
-                <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                {t('rerunTest')}
-              </Button>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Test Run Information */}
-      <div className="bg-white rounded-lg border p-4 space-y-3">
-        <div className="flex flex-wrap gap-6 text-sm text-gray-500">
+      {/* Test run timeline. The header already carries created/updated, so this
+          strip shows the execution window instead: when the run actually
+          started and whether it has finished. */}
+      <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4" />
+            <PlayCircle className="h-4 w-4 shrink-0 text-slate-400" />
             <span>
-              Created: {testRun.created_at ? new Date(testRun.created_at).toLocaleDateString(language) : 'N/A'}
+              {t('startedLabel')}: {testRun.started_at ? formatDateTime(testRun.started_at) : t('notAvailableShort')}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4" />
+            <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
             <span>
-              {testRun.completed_at 
-                ? `Completed: ${new Date(testRun.completed_at).toLocaleDateString(language)}`
-                : 'Not completed'
-              }
+              {testRun.completed_at
+                ? t('completedOn', { date: formatDateTime(testRun.completed_at) })
+                : t('notCompleted')}
             </span>
           </div>
           {testRun.updated_at && testRun.updated_at !== testRun.created_at && (
             <div className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4" />
-              <span>
-                Last updated: {new Date(testRun.updated_at).toLocaleDateString(language)}
-              </span>
+              <RefreshCw className="h-4 w-4 shrink-0 text-slate-400" />
+              <span>{t('lastUpdated')}: {formatDateTime(testRun.updated_at)}</span>
+            </div>
+          )}
+          {testRun.environment?.name && (
+            <div className="flex items-center gap-2">
+              <Server className="h-4 w-4 shrink-0 text-slate-400" />
+              <span>{t('environmentLabel')}: {testRun.environment.name}</span>
             </div>
           )}
         </div>
@@ -2036,7 +2137,7 @@ export function TestRunDetail() {
         </CardHeader>
         <CardContent className="p-0">
           {/* Bulk-action bar */}
-          {selectedTestCasesForRemoval.length > 0 && (
+          {selectedTestCasesForRemoval.length > 0 && canWrite && (
             <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-blue-50/70 px-4 py-2.5 dark:border-slate-800 dark:bg-blue-950/20">
               <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
                 {t('selectedResultsCount', { count: selectedTestCasesForRemoval.length })}
@@ -2082,8 +2183,8 @@ export function TestRunDetail() {
                 variant="ghost"
                 size="sm"
                 className="h-8 gap-1.5 text-red-600 hover:text-red-700 dark:text-red-400"
-                disabled={bulkBusy}
-                onClick={handleRemoveTestCases}
+                disabled={bulkBusy || isRemovingResults}
+                onClick={() => setIsRemoveDialogOpen(true)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {t('removeFromRun')}
@@ -2099,36 +2200,58 @@ export function TestRunDetail() {
               </Button>
             </div>
           )}
-          {filteredResults.length === 0 ? (
+          {totalTests === 0 ? (
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <PlayCircle className="mb-3 h-10 w-10 text-slate-300" />
+              <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">{t('runHasNoTestCases')}</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('runHasNoTestCasesDesc')}</p>
+              {canWrite && (
+                <Button size="sm" className="mt-4" onClick={() => setIsAddTestCasesOpen(true)}>
+                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('addTestCases')}
+                </Button>
+              )}
+            </div>
+          ) : filteredResults.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
               <Search className="mb-3 h-10 w-10 text-slate-300" />
               <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">{t('noMatchingTestResults')}</h3>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('tryDifferentResultSearch')}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4"
+                onClick={() => {
+                  setFilter('all'); setSectionFilter('all'); setPriorityFilter('all');
+                  setAssigneeFilter('all'); setAttentionFilter('all'); setResultSearchQuery('');
+                }}
+              >
+                <X className={`h-3.5 w-3.5 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('clearFilters')}
+              </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900">
                   <TableRow className="border-slate-200 dark:border-slate-800">
+                    {canWrite && (
                     <TableHead className="w-12">
                       <Checkbox
                         checked={
-                          filteredResults.length > 0 && selectedTestCasesForRemoval.length === filteredResults.length
+                          filteredResults.length > 0 && selectedFilteredCount === filteredResults.length
                             ? true
-                            : selectedTestCasesForRemoval.length > 0
+                            : selectedFilteredCount > 0
                               ? 'indeterminate'
                               : false
                         }
                         onCheckedChange={(checked) => {
-                          if (checked) {
-                            setSelectedTestCasesForRemoval(filteredResults.map(r => r.id));
-                          } else {
-                            setSelectedTestCasesForRemoval([]);
-                          }
+                          setSelectedTestCasesForRemoval(checked ? filteredResults.map(r => r.id) : []);
                         }}
-                        aria-label="Select all visible test results"
+                        aria-label={t('selectAllVisibleResults')}
                       />
                     </TableHead>
+                    )}
                     {/* Sortable helper rendered inline */}
                     {(() => {
                       const SortIcon = ({ col }: { col: string }) => {
@@ -2178,13 +2301,15 @@ export function TestRunDetail() {
 
                     return (
                       <TableRow key={result.id} className="group border-slate-100 transition-colors hover:bg-blue-50/40 dark:border-slate-800 dark:hover:bg-blue-950/20">
-                        <TableCell className="align-top pt-5">
-                          <Checkbox
-                            checked={selectedTestCasesForRemoval.includes(result.id)}
-                            onCheckedChange={() => handleSelectTestCaseForRemoval(result.id)}
-                            aria-label={`Select ${testCaseTitle}`}
-                          />
-                        </TableCell>
+                        {canWrite && (
+                          <TableCell className="align-top pt-5">
+                            <Checkbox
+                              checked={selectedTestCasesForRemoval.includes(result.id)}
+                              onCheckedChange={() => handleSelectTestCaseForRemoval(result.id)}
+                              aria-label={`${t('select')} ${testCaseTitle}`}
+                            />
+                          </TableCell>
+                        )}
                         <TableCell className="align-top">
                           <div className="space-y-1">
                             <Button
@@ -2237,7 +2362,14 @@ export function TestRunDetail() {
                           </TableCell>
                         )}
                         <TableCell className="align-top">
-                          {isEditing ? (
+                          {!canWrite ? (
+                            <div className="flex items-center gap-1.5">
+                              {getStatusIcon(result.status)}
+                              <Badge className={getStatusBadge(result.status)}>
+                                {formatStatusLabel(result.status)}
+                              </Badge>
+                            </div>
+                          ) : isEditing ? (
                             <Select
                               value={editValues[result.id]?.status || result.status}
                               onValueChange={(value) => handleEdit(result.id, 'status', value)}
@@ -2302,15 +2434,17 @@ export function TestRunDetail() {
                                   >
                                     {link.defect?.defect_id || `#${link.defect_id}`}
                                   </Link>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUnlinkDefect(result, link.id)}
-                                    title={t('unlinkDefect')}
-                                    aria-label={`${t('unlinkDefect')} ${link.defect?.defect_id || ''}`}
-                                    className="rounded text-slate-400 hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-red-400"
-                                  >
-                                    <Unlink className="h-3 w-3" />
-                                  </button>
+                                  {canWrite && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUnlinkDefect(result, link.id)}
+                                      title={t('unlinkDefect')}
+                                      aria-label={`${t('unlinkDefect')} ${link.defect?.defect_id || ''}`}
+                                      className="rounded text-slate-400 hover:text-red-500 focus-visible:text-red-500 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-red-400"
+                                    >
+                                      <Unlink className="h-3 w-3" />
+                                    </button>
+                                  )}
                                 </span>
                               ))}
                               {isUnlinkedFailure(result) && (
@@ -2319,15 +2453,17 @@ export function TestRunDetail() {
                                   {t('noDefect')}
                                 </span>
                               )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 gap-1 px-1.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                                onClick={() => openLinkDialog(result.id)}
-                              >
-                                <Link2 className="h-3 w-3" />
-                                {t('link')}
-                              </Button>
+                              {canWrite && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 gap-1 px-1.5 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                                  onClick={() => openLinkDialog(result.id)}
+                                >
+                                  <Link2 className="h-3 w-3" />
+                                  {t('link')}
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         )}
@@ -2406,13 +2542,15 @@ export function TestRunDetail() {
                               <PlayCircle className="h-4 w-4 mr-1" />
                               {t('execute')}
                             </Button>
-                            {isEditing ? (
+                            {canWrite && (isEditing ? (
                               <>
-                                <Button size="sm" onClick={() => handleSave(result.id)}>
-                                  <Save className="h-4 w-4 mr-1" />
+                                <Button size="sm" onClick={() => handleSave(result.id)} disabled={isSaving}>
+                                  {isSaving
+                                    ? <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                    : <Save className="h-4 w-4 mr-1" />}
                                   {t('save')}
                                 </Button>
-                                <Button size="sm" variant="ghost" onClick={() => handleCancel(result.id)}>
+                                <Button size="sm" variant="ghost" onClick={() => handleCancel(result.id)} disabled={isSaving}>
                                   <X className="h-4 w-4" />
                                 </Button>
                               </>
@@ -2421,7 +2559,7 @@ export function TestRunDetail() {
                                 <Edit className="h-4 w-4 mr-1" />
                                 {t('edit')}
                               </Button>
-                            )}
+                            ))}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -2472,175 +2610,274 @@ export function TestRunDetail() {
         </CardContent>
       </Card>
 
-      {/* Add Test Cases Dialog */}
-      {isAddTestCasesOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[80vh] flex flex-col">
-            <h2 className="text-xl font-semibold mb-4">Add Test Cases to Test Run</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Select test cases to add to this test run ({selectedTestCasesToAdd.length} selected):
-            </p>
-            
-            {/* Search */}
-            <div className="mb-4">
-              <Input
-                placeholder="Search test cases..."
-                value={searchTestCases}
-                onChange={(e) => setSearchTestCases(e.target.value)}
-                className="w-full"
-              />
-            </div>
-            
-            {/* Test Cases List - Grouped by Section */}
-            <div className="flex-1 overflow-y-auto border rounded p-3 space-y-3">
-              {availableTestCases.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  No available test cases to add. All test cases may already be in this test run.
-                </p>
-              ) : (() => {
-                // Filter test cases based on search
-                const filteredTestCases = availableTestCases.filter(tc => 
-                  tc.title.toLowerCase().includes(searchTestCases.toLowerCase()) ||
-                  (tc.description && tc.description.toLowerCase().includes(searchTestCases.toLowerCase()))
-                );
+      {/* Add Test Cases picker */}
+      <Dialog
+        open={isAddTestCasesOpen}
+        onOpenChange={(open) => {
+          if (open || isAddingTestCases) return;
+          setIsAddTestCasesOpen(false);
+          setSelectedTestCasesToAdd([]);
+          setSearchTestCases('');
+          setCollapsedSections(new Set());
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="flex max-h-[85vh] flex-col sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t('addTestCasesToRunTitle')}</DialogTitle>
+            <DialogDescription>{t('addTestCasesToRunDesc')}</DialogDescription>
+          </DialogHeader>
 
-                // Group test cases by section
-                const groupedTestCases: { [key: string]: any[] } = {};
-                const noSectionKey = '__no_section__';
-                
-                filteredTestCases.forEach(tc => {
-                  const section = sections.find(s => s.id === tc.section_id);
-                  const key = section ? `${section.id}` : noSectionKey;
-                  if (!groupedTestCases[key]) {
-                    groupedTestCases[key] = [];
-                  }
-                  groupedTestCases[key].push(tc);
-                });
+          {(() => {
+            // Cases already in the run are excluded here rather than at fetch
+            // time, so the catalogue survives a background refresh of results.
+            const existingTestCaseIds = new Set(testResults.map((r) => r.test_case_id));
+            const selectableTestCases = availableTestCases.filter((tc) => !existingTestCaseIds.has(tc.id));
 
-                // Sort sections by name
-                const sortedSectionKeys = Object.keys(groupedTestCases).sort((a, b) => {
-                  if (a === noSectionKey) return 1;
-                  if (b === noSectionKey) return -1;
-                  const sectionA = sections.find(s => s.id === parseInt(a));
-                  const sectionB = sections.find(s => s.id === parseInt(b));
-                  return (sectionA?.name || '').localeCompare(sectionB?.name || '');
-                });
+            // One lookup table instead of a linear scan per case per keystroke.
+            const sectionNames = new Map<number, string>(sections.map((sec) => [sec.id, sec.name]));
+            const query = searchTestCases.trim().toLowerCase();
+            const sectionNameFor = (tc: any) => sectionNames.get(tc.section_id) || '';
+            const matchesQuery = (tc: any) => {
+              if (!query) return true;
+              // Match what the row actually shows — title, id badge and section —
+              // so searching for "TC-14" or a section name finds the case.
+              const haystack = [
+                tc.title,
+                tc.description,
+                `tc-${tc.project_seq ?? tc.id}`,
+                String(tc.project_seq ?? tc.id),
+                sectionNameFor(tc),
+              ];
+              return haystack.some((field) => String(field || '').toLowerCase().includes(query));
+            };
+            const filteredTestCases = selectableTestCases.filter(matchesQuery);
 
-                return sortedSectionKeys.map(sectionKey => {
-                  const testCasesInSection = groupedTestCases[sectionKey];
-                  const section = sectionKey === noSectionKey ? null : sections.find(s => s.id === parseInt(sectionKey));
-                  const sectionName = section ? section.name : 'No Section';
-                  const allSelected = testCasesInSection.every(tc => selectedTestCasesToAdd.includes(tc.id));
-                  const someSelected = testCasesInSection.some(tc => selectedTestCasesToAdd.includes(tc.id));
+            // Group by section, keeping an explicit bucket for unsectioned cases.
+            const groupedTestCases = new Map<string, any[]>();
+            filteredTestCases.forEach((tc) => {
+              const key = sectionNames.has(tc.section_id) ? String(tc.section_id) : NO_SECTION;
+              const bucket = groupedTestCases.get(key);
+              if (bucket) bucket.push(tc);
+              else groupedTestCases.set(key, [tc]);
+            });
 
-                  return (
-                    <div key={sectionKey} className="border rounded-lg overflow-hidden">
-                      {/* Section Header */}
-                      <div 
-                        className="bg-gray-50 dark:bg-gray-700 px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
-                        onClick={() => {
-                          // Toggle all test cases in this section
-                          if (allSelected) {
-                            setSelectedTestCasesToAdd(prev => 
-                              prev.filter(id => !testCasesInSection.map(tc => tc.id).includes(id))
-                            );
-                          } else {
-                            setSelectedTestCasesToAdd(prev => {
-                              const newIds = testCasesInSection.map(tc => tc.id).filter(id => !prev.includes(id));
-                              return [...prev, ...newIds];
-                            });
-                          }
-                        }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={allSelected}
-                            ref={(el) => {
-                              if (el) el.indeterminate = someSelected && !allSelected;
-                            }}
-                            onChange={() => {}}
-                            onClick={(e) => e.stopPropagation()}
-                            className="h-4 w-4"
-                          />
-                          <span className="font-medium text-sm">
-                            📁 {sectionName}
-                          </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            ({testCasesInSection.length} test case{testCasesInSection.length !== 1 ? 's' : ''})
-                          </span>
-                        </div>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {someSelected ? `${testCasesInSection.filter(tc => selectedTestCasesToAdd.includes(tc.id)).length} selected` : 'Click to select all'}
-                        </span>
-                      </div>
+            const sortedSectionKeys = Array.from(groupedTestCases.keys()).sort((a, b) => {
+              if (a === NO_SECTION) return 1;
+              if (b === NO_SECTION) return -1;
+              const nameA = sectionNames.get(parseInt(a, 10)) || '';
+              const nameB = sectionNames.get(parseInt(b, 10)) || '';
+              return nameA.localeCompare(nameB);
+            });
 
-                      {/* Test Cases in Section */}
-                      <div className="divide-y">
-                        {testCasesInSection.map((testCase) => (
-                          <div
-                            key={testCase.id}
-                            className="flex items-center space-x-3 p-2 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTestCasesToAdd(prev =>
-                                prev.includes(testCase.id)
-                                  ? prev.filter(id => id !== testCase.id)
-                                  : [...prev, testCase.id]
-                              );
-                            }}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedTestCasesToAdd.includes(testCase.id)}
-                              onChange={() => {}}
-                              className="h-4 w-4 shrink-0 ml-6"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{testCase.title}</div>
-                              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                                <span>TC{testCase.id}</span>
-                              </div>
-                            </div>
-                            <Badge className={getPriorityBadge(testCase.priority || 'medium') + ' text-xs'}>
-                              {testCase.priority || 'medium'}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
+            const filteredIds = filteredTestCases.map((tc) => tc.id);
+            const selectedSet = new Set(selectedTestCasesToAdd);
+            const selectedVisibleCount = filteredIds.filter((tcId) => selectedSet.has(tcId)).length;
+            const allVisibleSelected = filteredIds.length > 0 && selectedVisibleCount === filteredIds.length;
+            const allCollapsed = sortedSectionKeys.length > 0
+              && sortedSectionKeys.every((key) => collapsedSections.has(key));
+
+            const setSelection = (ids: number[], selected: boolean) => {
+              setSelectedTestCasesToAdd((prev) => {
+                if (selected) {
+                  const next = new Set(prev);
+                  ids.forEach((tcId) => next.add(tcId));
+                  return Array.from(next);
+                }
+                const removing = new Set(ids);
+                return prev.filter((tcId) => !removing.has(tcId));
+              });
+            };
+
+            const toggleSection = (key: string) => {
+              setCollapsedSections((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              });
+            };
+
+            return (
+              <>
+                {/* Search + bulk selection / expansion controls */}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <div className="relative flex-1">
+                    <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ${isRTL ? 'right-3' : 'left-3'}`} />
+                    <Input
+                      autoFocus
+                      value={searchTestCases}
+                      onChange={(e) => setSearchTestCases(e.target.value)}
+                      placeholder={t('searchTestCasesPlaceholder')}
+                      className={isRTL ? 'pr-9' : 'pl-9'}
+                    />
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9"
+                      disabled={sortedSectionKeys.length === 0}
+                      onClick={() => setCollapsedSections(allCollapsed ? new Set() : new Set(sortedSectionKeys))}
+                    >
+                      {allCollapsed
+                        ? <ChevronDown className={`h-3.5 w-3.5 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} />
+                        : <ChevronUp className={`h-3.5 w-3.5 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} />}
+                      {allCollapsed ? t('expandAll') : t('collapseAll')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9"
+                      disabled={filteredIds.length === 0}
+                      onClick={() => setSelection(filteredIds, !allVisibleSelected)}
+                    >
+                      {allVisibleSelected ? t('clearSelection') : t('selectAllFiltered')}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Test cases, grouped by section */}
+                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-md border border-slate-200 p-2 dark:border-slate-800">
+                  {isLoadingAvailable ? (
+                    <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {t('loadingAvailableTestCases')}
                     </div>
-                  );
-                });
-              })()}
-            </div>
-            
-            <div className="flex justify-between items-center mt-4 pt-4 border-t">
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                {selectedTestCasesToAdd.length} test case(s) selected
-              </div>
-              <div className="flex space-x-2">
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    setIsAddTestCasesOpen(false);
-                    setSelectedTestCasesToAdd([]);
-                    setSearchTestCases('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleAddTestCases}
-                  disabled={selectedTestCasesToAdd.length === 0}
-                >
-                  <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                  Add {selectedTestCasesToAdd.length} Test Case(s)
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                  ) : selectableTestCases.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                      {t('noAvailableTestCases')}
+                    </p>
+                  ) : filteredTestCases.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                      {t('noMatchingTestCases')}
+                    </p>
+                  ) : (
+                    sortedSectionKeys.map((sectionKey) => {
+                      const casesInSection = groupedTestCases.get(sectionKey) || [];
+                      const sectionIds = casesInSection.map((tc) => tc.id);
+                      const sectionName = sectionKey === NO_SECTION
+                        ? t('noSection')
+                        : sectionNames.get(parseInt(sectionKey, 10)) || t('noSection');
+                      const selectedInSection = sectionIds.filter((tcId) => selectedSet.has(tcId)).length;
+                      const allSelected = selectedInSection === sectionIds.length && sectionIds.length > 0;
+                      const someSelected = selectedInSection > 0 && !allSelected;
+                      const isCollapsed = collapsedSections.has(sectionKey);
+
+                      return (
+                        <div key={sectionKey} className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+                          {/* Section header: the chevron expands/collapses, the
+                              checkbox selects the whole section. They are separate
+                              targets so neither action can be triggered by accident. */}
+                          <div className="flex items-center gap-2 bg-slate-50 px-2 py-2 dark:bg-slate-900">
+                            <button
+                              type="button"
+                              onClick={() => toggleSection(sectionKey)}
+                              aria-expanded={!isCollapsed}
+                              aria-label={isCollapsed ? t('expandAll') : t('collapseAll')}
+                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800"
+                            >
+                              {isCollapsed
+                                ? <ChevronRight className={`h-4 w-4 ${isRTL ? 'rotate-180' : ''}`} />
+                                : <ChevronDown className="h-4 w-4" />}
+                            </button>
+                            <Checkbox
+                              checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                              onCheckedChange={(checked) => setSelection(sectionIds, checked === true)}
+                              aria-label={`${t('select')} ${sectionName}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => toggleSection(sectionKey)}
+                              className="flex min-w-0 flex-1 items-center gap-2 text-start"
+                            >
+                              <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100" title={sectionName}>
+                                {sectionName}
+                              </span>
+                              <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                                {t('sectionCaseCount', { count: sectionIds.length })}
+                              </span>
+                            </button>
+                            {selectedInSection > 0 && (
+                              <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                                {t('sectionSelectedCount', { selected: selectedInSection, total: sectionIds.length })}
+                              </span>
+                            )}
+                          </div>
+
+                          {!isCollapsed && (
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {casesInSection.map((testCase) => {
+                                const isSelected = selectedSet.has(testCase.id);
+                                return (
+                                  <label
+                                    key={testCase.id}
+                                    className="flex cursor-pointer items-center gap-3 p-2 transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
+                                  >
+                                    <Checkbox
+                                      checked={isSelected}
+                                      onCheckedChange={(checked) => setSelection([testCase.id], checked === true)}
+                                      className={isRTL ? 'mr-5' : 'ml-5'}
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100" title={testCase.title}>
+                                        {testCase.title}
+                                      </div>
+                                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                                        TC-{testCase.project_seq ?? testCase.id}
+                                      </div>
+                                    </div>
+                                    <Badge className={`${getPriorityBadge(testCase.priority || 'medium')} shrink-0 text-xs`}>
+                                      {testCase.priority || 'medium'}
+                                    </Badge>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <DialogFooter className="items-center sm:justify-between">
+                  <span className="text-sm text-slate-600 dark:text-slate-400">
+                    {t('testCasesSelectedCount', { count: selectedTestCasesToAdd.length })}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={isAddingTestCases}
+                      onClick={() => {
+                        setIsAddTestCasesOpen(false);
+                        setSelectedTestCasesToAdd([]);
+                        setSearchTestCases('');
+                        setCollapsedSections(new Set());
+                      }}
+                    >
+                      {t('cancel')}
+                    </Button>
+                    <Button
+                      onClick={handleAddTestCases}
+                      disabled={selectedTestCasesToAdd.length === 0 || isAddingTestCases}
+                    >
+                      {isAddingTestCases
+                        ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                        : <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                      {isAddingTestCases
+                        ? t('addingTestCases')
+                        : t('addSelectedTestCases', { count: selectedTestCasesToAdd.length })}
+                    </Button>
+                  </div>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
 
       {/* Link Defect Dialog */}
       <Dialog open={linkDialogResultId !== null} onOpenChange={(open) => !open && setLinkDialogResultId(null)}>
@@ -2833,6 +3070,45 @@ export function TestRunDetail() {
           />
         </div>
       )}
+
+      {/* Removing results discards recorded outcomes, so it asks first. */}
+      <Dialog open={isRemoveDialogOpen} onOpenChange={(open) => { if (!open && !isRemovingResults) setIsRemoveDialogOpen(false); }}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{t('removeFromRunTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('removeFromRunConfirm', { count: selectedTestCasesForRemoval.length })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={isRemovingResults} onClick={() => setIsRemoveDialogOpen(false)}>
+              {t('cancel')}
+            </Button>
+            <Button variant="destructive" onClick={handleRemoveTestCases} disabled={isRemovingResults}>
+              {isRemovingResults && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {isRemovingResults ? t('removing') : t('removeFromRun')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isResetTimeDialogOpen} onOpenChange={(open) => { if (!open && !isResettingTime) setIsResetTimeDialogOpen(false); }}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{t('resetTimeTitle')}</DialogTitle>
+            <DialogDescription>{t('resetTimeConfirm')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={isResettingTime} onClick={() => setIsResetTimeDialogOpen(false)}>
+              {t('cancel')}
+            </Button>
+            <Button variant="destructive" onClick={handleResetTime} disabled={isResettingTime}>
+              {isResettingTime && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {isResettingTime ? t('resettingTime') : t('resetTime')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[425px]">
