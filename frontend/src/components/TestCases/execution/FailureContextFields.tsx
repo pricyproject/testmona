@@ -44,6 +44,7 @@ function BlockerContext() {
     executionNotes, setExecutionNotes,
     blockerReason, setBlockerReason, canWrite,
   } = useExecution();
+  const readOnlyInput = { readOnly: !canWrite, tabIndex: canWrite ? undefined : -1 };
 
   const fieldClass = 'mt-1 h-9 border-amber-200 bg-white text-sm dark:border-amber-900/60 dark:bg-slate-950/40';
 
@@ -98,7 +99,7 @@ function BlockerContext() {
       {testSteps.length > 0 && (
         <div className="mb-3">
           <Label htmlFor="blockedStep" className="text-xs font-medium text-amber-800 dark:text-amber-300">{t('blockedAtStep')}</Label>
-          <Select value={selectedFailureStepNumber} onValueChange={setSelectedFailureStepNumber}>
+          <Select value={selectedFailureStepNumber} onValueChange={setSelectedFailureStepNumber} disabled={!canWrite}>
             <SelectTrigger id="blockedStep" className={fieldClass}>
               <SelectValue placeholder={t('selectBlockedStep')} />
             </SelectTrigger>
@@ -120,7 +121,7 @@ function BlockerContext() {
             {t('blockingIssueLabel')}
           </Label>
           <Input
-            id="blockingIssue" name="blocking-url" {...urlInputProps}
+            id="blockingIssue" name="blocking-url" {...urlInputProps} {...readOnlyInput}
             value={defectLink}
             onChange={(e) => setDefectLink(e.target.value)}
             placeholder={t('blockingIssuePlaceholder')}
@@ -130,7 +131,7 @@ function BlockerContext() {
         <div>
           <Label htmlFor="blockerReference" className="text-xs font-medium text-amber-800 dark:text-amber-300">{t('blockerReferenceLabel')}</Label>
           <Input
-            id="blockerReference" name="blocker-reference-url" {...urlInputProps}
+            id="blockerReference" name="blocker-reference-url" {...urlInputProps} {...readOnlyInput}
             value={customLink}
             onChange={(e) => setCustomLink(e.target.value)}
             placeholder={t('blockerReferencePlaceholder')}
@@ -147,10 +148,11 @@ function FailureContext() {
     t, testCase, testSteps, testStepsLoadError, requireDefectOnFailure,
     selectedFailureStepNumber, setSelectedFailureStepNumber,
     failureStepActual, setFailureStepActual,
-    defectLink, setDefectLink, customLink, setCustomLink,
+    defectLink, setDefectLink, customLink, setCustomLink, canWrite,
   } = useExecution();
 
   const fieldClass = 'mt-1 h-9 border-red-200 bg-white text-sm dark:border-red-900/60 dark:bg-slate-950/40';
+  const readOnlyInput = { readOnly: !canWrite, tabIndex: canWrite ? undefined : -1 };
 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50/60 p-4 dark:border-red-900/50 dark:bg-red-950/20">
@@ -177,7 +179,7 @@ function FailureContext() {
         <div className="mb-3 grid gap-3 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
           <div>
             <Label htmlFor="failingStep" className="text-xs font-medium text-red-700 dark:text-red-300">{t('failingStep')}</Label>
-            <Select value={selectedFailureStepNumber} onValueChange={setSelectedFailureStepNumber}>
+            <Select value={selectedFailureStepNumber} onValueChange={setSelectedFailureStepNumber} disabled={!canWrite}>
               <SelectTrigger id="failingStep" className={fieldClass}>
                 <SelectValue placeholder={t('selectFailingStep')} />
               </SelectTrigger>
@@ -193,7 +195,7 @@ function FailureContext() {
           <div>
             <Label htmlFor="failureStepActual" className="text-xs font-medium text-red-700 dark:text-red-300">{t('failureStepActual')}</Label>
             <Input
-              id="failureStepActual"
+              id="failureStepActual" {...readOnlyInput}
               value={failureStepActual}
               onChange={(e) => setFailureStepActual(e.target.value)}
               placeholder={t('failureStepActualPlaceholder')}
@@ -208,7 +210,7 @@ function FailureContext() {
         <div>
           <Label htmlFor="defectLink" className="text-xs font-medium text-red-700 dark:text-red-300">{t('defectLinkLabel')}</Label>
           <Input
-            id="defectLink" name="defect-url" {...urlInputProps}
+            id="defectLink" name="defect-url" {...urlInputProps} {...readOnlyInput}
             value={defectLink}
             onChange={(e) => setDefectLink(e.target.value)}
             placeholder={t('defectLinkPlaceholder')}
@@ -218,7 +220,7 @@ function FailureContext() {
         <div>
           <Label htmlFor="customLink" className="text-xs font-medium text-red-700 dark:text-red-300">{t('customLinkLabel')}</Label>
           <Input
-            id="customLink" name="custom-url" {...urlInputProps}
+            id="customLink" name="custom-url" {...urlInputProps} {...readOnlyInput}
             value={customLink}
             onChange={(e) => setCustomLink(e.target.value)}
             placeholder={t('customLinkPlaceholder')}

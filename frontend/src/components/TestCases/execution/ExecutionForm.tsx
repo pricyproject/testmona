@@ -23,6 +23,12 @@ export function ExecutionForm() {
   // notes field), so we don't render the generic notes box a second time.
   const isBlocked = executionStatus === 'blocked';
 
+  // A saved assignee the users list doesn't contain still needs an option, or
+  // the Select shows an empty trigger and the assignment looks lost.
+  const isAssigneeUnlisted = assignee !== ''
+    && assignee !== currentUser?.id?.toString()
+    && !users.some((u) => u.id?.toString() === assignee);
+
   return (
     <Card className="border-slate-200 dark:border-slate-800">
       <CardHeader className="border-b border-slate-100 pb-3 dark:border-slate-800">
@@ -62,7 +68,9 @@ export function ExecutionForm() {
                   <SelectItem value={currentUser.id.toString()}>
                     <div className="flex items-center gap-2">
                       <User className="h-3.5 w-3.5" />
-                      <span className="text-sm font-medium">Me ({currentUser.username || currentUser.email || t('unknown')})</span>
+                      <span className="text-sm font-medium">
+                        {t('assigneeMeOption', { name: currentUser.username || currentUser.email || t('unknown') })}
+                      </span>
                     </div>
                   </SelectItem>
                 )}
@@ -74,6 +82,14 @@ export function ExecutionForm() {
                     </div>
                   </SelectItem>
                 ))}
+                {isAssigneeUnlisted && (
+                  <SelectItem value={assignee}>
+                    <div className="flex items-center gap-2">
+                      <User className="h-3.5 w-3.5" />
+                      <span className="text-sm">{t('unknown')} (#{assignee})</span>
+                    </div>
+                  </SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>

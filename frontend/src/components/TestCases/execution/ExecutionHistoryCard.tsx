@@ -52,7 +52,7 @@ export function ExecutionHistoryCard() {
                   <button
                     key={run.runId}
                     type="button"
-                    onClick={() => openRunExecution(run.runId)}
+                    onClick={() => openRunExecution(run.runSeq)}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left transition-colors hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-slate-800 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/20"
                   >
                     <div className="flex items-center justify-between gap-2">

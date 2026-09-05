@@ -18,13 +18,20 @@ function DefectDialog() {
   } = useExecution();
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Allow both Enter and Ctrl+Enter for convenience
-    if (e.key === 'Enter' && !e.ctrlKey) {
-      e.preventDefault();
-      handleCreateDefect();
-    }
-    // Still call the existing handler for Ctrl+Enter
+    // Ctrl/Cmd+Enter submits from anywhere in the dialog.
     handleDefectDialogKeyDown(e);
+    if (e.defaultPrevented) return;
+
+    // A bare Enter may only submit from a single-line control. In the
+    // description textarea Enter has to insert a newline, and in a Select it
+    // belongs to the listbox — submitting there discarded the user's typing.
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT') {
+        e.preventDefault();
+        handleCreateDefect();
+      }
+    }
   };
 
   return (

@@ -6,6 +6,9 @@ import {
 import { useExecution } from './ExecutionContext';
 import { getStatusBadgeClass, getStatusOption } from './statusConfig';
 
+/** Above this many cases the per-case dots stop being scannable. */
+const DOT_LIMIT = 25;
+
 export function ExecutionHeader() {
   const {
     t, isRTL, testCase, testRun, testCaseId,
@@ -76,20 +79,29 @@ export function ExecutionHeader() {
             </div>
 
             {allTestCases.length > 0 && (
-              <div className="flex items-center gap-1.5" aria-hidden="true">
-                {allTestCases.map((_, index) => (
+              DOT_LIMIT >= allTestCases.length ? (
+                <div className="flex items-center gap-1.5" aria-hidden="true">
+                  {allTestCases.map((_, index) => (
+                    <div
+                      key={index}
+                      className={`h-1.5 rounded-full transition-all duration-200 ${
+                        index === currentIndex
+                          ? 'w-6 bg-indigo-500'
+                          : index < currentIndex
+                          ? 'w-1.5 bg-emerald-500'
+                          : 'w-1.5 bg-slate-200 dark:bg-slate-700'
+                      }`}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" aria-hidden="true">
                   <div
-                    key={index}
-                    className={`h-1.5 rounded-full transition-all duration-200 ${
-                      index === currentIndex
-                        ? 'w-6 bg-indigo-500'
-                        : index < currentIndex
-                        ? 'w-1.5 bg-emerald-500'
-                        : 'w-1.5 bg-slate-200 dark:bg-slate-700'
-                    }`}
+                    className="h-full rounded-full bg-indigo-500 transition-all duration-200"
+                    style={{ width: `${Math.round(((currentIndex + 1) / allTestCases.length) * 100)}%` }}
                   />
-                ))}
-              </div>
+                </div>
+              )
             )}
           </div>
         </div>

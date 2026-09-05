@@ -64,6 +64,9 @@ const BACKEND_STEP_TO_STATUS: Record<string, ExecutionStatus> = {
 // Stable, order-independent fingerprint of per-step outcomes for dirty detection.
 const serializeStepMap = (steps: TestStep[], map: Record<number, ExecutionStatus>): string =>
   JSON.stringify(steps.map((s) => map[s.step_number] || 'pending'));
+// Same idea for per-iteration outcomes on data-driven cases.
+const serializeIterationMap = (rowCount: number, map: IterationStatusMap): string =>
+  JSON.stringify(Array.from({ length: rowCount }, (_, i) => map[i] || 'pending'));
 
 const STATUS_TO_BACKEND: Record<string, string> = { passed: 'pass', failed: 'fail', blocked: 'block', skipped: 'skip' };
 const BACKEND_TO_STATUS: Record<string, ExecutionStatus> = {
@@ -177,6 +180,7 @@ export function useTestCaseExecution() {
   const [dataset, setDataset] = useState<TestDataset | null>(null);
   const [activeIteration, setActiveIteration] = useState(0);
   const [iterationStatuses, setIterationStatuses] = useState<IterationStatusMap>({});
+  const savedIterationSnapshotRef = useRef<string | null>(null);
   const [globalParams, setGlobalParams] = useState<GlobalParameter[]>([]);
 
   // --- Per-step outcomes (multistep cases) ---
@@ -361,35 +365,48 @@ export function useTestCaseExecution() {
   // need `assignee` in its deps (which would refetch on every keystroke).
   useEffect(() => {
     let cancelled = false;
-    const loadInitialData = async () => {
+
+    // The users list only enriches labels and the assignee picker, and a viewer
+    // is not allowed to list users at all. Load it in its own try/catch so a 403
+    // here can't take the run's case list down with it.
+    const loadUsers = async () => {
       try {
         const allUsers = await usersAPI.getAll();
         if (cancelled) return;
-        setUsers(allUsers);
-        if (currentUser) setAssignee((prev) => prev || currentUser.id.toString());
-        // Only fetch the run's cases once the seq -> global id has resolved.
-        // Passing an unresolved NaN drops the test_run_id filter and would pull
-        // every result in the system, corrupting the "X of N" count and the
-        // prev/next list (cycling through cases that aren't in this run).
-        if (testRunId && Number.isFinite(runGlobalId)) {
-          const results = await testResultsAPI.getAll(runGlobalId);
-          if (cancelled) return;
-          setAllTestCases(results.map((r: any) => ({
-            id: r.test_case_id,
-            projectSeq: r.test_case?.project_seq ?? null,
-            title: r.test_case?.title || `Test Case ${r.test_case_id}`,
-          })));
-        }
+        setUsers(Array.isArray(allUsers) ? allUsers : []);
       } catch (error) {
         if (cancelled) return;
-        console.error('Failed to load initial data:', error);
-        if (currentUser) {
-          setUsers([currentUser]);
-          setAssignee((prev) => prev || currentUser.id.toString());
+        if ((error as any)?.response?.status !== 403) {
+          console.error('Failed to load users:', error);
         }
+        if (currentUser) setUsers([currentUser]);
+      } finally {
+        if (!cancelled && currentUser) setAssignee((prev) => prev || currentUser.id.toString());
       }
     };
-    loadInitialData();
+
+    // Only fetch the run's cases once the seq -> global id has resolved.
+    // Passing an unresolved NaN drops the test_run_id filter and would pull
+    // every result in the system, corrupting the "X of N" count and the
+    // prev/next list (cycling through cases that aren't in this run).
+    const loadRunCases = async () => {
+      if (!testRunId || !Number.isFinite(runGlobalId)) return;
+      try {
+        const results = await testResultsAPI.getAllPages(runGlobalId);
+        if (cancelled) return;
+        setAllTestCases(results.map((r: any) => ({
+          id: r.test_case_id,
+          projectSeq: r.test_case?.project_seq ?? null,
+          title: r.test_case?.title || `Test Case ${r.test_case_id}`,
+        })));
+      } catch (error) {
+        if (cancelled) return;
+        console.error('Failed to load the run\'s test cases:', error);
+        setAllTestCases([]);
+      }
+    };
+
+    void Promise.all([loadUsers(), loadRunCases()]);
     return () => { cancelled = true; };
   }, [testRunId, runGlobalId, currentUser]);
 
@@ -510,7 +527,9 @@ export function useTestCaseExecution() {
     const loadExistingDefects = async () => {
       if (!projectId || !testCaseId) return;
       try {
-        const allDefects = await defectsAPI.getAll(parseInt(projectId));
+        // Walk past the API's default first page: the picker filters this list
+        // client-side, so a truncated catalogue makes older defects unreachable.
+        const allDefects = await defectsAPI.getAll(parseInt(projectId), 0, 500);
         if (cancelled) return;
         setAvailableDefects(Array.isArray(allDefects) ? allDefects : []);
         const currentTestCaseId = tcGlobalId;
@@ -597,23 +616,34 @@ export function useTestCaseExecution() {
 
   // Restore prior per-iteration outcomes.
   useEffect(() => {
-    if (!testResultId || !hasIterations) return;
+    if (!hasIterations) {
+      savedIterationSnapshotRef.current = null;
+      return;
+    }
+    const rowCount = dataset?.rows.length ?? 0;
+    if (!testResultId) {
+      setIterationStatuses({});
+      savedIterationSnapshotRef.current = serializeIterationMap(rowCount, {});
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
         const result = await testResultsAPI.getById(testResultId);
-        if (cancelled || !result?.iteration_results) return;
+        if (cancelled) return;
         const next: IterationStatusMap = {};
-        for (const it of result.iteration_results) {
+        for (const it of result?.iteration_results || []) {
           if (typeof it?.row_index === 'number') next[it.row_index] = BACKEND_TO_STATUS[it.status] || 'pending';
         }
         setIterationStatuses(next);
+        savedIterationSnapshotRef.current = serializeIterationMap(rowCount, next);
       } catch {
         /* prior iteration outcomes are best-effort */
+        if (!cancelled) savedIterationSnapshotRef.current = serializeIterationMap(rowCount, iterationStatuses);
       }
     })();
     return () => { cancelled = true; };
-  }, [testResultId, hasIterations]);
+  }, [testResultId, hasIterations, dataset?.rows.length]);
 
   // Project defect-on-failure policy.
   useEffect(() => {
@@ -662,9 +692,12 @@ export function useTestCaseExecution() {
   const stepsDirty = testSteps.length > 0
     && savedStepSnapshotRef.current !== null
     && serializeStepMap(testSteps, stepStatuses) !== savedStepSnapshotRef.current;
+  const iterationsDirty = hasIterations
+    && savedIterationSnapshotRef.current !== null
+    && serializeIterationMap(dataset?.rows.length ?? 0, iterationStatuses) !== savedIterationSnapshotRef.current;
   // A timer started before the first save lives only in memory.
   const timerUnsaved = !testResultId && (executionState === 'running' || elapsedSeconds > 0);
-  const isDirty = !isLoading && (formDirty || stepsDirty);
+  const isDirty = !isLoading && (formDirty || stepsDirty || iterationsDirty);
 
   // Warn before a full page unload (refresh / tab close) if there are edits or a
   // running timer that haven't been recorded. In-app navigation is guarded
@@ -710,7 +743,10 @@ export function useTestCaseExecution() {
         const latest = entries[0];
         return {
           runId,
-          runName: latest?.test_run_name || `Run #${runId}`,
+          // What the URL for this run must use. Falls back to the global id for
+          // rows written before runs were numbered per project.
+          runSeq: latest?.test_run_project_seq ?? runId,
+          runName: latest?.test_run_name || t('runNumberLabel', { id: runId }),
           runStatus: latest?.test_run_status || 'unknown',
           runPriority: latest?.test_run_priority || 'medium',
           projectName: latest?.project_name || t('unknown'),
@@ -742,9 +778,9 @@ export function useTestCaseExecution() {
     };
   }, [executionHistory, historyByRun.length]);
 
-  const openRunExecution = (runId: number) => {
+  const openRunExecution = (runSeqOrId: number) => {
     if (!projectId || !testCaseId) return;
-    guardedNavigate(() => navigate(`/projects/${projectId}/test-runs/${runId}/test-cases/${testCaseId}`));
+    guardedNavigate(() => navigate(`/projects/${projectId}/test-runs/${runSeqOrId}/test-cases/${testCaseId}`));
   };
 
   const refreshHistory = useCallback(async () => {
@@ -763,6 +799,14 @@ export function useTestCaseExecution() {
       toast({ title: t('error'), description: t('failedToLoadTestCaseOrTestRun'), variant: 'destructive' });
       return false;
     }
+    // Saving before the URL sequences have resolved to global ids would write
+    // the result against NaN — or, mid-navigation, against the case we just
+    // left. Refuse until both ids are settled.
+    if (runLoading || tcLoading || !Number.isFinite(runGlobalId) || !Number.isFinite(tcGlobalId)) {
+      toast({ title: t('error'), description: t('failedToLoadTestCaseOrTestRun'), variant: 'destructive' });
+      return false;
+    }
+    if (!canWrite) return false;
     if (executionStatus === 'pending') {
       toast({
         title: t('validationError'),
@@ -860,6 +904,9 @@ export function useTestCaseExecution() {
         status: executionStatus, notes: executionNotes, logs: executionLogs,
         defectLink, customLink, blockerReason, assignee,
       });
+      if (hasIterations) {
+        savedIterationSnapshotRef.current = serializeIterationMap(dataset?.rows.length ?? 0, iterationStatuses);
+      }
       await refreshHistory();
 
       toast({ title: t('executionSaved'), description: t('executionSavedDescription'), variant: 'success' });
@@ -877,7 +924,8 @@ export function useTestCaseExecution() {
       setIsSaving(false);
     }
   }, [
-    testRunId, testCaseId, executionStatus, defectLink, customLink, blockerReason, requireDefectOnFailure,
+    testRunId, testCaseId, runGlobalId, tcGlobalId, runLoading, tcLoading, canWrite,
+    executionStatus, defectLink, customLink, blockerReason, requireDefectOnFailure,
     resultDefectLinks.length, computeElapsed, manualTimeAdjustment, totalPausedTime,
     hasIterations, dataset, iterationStatuses, testSteps, stepStatuses,
     executionNotes, assignee, executionLogs, t, toast, loadResultDefectLinks, refreshHistory,
@@ -1219,7 +1267,7 @@ export function useTestCaseExecution() {
   };
 
   const handleDefectDialogKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey && e.key === 'Enter') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       handleCreateDefect();
     }
@@ -1241,7 +1289,7 @@ export function useTestCaseExecution() {
       // Save works even while typing in the notes/logs fields.
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
-        handleSaveExecution();
+        if (canWrite) handleSaveExecution();
         return;
       }
       if (isTyping || e.ctrlKey || e.metaKey) return;
@@ -1250,7 +1298,7 @@ export function useTestCaseExecution() {
       if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); handlePreviousTestCase(); return; }
       if (e.altKey) return;
 
-      if (!hasIterations) {
+      if (!hasIterations && canWrite) {
         const k = e.key.toLowerCase();
         if (k === 'p' || k === 'f' || k === 'b' || k === 's') {
           e.preventDefault();
@@ -1260,7 +1308,7 @@ export function useTestCaseExecution() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [anyDialogOpen, hasIterations, handleSaveExecution, handleNextTestCase, handlePreviousTestCase]);
+  }, [anyDialogOpen, hasIterations, canWrite, handleSaveExecution, handleNextTestCase, handlePreviousTestCase]);
 
   return {
     // routing / i18n
