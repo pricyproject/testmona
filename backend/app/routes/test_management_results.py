@@ -110,7 +110,14 @@ def register_result_routes(app):
         return db_test_result
 
     @app.get("/test-results", response_model=List[schemas.TestResultWithDetails])
-    def read_test_results(test_run_id: int = None, test_case_id: int = None, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
+    def read_test_results(
+        test_run_id: int = None,
+        test_case_id: int = None,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
         query = db.query(models.TestResult).options(
             joinedload(models.TestResult.test_case).joinedload(models.TestCase.section),
             joinedload(models.TestResult.test_case).selectinload(models.TestCase.custom_field_values),
@@ -151,7 +158,16 @@ def register_result_routes(app):
         if not scoped_project_ids:
             return []
 
-        return query.filter(models.TestRun.project_id.in_(scoped_project_ids)).offset(skip).limit(limit).all()
+        # A stable order is what makes `skip`/`limit` paging correct: without an
+        # ORDER BY the backend may return rows in a different order per page, so
+        # a client walking the pages would duplicate some rows and drop others.
+        return (
+            query.filter(models.TestRun.project_id.in_(scoped_project_ids))
+            .order_by(models.TestResult.id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     @app.get("/test-results/{test_result_id}", response_model=schemas.TestResult)
     def read_test_result(test_result_id: int, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
