@@ -34,6 +34,28 @@ export const testCasesAPI = {
     const response = await api.get(`/test-cases?${params}`);
     return response.data;
   },
+  /**
+   * Every test case in a project, not just the API's first page. Callers that
+   * present a complete catalogue (e.g. picking cases to add to a run) must use
+   * this — `getAll` stops at `limit` and would silently hide the rest.
+   */
+  getAllPages: async (
+    projectId: number,
+    options: { testSuiteId?: number; sectionId?: number; pageSize?: number; maxPages?: number } = {},
+  ) => {
+    const pageSize = Math.min(Math.max(options.pageSize ?? 500, 1), 500); // backend caps at 500
+    const maxPages = options.maxPages ?? 40; // hard stop so a paging bug can't loop forever
+    const all: any[] = [];
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const page = await testCasesAPI.getAll(
+        projectId, options.testSuiteId, options.sectionId, 'id', 'asc', pageIndex * pageSize, pageSize,
+      );
+      if (!Array.isArray(page) || page.length === 0) break;
+      all.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return all;
+  },
   getById: async (id: number, options: { includeLinkedRequirements?: boolean } = {}) => {
     const params = new URLSearchParams();
     if (options.includeLinkedRequirements !== undefined) {
@@ -239,6 +261,27 @@ export const testResultsAPI = {
     if (testCaseId) params.append('test_case_id', testCaseId.toString());
     const response = await api.get(`/test-results?${params}`);
     return response.data;
+  },
+  /**
+   * Every result for a run (or case), not just the API's first page. A run can
+   * hold far more than the 100-row default, and truncating it silently corrupts
+   * the run's totals, pass rate and prev/next navigation.
+   */
+  getAllPages: async (
+    testRunId?: number,
+    testCaseId?: number,
+    options: { pageSize?: number; maxPages?: number } = {},
+  ) => {
+    const pageSize = Math.min(Math.max(options.pageSize ?? 500, 1), 500); // backend caps at 500
+    const maxPages = options.maxPages ?? 40; // hard stop so a paging bug can't loop forever
+    const all: any[] = [];
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const page = await testResultsAPI.getAll(testRunId, testCaseId, pageIndex * pageSize, pageSize);
+      if (!Array.isArray(page) || page.length === 0) break;
+      all.push(...page);
+      if (page.length < pageSize) break;
+    }
+    return all;
   },
   getById: async (id: number) => {
     const response = await api.get(`/test-results/${id}`);
