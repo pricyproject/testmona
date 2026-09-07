@@ -288,18 +288,18 @@ function SummaryStat({
     <Wrapper
       {...(interactive ? { type: 'button', onClick } : {})}
       aria-pressed={interactive ? active : undefined}
-      className={`group flex items-center gap-3 rounded-2xl border bg-white p-4 text-left shadow-xs transition dark:bg-slate-900 ${
+      className={`group flex items-center gap-3 rounded-2xl border bg-card p-4 text-left shadow-xs transition ${
         active
-          ? 'border-slate-900 ring-2 ring-slate-900/10 dark:border-slate-100 dark:ring-slate-100/10'
-          : 'border-slate-200 dark:border-slate-800'
-      } ${interactive ? 'hover:border-slate-300 hover:shadow-sm dark:hover:border-slate-700' : ''}`}
+          ? 'border-primary ring-2 ring-primary/15'
+          : 'border-border'
+      } ${interactive ? 'hover:border-foreground/20 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring' : ''}`}
     >
       <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${accent}`} aria-hidden="true">
         {icon}
       </span>
       <span className="flex flex-col">
-        <span className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
-        <span className="text-2xl font-semibold text-slate-900 dark:text-slate-50">{value}</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className="text-2xl font-semibold text-foreground">{value}</span>
       </span>
     </Wrapper>
   );
@@ -1739,7 +1739,7 @@ export function Defects() {
           </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-bold tracking-tight">{t('defects')}</h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400">{t('defectsDescription')}</p>
+            <p className="text-sm text-muted-foreground">{t('defectsDescription')}</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1770,7 +1770,7 @@ export function Defects() {
                   <div className="text-center py-8">
                     <Settings className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" />
                     <h3 className="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('noIntegrationsAvailable')}</h3>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    <p className="mt-1 text-sm text-muted-foreground">
                       {t('noIntegrationsDefectsDesc')}
                     </p>
                   </div>
@@ -1786,7 +1786,7 @@ export function Defects() {
                                 <Badge variant="outline" className="text-xs">{t('inactive')}</Badge>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Badge variant="outline" className="capitalize">
                                 {integration.tracker_type}
                               </Badge>
@@ -1798,7 +1798,7 @@ export function Defects() {
                               </Badge>
                             </div>
                             {integration.last_sync && (
-                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              <p className="text-xs text-muted-foreground mt-1">
                                 {t('lastSyncLabel')}: {formatDateTime(integration.last_sync)}
                               </p>
                             )}
@@ -2309,7 +2309,7 @@ export function Defects() {
       </div>
 
       {/* Search and Filters — standard project pattern */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-4 space-y-3">
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-sm">
         {(selectedDefectIds.length > 0 || projectId) && (
           <div className="flex flex-wrap items-center gap-2">
             {projectId && (
@@ -2335,7 +2335,7 @@ export function Defects() {
             )}
             {canWrite && selectedDefectIds.length > 0 && (
               <>
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="text-sm text-muted-foreground">
                   {t('selectedCount', { count: String(selectedDefectIds.length) })}
                 </span>
                 <Button variant="outline" size="sm" onClick={() => setBulkEditOpen(true)}>
@@ -2433,8 +2433,8 @@ export function Defects() {
       <div className="space-y-3">
         {isLoading ? (
           viewMode === 'table' ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900" role="status" aria-busy="true" aria-label={t('loading')}>
-              <div className="flex items-center gap-4 border-b border-gray-200 bg-gray-50/80 px-4 py-3 dark:border-gray-800 dark:bg-gray-800/40">
+            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs" role="status" aria-busy="true" aria-label={t('loading')}>
+              <div className="flex items-center gap-4 border-b border-border bg-muted/40 px-4 py-3">
                 <div className="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
                 <div className="h-3 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
                 <div className="h-3 flex-1 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
@@ -2443,7 +2443,7 @@ export function Defects() {
                 <div className="h-3 w-8 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
               </div>
               {Array.from({ length: 8 }).map((_, index) => (
-                <div key={index} className="flex items-center gap-4 border-b border-gray-100 px-4 py-4 last:border-b-0 dark:border-gray-800">
+                <div key={index} className="flex items-center gap-4 border-b border-border px-4 py-4 last:border-b-0">
                   <div className="h-4 w-4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
                   <div className="h-4 w-12 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
                   <div className="h-4 flex-1 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
@@ -2456,7 +2456,7 @@ export function Defects() {
           ) : (
             <div className="space-y-3" role="status" aria-busy="true" aria-label={t('loading')}>
               {Array.from({ length: 6 }).map((_, index) => (
-                <div key={index} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+                <div key={index} className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-xs">
                   <div className="flex items-center justify-between">
                     <div className="h-4 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
                     <div className="h-5 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-700" />
@@ -2473,10 +2473,10 @@ export function Defects() {
           )
         ) : paginatedDefects.length > 0 ? (
           viewMode === 'table' ? (
-            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+            <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-xs">
               <Table className="min-w-[760px]">
                 <TableHeader>
-                  <TableRow className="border-b border-gray-200 bg-gray-50/80 hover:bg-gray-50/80 dark:border-gray-800 dark:bg-gray-800/40 dark:hover:bg-gray-800/40 [&_th]:text-xs [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-gray-500 dark:[&_th]:text-gray-400">
+                  <TableRow className="border-b border-border bg-muted/40 hover:bg-muted/40 [&_th]:text-xs [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-muted-foreground">
                     <TableHead className="w-10">
                       {canWrite && (
                         <Checkbox
@@ -2505,7 +2505,7 @@ export function Defects() {
                   {paginatedDefects.map((defect) => {
                     const externalUrl = externalUrlOf(defect);
                     return (
-                      <TableRow key={defect.id} className="border-b border-gray-100 dark:border-gray-800">
+                      <TableRow key={defect.id} className="border-b border-border">
                         <TableCell className="py-2">
                           {canWrite && (
                             <Checkbox
@@ -2545,8 +2545,8 @@ export function Defects() {
                             <Flag className="h-3 w-3" />{getTriageLabel(defect.priority)}
                           </Badge>
                         </TableCell>
-                        <TableCell className="max-w-[200px] truncate py-2 text-sm text-gray-600 dark:text-gray-400" title={defect.environment || undefined}>{defect.environment || '-'}</TableCell>
-                        <TableCell className="py-2 text-sm text-gray-500 dark:text-gray-400">
+                        <TableCell className="max-w-[200px] truncate py-2 text-sm text-muted-foreground" title={defect.environment || undefined}>{defect.environment || '-'}</TableCell>
+                        <TableCell className="py-2 text-sm text-muted-foreground">
                           {formatDefectDate(defect.created_at)}
                         </TableCell>
                         <TableCell className="py-2">
@@ -2612,8 +2612,8 @@ export function Defects() {
           ) : viewMode === 'board' ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {boardColumns.map((column) => (
-                  <div key={column.key} className="flex flex-col rounded-2xl border border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/40">
-                    <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2.5 dark:border-slate-800">
+                  <div key={column.key} className="flex flex-col rounded-2xl border border-border bg-muted/40">
+                    <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
                       <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
                         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${column.dot}`} aria-hidden="true" />
                         <span className="truncate">{column.isOther ? t('defectsBoardOtherColumn') : getStatusLabel(column.key)}</span>
@@ -2628,7 +2628,7 @@ export function Defects() {
                           <Link
                             key={defect.id}
                             to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
-                            className="block rounded-xl border border-slate-200 bg-white p-3 shadow-xs transition hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-950/40 dark:hover:border-slate-700"
+                            className="block rounded-xl border border-border bg-card p-3 shadow-xs transition hover:border-foreground/20 hover:shadow-sm"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-mono text-xs text-blue-600 dark:text-blue-400">{defect.defect_id}</span>
@@ -2662,7 +2662,7 @@ export function Defects() {
               ? requirements.find((requirement) => requirement.id === defect.requirement_id)
               : null;
             return (
-              <Card key={defect.id} className="group relative overflow-hidden border-slate-200 transition hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:hover:border-slate-700">
+              <Card key={defect.id} className="group relative overflow-hidden transition hover:border-foreground/20 hover:shadow-sm">
                 <div className={`absolute inset-y-0 ${isRTL ? 'right-0' : 'left-0'} w-1 ${accentClass}`} aria-hidden="true" />
                 <CardHeader className={`pb-3 ${isRTL ? 'pr-5' : 'pl-5'}`}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2704,11 +2704,11 @@ export function Defects() {
                         </Link>
                       </CardTitle>
                       {defect.description && (
-                        <p className="line-clamp-2 text-sm text-gray-600 dark:text-gray-400">
+                        <p className="line-clamp-2 text-sm text-muted-foreground">
                           {defect.description}
                         </p>
                       )}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         {defect.environment && (
                           <span className="inline-flex items-center gap-1">
                             <Settings className="h-3 w-3" aria-hidden="true" />
@@ -2845,7 +2845,7 @@ export function Defects() {
                   <CardContent className={`pt-0 ${isRTL ? 'pr-5' : 'pl-5'}`}>
                     <div className="space-y-3">
                       {defect.steps_to_reproduce && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                        <div className="rounded-xl border border-border bg-muted/40 p-3">
                           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             {t('stepsToReproduce')}
                           </h4>
@@ -2853,7 +2853,7 @@ export function Defects() {
                         </div>
                       )}
 
-                      <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                      <div className="rounded-xl border border-border bg-card p-3">
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                           <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                             {t('defectResultSnapshot')}
@@ -2882,7 +2882,7 @@ export function Defects() {
                             return (
                               <div
                                 key={link.id}
-                                className="rounded-lg border border-slate-200 bg-slate-50/80 p-3 text-sm dark:border-slate-800 dark:bg-slate-900/50"
+                                className="rounded-lg border border-border bg-muted/40 p-3 text-sm"
                               >
                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                   <div className="min-w-0 space-y-1">
@@ -2963,7 +2963,7 @@ export function Defects() {
           })
           )
         ) : (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-xs dark:border-slate-700 dark:bg-slate-900">
+          <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center shadow-xs">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
               <Bug className="h-6 w-6 text-slate-400 dark:text-slate-500" aria-hidden="true" />
             </div>
@@ -2992,8 +2992,8 @@ export function Defects() {
 
       {/* Pagination — board view shows every column in full, so it opts out */}
       {viewMode !== 'board' && sortedDefects.length > 0 && totalPages > 1 && (
-        <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900 sm:flex-row">
-          <div className="text-sm text-gray-600 dark:text-gray-400">
+        <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3 shadow-xs sm:flex-row">
+          <div className="text-sm text-muted-foreground">
             {t('showingDefects', {
               start: startIndex + 1,
               end: Math.min(startIndex + itemsPerPage, sortedDefects.length),
@@ -3010,7 +3010,7 @@ export function Defects() {
               {isRTL ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
               <span className={isRTL ? 'mr-1' : 'ml-1'}>{t('previous')}</span>
             </Button>
-            <span className="text-sm text-gray-600 dark:text-gray-400">
+            <span className="text-sm text-muted-foreground">
               {t('defectsPageOf', { current: safeCurrentPage, total: totalPages })}
             </span>
             <Button
