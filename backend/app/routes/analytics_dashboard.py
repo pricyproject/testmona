@@ -195,6 +195,7 @@ def _serialize_rca(analysis: "models.RootCauseAnalysis") -> dict:
         "discoverer_name": _user_display_name(analysis.discoverer),
         "defect_title": defect.title if defect else None,
         "defect_key": defect.defect_id if defect else None,
+        "defect_seq": defect.project_seq if defect else None,
         "requirement_title": requirement.title if requirement else None,
         "requirement_seq": requirement.project_seq if requirement else None,
         "test_case_title": test_case.title if test_case else None,

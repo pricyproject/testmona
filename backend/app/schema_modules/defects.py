@@ -249,6 +249,10 @@ class DefectUserSummary(BaseModel):
 
 class DefectEntitySummary(BaseModel):
     id: int
+    # Per-project sequence: the number the frontend puts in project-first URLs
+    # (/projects/3/test-cases/7). Without it the UI would link by global id and
+    # the resolver would silently open a *different* row in the project.
+    project_seq: Optional[int] = None
     key: Optional[str] = None
     title: Optional[str] = None
     name: Optional[str] = None

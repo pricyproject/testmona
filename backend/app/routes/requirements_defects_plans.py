@@ -2034,7 +2034,8 @@ def register_requirements_defects_plans_routes(app):
             if test_case and test_case.project_id == defect.project_id:
                 test_case_summary = {
                     "id": test_case.id,
-                    "key": f"TC-{test_case.id}",
+                    "project_seq": test_case.project_seq,
+                    "key": f"TC-{test_case.project_seq or test_case.id}",
                     "title": test_case.title,
                     "status": test_case.status,
                 }
@@ -2045,6 +2046,7 @@ def register_requirements_defects_plans_routes(app):
             if test_run and test_run.project_id == defect.project_id:
                 test_run_summary = {
                     "id": test_run.id,
+                    "project_seq": test_run.project_seq,
                     "name": test_run.name,
                     "status": test_run.status,
                 }
@@ -2055,6 +2057,7 @@ def register_requirements_defects_plans_routes(app):
             if requirement and requirement.project_id == defect.project_id:
                 requirement_summary = {
                     "id": requirement.id,
+                    "project_seq": requirement.project_seq,
                     "key": requirement.requirement_id,
                     "title": requirement.title,
                     "status": getattr(requirement.status, "value", requirement.status),
