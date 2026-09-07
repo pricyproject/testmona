@@ -5,8 +5,17 @@ import { GitBranch, Plus, Edit, Trash2, Loader2, UserCircle, Clock } from 'lucid
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { analyticsAPI } from '@/lib/api';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
@@ -34,6 +43,13 @@ const STATUS_LABEL_KEY: Record<string, string> = {
   closed: 'closed',
 };
 
+const SEVERITY_LABEL_KEY: Record<string, string> = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  critical: 'critical',
+};
+
 /**
  * Root Cause Analysis section for a single defect. Lists the analyses anchored to
  * this defect and lets the user author/edit them inline (the defect link is
@@ -48,12 +64,14 @@ export function DefectRootCauseCard({
   defect: { id: number; defect_id?: string | null; title?: string | null };
   canWrite: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const { canManageProject } = useProjectPermissions(projectId);
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const listQuery = useQuery<any[]>({
     queryKey: ['rca', 'list', projectId, 'defect', defect.id],
@@ -76,7 +94,14 @@ export function DefectRootCauseCard({
       : { ...formData, defects: [{ id: defect.id, defect_id: defect.defect_id, title: defect.title }, ...formData.defects] };
   }, [formData, defect.id, defect.defect_id, defect.title]);
 
-  const statusLabel = (status: string) => t(STATUS_LABEL_KEY[status] || status);
+  const statusLabel = (status: string) => {
+    const normalized = String(status || '').toLowerCase();
+    return STATUS_LABEL_KEY[normalized] ? t(STATUS_LABEL_KEY[normalized]) : normalized.replace(/_/g, ' ') || '-';
+  };
+  const severityLabel = (severity: string) => {
+    const normalized = String(severity || '').toLowerCase();
+    return SEVERITY_LABEL_KEY[normalized] ? t(SEVERITY_LABEL_KEY[normalized]) : normalized || t('rca_none');
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -88,11 +113,14 @@ export function DefectRootCauseCard({
     setShowModal(true);
   };
 
-  const handleDelete = async (analysis: any) => {
-    if (!window.confirm(t('reports_rcaDeleteConfirm', { title: analysis.analysis_title }))) return;
+  const confirmDelete = async () => {
+    const analysis = pendingDelete;
+    if (!analysis) return;
+    setIsDeleting(true);
     try {
       await analyticsAPI.deleteRootCauseAnalysis(analysis.id);
       await listQuery.refetch();
+      setPendingDelete(null);
       toast({
         title: t('reports_toast_analysisDeleted'),
         description: t('reports_toast_analysisDeletedDesc', { title: analysis.analysis_title }),
@@ -101,9 +129,11 @@ export function DefectRootCauseCard({
       console.error('Failed to delete root cause analysis:', err);
       toast({
         title: t('reports_toast_couldNotDeleteAnalysis'),
-        description: t('reports_toast_analysisDeleteFailed'),
+        description: getApiErrorMessage(err, t('reports_toast_analysisDeleteFailed')),
         variant: 'destructive',
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -124,7 +154,7 @@ export function DefectRootCauseCard({
         </CardTitle>
         {canWrite && (
           <Button size="sm" variant="outline" onClick={openCreate}>
-            <Plus className="mr-1.5 h-4 w-4" />
+            <Plus className={`h-4 w-4 ${isRTL ? 'ml-1.5' : 'mr-1.5'}`} />
             {t('add')}
           </Button>
         )}
@@ -161,10 +191,10 @@ export function DefectRootCauseCard({
                       </p>
                     )}
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge className={cn('capitalize', SEVERITY_BADGE[analysis.severity] || SEVERITY_BADGE.low)}>
-                        {analysis.severity || 'unknown'}
+                      <Badge className={SEVERITY_BADGE[analysis.severity] || SEVERITY_BADGE.low}>
+                        {severityLabel(analysis.severity)}
                       </Badge>
-                      <Badge className={cn('capitalize', STATUS_BADGE[analysis.status] || STATUS_BADGE.open)}>
+                      <Badge className={STATUS_BADGE[analysis.status] || STATUS_BADGE.open}>
                         {statusLabel(analysis.status || 'open')}
                       </Badge>
                       {data.category && (
@@ -183,7 +213,7 @@ export function DefectRootCauseCard({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDelete(analysis)}
+                          onClick={() => setPendingDelete(analysis)}
                           aria-label={t('reports_rcaDeleteAria')}
                           className="text-red-600 hover:text-red-700"
                         >
@@ -206,7 +236,7 @@ export function DefectRootCauseCard({
                   {analysis.resolution_time_hours != null && (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5" />
-                      {analysis.resolution_time_hours}h
+                      {t('rca_hoursValue', { hours: analysis.resolution_time_hours })}
                     </span>
                   )}
                 </div>
@@ -215,6 +245,31 @@ export function DefectRootCauseCard({
           })
         )}
       </CardContent>
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open && !isDeleting) setPendingDelete(null); }}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('rca_deleteTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('reports_rcaDeleteConfirm', { title: pendingDelete?.analysis_title || '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <RootCauseAnalysisModal
         open={showModal}

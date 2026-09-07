@@ -12,7 +12,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   AlertOctagon,
+  AlertTriangle,
   Bug,
   CheckCircle2,
   Clock,
@@ -54,18 +65,30 @@ const STATUS_LABEL_KEY: Record<string, string> = {
   closed: 'closed',
 };
 
+// Severities are plain lowercase words whose keys happen to match, but an
+// unknown value must not be printed raw into a localized UI.
+const SEVERITY_LABEL_KEY: Record<string, string> = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  critical: 'critical',
+};
+
 export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
   const { formatDate } = useDateFormat();
   const { toast } = useToast();
-  // Deleting an RCA is a manager+ action (testers can author/edit but not delete).
-  const { canManageProject } = useProjectPermissions(projectId);
+  // Authoring is a write action; deleting an RCA is manager+ (testers can
+  // author/edit but not delete).
+  const { canWrite, canManageProject } = useProjectPermissions(projectId);
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const listQuery = useQuery<any[]>({
     queryKey: ['rca', 'list', projectId],
@@ -95,11 +118,14 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
     setShowModal(true);
   };
 
-  const handleDelete = async (analysis: any) => {
-    if (!window.confirm(t('reports_rcaDeleteConfirm', { title: analysis.analysis_title }))) return;
+  const confirmDelete = async () => {
+    const analysis = pendingDelete;
+    if (!analysis) return;
+    setIsDeleting(true);
     try {
       await analyticsAPI.deleteRootCauseAnalysis(analysis.id);
       await reload();
+      setPendingDelete(null);
       toast({
         title: t('reports_toast_analysisDeleted'),
         description: t('reports_toast_analysisDeletedDesc', { title: analysis.analysis_title }),
@@ -108,9 +134,11 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
       console.error('Failed to delete root cause analysis:', err);
       toast({
         title: t('reports_toast_couldNotDeleteAnalysis'),
-        description: t('reports_toast_analysisDeleteFailed'),
+        description: getApiErrorMessage(err, t('reports_toast_analysisDeleteFailed')),
         variant: 'destructive',
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -138,7 +166,14 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
     });
   }, [rootCauseAnalyses, statusFilter, severityFilter, search]);
 
-  const statusLabel = (status: string) => t(STATUS_LABEL_KEY[status] || status);
+  const statusLabel = (status: string) => {
+    const normalized = String(status || '').toLowerCase();
+    return STATUS_LABEL_KEY[normalized] ? t(STATUS_LABEL_KEY[normalized]) : normalized.replace(/_/g, ' ') || '-';
+  };
+  const severityLabel = (severity: string) => {
+    const normalized = String(severity || '').toLowerCase();
+    return SEVERITY_LABEL_KEY[normalized] ? t(SEVERITY_LABEL_KEY[normalized]) : normalized || t('rca_none');
+  };
 
   return (
     <div className="space-y-6">
@@ -148,12 +183,14 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
           <p className="text-sm text-gray-600 dark:text-gray-400">{t('reports_rcaSubtitle')}</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t('addRootCauseAnalysis')}
-          </Button>
-          <Button variant="outline" onClick={() => reload()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
+          {canWrite && (
+            <Button onClick={openCreate}>
+              <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('addRootCauseAnalysis')}
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => reload()} disabled={listQuery.isFetching}>
+            <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} ${listQuery.isFetching ? 'animate-spin' : ''}`} />
             {t('reports_refresh')}
           </Button>
         </div>
@@ -173,12 +210,13 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
       {!isLoading && rootCauseAnalyses.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[200px] flex-1">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 ${isRTL ? 'right-2.5' : 'left-2.5'}`} />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t('rca_searchPlaceholder')}
-              className="pl-8"
+              aria-label={t('rca_searchPlaceholder')}
+              className={isRTL ? 'pr-8' : 'pl-8'}
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -211,15 +249,30 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
         </div>
       )}
 
-      {!isLoading && rootCauseAnalyses.length === 0 && (
+      {!isLoading && error && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <AlertTriangle className="mb-4 h-12 w-12 text-amber-500" />
+            <p className="text-center text-sm text-gray-600 dark:text-gray-400">{error}</p>
+            <Button className="mt-4" variant="outline" onClick={() => reload()}>
+              <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('retry')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!isLoading && !error && rootCauseAnalyses.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <GitBranch className="mb-4 h-12 w-12 text-gray-400" />
-            <p className="text-center text-gray-600">{error || t('reports_noRCA')}</p>
-            <Button className="mt-4" onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" />
-              {t('addRootCauseAnalysis')}
-            </Button>
+            <p className="text-center text-gray-600 dark:text-gray-400">{t('reports_noRCA')}</p>
+            {canWrite && (
+              <Button className="mt-4" onClick={openCreate}>
+                <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('addRootCauseAnalysis')}
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -257,21 +310,24 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
                       </h3>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      <Badge className={cn('capitalize', SEVERITY_BADGE[analysis.severity] || SEVERITY_BADGE.low)}>
-                        {analysis.severity || 'unknown'}
+                      <Badge className={SEVERITY_BADGE[analysis.severity] || SEVERITY_BADGE.low}>
+                        {severityLabel(analysis.severity)}
                       </Badge>
-                      <Badge className={cn('capitalize', STATUS_BADGE[analysis.status] || STATUS_BADGE.open)}>
+                      <Badge className={STATUS_BADGE[analysis.status] || STATUS_BADGE.open}>
                         {statusLabel(analysis.status || 'open')}
                       </Badge>
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(analysis)} aria-label={t('reports_rcaEditAria')}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
+                      {canWrite && (
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(analysis)} aria-label={t('reports_rcaEditAria')} title={t('edit')}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      )}
                       {canManageProject && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDelete(analysis)}
+                          onClick={() => setPendingDelete(analysis)}
                           aria-label={t('reports_rcaDeleteAria')}
+                          title={t('delete')}
                           className="text-red-600 hover:text-red-700"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -303,7 +359,7 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
                     {analysis.resolution_time_hours != null && (
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" />
-                        {analysis.resolution_time_hours}h
+                        {t('rca_hoursValue', { hours: analysis.resolution_time_hours })}
                       </span>
                     )}
                     <span>
@@ -352,7 +408,7 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
                     <div className="flex flex-wrap items-center gap-2 border-t pt-3">
                       {analysis.defect_id && (
                         <Link
-                          to={`/projects/${projectId}/defects/${analysis.defect_id}`}
+                          to={`/projects/${projectId}/defects/${analysis.defect_seq ?? analysis.defect_id}`}
                           className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300"
                         >
                           <Bug className="h-3.5 w-3.5" />
@@ -362,7 +418,7 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
                       )}
                       {analysis.requirement_id && (
                         <Link
-                          to={`/projects/${projectId}/requirements/${analysis.requirement_id}`}
+                          to={`/projects/${projectId}/requirements/${analysis.requirement_seq ?? analysis.requirement_id}`}
                           className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300"
                         >
                           REQ-{analysis.requirement_seq ?? analysis.requirement_id}
@@ -371,7 +427,7 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
                       )}
                       {analysis.test_case_id && (
                         <Link
-                          to={`/projects/${projectId}/test-cases/${analysis.test_case_id}`}
+                          to={`/projects/${projectId}/test-cases/${analysis.test_case_seq ?? analysis.test_case_id}`}
                           className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300"
                         >
                           TC-{analysis.test_case_seq ?? analysis.test_case_id}
@@ -391,6 +447,31 @@ export function RootCauseAnalysisPanel({ projectId }: { projectId: number }) {
           })}
         </div>
       )}
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open && !isDeleting) setPendingDelete(null); }}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('rca_deleteTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('reports_rcaDeleteConfirm', { title: pendingDelete?.analysis_title || '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDelete();
+              }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <RootCauseAnalysisModal
         open={showModal}

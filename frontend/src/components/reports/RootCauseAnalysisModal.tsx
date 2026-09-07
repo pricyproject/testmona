@@ -7,6 +7,16 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { SearchableDefectSelect } from '@/components/Defects/SearchableDefectSelect';
 import { SearchableRequirementSelect } from '@/components/Defects/SearchableRequirementSelect';
 import { SearchableTestCaseSelect } from '@/components/Defects/SearchableTestCaseSelect';
@@ -72,6 +82,17 @@ const STATUS_LABEL_KEY: Record<string, string> = {
 
 const UNASSIGNED_VALUE = 'unassigned';
 
+// Mirrors the API's column limits so the form clamps instead of 422-ing.
+const RCA_LIMITS = {
+  title: 200,
+  rootCause: 2000,
+  impact: 2000,
+  action: 2000,
+  commitHash: 100,
+};
+
+const MAX_RESOLUTION_HOURS = 100000;
+
 const emptyForm = {
   analysis_title: '',
   root_cause: '',
@@ -122,7 +143,7 @@ function SegmentedControl({
           data-active={value === option}
           onClick={() => onChange(option)}
           className={cn(
-            'rounded-full border px-3 py-1 text-xs font-medium capitalize transition-colors',
+            'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
             'border-gray-200 bg-white text-gray-600 hover:bg-gray-50',
             'dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800',
             styles[option],
@@ -158,14 +179,16 @@ export function RootCauseAnalysisModal({
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const [form, setForm] = useState<FormState>({ ...emptyForm });
+  const [initialForm, setInitialForm] = useState<FormState>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const isEdit = editing != null;
 
   useEffect(() => {
     if (!open) return;
     if (editing) {
       const data = editing.analysis_data || {};
-      setForm({
+      const loaded: FormState = {
         analysis_title: editing.analysis_title || '',
         root_cause: editing.root_cause || '',
         category: data.category || '',
@@ -181,10 +204,15 @@ export function RootCauseAnalysisModal({
         defect_id: editing.defect_id != null ? String(editing.defect_id) : '',
         requirement_id: editing.requirement_id != null ? String(editing.requirement_id) : '',
         test_case_id: editing.test_case_id != null ? String(editing.test_case_id) : '',
-      });
+      };
+      setForm(loaded);
+      setInitialForm(loaded);
     } else {
-      setForm({ ...emptyForm, defect_id: lockedDefectId != null ? String(lockedDefectId) : '' });
+      const blank: FormState = { ...emptyForm, defect_id: lockedDefectId != null ? String(lockedDefectId) : '' };
+      setForm(blank);
+      setInitialForm(blank);
     }
+    setConfirmDiscard(false);
   }, [open, editing, lockedDefectId]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -192,7 +220,22 @@ export function RootCauseAnalysisModal({
 
   const titleValid = form.analysis_title.trim().length > 0;
   const rootCauseValid = form.root_cause.trim().length > 0;
-  const canSave = titleValid && rootCauseValid && !saving;
+  // The field is `type=number`, but a browser can still hand back something
+  // unparsable, and a negative or absurd duration is not a real value.
+  const resolutionHours = form.resolution_time_hours.trim() === '' ? null : Number(form.resolution_time_hours);
+  const resolutionValid = resolutionHours === null
+    || (Number.isFinite(resolutionHours) && resolutionHours >= 0 && resolutionHours <= MAX_RESOLUTION_HOURS);
+  const canSave = titleValid && rootCauseValid && resolutionValid && !saving;
+  const isDirty = (Object.keys(form) as Array<keyof FormState>).some((key) => form[key] !== initialForm[key]);
+
+  const requestClose = () => {
+    if (saving) return;
+    if (isDirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  };
 
   const memberOptions = useMemo(() => formData.members ?? [], [formData.members]);
 
@@ -217,7 +260,7 @@ export function RootCauseAnalysisModal({
       status: form.status,
       assigned_to: toId(form.assigned_to),
       impact_assessment: form.impact_assessment.trim() || null,
-      resolution_time_hours: form.resolution_time_hours ? Number(form.resolution_time_hours) : null,
+      resolution_time_hours: resolutionHours,
       fix_commit_hash: form.fix_commit_hash.trim() || null,
       defect_id: toId(form.defect_id),
       requirement_id: toId(form.requirement_id),
@@ -253,7 +296,8 @@ export function RootCauseAnalysisModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
+    <>
+    <Dialog open={open} onOpenChange={(value) => { if (!value) requestClose(); }}>
       <DialogContent isRTL={isRTL} className="sm:max-w-2xl p-0 overflow-hidden gap-0">
         <DialogHeader className="space-y-1 border-b bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 text-white">
           <DialogTitle className="flex items-center gap-2 text-white">
@@ -275,7 +319,7 @@ export function RootCauseAnalysisModal({
                 value={form.analysis_title}
                 onChange={(e) => set('analysis_title', e.target.value)}
                 placeholder={t('enterAnalysisTitle')}
-                maxLength={200}
+                maxLength={RCA_LIMITS.title}
                 className={!titleValid && form.analysis_title.length > 0 ? 'border-red-400' : ''}
               />
             </div>
@@ -288,6 +332,7 @@ export function RootCauseAnalysisModal({
                 onChange={(e) => set('root_cause', e.target.value)}
                 placeholder={t('describeRootCause')}
                 rows={3}
+                maxLength={RCA_LIMITS.rootCause}
               />
             </div>
             <div>
@@ -367,6 +412,7 @@ export function RootCauseAnalysisModal({
                 value={form.impact_assessment}
                 onChange={(e) => set('impact_assessment', e.target.value)}
                 rows={2}
+                maxLength={RCA_LIMITS.impact}
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -375,10 +421,16 @@ export function RootCauseAnalysisModal({
                 <Input
                   type="number"
                   min="0"
+                  max={MAX_RESOLUTION_HOURS}
                   step="0.5"
                   value={form.resolution_time_hours}
                   onChange={(e) => set('resolution_time_hours', e.target.value)}
+                  aria-invalid={!resolutionValid}
+                  className={resolutionValid ? '' : 'border-red-400 focus-visible:ring-red-400'}
                 />
+                {!resolutionValid && (
+                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">{t('rca_resolutionTimeInvalid')}</p>
+                )}
               </div>
               <div>
                 <Label className="mb-1 block">{t('fixCommitHash')}</Label>
@@ -386,6 +438,7 @@ export function RootCauseAnalysisModal({
                   value={form.fix_commit_hash}
                   onChange={(e) => set('fix_commit_hash', e.target.value)}
                   placeholder="a1b2c3d"
+                  maxLength={RCA_LIMITS.commitHash}
                   className="font-mono"
                 />
               </div>
@@ -453,6 +506,7 @@ export function RootCauseAnalysisModal({
                   onChange={(e) => set('corrective_action', e.target.value)}
                   placeholder={t('rca_correctiveActionPlaceholder')}
                   rows={3}
+                  maxLength={RCA_LIMITS.action}
                 />
               </div>
               <div>
@@ -462,6 +516,7 @@ export function RootCauseAnalysisModal({
                   onChange={(e) => set('preventive_action', e.target.value)}
                   placeholder={t('rca_preventiveActionPlaceholder')}
                   rows={3}
+                  maxLength={RCA_LIMITS.action}
                 />
               </div>
             </div>
@@ -469,15 +524,40 @@ export function RootCauseAnalysisModal({
         </div>
 
         <DialogFooter className="gap-2 border-t bg-gray-50 px-6 py-4 dark:bg-gray-900/50">
-          <Button variant="outline" onClick={onClose} disabled={saving}>
+          <Button variant="outline" onClick={requestClose} disabled={saving}>
             {t('cancel')}
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <Button
+            onClick={handleSave}
+            disabled={!canSave}
+            title={canSave ? undefined : t('rca_requiredHint')}
+          >
+            {saving && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
             {saving ? t('saving') : isEdit ? t('save') : t('add')}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+      <AlertDialogContent isRTL={isRTL}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('rca_unsavedTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('rca_unsavedDesc')}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('rca_keepEditing')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              setConfirmDiscard(false);
+              onClose();
+            }}
+          >
+            {t('rca_discard')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
