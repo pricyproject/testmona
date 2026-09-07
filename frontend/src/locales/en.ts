@@ -2428,6 +2428,8 @@ export const en = {
   defectsSortTitle: 'Title (A-Z)',
   defectsClearFilters: 'Clear filters',
   defectsOpenDetail: "Open defect",
+  defectExpectedPlaceholder: "What should have happened?",
+  defectActualPlaceholder: "What happened instead?",
   defectsSelectAllOnPage: "Select every defect on this page",
   defectsClearSelection: "Clear selection",
   confirmDeleteDefectTitle: "Delete this defect?",

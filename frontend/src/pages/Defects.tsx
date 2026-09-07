@@ -85,10 +85,15 @@ const BOARD_COLUMNS: Array<{ status: string; dot: string }> = [
 
 const LINKED_ENTITY_PAGE_SIZE = 500;
 
+// Mirrors the column limits the API enforces, so the form clamps before the
+// request rather than surfacing a 422.
 const DEFECT_FIELD_LIMITS = {
+  defectId: 50,
   title: 200,
   description: 1000,
   steps: 2000,
+  expected: 1000,
+  actual: 1000,
   environment: 255,
   tags: 500,
   externalIssueUrl: 500,
@@ -492,6 +497,7 @@ export function Defects() {
   const [editingDefect, setEditingDefect] = useState<any>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [isCreateDialogExpanded, setIsCreateDialogExpanded] = useState(false);
   const defectTitleInputRef = useRef<HTMLInputElement>(null);
   const [isIntegrationDialogOpen, setIsIntegrationDialogOpen] = useState(false);
@@ -587,6 +593,8 @@ export function Defects() {
   const [defectSeverity, setDefectSeverity] = useState('');
   const [defectPriority, setDefectPriority] = useState('');
   const [defectSteps, setDefectSteps] = useState('');
+  const [defectExpected, setDefectExpected] = useState('');
+  const [defectActual, setDefectActual] = useState('');
   const [defectEnvironment, setDefectEnvironment] = useState('');
   const [defectTags, setDefectTags] = useState('');
   const [defectJiraLink, setDefectJiraLink] = useState('');
@@ -603,16 +611,18 @@ export function Defects() {
 
   const draftStorageKey = projectId ? `defects.reportDefectDraft.project-${projectId}` : null;
 
-  const hasUnsavedChanges = defectTitle.trim() !== ''
+  // Anything the user typed into the report dialog that isn't yet persisted.
+  const hasDraftContent = defectTitle.trim() !== ''
     || defectDescription.trim() !== ''
     || defectSteps.trim() !== ''
+    || defectExpected.trim() !== ''
+    || defectActual.trim() !== ''
     || defectEnvironment.trim() !== ''
     || defectTags.trim() !== ''
     || defectJiraLink.trim() !== ''
-    || defectSeverity !== ''
-    || defectPriority !== ''
-    || (defectTestCaseId && defectTestCaseId !== 'none')
-    || (defectRequirementId && defectRequirementId !== 'none');
+    || (defectTestCaseId !== '' && defectTestCaseId !== 'none')
+    || (defectRequirementId !== '' && defectRequirementId !== 'none');
+  const hasUnsavedChanges = hasDraftContent || defectSeverity !== '' || defectPriority !== '';
   const externalIssueValue = defectJiraLink.trim();
   const isExternalIssueUrlInvalid = externalIssueValue !== '' && !/^https?:\/\/\S+$/i.test(externalIssueValue);
   const selectedDefectTestCase = testCases.find((testCase) => String(testCase.id) === defectTestCaseId) || null;
@@ -659,6 +669,8 @@ export function Defects() {
     setDefectSeverity('');
     setDefectPriority('');
     setDefectSteps('');
+    setDefectExpected('');
+    setDefectActual('');
     setDefectEnvironment('');
     setDefectTags('');
     setDefectJiraLink('');
@@ -754,6 +766,8 @@ export function Defects() {
           defectSeverity: string;
           defectPriority: string;
           defectSteps: string;
+          defectExpected: string;
+          defectActual: string;
           defectEnvironment: string;
           defectTags: string;
           defectJiraLink: string;
@@ -766,6 +780,8 @@ export function Defects() {
         if (typeof draft.defectSeverity === 'string') setDefectSeverity(draft.defectSeverity);
         if (typeof draft.defectPriority === 'string') setDefectPriority(draft.defectPriority);
         if (typeof draft.defectSteps === 'string') setDefectSteps(draft.defectSteps);
+        if (typeof draft.defectExpected === 'string') setDefectExpected(draft.defectExpected);
+        if (typeof draft.defectActual === 'string') setDefectActual(draft.defectActual);
         if (typeof draft.defectEnvironment === 'string') setDefectEnvironment(draft.defectEnvironment);
         if (typeof draft.defectTags === 'string') setDefectTags(draft.defectTags);
         if (typeof draft.defectJiraLink === 'string') setDefectJiraLink(draft.defectJiraLink);
@@ -802,6 +818,8 @@ export function Defects() {
         defectSeverity,
         defectPriority,
         defectSteps,
+        defectExpected,
+        defectActual,
         defectEnvironment,
         defectTags,
         defectJiraLink,
@@ -810,17 +828,8 @@ export function Defects() {
         savedAt: new Date().toISOString(),
       };
 
-      const hasContent = defectTitle.trim() !== ''
-        || defectDescription.trim() !== ''
-        || defectSteps.trim() !== ''
-        || defectEnvironment.trim() !== ''
-        || defectTags.trim() !== ''
-        || defectJiraLink.trim() !== ''
-        || (defectTestCaseId && defectTestCaseId !== 'none')
-        || (defectRequirementId && defectRequirementId !== 'none');
-
       try {
-        if (hasContent) {
+        if (hasDraftContent) {
           window.localStorage.setItem(draftStorageKey, JSON.stringify(payload));
           setHasRestorableDraft(true);
           setDraftStatus('saved');
@@ -848,11 +857,14 @@ export function Defects() {
     defectSeverity,
     defectPriority,
     defectSteps,
+    defectExpected,
+    defectActual,
     defectEnvironment,
     defectTags,
     defectJiraLink,
     defectTestCaseId,
     defectRequirementId,
+    hasDraftContent,
   ]);
 
   useEffect(() => () => {
@@ -877,6 +889,9 @@ export function Defects() {
   };
 
   const handleDialogClose = (open: boolean) => {
+    // Closing mid-create would drop the dialog while the request is still in
+    // flight, leaving the user with no feedback either way.
+    if (!open && isCreating) return;
     if (!open && hasUnsavedChanges) {
       setShowUnsavedDialog(true);
     } else {
@@ -898,10 +913,13 @@ export function Defects() {
     }
   };
 
+  // Ctrl/Cmd+Enter submits, but only when the footer's submit button would also
+  // be enabled — otherwise the shortcut fires a request that just toasts an
+  // error, or a second one on top of the in-flight create.
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey && e.key === 'Enter') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      handleCreateDefect();
+      if (isDefectReadyToSubmit && !isCreating) void handleCreateDefect();
     }
   };
 
@@ -1146,6 +1164,8 @@ export function Defects() {
         severity: defectSeverity,
         priority: defectPriority,
         steps_to_reproduce: defectSteps.trim(),
+        expected_result: defectExpected.trim(),
+        actual_result: defectActual.trim(),
         environment: defectEnvironment.trim(),
         tags: defectTags.trim(),
         external_issue_url: externalIssueValue || null,
@@ -1187,16 +1207,32 @@ export function Defects() {
     setDefectSeverity(defect.severity || 'medium');
     setDefectPriority(defect.priority || 'medium');
     setDefectSteps(defect.steps_to_reproduce || '');
+    setDefectExpected(defect.expected_result || '');
+    setDefectActual(defect.actual_result || '');
     setDefectEnvironment(defect.environment || '');
     setDefectTags(defect.tags || '');
     setDefectJiraLink(defect.external_issue_url || defect.jira_link || '');
     setDefectTestCaseId(defect.test_case_id?.toString() || 'none');
     setDefectRequirementId(defect.requirement_id?.toString() || 'none');
+    // Stale "touched" flags from a previous create attempt would light up the
+    // edit form's error styling on fields the user hasn't touched yet.
+    setDefectTouchedFields({});
     setIsEditDialogOpen(true);
   };
 
+  // The create and edit dialogs share one set of form fields, so the edit dialog
+  // must hand them back empty — otherwise the next "Report defect" opens
+  // pre-filled with the defect that was last edited.
+  const handleEditDialogOpenChange = (open: boolean) => {
+    setIsEditDialogOpen(open);
+    if (!open) {
+      setEditingDefect(null);
+      resetDefectForm();
+    }
+  };
+
   const handleUpdateDefect = async () => {
-    if (!editingDefect || !projectId) return;
+    if (!editingDefect || !projectId || isUpdating) return;
 
     const trimmedDefectId = defectId.trim();
     const trimmedTitle = defectTitle.trim();
@@ -1204,9 +1240,22 @@ export function Defects() {
     const selectedRequirementId = defectRequirementId && defectRequirementId !== 'none' ? Number(defectRequirementId) : null;
 
     if (!trimmedDefectId || !trimmedTitle) {
+      setDefectTouchedFields((prev) => ({ ...prev, defectId: true, defectTitle: true }));
       toast({
         title: t('error'),
         description: t('defectIdAndTitleRequired'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // The edit form used to skip this, so a `javascript:` URL could be saved
+    // here and later opened from the list's "Open in tracker" action.
+    if (isExternalIssueUrlInvalid) {
+      setDefectTouchedFields((prev) => ({ ...prev, defectJiraLink: true }));
+      toast({
+        title: t('validationError'),
+        description: t('externalIssueUrlInvalid'),
         variant: "destructive",
       });
       return;
@@ -1230,6 +1279,7 @@ export function Defects() {
       return;
     }
 
+    setIsUpdating(true);
     try {
       const defectData = {
         defect_id: trimmedDefectId,
@@ -1239,18 +1289,32 @@ export function Defects() {
         severity: defectSeverity,
         priority: defectPriority,
         steps_to_reproduce: defectSteps.trim(),
+        expected_result: defectExpected.trim(),
+        actual_result: defectActual.trim(),
         environment: defectEnvironment.trim(),
         tags: defectTags.trim(),
-        external_issue_url: defectJiraLink.trim() || null,
+        external_issue_url: externalIssueValue || null,
         test_case_id: selectedTestCaseId,
         requirement_id: selectedRequirementId,
       };
 
       const updatedDefect = await defectsAPI.update(editingDefect.id, defectData);
-      setDefects(defects.map(d => d.id === editingDefect.id ? updatedDefect : d));
-      
-      setIsEditDialogOpen(false);
-      setEditingDefect(null);
+      // The PUT response omits the link sequences the list route attaches, so
+      // preserve them instead of blanking the row's execution/requirement links.
+      setDefects((prev) =>
+        prev.map((d) =>
+          d.id === editingDefect.id
+            ? {
+                ...d,
+                ...updatedDefect,
+                test_case_seq: updatedDefect.test_case_seq ?? d.test_case_seq,
+                test_run_seq: updatedDefect.test_run_seq ?? d.test_run_seq,
+              }
+            : d,
+        ),
+      );
+
+      handleEditDialogOpenChange(false);
 
       toast({
         title: t('success'),
@@ -1263,6 +1327,8 @@ export function Defects() {
         description: getApiErrorMessage(error, t('failedToUpdateDefect')),
         variant: "destructive",
       });
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -1937,6 +2003,38 @@ export function Defects() {
                       />
                       <div className="flex justify-end text-xs text-muted-foreground">{defectSteps.length}/{DEFECT_FIELD_LIMITS.steps}</div>
                     </div>
+
+                    {/* Expected vs actual: the defect detail page and the API
+                        both carry these, so the report form has to offer them —
+                        otherwise every defect starts out incomplete. */}
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="defectExpected" className="text-xs font-semibold">{t('expectedResult')}</Label>
+                        <Textarea
+                          id="defectExpected"
+                          value={defectExpected}
+                          onChange={(e) => setDefectExpected(e.target.value)}
+                          placeholder={t('defectExpectedPlaceholder')}
+                          rows={3}
+                          maxLength={DEFECT_FIELD_LIMITS.expected}
+                          className="min-h-20 resize-y rounded-md border-input bg-background text-sm focus-visible:ring-ring"
+                        />
+                        <div className="flex justify-end text-xs text-muted-foreground">{defectExpected.length}/{DEFECT_FIELD_LIMITS.expected}</div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="defectActual" className="text-xs font-semibold">{t('actualResultLabel')}</Label>
+                        <Textarea
+                          id="defectActual"
+                          value={defectActual}
+                          onChange={(e) => setDefectActual(e.target.value)}
+                          placeholder={t('defectActualPlaceholder')}
+                          rows={3}
+                          maxLength={DEFECT_FIELD_LIMITS.actual}
+                          className="min-h-20 resize-y rounded-md border-input bg-background text-sm focus-visible:ring-ring"
+                        />
+                        <div className="flex justify-end text-xs text-muted-foreground">{defectActual.length}/{DEFECT_FIELD_LIMITS.actual}</div>
+                      </div>
+                    </div>
                   </div>
                 </section>
                 <div className="space-y-3">
@@ -2137,15 +2235,17 @@ export function Defects() {
                   {t('defectModalDiscardDraft')}
                 </Button>
               )}
-              <Button variant="outline" onClick={() => handleDialogClose(false)}>
+              <Button variant="outline" onClick={() => handleDialogClose(false)} disabled={isCreating}>
                 {t('cancel')}
               </Button>
               <Button
                 type="submit"
                 onClick={handleCreateDefect}
                 disabled={!isDefectReadyToSubmit || isCreating}
+                title={isDefectReadyToSubmit ? undefined : defectReadinessDescription}
                 className="min-w-36 transition-all duration-200"
               >
+                {isCreating && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
                 {isCreating ? t('creating') : t('reportDefect')}
               </Button>
             </DialogFooter>
@@ -3162,196 +3262,266 @@ export function Defects() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Defect Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent isRTL={isRTL} className="sm:max-w-[700px] max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{t('editDefectTitle', { id: editingDefect?.defect_id || '' })}</DialogTitle>
-            <DialogDescription>
-              {t('editDefectDesc')}
-            </DialogDescription>
+      {/* Edit Defect Dialog — same sectioned layout as the report dialog so the
+          two forms read as one flow rather than two unrelated designs. */}
+      <Dialog open={isEditDialogOpen} onOpenChange={handleEditDialogOpenChange}>
+        <DialogContent
+          isRTL={isRTL}
+          className="grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-[900px] max-h-[92svh]"
+        >
+          <DialogHeader className="border-b border-border bg-card px-4 pb-3 pt-4 sm:px-5">
+            <div className={`flex min-w-0 items-start gap-3 ${isRTL ? 'flex-row-reverse text-right' : ''}`}>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Edit className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 space-y-1 pe-8 rtl:pe-0 rtl:ps-8">
+                <DialogTitle className="text-base font-semibold tracking-tight text-foreground">
+                  {t('editDefectTitle', { id: editingDefect?.defect_id || '' })}
+                </DialogTitle>
+                <DialogDescription className="max-w-2xl text-xs text-muted-foreground">
+                  {t('editDefectDesc')}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectId" className="text-right">
-                {t('defectId')}
-              </Label>
-              <Input
-                id="editDefectId"
-                value={defectId}
-                onChange={(e) => setDefectId(e.target.value)}
-                className="col-span-3"
-                placeholder={t('defectIdPlaceholder')}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectTitle" className="text-right">
-                {t('title')}
-              </Label>
-              <Input
-                id="editDefectTitle"
-                value={defectTitle}
-                onChange={(e) => setDefectTitle(e.target.value)}
-                className="col-span-3"
-                placeholder={t('defectTitlePlaceholder')}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="editDefectDescription" className="text-right pt-2">
-                {t('description')}
-              </Label>
-              <Textarea
-                id="editDefectDescription"
-                value={defectDescription}
-                onChange={(e) => setDefectDescription(e.target.value)}
-                className="col-span-3"
-                placeholder={t('defectDescriptionPlaceholder')}
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectStatus" className="text-right">
-                {t('status')}
-              </Label>
-              <Select value={defectStatus} onValueChange={setDefectStatus}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder={t('defectSelectStatus')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="open">{t('open')}</SelectItem>
-                  <SelectItem value="in_progress">{t('inProgress')}</SelectItem>
-                  <SelectItem value="fixed">{t('fixed')}</SelectItem>
-                  <SelectItem value="reopened">{t('reopened')}</SelectItem>
-                  <SelectItem value="closed">{t('closed')}</SelectItem>
-                  <SelectItem value="rejected">{t('rejected')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectSeverity" className="text-right">
-                {t('defectSeverity')}
-              </Label>
-              <Select value={defectSeverity} onValueChange={setDefectSeverity}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder={t('selectSeverity')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">{t('low')}</SelectItem>
-                  <SelectItem value="medium">{t('medium')}</SelectItem>
-                  <SelectItem value="high">{t('high')}</SelectItem>
-                  <SelectItem value="critical">{t('critical')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectPriority" className="text-right">
-                {t('defectPriority')}
-              </Label>
-              <Select value={defectPriority} onValueChange={setDefectPriority}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder={t('selectPriority')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">{t('low')}</SelectItem>
-                  <SelectItem value="medium">{t('medium')}</SelectItem>
-                  <SelectItem value="high">{t('high')}</SelectItem>
-                  <SelectItem value="urgent">{t('urgent')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="editDefectSteps" className="text-right pt-2">
-                {t('stepsToReproduce')}
-              </Label>
-              <Textarea
-                id="editDefectSteps"
-                value={defectSteps}
-                onChange={(e) => setDefectSteps(e.target.value)}
-                className="col-span-3"
-                placeholder={t('stepsToReproducePlaceholder')}
-                rows={4}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectEnvironment" className="text-right">
-                {t('environmentLabel')}
-              </Label>
-              <Input
-                id="editDefectEnvironment"
-                value={defectEnvironment}
-                onChange={(e) => setDefectEnvironment(e.target.value)}
-                className="col-span-3"
-                placeholder={t('environmentPlaceholder')}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectJiraLink" className="text-right">
-                {t('jiraLink')}
-              </Label>
-              <Input
-                id="editDefectJiraLink"
-                value={defectJiraLink}
-                onChange={(e) => setDefectJiraLink(e.target.value)}
-                className="col-span-3"
-                placeholder={t('jiraLinkPlaceholder')}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectTags" className="text-right">
-                {t('tags')}
-              </Label>
-              <Input
-                id="editDefectTags"
-                value={defectTags}
-                onChange={(e) => setDefectTags(e.target.value)}
-                className="col-span-3"
-                placeholder={t('tagsPlaceholder')}
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectTestCase" className="text-right">
-                {t('testCase')}
-              </Label>
-              <SearchableTestCaseSelect
-                id="editDefectTestCase"
-                value={defectTestCaseId}
-                onChange={setDefectTestCaseId}
-                testCases={testCases}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editDefectRequirement" className="text-right">
-                {t('requirement')}
-              </Label>
-              <SearchableRequirementSelect
-                id="editDefectRequirement"
-                value={defectRequirementId}
-                onChange={setDefectRequirementId}
-                requirements={requirements}
-                className="col-span-3"
-              />
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-muted/30 px-4 py-4 sm:px-5">
+            <div className="grid gap-3 lg:grid-cols-[minmax(460px,1.25fr)_minmax(0,1fr)]">
+              <section className="rounded-lg border border-border bg-card p-3 shadow-xs sm:p-4">
+                <div className="mb-3">
+                  <SectionHeader icon={<AlertTriangle className="h-4 w-4" />} title={t('defectModalEvidence')} accent="text-muted-foreground" isRTL={isRTL} />
+                </div>
+                <div className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="editDefectId" className="text-xs font-semibold">{t('defectId')}</Label>
+                      <Input
+                        id="editDefectId"
+                        value={defectId}
+                        onChange={(e) => setDefectId(e.target.value)}
+                        onBlur={() => setDefectTouchedFields((prev) => ({ ...prev, defectId: true }))}
+                        placeholder={t('defectIdPlaceholder')}
+                        maxLength={DEFECT_FIELD_LIMITS.defectId}
+                        aria-invalid={defectTouchedFields.defectId && !defectId.trim()}
+                        className={`h-10 rounded-md bg-background font-mono text-sm ${
+                          defectTouchedFields.defectId && !defectId.trim() ? 'border-destructive focus-visible:ring-destructive' : ''
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="editDefectTitle" className="text-xs font-semibold">{t('title')}</Label>
+                      <Input
+                        id="editDefectTitle"
+                        value={defectTitle}
+                        onChange={(e) => setDefectTitle(e.target.value)}
+                        onBlur={() => setDefectTouchedFields((prev) => ({ ...prev, defectTitle: true }))}
+                        placeholder={t('defectTitlePlaceholder')}
+                        maxLength={DEFECT_FIELD_LIMITS.title}
+                        aria-invalid={defectTouchedFields.defectTitle && !hasDefectTitle}
+                        className={`h-10 rounded-md bg-background text-sm font-medium ${
+                          defectTouchedFields.defectTitle && !hasDefectTitle ? 'border-destructive focus-visible:ring-destructive' : ''
+                        }`}
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className={defectTouchedFields.defectTitle && !hasDefectTitle ? 'text-destructive' : 'text-muted-foreground'}>
+                          {defectTouchedFields.defectTitle && !hasDefectTitle ? t('defectTitleRequired') : ''}
+                        </span>
+                        <span className="font-medium text-muted-foreground">{defectTitle.length}/{DEFECT_FIELD_LIMITS.title}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="editDefectDescription" className="text-xs font-semibold">{t('description')}</Label>
+                    <Textarea
+                      id="editDefectDescription"
+                      value={defectDescription}
+                      onChange={(e) => setDefectDescription(e.target.value)}
+                      placeholder={t('defectDescriptionPlaceholder')}
+                      rows={3}
+                      maxLength={DEFECT_FIELD_LIMITS.description}
+                      className="min-h-20 resize-y rounded-md bg-background text-sm"
+                    />
+                    <div className="flex justify-end text-xs text-muted-foreground">{defectDescription.length}/{DEFECT_FIELD_LIMITS.description}</div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="editDefectSteps" className="text-xs font-semibold">{t('stepsToReproduce')}</Label>
+                    <Textarea
+                      id="editDefectSteps"
+                      value={defectSteps}
+                      onChange={(e) => setDefectSteps(e.target.value)}
+                      placeholder={t('stepsToReproducePlaceholder')}
+                      rows={4}
+                      maxLength={DEFECT_FIELD_LIMITS.steps}
+                      className="min-h-24 resize-y rounded-md bg-background font-mono text-sm leading-6"
+                    />
+                    <div className="flex justify-end text-xs text-muted-foreground">{defectSteps.length}/{DEFECT_FIELD_LIMITS.steps}</div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="editDefectExpected" className="text-xs font-semibold">{t('expectedResult')}</Label>
+                      <Textarea
+                        id="editDefectExpected"
+                        value={defectExpected}
+                        onChange={(e) => setDefectExpected(e.target.value)}
+                        placeholder={t('defectExpectedPlaceholder')}
+                        rows={3}
+                        maxLength={DEFECT_FIELD_LIMITS.expected}
+                        className="min-h-20 resize-y rounded-md bg-background text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editDefectActual" className="text-xs font-semibold">{t('actualResultLabel')}</Label>
+                      <Textarea
+                        id="editDefectActual"
+                        value={defectActual}
+                        onChange={(e) => setDefectActual(e.target.value)}
+                        placeholder={t('defectActualPlaceholder')}
+                        rows={3}
+                        maxLength={DEFECT_FIELD_LIMITS.actual}
+                        className="min-h-20 resize-y rounded-md bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div className="space-y-3">
+                <section className="rounded-lg border border-border bg-card p-3 shadow-xs sm:p-4">
+                  <div className="mb-3">
+                    <SectionHeader icon={<SlidersHorizontal className="h-4 w-4" />} title={t('defectModalTriage')} accent="text-muted-foreground" isRTL={isRTL} />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="editDefectStatus" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('status')}</Label>
+                      <Select value={defectStatus} onValueChange={setDefectStatus}>
+                        <SelectTrigger id="editDefectStatus" className="h-9 bg-background">
+                          <SelectValue placeholder={t('defectSelectStatus')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="open">{t('open')}</SelectItem>
+                          <SelectItem value="in_progress">{t('inProgress')}</SelectItem>
+                          <SelectItem value="fixed">{t('fixed')}</SelectItem>
+                          <SelectItem value="reopened">{t('reopened')}</SelectItem>
+                          <SelectItem value="closed">{t('closed')}</SelectItem>
+                          <SelectItem value="rejected">{t('rejected')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <PillPickerRow
+                      label={t('defectSeverity')}
+                      value={defectSeverity}
+                      onChange={setDefectSeverity}
+                      options={severityPickerOptions}
+                    />
+                    <PillPickerRow
+                      label={t('defectPriority')}
+                      value={defectPriority}
+                      onChange={setDefectPriority}
+                      options={priorityPickerOptions}
+                    />
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-border bg-card p-3 shadow-xs sm:p-4">
+                  <div className="mb-3">
+                    <SectionHeader icon={<FileText className="h-4 w-4" />} title={t('defectModalCoreDetails')} accent="text-muted-foreground" isRTL={isRTL} />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="editDefectEnvironment" className="text-xs font-semibold">{t('environmentLabel')}</Label>
+                      <Input
+                        id="editDefectEnvironment"
+                        value={defectEnvironment}
+                        onChange={(e) => setDefectEnvironment(e.target.value)}
+                        placeholder={t('environmentPlaceholder')}
+                        maxLength={DEFECT_FIELD_LIMITS.environment}
+                        className="h-9 rounded-md bg-background text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="editDefectTags" className="text-xs font-semibold">{t('tags')}</Label>
+                      <Input
+                        id="editDefectTags"
+                        value={defectTags}
+                        onChange={(e) => setDefectTags(e.target.value)}
+                        placeholder={t('tagsPlaceholder')}
+                        maxLength={DEFECT_FIELD_LIMITS.tags}
+                        className="h-9 rounded-md bg-background text-sm"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-border bg-card p-3 shadow-xs sm:p-4">
+                  <div className="mb-3">
+                    <SectionHeader icon={<Link2 className="h-4 w-4" />} title={t('defectModalLinks')} accent="text-muted-foreground" isRTL={isRTL} />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="editDefectTestCase" className="text-xs font-semibold">{t('testCase')}</Label>
+                      <SearchableTestCaseSelect
+                        id="editDefectTestCase"
+                        value={defectTestCaseId}
+                        onChange={setDefectTestCaseId}
+                        testCases={testCases}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editDefectRequirement" className="text-xs font-semibold">{t('requirement')}</Label>
+                      <SearchableRequirementSelect
+                        id="editDefectRequirement"
+                        value={defectRequirementId}
+                        onChange={setDefectRequirementId}
+                        requirements={requirements}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editDefectJiraLink" className="text-xs font-semibold">{t('externalIssue')}</Label>
+                      <Input
+                        id="editDefectJiraLink"
+                        value={defectJiraLink}
+                        onChange={(e) => setDefectJiraLink(e.target.value)}
+                        onBlur={() => setDefectTouchedFields((prev) => ({ ...prev, defectJiraLink: true }))}
+                        placeholder={t('jiraLinkPlaceholder')}
+                        maxLength={DEFECT_FIELD_LIMITS.externalIssueUrl}
+                        aria-invalid={isExternalIssueUrlInvalid}
+                        className={`h-9 rounded-md bg-background text-sm ${isExternalIssueUrlInvalid ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                      />
+                      <div className={`text-xs ${isExternalIssueUrlInvalid ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        {externalIssueStatusLabel}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {editingDefect?.id && numericProjectId != null && (
+                  <section className="rounded-lg border border-border bg-card p-3 shadow-xs sm:p-4">
+                    <DefectComments
+                      defectId={editingDefect.id}
+                      projectId={numericProjectId}
+                      defectLabel={editingDefect.defect_id || undefined}
+                      canComment={canWrite}
+                    />
+                  </section>
+                )}
+              </div>
             </div>
           </div>
-          {editingDefect?.id && projectId && (
-            <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
-              <DefectComments
-                defectId={editingDefect.id}
-                projectId={parseInt(projectId)}
-                defectLabel={editingDefect.defect_id || undefined}
-                canComment={canWrite}
-              />
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+
+          <DialogFooter className="border-t border-border bg-card px-4 py-3 sm:px-5">
+            <Button variant="outline" onClick={() => handleEditDialogOpenChange(false)} disabled={isUpdating}>
               {t('cancel')}
             </Button>
             <Button
               type="submit"
               onClick={handleUpdateDefect}
-              disabled={!defectId.trim() || !defectTitle.trim()}
+              disabled={isUpdating || !defectId.trim() || !defectTitle.trim() || isExternalIssueUrlInvalid}
+              className="min-w-36"
             >
+              {isUpdating && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
               {t('updateDefect')}
             </Button>
           </DialogFooter>

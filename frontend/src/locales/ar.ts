@@ -2242,6 +2242,8 @@ export const ar = {
     defectsSortTitle: 'العنوان (أ-ي)',
     defectsClearFilters: 'مسح المرشحات',
     defectsOpenDetail: "فتح العيب",
+    defectExpectedPlaceholder: "ما الذي كان ينبغي أن يحدث؟",
+    defectActualPlaceholder: "ما الذي حدث بدلًا من ذلك؟",
     defectsSelectAllOnPage: "تحديد كل العيوب في هذه الصفحة",
     defectsClearSelection: "مسح التحديد",
     confirmDeleteDefectTitle: "هل تريد حذف هذا العيب؟",

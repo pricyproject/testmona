@@ -2273,6 +2273,8 @@ export const fa = {
     defectsSortTitle: 'عنوان (الفبا)',
     defectsClearFilters: 'پاک کردن فیلترها',
     defectsOpenDetail: "باز کردن نقص",
+    defectExpectedPlaceholder: "چه چیزی باید اتفاق می‌افتاد؟",
+    defectActualPlaceholder: "در عمل چه اتفاقی افتاد؟",
     defectsSelectAllOnPage: "انتخاب همه‌ی نقص‌های این صفحه",
     defectsClearSelection: "پاک کردن انتخاب",
     confirmDeleteDefectTitle: "این نقص حذف شود؟",
