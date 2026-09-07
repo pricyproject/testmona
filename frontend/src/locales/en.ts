@@ -2429,6 +2429,7 @@ export const en = {
   defectsClearFilters: 'Clear filters',
   defectsOpenDetail: "Open defect",
   defectExpectedPlaceholder: "What should have happened?",
+  notTested: "Not tested",
   defectActualPlaceholder: "What happened instead?",
   defectsSelectAllOnPage: "Select every defect on this page",
   defectsClearSelection: "Clear selection",

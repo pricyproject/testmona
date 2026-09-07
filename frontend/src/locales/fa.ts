@@ -2274,6 +2274,7 @@ export const fa = {
     defectsClearFilters: 'پاک کردن فیلترها',
     defectsOpenDetail: "باز کردن نقص",
     defectExpectedPlaceholder: "چه چیزی باید اتفاق می‌افتاد؟",
+    notTested: "آزمایش‌نشده",
     defectActualPlaceholder: "در عمل چه اتفاقی افتاد؟",
     defectsSelectAllOnPage: "انتخاب همه‌ی نقص‌های این صفحه",
     defectsClearSelection: "پاک کردن انتخاب",

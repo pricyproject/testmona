@@ -60,6 +60,71 @@ def _explain_defect_integrity_error(error: IntegrityError) -> str:
 BLOCKED_RESULT_STATUSES = {"block", "blocked"}
 
 
+def _serialize_result_links_with_seqs(db: Session, links) -> list:
+    """Serialize defect result links, backfilling the linked entities' sequences.
+
+    Snapshots taken before ``project_seq`` was recorded carry only global ids,
+    which the UI cannot turn into a project-first URL without opening a
+    different row. Rather than rewrite stored history, the missing sequences are
+    resolved here (two batched queries) into a *copy* of the snapshot, leaving
+    the persisted record untouched.
+    """
+    rows = list(links or [])
+    if not rows:
+        return []
+
+    def snapshot_of(link):
+        return link.result_snapshot if isinstance(link.result_snapshot, dict) else None
+
+    missing_case_ids = set()
+    missing_run_ids = set()
+    for link in rows:
+        snapshot = snapshot_of(link)
+        if not snapshot:
+            continue
+        case = snapshot.get("test_case") or {}
+        run = snapshot.get("test_run") or {}
+        if case.get("id") and case.get("project_seq") is None:
+            missing_case_ids.add(case["id"])
+        if run.get("id") and run.get("project_seq") is None:
+            missing_run_ids.add(run["id"])
+
+    case_seqs = (
+        dict(
+            db.query(models.TestCase.id, models.TestCase.project_seq)
+            .filter(models.TestCase.id.in_(missing_case_ids))
+            .all()
+        )
+        if missing_case_ids
+        else {}
+    )
+    run_seqs = (
+        dict(
+            db.query(models.TestRun.id, models.TestRun.project_seq)
+            .filter(models.TestRun.id.in_(missing_run_ids))
+            .all()
+        )
+        if missing_run_ids
+        else {}
+    )
+
+    serialized = []
+    for link in rows:
+        payload = schemas.TestResultDefectLink.model_validate(link).model_dump()
+        snapshot = payload.get("result_snapshot")
+        if isinstance(snapshot, dict):
+            snapshot = dict(snapshot)
+            for key, seqs in (("test_case", case_seqs), ("test_run", run_seqs)):
+                entity = snapshot.get(key)
+                if isinstance(entity, dict) and entity.get("project_seq") is None:
+                    entity = dict(entity)
+                    entity["project_seq"] = seqs.get(entity.get("id"))
+                    snapshot[key] = entity
+            payload["result_snapshot"] = snapshot
+        serialized.append(payload)
+    return serialized
+
+
 def _attach_link_seqs(db: Session, defects) -> None:
     """Attach the linked test case's / test run's per-project sequence to defects.
 
@@ -2119,7 +2184,7 @@ def register_requirements_defects_plans_routes(app):
             "test_case": test_case_summary,
             "test_run": test_run_summary,
             "requirement": requirement_summary,
-            "result_links": result_links,
+            "result_links": _serialize_result_links_with_seqs(db, result_links),
             "can_edit": rbac.can(current_user, "write", defect.project_id, db),
             "can_delete": rbac.can(current_user, "delete", defect.project_id, db),
         }
@@ -2394,6 +2459,8 @@ def register_requirements_defects_plans_routes(app):
             },
             "test_case": {
                 "id": test_case.id if test_case else test_result.test_case_id,
+                # The UI links to project-first URLs keyed on this sequence.
+                "project_seq": test_case.project_seq if test_case else None,
                 "title": test_case.title if test_case else None,
                 "priority": getattr(test_case.priority, "value", test_case.priority) if test_case else None,
                 "status": getattr(test_case.status, "value", test_case.status) if test_case else None,
@@ -2403,6 +2470,7 @@ def register_requirements_defects_plans_routes(app):
             },
             "test_run": {
                 "id": test_run.id if test_run else test_result.test_run_id,
+                "project_seq": test_run.project_seq if test_run else None,
                 "name": test_run.name if test_run else None,
                 "status": getattr(test_run.status, "value", test_run.status) if test_run else None,
                 "test_plan_id": test_run.test_plan_id if test_run else None,

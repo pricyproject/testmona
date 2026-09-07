@@ -17,6 +17,7 @@ import {
   ShieldAlert,
   Sparkles,
   TestTube2,
+  Trash2,
   User,
   X,
 } from 'lucide-react';
@@ -41,7 +42,19 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import { getApiErrorMessage } from '@/lib/api';
+import { defectsAPI, getApiErrorMessage } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { DefectComments } from '@/components/Defects/DefectComments';
 import {
   useDefectDetail,
   useDefectEditRequirements,
@@ -60,6 +73,9 @@ type DefectDetailResponse = {
   test_run?: any | null;
   requirement?: any | null;
   result_links: any[];
+  /** Per-request capability flags for the current user, from the detail route. */
+  can_edit?: boolean | null;
+  can_delete?: boolean | null;
 };
 
 type DefectEditForm = {
@@ -77,6 +93,36 @@ type DefectEditForm = {
   tags: string;
   external_issue_url: string;
   requirement_id: string;
+};
+
+// Enum values are stored snake_case but their translation keys are camelCase,
+// so `t(defect.status)` printed a raw "in_progress" in every language.
+const STATUS_LABEL_KEY: Record<string, string> = {
+  open: 'open',
+  in_progress: 'inProgress',
+  fixed: 'fixed',
+  reopened: 'reopened',
+  closed: 'closed',
+  rejected: 'rejected',
+  resolved: 'resolved',
+};
+
+const TRIAGE_LABEL_KEY: Record<string, string> = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  critical: 'critical',
+  urgent: 'urgent',
+};
+
+const RESULT_STATUS_LABEL_KEY: Record<string, string> = {
+  passed: 'passed',
+  failed: 'failed',
+  blocked: 'blocked',
+  skipped: 'skipped',
+  not_tested: 'notTested',
+  in_progress: 'inProgress',
+  retest: 'retest',
 };
 
 const splitTags = (value?: string | null): string[] =>
@@ -127,6 +173,7 @@ export function DefectDetail() {
   const { projectId, defectId } = useParams<{ projectId: string; defectId: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { t, isRTL } = useTranslation();
   const { formatDateTime: fmtDateTime } = useDateFormat();
   const formatDateTime = (value?: string | null): string => (value ? fmtDateTime(value) || '-' : '-');
@@ -134,6 +181,8 @@ export function DefectDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<DefectEditForm>(() => buildEditForm(null));
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // The URL carries the per-project sequence; resolve it to the global defect id.
   const { id: numericDefectId, loading: defectIdLoading } = useResolvedEntityId(projectId, 'defects', defectId);
@@ -146,8 +195,8 @@ export function DefectDetail() {
   const updateSnapshotMutation = useUpdateDefectSnapshot(numericDefectId);
   const isSaving = updateDefect.isPending;
 
-  const { canWrite } = useProjectPermissions(projectIdValid ? numericProjectId : null);
-  const requirementsQuery = useDefectEditRequirements(numericProjectId, projectIdValid);
+  const { canWrite: projectCanWrite } = useProjectPermissions(projectIdValid ? numericProjectId : null);
+  const requirementsQuery = useDefectEditRequirements(numericProjectId, projectIdValid && projectCanWrite);
   const membersQuery = useDefectProjectMembers(numericProjectId, projectIdValid);
   const requirements: any[] = requirementsQuery.data ?? [];
   const members: { id: number; name: string }[] = membersQuery.data ?? [];
@@ -169,6 +218,28 @@ export function DefectDetail() {
           : null;
 
   const defect = detail?.defect;
+  // The detail route answers per-request whether this user may edit/delete this
+  // defect; fall back to the project permission set while that is unknown so the
+  // controls don't flicker. Every editing affordance below is gated on it —
+  // previously they were all rendered for viewers and only failed on save.
+  const canWrite = detail?.can_edit ?? projectCanWrite;
+  const canDelete = detail?.can_delete ?? false;
+
+  const statusLabel = (value?: string | null): string => {
+    const normalized = String(value || '').toLowerCase();
+    return STATUS_LABEL_KEY[normalized] ? t(STATUS_LABEL_KEY[normalized]) : normalized.replace(/_/g, ' ') || '-';
+  };
+  const triageLabel = (value?: string | null): string => {
+    const normalized = String(value || '').toLowerCase();
+    return TRIAGE_LABEL_KEY[normalized] ? t(TRIAGE_LABEL_KEY[normalized]) : normalized || '-';
+  };
+  // Shared by every click-to-edit block so they stay consistent.
+  const inlineEditProps = {
+    editLabel: t('edit'),
+    saveLabel: t('save'),
+    cancelLabel: t('cancel'),
+    canEdit: canWrite,
+  };
 
   // Sync the edit form from the loaded defect, but never clobber in-progress edits.
   useEffect(() => {
@@ -285,6 +356,27 @@ export function DefectDetail() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!defect?.id || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await defectsAPI.delete(defect.id);
+      // Drop the cached list so the defect doesn't reappear on the page we
+      // navigate back to.
+      queryClient.invalidateQueries({ queryKey: ['defects'] });
+      toast({ title: t('success'), description: t('defectDeletedSuccessfully') });
+      navigate(`/projects/${projectId}/defects`);
+    } catch (err) {
+      console.error('Failed to delete defect:', err);
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(err, t('failedToDeleteDefect')),
+        variant: 'destructive',
+      });
+      setIsDeleting(false);
+    }
+  };
+
   const updateSnapshot = async (link: any, clearFailingStep = false) => {
     if (!link?.id || !link?.test_result_id) return;
 
@@ -309,9 +401,28 @@ export function DefectDetail() {
   };
 
   if (loading) {
+    // Skeleton in the page's own shape rather than a centred spinner, so the
+    // layout doesn't jump once the defect arrives.
     return (
-      <div className="flex min-h-[45vh] items-center justify-center" dir={isRTL ? 'rtl' : 'ltr'}>
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'} role="status" aria-busy="true" aria-label={t('loading')}>
+        <div className="space-y-3">
+          <div className="h-4 w-28 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="flex gap-2">
+            <div className="h-5 w-20 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+            <div className="h-5 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+            <div className="h-5 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+          </div>
+          <div className="h-8 w-2/3 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+        </div>
+        <div className="grid gap-4 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="h-24 animate-pulse rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900" />
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="h-72 animate-pulse rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900" />
+          <div className="h-72 animate-pulse rounded-lg border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900" />
+        </div>
       </div>
     );
   }
@@ -344,8 +455,8 @@ export function DefectDetail() {
           </Button>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="font-mono">{defect.defect_id || `#${defect.id}`}</Badge>
-            <Badge className={severityClass(defect.severity)}>{t(defect.severity || 'medium')}</Badge>
-            <Badge variant="outline" className={statusClass(defect.status)}>{t(defect.status || 'open')}</Badge>
+            <Badge className={severityClass(defect.severity)}>{triageLabel(defect.severity || 'medium')}</Badge>
+            <Badge variant="outline" className={statusClass(defect.status)}>{statusLabel(defect.status || 'open')}</Badge>
           </div>
           <div className="mt-3 max-w-5xl">
             <InlineEditable
@@ -354,6 +465,9 @@ export function DefectDetail() {
               placeholder={t('title')}
               maxLength={200}
               editLabel={t('edit')}
+              saveLabel={t('save')}
+              cancelLabel={t('cancel')}
+              canEdit={canWrite}
               displayClass="text-2xl font-bold text-slate-950 dark:text-slate-50"
             />
           </div>
@@ -372,14 +486,27 @@ export function DefectDetail() {
               </a>
             </Button>
           )}
-          <Button variant={isEditing ? 'secondary' : 'default'} onClick={isEditing ? cancelEditing : startEditing} disabled={isSaving}>
-            {isEditing ? (
-              <X className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            ) : (
-              <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-            )}
-            {isEditing ? t('cancel') : t('edit')}
-          </Button>
+          {canWrite && (
+            <Button variant={isEditing ? 'secondary' : 'default'} onClick={isEditing ? cancelEditing : startEditing} disabled={isSaving}>
+              {isEditing ? (
+                <X className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              ) : (
+                <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              )}
+              {isEditing ? t('cancel') : t('edit')}
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(true)}
+              disabled={isSaving || isDeleting}
+              className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
+            >
+              <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+              {t('delete')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -541,15 +668,15 @@ export function DefectDetail() {
       <div className="grid gap-4 md:grid-cols-4">
         <MetricSelect
           label={t('status')} value={defect.status || 'open'} icon={<ShieldAlert className="h-4 w-4" />}
-          options={statusOptions(t)} onSave={(v) => patchDefect({ status: v })}
+          options={statusOptions(t)} onSave={(v) => patchDefect({ status: v })} canEdit={canWrite}
         />
         <MetricSelect
           label={t('severity')} value={defect.severity || 'medium'} icon={<Bug className="h-4 w-4" />}
-          options={severityOptions(t)} onSave={(v) => patchDefect({ severity: v })}
+          options={severityOptions(t)} onSave={(v) => patchDefect({ severity: v })} canEdit={canWrite}
         />
         <MetricSelect
           label={t('priority')} value={defect.priority || 'medium'} icon={<AlertTriangle className="h-4 w-4" />}
-          options={priorityOptions(t)} onSave={(v) => patchDefect({ priority: v })}
+          options={priorityOptions(t)} onSave={(v) => patchDefect({ priority: v })} canEdit={canWrite}
         />
         <Metric label={t('linkedExecutions')} value={String(detail.result_links.length)} icon={<TestTube2 className="h-4 w-4" />} />
       </div>
@@ -566,20 +693,20 @@ export function DefectDetail() {
             <CardContent className="space-y-5">
               <EditableTextBlock
                 label={t('description')} value={defect.description} empty={t('noDescriptionProvided')}
-                onSave={(v) => patchDefect({ description: v })} rows={4} maxLength={1000} editLabel={t('edit')}
+                onSave={(v) => patchDefect({ description: v })} rows={4} maxLength={1000} {...inlineEditProps}
               />
               <EditableTextBlock
                 label={t('stepsToReproduce')} value={defect.steps_to_reproduce} empty={t('noStepsProvided')}
-                onSave={(v) => patchDefect({ steps_to_reproduce: v })} rows={5} maxLength={2000} editLabel={t('edit')}
+                onSave={(v) => patchDefect({ steps_to_reproduce: v })} rows={5} maxLength={2000} {...inlineEditProps}
               />
               <div className="grid gap-4 md:grid-cols-2">
                 <EditableTextBlock
                   label={t('expectedResult')} value={defect.expected_result} empty="-"
-                  onSave={(v) => patchDefect({ expected_result: v })} rows={3} maxLength={1000} editLabel={t('edit')}
+                  onSave={(v) => patchDefect({ expected_result: v })} rows={3} maxLength={1000} {...inlineEditProps}
                 />
                 <EditableTextBlock
                   label={t('actualResultLabel')} value={defect.actual_result} empty="-"
-                  onSave={(v) => patchDefect({ actual_result: v })} rows={3} maxLength={1000} editLabel={t('edit')}
+                  onSave={(v) => patchDefect({ actual_result: v })} rows={3} maxLength={1000} {...inlineEditProps}
                 />
               </div>
             </CardContent>
@@ -603,6 +730,7 @@ export function DefectDetail() {
                       link={link}
                       projectId={projectId || ''}
                       isUpdating={updatingLinkId === link.id}
+                      canEdit={canWrite}
                       onRefresh={() => updateSnapshot(link)}
                       onClearFailingStep={() => updateSnapshot(link, true)}
                       t={t}
@@ -618,6 +746,21 @@ export function DefectDetail() {
             defect={{ id: defect.id, defect_id: defect.defect_id, title: defect.title }}
             canWrite={canWrite}
           />
+
+          {/* Comment threads existed on this defect but were only reachable from
+              the list page's edit dialog — the detail page never showed them. */}
+          {projectIdValid && (
+            <Card>
+              <CardContent className="pt-6">
+                <DefectComments
+                  defectId={defect.id}
+                  projectId={numericProjectId}
+                  defectLabel={defect.defect_id || undefined}
+                  canComment={canWrite}
+                />
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <aside className="space-y-6">
@@ -629,22 +772,30 @@ export function DefectDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* These routes are keyed on the per-project sequence, so linking
+                  by the global id would resolve to a different record. */}
               <Relationship
                 label={t('requirement')}
                 value={detail.requirement?.title}
                 code={detail.requirement?.key}
-                to={detail.requirement ? `/projects/${projectId}/requirements/${detail.requirement.id}` : undefined}
+                to={detail.requirement
+                  ? `/projects/${projectId}/requirements/${detail.requirement.project_seq ?? detail.requirement.id}`
+                  : undefined}
               />
               <Relationship
                 label={t('testCase')}
                 value={detail.test_case?.title}
                 code={detail.test_case?.key}
-                to={detail.test_case ? `/projects/${projectId}/test-cases/${detail.test_case.id}` : undefined}
+                to={detail.test_case
+                  ? `/projects/${projectId}/test-cases/${detail.test_case.project_seq ?? detail.test_case.id}`
+                  : undefined}
               />
               <Relationship
                 label={t('testRun')}
                 value={detail.test_run?.name}
-                to={detail.test_run ? `/projects/${projectId}/test-runs/${detail.test_run.id}` : undefined}
+                to={detail.test_run
+                  ? `/projects/${projectId}/test-runs/${detail.test_run.project_seq ?? detail.test_run.id}`
+                  : undefined}
               />
             </CardContent>
           </Card>
@@ -664,14 +815,15 @@ export function DefectDetail() {
                 members={members}
                 unassignedLabel={t('unassigned')}
                 onSave={(v) => patchDefect({ assigned_to: v })}
+                canEdit={canWrite}
               />
               <EditableMeta
                 label={t('environment')} value={defect.environment} maxLength={255}
-                onSave={(v) => patchDefect({ environment: v })} editLabel={t('edit')}
+                onSave={(v) => patchDefect({ environment: v })} {...inlineEditProps}
               />
               <EditableMeta
                 label={t('browserInfo')} value={defect.browser_info} maxLength={255}
-                onSave={(v) => patchDefect({ browser_info: v })} editLabel={t('edit')}
+                onSave={(v) => patchDefect({ browser_info: v })} {...inlineEditProps}
               />
             </CardContent>
           </Card>
@@ -714,6 +866,34 @@ export function DefectDetail() {
         defect={defect}
         linkedTestCase={detail.test_case ? { id: detail.test_case.id, title: detail.test_case.title, key: detail.test_case.key } : null}
       />
+
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => { if (!open && !isDeleting) setDeleteOpen(false); }}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('confirmDeleteDefectTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('confirmDeleteDefectDesc', {
+                id: defect.defect_id || `#${defect.id}`,
+                title: defect.title || '',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void handleDelete();
+              }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -804,39 +984,48 @@ const priorityOptions = (t: (k: string) => string): Option[] => [
 
 // Editable metric card: label + icon with an inline select that saves on change.
 function MetricSelect({
-  label, value, icon, options, onSave,
-}: { label: string; value: string; icon: React.ReactNode; options: Option[]; onSave: SaveFn }) {
+  label, value, icon, options, onSave, canEdit,
+}: { label: string; value: string; icon: React.ReactNode; options: Option[]; onSave: SaveFn; canEdit: boolean }) {
   const [saving, setSaving] = useState(false);
+  const current = options.find((option) => option.value === value);
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-500">
         {icon}
         {label}
       </div>
-      <Select
-        value={value}
-        disabled={saving}
-        onValueChange={async (next) => {
-          if (next === value) return;
-          setSaving(true);
-          await onSave(next);
-          setSaving(false);
-        }}
-      >
-        <SelectTrigger className="mt-2 h-9 capitalize">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <SelectValue />}
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      {canEdit ? (
+        <Select
+          value={value}
+          disabled={saving}
+          onValueChange={async (next) => {
+            if (next === value) return;
+            setSaving(true);
+            await onSave(next);
+            setSaving(false);
+          }}
+        >
+          <SelectTrigger className="mt-2 h-9" aria-label={label}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <SelectValue />}
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      ) : (
+        <div className="mt-2 text-lg font-semibold text-slate-950 dark:text-slate-50">
+          {current?.label || value || '-'}
+        </div>
+      )}
     </div>
   );
 }
 
-// Click-to-edit text / textarea field with save (Enter) + cancel (Esc).
+// Click-to-edit text / textarea field. Enter saves a single-line field,
+// Ctrl/Cmd+Enter saves a textarea, Escape cancels either.
 function InlineEditable({
-  value, onSave, placeholder, multiline = false, rows = 4, maxLength, displayClass = '', editLabel,
+  value, onSave, placeholder, multiline = false, rows = 4, maxLength, displayClass = '',
+  editLabel, saveLabel, cancelLabel, canEdit = true,
 }: {
   value?: string | null;
   onSave: SaveFn;
@@ -846,24 +1035,41 @@ function InlineEditable({
   maxLength?: number;
   displayClass?: string;
   editLabel: string;
+  saveLabel: string;
+  cancelLabel: string;
+  /** Read-only viewers get plain text with no edit affordance. */
+  canEdit?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value || '');
   const [saving, setSaving] = useState(false);
 
   const begin = () => { setDraft(value || ''); setEditing(true); };
+  const cancel = () => { setDraft(value || ''); setEditing(false); };
   const commit = async () => {
+    if (saving) return;
     setSaving(true);
     const ok = await onSave(draft.trim());
     setSaving(false);
     if (ok) setEditing(false);
   };
 
-  if (editing) {
+  if (editing && canEdit) {
     return (
       <div className="space-y-2">
         {multiline ? (
-          <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={rows} maxLength={maxLength} autoFocus />
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={rows}
+            maxLength={maxLength}
+            autoFocus
+            onKeyDown={(e) => {
+              // Plain Enter has to stay a newline in a textarea.
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); void commit(); }
+              if (e.key === 'Escape') cancel();
+            }}
+          />
         ) : (
           <Input
             value={draft}
@@ -872,43 +1078,65 @@ function InlineEditable({
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter') { e.preventDefault(); void commit(); }
-              if (e.key === 'Escape') setEditing(false);
+              if (e.key === 'Escape') cancel();
             }}
           />
         )}
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button size="sm" onClick={commit} disabled={saving}>
             {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1 h-3.5 w-3.5" />}
-            {/* reuse a generic save label via icon; text kept minimal */}
-            <span className="text-xs">{editLabel}</span>
+            <span className="text-xs">{saveLabel}</span>
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>
+          <Button size="sm" variant="ghost" onClick={cancel} disabled={saving} aria-label={cancelLabel} title={cancelLabel}>
             <X className="h-3.5 w-3.5" />
           </Button>
+          {maxLength != null && (
+            <span className="ms-auto text-xs text-slate-400">{draft.length}/{maxLength}</span>
+          )}
         </div>
       </div>
     );
+  }
+
+  const body = (
+    <span className={`min-w-0 flex-1 ${displayClass} ${!value?.trim() ? 'text-slate-400' : ''}`}>
+      {value?.trim() || placeholder}
+    </span>
+  );
+
+  if (!canEdit) {
+    return <div className="flex w-full items-start gap-2 text-start">{body}</div>;
   }
 
   return (
     <button
       type="button"
       onClick={begin}
-      className="group flex w-full items-start gap-2 rounded-md text-start hover:bg-slate-50 dark:hover:bg-slate-800/40"
+      className="group flex w-full items-start gap-2 rounded-md text-start hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:bg-slate-800/40"
       title={editLabel}
+      aria-label={editLabel}
     >
-      <span className={`min-w-0 flex-1 ${displayClass} ${!value?.trim() ? 'text-slate-400' : ''}`}>
-        {value?.trim() || placeholder}
-      </span>
-      <Edit className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100" />
+      {body}
+      <Edit className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
     </button>
   );
 }
 
 // Read-only-styled block (description / steps / …) made click-to-edit.
 function EditableTextBlock({
-  label, value, empty, onSave, rows = 4, maxLength, editLabel,
-}: { label: string; value?: string | null; empty: string; onSave: SaveFn; rows?: number; maxLength?: number; editLabel: string }) {
+  label, value, empty, onSave, rows = 4, maxLength, editLabel, saveLabel, cancelLabel, canEdit,
+}: {
+  label: string;
+  value?: string | null;
+  empty: string;
+  onSave: SaveFn;
+  rows?: number;
+  maxLength?: number;
+  editLabel: string;
+  saveLabel: string;
+  cancelLabel: string;
+  canEdit: boolean;
+}) {
   return (
     <section>
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</h3>
@@ -921,6 +1149,9 @@ function EditableTextBlock({
           rows={rows}
           maxLength={maxLength}
           editLabel={editLabel}
+          saveLabel={saveLabel}
+          cancelLabel={cancelLabel}
+          canEdit={canEdit}
           displayClass="block whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-slate-300"
         />
       </div>
@@ -930,19 +1161,32 @@ function EditableTextBlock({
 
 // Sidebar assignee picker that saves on change (project members + unassigned).
 function EditableAssignee({
-  label, value, members, unassignedLabel, onSave,
+  label, value, members, unassignedLabel, onSave, canEdit,
 }: {
   label: string;
   value: number | null;
   members: { id: number; name: string }[];
   unassignedLabel: string;
   onSave: (value: number | null) => Promise<boolean>;
+  canEdit: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   // Keep the current assignee visible even if they're no longer in the member list.
   const options = value != null && !members.some((m) => m.id === value)
     ? [{ id: value, name: `User ${value}` }, ...members]
     : members;
+
+  if (!canEdit) {
+    return (
+      <div>
+        <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+        <div className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+          {options.find((m) => m.id === value)?.name || unassignedLabel}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
@@ -971,8 +1215,17 @@ function EditableAssignee({
 
 // Sidebar meta value that is click-to-edit.
 function EditableMeta({
-  label, value, onSave, maxLength, editLabel,
-}: { label: string; value?: string | null; onSave: SaveFn; maxLength?: number; editLabel: string }) {
+  label, value, onSave, maxLength, editLabel, saveLabel, cancelLabel, canEdit,
+}: {
+  label: string;
+  value?: string | null;
+  onSave: SaveFn;
+  maxLength?: number;
+  editLabel: string;
+  saveLabel: string;
+  cancelLabel: string;
+  canEdit: boolean;
+}) {
   return (
     <div>
       <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
@@ -983,6 +1236,9 @@ function EditableMeta({
           placeholder="-"
           maxLength={maxLength}
           editLabel={editLabel}
+          saveLabel={saveLabel}
+          cancelLabel={cancelLabel}
+          canEdit={canEdit}
           displayClass="text-sm text-slate-800 dark:text-slate-200"
         />
       </div>
@@ -994,6 +1250,7 @@ function ResultLinkCard({
   link,
   projectId,
   isUpdating,
+  canEdit,
   onRefresh,
   onClearFailingStep,
   t,
@@ -1001,6 +1258,7 @@ function ResultLinkCard({
   link: any;
   projectId: string;
   isUpdating: boolean;
+  canEdit: boolean;
   onRefresh: () => void;
   onClearFailingStep: () => void;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -1011,57 +1269,71 @@ function ResultLinkCard({
   const testCase = link.result_snapshot?.test_case || {};
   const testRun = link.result_snapshot?.test_run || {};
   const failingStep = link.failing_step_snapshot;
+  // The snapshot records global ids; the routes want the per-project sequence,
+  // which the API backfills onto the snapshot copy it serializes.
   const testCaseId = testCase.id || result.test_case_id;
   const testRunId = testRun.id || result.test_run_id;
+  const testCaseSeq = testCase.project_seq ?? null;
+  const testRunSeq = testRun.project_seq ?? null;
+  const resultStatus = String(result.status || '').toLowerCase();
+  const resultStatusLabel = RESULT_STATUS_LABEL_KEY[resultStatus]
+    ? t(RESULT_STATUS_LABEL_KEY[resultStatus])
+    : (resultStatus.replace(/_/g, ' ') || '-');
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{result.status || '-'}</Badge>
+            <Badge variant="outline">{resultStatusLabel}</Badge>
             <span className="text-xs text-slate-500">
               {t('resultSnapshotCaptured', {
-                status: result.status || '-',
+                status: resultStatusLabel,
                 date: formatDateTime(link.snapshot_created_at || link.result_snapshot?.captured_at),
               })}
             </span>
           </div>
           <div className="mt-2 space-y-1">
-            {testCaseId ? (
+            {testCaseSeq ? (
               <Link
-                to={`/projects/${projectId}/test-cases/${testCaseId}`}
+                to={`/projects/${projectId}/test-cases/${testCaseSeq}`}
                 className="block text-sm font-semibold text-blue-700 hover:underline dark:text-blue-300"
               >
                 {testCase.title || `${t('testCase')} #${testCaseId}`}
               </Link>
             ) : (
               <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                {testCase.title || `${t('testCase')} -`}
+                {testCase.title || (testCaseId ? `${t('testCase')} #${testCaseId}` : `${t('testCase')} -`)}
               </div>
             )}
-            {testRun.name && testRunId && (
-              <Link
-                to={`/projects/${projectId}/test-runs/${testRunId}`}
-                className="block text-xs text-slate-500 hover:underline"
-              >
-                {t('testRunLabel')}: {testRun.name}
-              </Link>
+            {testRun.name && (
+              testRunSeq ? (
+                <Link
+                  to={`/projects/${projectId}/test-runs/${testRunSeq}`}
+                  className="block text-xs text-slate-500 hover:underline"
+                >
+                  {t('testRunLabel')}: {testRun.name}
+                </Link>
+              ) : (
+                <div className="text-xs text-slate-500">{t('testRunLabel')}: {testRun.name}</div>
+              )
             )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={onRefresh} disabled={isUpdating} className="h-8 gap-1 text-xs">
-            {isUpdating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-            {t('correctSnapshot')}
-          </Button>
-          {failingStep && (
-            <Button variant="ghost" size="sm" onClick={onClearFailingStep} disabled={isUpdating} className="h-8 gap-1 text-xs">
-              <X className="h-3 w-3" />
-              {t('clearFailingStepSnapshot')}
+        {canEdit && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={onRefresh} disabled={isUpdating} className="h-8 gap-1 text-xs">
+              {isUpdating ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {t('correctSnapshot')}
             </Button>
-          )}
-        </div>
+            {failingStep && (
+              <Button variant="ghost" size="sm" onClick={onClearFailingStep} disabled={isUpdating} className="h-8 gap-1 text-xs">
+                <X className="h-3 w-3" />
+                {t('clearFailingStepSnapshot')}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
       {failingStep && (
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-900 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100">

@@ -2243,6 +2243,7 @@ export const ar = {
     defectsClearFilters: 'مسح المرشحات',
     defectsOpenDetail: "فتح العيب",
     defectExpectedPlaceholder: "ما الذي كان ينبغي أن يحدث؟",
+    notTested: "لم يُختبر",
     defectActualPlaceholder: "ما الذي حدث بدلًا من ذلك؟",
     defectsSelectAllOnPage: "تحديد كل العيوب في هذه الصفحة",
     defectsClearSelection: "مسح التحديد",
