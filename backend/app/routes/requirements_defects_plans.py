@@ -60,6 +60,45 @@ def _explain_defect_integrity_error(error: IntegrityError) -> str:
 BLOCKED_RESULT_STATUSES = {"block", "blocked"}
 
 
+def _attach_link_seqs(db: Session, defects) -> None:
+    """Attach the linked test case's / test run's per-project sequence to defects.
+
+    Frontend URLs for those entities are keyed on ``project_seq``, not the global
+    id, so a link built from ``defect.test_case_id`` would open a different row.
+    Resolved with two batched ``IN`` queries (not per-defect relationship loads)
+    and set as plain instance attributes that the response model reads.
+    """
+    rows = list(defects or [])
+    if not rows:
+        return
+
+    case_ids = {d.test_case_id for d in rows if d.test_case_id}
+    run_ids = {d.test_run_id for d in rows if d.test_run_id}
+
+    case_seqs = (
+        dict(
+            db.query(models.TestCase.id, models.TestCase.project_seq)
+            .filter(models.TestCase.id.in_(case_ids))
+            .all()
+        )
+        if case_ids
+        else {}
+    )
+    run_seqs = (
+        dict(
+            db.query(models.TestRun.id, models.TestRun.project_seq)
+            .filter(models.TestRun.id.in_(run_ids))
+            .all()
+        )
+        if run_ids
+        else {}
+    )
+
+    for defect in rows:
+        defect.test_case_seq = case_seqs.get(defect.test_case_id)
+        defect.test_run_seq = run_seqs.get(defect.test_run_id)
+
+
 def _is_auto_project_defect_id(value: str, project_id: int) -> bool:
     return re.fullmatch(rf"P{project_id}-DEF-\d+", value.strip(), flags=re.IGNORECASE) is not None
 
@@ -1977,7 +2016,7 @@ def register_requirements_defects_plans_routes(app):
             if milestone.project_id != project_id:
                 raise HTTPException(status_code=400, detail="Milestone does not belong to this project")
 
-        return get_defects(
+        defects = get_defects(
             db,
             project_id=project_id,
             skip=skip,
@@ -1986,6 +2025,8 @@ def register_requirements_defects_plans_routes(app):
             status=status,
             milestone_id=milestone_id,
         )
+        _attach_link_seqs(db, defects)
+        return defects
 
     @app.get("/defects/{defect_id}", response_model=schemas.Defect)
     def read_defect(

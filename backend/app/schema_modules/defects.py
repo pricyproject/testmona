@@ -146,6 +146,11 @@ class DefectUpdate(BaseModel):
 class Defect(DefectBase):
     id: int
     project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
+    # Per-project sequences of the linked test case / test run, so the UI can
+    # build project-first links without a follow-up lookup per defect. Populated
+    # by the list route; None elsewhere.
+    test_case_seq: Optional[int] = None
+    test_run_seq: Optional[int] = None
     project_id: int
     reported_by: int
     external_last_sync: Optional[datetime] = None

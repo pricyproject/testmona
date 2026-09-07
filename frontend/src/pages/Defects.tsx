@@ -17,7 +17,7 @@ import { DefectComments } from '@/components/Defects/DefectComments';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAppName } from '@/hooks/useAppName';
 import {
   Dialog,
@@ -103,7 +103,29 @@ type PriorityColorOption = {
 const DEFECT_SEVERITY_OPTIONS = ['low', 'medium', 'high', 'critical'];
 const DEFECT_PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
 
+const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
+
 const isSafeHexColor = (value?: string): value is string => /^#[0-9a-f]{6}$/i.test(value || '');
+
+// Only http(s) links are ever followed. `external_issue_url` is free text that
+// older rows (and the pre-validation edit form) could carry a `javascript:` or
+// `data:` URL in, and opening one would execute in this origin.
+const isSafeExternalUrl = (value?: string | null): boolean => /^https?:\/\/\S+$/i.test(String(value || '').trim());
+
+const externalUrlOf = (defect: any): string | null => {
+  const raw = String(defect?.external_issue_url || defect?.jira_link || '').trim();
+  return isSafeExternalUrl(raw) ? raw : null;
+};
+
+// Timestamps arrive as ISO strings but can be null on legacy rows; an unparsable
+// value must sort last rather than poison the comparator with NaN.
+const timeOf = (value?: string | null): number => {
+  const parsed = new Date(String(value || '')).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
 const loadAllProjectTestCases = async (numericProjectId: number) => {
   const allTestCases: any[] = [];
@@ -280,17 +302,19 @@ function SummaryStat({
 
 export function Defects() {
   const navigate = useNavigate();
-  const { projectId, defectId: routeDefectId } = useParams();
+  const { projectId } = useParams();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { formatDate, formatDateTime } = useDateFormat();
   const formatSnapshotDate = (value?: string | null): string => (value ? formatDateTime(value) || '-' : '-');
-  const { canWrite } = usePermissions();
   const { appName } = useAppName(false);
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
-  
-  const numericProjectId = projectId ? parseInt(projectId) : null;
+
+  const numericProjectId = projectId && /^\d+$/.test(projectId) ? parseInt(projectId, 10) : null;
+  // Project-scoped, so a global viewer elevated to tester/manager in this
+  // project still gets the write affordances (and vice versa).
+  const { canWrite, canDelete, canManageProject } = useProjectPermissions(numericProjectId);
   const [defects, setDefects] = useState<any[]>([]);
 
   const defectsQuery = useDefectsList(numericProjectId, linkedMilestoneId, numericProjectId != null);
@@ -386,6 +410,8 @@ export function Defects() {
   const [correctingSnapshotIds, setCorrectingSnapshotIds] = useState<Set<number>>(new Set());
   const [selectedDefectIds, setSelectedDefectIds] = useState<number[]>([]);
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [defectToDelete, setDefectToDelete] = useState<any | null>(null);
+  const [isDeletingDefect, setIsDeletingDefect] = useState(false);
 
   const toggleDefectSelection = (defectId: number) => {
     setSelectedDefectIds((prev) =>
@@ -666,23 +692,6 @@ export function Defects() {
     fetchIntegrations();
   }, [fetchIntegrations]);
 
-  useEffect(() => {
-    if (!routeDefectId || defects.length === 0) return;
-
-    const targetDefect = defects.find((defect) =>
-      String(defect.id) === routeDefectId || String(defect.defect_id) === routeDefectId,
-    );
-    if (!targetDefect) return;
-
-    setSearchQuery(String(targetDefect.defect_id || targetDefect.title || routeDefectId));
-    setStatusFilter('all');
-    setSeverityFilter('all');
-    setPriorityFilter('all');
-    setCurrentPage(1);
-    setExpandedDefectIds((prev) => new Set(prev).add(targetDefect.id));
-    void loadDefectResultLinks(targetDefect.id);
-  }, [routeDefectId, defects]);
-
   // Auto-focus on title input when dialog opens
   useEffect(() => {
     if (isCreateDialogOpen && defectTitleInputRef.current) {
@@ -701,6 +710,17 @@ export function Defects() {
   useEffect(() => {
     setSelectedDefectIds([]);
   }, [projectId]);
+
+  // Same for defects that disappeared from the list (deleted elsewhere, or the
+  // milestone filter changed): keep the selection to what actually exists.
+  useEffect(() => {
+    if (defects.length === 0) return;
+    const liveIds = new Set(defects.map((defect) => defect.id));
+    setSelectedDefectIds((prev) => {
+      const next = prev.filter((id) => liveIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [defects]);
 
   // Detect a restorable draft so we can offer a "Discard draft" affordance even
   // before the dialog is opened.
@@ -889,9 +909,6 @@ export function Defects() {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
-  const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
-
   // Parse the search box once per keystroke into structured terms + key:value
   // filters so the per-row matcher stays cheap as the result set scales.
   const parsedSearchQuery = useMemo(() => parseDefectQuery(searchQuery), [searchQuery]);
@@ -958,52 +975,63 @@ export function Defects() {
     ];
   }, [defects, t]);
 
-  const filteredDefects = defects.filter((defect) => {
-    if (!defectMatchesQuery(defect, parsedSearchQuery)) return false;
-    if (statusFilter !== 'all' && String(defect.status) !== statusFilter) return false;
-    if (severityFilter !== 'all' && String(defect.severity) !== severityFilter) return false;
-    if (priorityFilter !== 'all' && String(defect.priority) !== priorityFilter) return false;
-    return true;
-  });
+  const filteredDefects = useMemo(
+    () =>
+      defects.filter((defect) => {
+        if (!defectMatchesQuery(defect, parsedSearchQuery)) return false;
+        if (statusFilter !== 'all' && normalize(defect.status) !== statusFilter) return false;
+        if (severityFilter !== 'all' && normalize(defect.severity) !== severityFilter) return false;
+        if (priorityFilter !== 'all' && normalize(defect.priority) !== priorityFilter) return false;
+        return true;
+      }),
+    [defects, parsedSearchQuery, statusFilter, severityFilter, priorityFilter],
+  );
 
-  const sortedDefects = [...filteredDefects].sort((a, b) => {
-    switch (sortMode) {
-      case 'oldest':
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      case 'severity_desc':
-        return (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0);
-      case 'priority_desc':
-        return (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0);
-      case 'title_asc':
-        return String(a.title || '').localeCompare(String(b.title || ''));
-      case 'updated_desc': {
-        const aT = new Date(a.updated_at || a.created_at).getTime();
-        const bT = new Date(b.updated_at || b.created_at).getTime();
-        return bT - aT;
-      }
-      case 'newest':
-      default:
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    }
-  });
+  const sortedDefects = useMemo(
+    () =>
+      [...filteredDefects].sort((a, b) => {
+        switch (sortMode) {
+          case 'oldest':
+            return timeOf(a.created_at) - timeOf(b.created_at);
+          case 'severity_desc':
+            return (SEVERITY_RANK[normalize(b.severity)] || 0) - (SEVERITY_RANK[normalize(a.severity)] || 0);
+          case 'priority_desc':
+            return (PRIORITY_RANK[normalize(b.priority)] || 0) - (PRIORITY_RANK[normalize(a.priority)] || 0);
+          case 'title_asc':
+            return String(a.title || '').localeCompare(String(b.title || ''), language);
+          case 'updated_desc':
+            return timeOf(b.updated_at || b.created_at) - timeOf(a.updated_at || a.created_at);
+          case 'newest':
+          default:
+            return timeOf(b.created_at) - timeOf(a.created_at);
+        }
+      }),
+    // SEVERITY_RANK/PRIORITY_RANK are module-level constants; `language` only
+    // affects the locale-aware title collation.
+    [filteredDefects, sortMode, language],
+  );
 
   const totalPages = Math.max(1, Math.ceil(sortedDefects.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const paginatedDefects = sortedDefects.slice(startIndex, startIndex + itemsPerPage);
 
-  const summary = defects.reduce(
-    (acc, defect) => {
-      const status = String(defect.status || '').toLowerCase();
-      const severity = String(defect.severity || '').toLowerCase();
-      if (status === 'open') acc.open += 1;
-      if (status === 'in_progress') acc.inProgress += 1;
-      if (status === 'fixed' || status === 'closed') acc.resolved += 1;
-      if (severity === 'critical') acc.critical += 1;
-      acc.total += 1;
-      return acc;
-    },
-    { total: 0, open: 0, inProgress: 0, resolved: 0, critical: 0 }
+  const summary = useMemo(
+    () =>
+      defects.reduce(
+        (acc, defect) => {
+          const status = normalize(defect.status);
+          const severity = normalize(defect.severity);
+          if (status === 'open') acc.open += 1;
+          if (status === 'in_progress') acc.inProgress += 1;
+          if (status === 'fixed' || status === 'closed') acc.resolved += 1;
+          if (severity === 'critical') acc.critical += 1;
+          acc.total += 1;
+          return acc;
+        },
+        { total: 0, open: 0, inProgress: 0, resolved: 0, critical: 0 },
+      ),
+    [defects],
   );
 
   // Safe, locale-aware date formatter — guards against missing or unparsable
@@ -1014,17 +1042,15 @@ export function Defects() {
   // status isn't one of the known lifecycle states (legacy/custom/empty values)
   // is collected into a trailing "Other" column so nothing silently disappears
   // from the board.
-  const boardColumns = (() => {
+  const boardColumns = useMemo(() => {
     const knownStatuses = new Set(BOARD_COLUMNS.map((column) => column.status));
     const columns = BOARD_COLUMNS.map((column) => ({
       key: column.status,
       dot: column.dot,
       isOther: false,
-      defects: sortedDefects.filter((defect) => String(defect.status || '').toLowerCase() === column.status),
+      defects: sortedDefects.filter((defect) => normalize(defect.status) === column.status),
     }));
-    const orphanDefects = sortedDefects.filter(
-      (defect) => !knownStatuses.has(String(defect.status || '').toLowerCase()),
-    );
+    const orphanDefects = sortedDefects.filter((defect) => !knownStatuses.has(normalize(defect.status)));
     if (orphanDefects.length > 0) {
       columns.push({
         key: 'other',
@@ -1034,7 +1060,7 @@ export function Defects() {
       });
     }
     return columns;
-  })();
+  }, [sortedDefects]);
 
   const hasActiveFilters = searchQuery.trim() !== ''
     || statusFilter !== 'all'
@@ -1240,12 +1266,23 @@ export function Defects() {
     }
   };
 
-  const handleDeleteDefect = async (defectId: number) => {
-    if (!confirm(t('confirmDeleteDefect'))) return;
+  const confirmDeleteDefect = async () => {
+    const target = defectToDelete;
+    if (!target) return;
 
+    setIsDeletingDefect(true);
     try {
-      await defectsAPI.delete(defectId);
-      setDefects(defects.filter(d => d.id !== defectId));
+      await defectsAPI.delete(target.id);
+      setDefects((prev) => prev.filter((d) => d.id !== target.id));
+      // A deleted id left in the selection would silently land in a later bulk
+      // edit's skipped_ids, and keeps the bulk toolbar showing a phantom count.
+      setSelectedDefectIds((prev) => prev.filter((id) => id !== target.id));
+      setExpandedDefectIds((prev) => {
+        const next = new Set(prev);
+        next.delete(target.id);
+        return next;
+      });
+      setDefectToDelete(null);
 
       toast({
         title: t('success'),
@@ -1258,29 +1295,26 @@ export function Defects() {
         description: getApiErrorMessage(error, t('failedToDeleteDefect')),
         variant: "destructive",
       });
+    } finally {
+      setIsDeletingDefect(false);
     }
   };
 
+  // Test cases and test runs live at project-first URLs keyed on their
+  // per-project sequence, so use the seq the API returns (falling back to the
+  // loaded catalog) rather than putting a global id in the path — that would
+  // silently open a different case.
   const handleLinkToTestCase = (defect: any) => {
-    if (defect.test_case_id && defect.test_run_id) {
-      // Navigate to the specific test execution for this test case
-      navigate(`/projects/${projectId}/test-runs/${defect.test_run_id}/test-cases/${defect.test_case_id}`);
-    } else if (defect.test_case_id) {
-      // If only test case ID, navigate to test case details
-      navigate(`/projects/${projectId}/test-cases/${defect.test_case_id}`);
-    } else {
-      // If no specific test case, navigate to test cases page
+    if (!defect.test_case_id) {
       navigate(`/projects/${projectId}/test-cases`);
+      return;
     }
-  };
-
-  const handleLinkToJira = (defect: any) => {
-    const externalLink = defect.external_issue_url || defect.jira_link;
-    if (externalLink) {
-      window.open(externalLink, '_blank', 'noopener,noreferrer');
+    const linkedTestCase = testCases.find((testCase) => testCase.id === defect.test_case_id);
+    const testCaseSeq = defect.test_case_seq ?? linkedTestCase?.project_seq ?? defect.test_case_id;
+    if (defect.test_run_id && defect.test_run_seq) {
+      navigate(`/projects/${projectId}/test-runs/${defect.test_run_seq}/test-cases/${testCaseSeq}`);
     } else {
-      // Navigate to Jira integration settings
-      navigate(`/projects/${projectId}/custom-fields?tab=jira`);
+      navigate(`/projects/${projectId}/test-cases/${testCaseSeq}`);
     }
   };
 
@@ -1416,7 +1450,16 @@ export function Defects() {
   };
 
   const handleViewInExternal = (externalUrl: string) => {
-    window.open(externalUrl, '_blank');
+    if (!isSafeExternalUrl(externalUrl)) {
+      toast({
+        title: t('validationError'),
+        description: t('externalIssueUrlInvalid'),
+        variant: 'destructive',
+      });
+      return;
+    }
+    // noopener/noreferrer: without them the tracker tab can navigate this one.
+    window.open(externalUrl, '_blank', 'noopener,noreferrer');
   };
 
   const handleAddIntegration = () => {
@@ -1701,11 +1744,13 @@ export function Defects() {
                             )}
                           </div>
                           <div className="flex gap-2">
-                            <Button 
-                              size="sm" 
+                            <Button
+                              size="sm"
                               variant="outline"
                               onClick={() => handleTestConnection(integration.id)}
                               disabled={isTestingConnection}
+                              aria-label={t('testConnection')}
+                              title={t('testConnection')}
                             >
                               {isTestingConnection ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1713,34 +1758,44 @@ export function Defects() {
                                 <CheckCircle2 className="h-4 w-4" />
                               )}
                             </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleEditIntegration(integration)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleDeleteIntegration(integration)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {canManageProject && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEditIntegration(integration)}
+                                  aria-label={t('edit')}
+                                  title={t('edit')}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleDeleteIntegration(integration)}
+                                  aria-label={t('delete')}
+                                  title={t('delete')}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </div>
                       </CardContent>
                     </Card>
                   ))
                 )}
-                <Button 
-                  className="w-full" 
-                  variant="outline"
-                  onClick={handleAddIntegration}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  {t('addIntegration')}
-                </Button>
+                {canManageProject && (
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={handleAddIntegration}
+                  >
+                    <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                    {t('addIntegration')}
+                  </Button>
+                )}
               </div>
             </DialogContent>
           </Dialog>
@@ -2178,7 +2233,7 @@ export function Defects() {
                 }}
               />
             )}
-            {selectedDefectIds.length > 0 && (
+            {canWrite && selectedDefectIds.length > 0 && (
               <>
                 <span className="text-sm text-gray-600 dark:text-gray-400">
                   {t('selectedCount', { count: String(selectedDefectIds.length) })}
@@ -2189,7 +2244,7 @@ export function Defects() {
                 </Button>
                 <Button variant="ghost" size="sm" onClick={clearDefectSelection}>
                   <X className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                  {t('cancel')}
+                  {t('defectsClearSelection')}
                 </Button>
               </>
             )}
@@ -2323,16 +2378,18 @@ export function Defects() {
                 <TableHeader>
                   <TableRow className="border-b border-gray-200 bg-gray-50/80 hover:bg-gray-50/80 dark:border-gray-800 dark:bg-gray-800/40 dark:hover:bg-gray-800/40 [&_th]:text-xs [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-gray-500 dark:[&_th]:text-gray-400">
                     <TableHead className="w-10">
-                      <Checkbox
-                        checked={paginatedDefects.length > 0 && paginatedDefects.every((d) => selectedDefectIds.includes(d.id))}
-                        onCheckedChange={(checked) => {
-                          const pageIds = paginatedDefects.map((d) => d.id);
-                          setSelectedDefectIds((prev) =>
-                            checked ? Array.from(new Set([...prev, ...pageIds])) : prev.filter((id) => !pageIds.includes(id)),
-                          );
-                        }}
-                        aria-label={t('selectDefect')}
-                      />
+                      {canWrite && (
+                        <Checkbox
+                          checked={paginatedDefects.length > 0 && paginatedDefects.every((d) => selectedDefectIds.includes(d.id))}
+                          onCheckedChange={(checked) => {
+                            const pageIds = paginatedDefects.map((d) => d.id);
+                            setSelectedDefectIds((prev) =>
+                              checked ? Array.from(new Set([...prev, ...pageIds])) : prev.filter((id) => !pageIds.includes(id)),
+                            );
+                          }}
+                          aria-label={t('defectsSelectAllOnPage')}
+                        />
+                      )}
                     </TableHead>
                     <TableHead>{t('defectId')}</TableHead>
                     <TableHead>{t('title')}</TableHead>
@@ -2346,15 +2403,17 @@ export function Defects() {
                 </TableHeader>
                 <TableBody>
                   {paginatedDefects.map((defect) => {
-                    const externalUrl = defect.external_issue_url || defect.jira_link;
+                    const externalUrl = externalUrlOf(defect);
                     return (
                       <TableRow key={defect.id} className="border-b border-gray-100 dark:border-gray-800">
                         <TableCell className="py-2">
-                          <Checkbox
-                            checked={selectedDefectIds.includes(defect.id)}
-                            onCheckedChange={() => toggleDefectSelection(defect.id)}
-                            aria-label={t('selectDefect')}
-                          />
+                          {canWrite && (
+                            <Checkbox
+                              checked={selectedDefectIds.includes(defect.id)}
+                              onCheckedChange={() => toggleDefectSelection(defect.id)}
+                              aria-label={t('selectDefect')}
+                            />
+                          )}
                         </TableCell>
                         <TableCell className="py-2">
                           <Link
@@ -2398,10 +2457,16 @@ export function Defects() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-52">
-                              <DropdownMenuItem onClick={() => handleEditDefect(defect)}>
-                                <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                {t('edit')}
+                              <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`)}>
+                                <FileText className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('defectsOpenDetail')}
                               </DropdownMenuItem>
+                              {canWrite && (
+                                <DropdownMenuItem onClick={() => handleEditDefect(defect)}>
+                                  <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                  {t('edit')}
+                                </DropdownMenuItem>
+                              )}
                               {defect.test_case_id && (
                                 <DropdownMenuItem onClick={() => handleLinkToTestCase(defect)}>
                                   <Link2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -2414,14 +2479,27 @@ export function Defects() {
                                   {t('defectsOpenInTracker')}
                                 </DropdownMenuItem>
                               )}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => handleDeleteDefect(defect.id)}
-                                className="text-red-600 focus:bg-red-50 focus:text-red-700 dark:text-red-400 dark:focus:bg-red-950/30"
-                              >
-                                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                {t('delete')}
-                              </DropdownMenuItem>
+                              {canWrite && (
+                                <DropdownMenuItem
+                                  onClick={() => handleOpenSyncDialog(defect.id)}
+                                  disabled={integrations.length === 0}
+                                >
+                                  <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                  {t('defectsSyncAction')}
+                                </DropdownMenuItem>
+                              )}
+                              {canDelete && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => setDefectToDelete(defect)}
+                                    className="text-red-600 focus:bg-red-50 focus:text-red-700 dark:text-red-400 dark:focus:bg-red-950/30"
+                                  >
+                                    <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                    {t('delete')}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -2478,8 +2556,8 @@ export function Defects() {
           paginatedDefects.map((defect) => {
             const isExpanded = expandedDefectIds.has(defect.id);
             const syncStatus = defect.sync_status || defect.external_sync_status;
-            const externalUrl = defect.external_issue_url || defect.jira_link;
-            const accentClass = SEVERITY_STRIPE[defect.severity] || 'bg-slate-300';
+            const externalUrl = externalUrlOf(defect);
+            const accentClass = SEVERITY_STRIPE[normalize(defect.severity)] || 'bg-slate-300';
             const linkedRequirement = defect.requirement_id
               ? requirements.find((requirement) => requirement.id === defect.requirement_id)
               : null;
@@ -2490,27 +2568,29 @@ export function Defects() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Checkbox
-                          checked={selectedDefectIds.includes(defect.id)}
-                          onCheckedChange={() => toggleDefectSelection(defect.id)}
-                          aria-label={t('selectDefect')}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                        {canWrite && (
+                          <Checkbox
+                            checked={selectedDefectIds.includes(defect.id)}
+                            onCheckedChange={() => toggleDefectSelection(defect.id)}
+                            aria-label={t('selectDefect')}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        )}
                         <Link
                           to={`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`}
                           className="font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
                         >
                           {defect.defect_id}
                         </Link>
-                        <Badge className={`${getStatusBadge(defect.status)} capitalize`}>{String(defect.status || '').replace('_', ' ')}</Badge>
-                        <Badge className={`${getSeverityBadge(defect.severity)} gap-1 capitalize`} title={`${t('defectSeverity')}: ${defect.severity}`}>
-                          <ShieldAlert className="h-3 w-3" />{defect.severity}
+                        <Badge className={getStatusBadge(defect.status)}>{getStatusLabel(defect.status)}</Badge>
+                        <Badge className={`${getSeverityBadge(defect.severity)} gap-1`} title={`${t('defectSeverity')}: ${getTriageLabel(defect.severity)}`}>
+                          <ShieldAlert className="h-3 w-3" />{getTriageLabel(defect.severity)}
                         </Badge>
-                        <Badge className={`${getPriorityBadge(defect.priority)} gap-1 capitalize`} title={`${t('defectPriority')}: ${defect.priority}`}>
-                          <Flag className="h-3 w-3" />{defect.priority}
+                        <Badge className={`${getPriorityBadge(defect.priority)} gap-1`} title={`${t('defectPriority')}: ${getTriageLabel(defect.priority)}`}>
+                          <Flag className="h-3 w-3" />{getTriageLabel(defect.priority)}
                         </Badge>
                         {syncStatus && syncStatus !== 'not_synced' && (
-                          <Badge className={`${getSyncStatusBadge(syncStatus)} capitalize`}>
+                          <Badge className={getSyncStatusBadge(syncStatus)}>
                             {getSyncStatusLabel(syncStatus)}
                           </Badge>
                         )}
@@ -2553,7 +2633,7 @@ export function Defects() {
                         )}
                         {defect.requirement_id && (
                           <Link
-                            to={`/projects/${projectId}/requirements/${defect.requirement_id}`}
+                            to={`/projects/${projectId}/requirements/${linkedRequirement?.project_seq ?? defect.requirement_id}`}
                             className="inline-flex items-center gap-1 text-emerald-700 hover:underline dark:text-emerald-300"
                           >
                             <FileText className="h-3 w-3" aria-hidden="true" />
@@ -2590,15 +2670,17 @@ export function Defects() {
                           {isExpanded ? t('defectsHideDetails') : t('defectsShowDetails')}
                         </span>
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditDefect(defect)}
-                        aria-label={t('edit')}
-                        className="h-8 w-8 p-0"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
+                      {canWrite && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditDefect(defect)}
+                          aria-label={t('edit')}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -2611,10 +2693,16 @@ export function Defects() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-52">
-                          <DropdownMenuItem onClick={() => handleEditDefect(defect)}>
-                            <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                            {t('edit')}
+                          <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/defects/${defect.project_seq ?? defect.id}`)}>
+                            <FileText className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                            {t('defectsOpenDetail')}
                           </DropdownMenuItem>
+                          {canWrite && (
+                            <DropdownMenuItem onClick={() => handleEditDefect(defect)}>
+                              <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                              {t('edit')}
+                            </DropdownMenuItem>
+                          )}
                           {defect.test_case_id && (
                             <DropdownMenuItem onClick={() => handleLinkToTestCase(defect)}>
                               <Link2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
@@ -2627,21 +2715,27 @@ export function Defects() {
                               {t('defectsOpenInTracker')}
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem
-                            onClick={() => handleOpenSyncDialog(defect.id)}
-                            disabled={integrations.length === 0}
-                          >
-                            <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                            {t('defectsSyncAction')}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleDeleteDefect(defect.id)}
-                            className="text-red-600 focus:bg-red-50 focus:text-red-700 dark:text-red-400 dark:focus:bg-red-950/30"
-                          >
-                            <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                            {t('delete')}
-                          </DropdownMenuItem>
+                          {canWrite && (
+                            <DropdownMenuItem
+                              onClick={() => handleOpenSyncDialog(defect.id)}
+                              disabled={integrations.length === 0}
+                            >
+                              <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                              {t('defectsSyncAction')}
+                            </DropdownMenuItem>
+                          )}
+                          {canDelete && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setDefectToDelete(defect)}
+                                className="text-red-600 focus:bg-red-50 focus:text-red-700 dark:text-red-400 dark:focus:bg-red-950/30"
+                              >
+                                <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                                {t('delete')}
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -2710,30 +2804,32 @@ export function Defects() {
                                     </p>
                                   </div>
 
-                                  <div className="flex flex-wrap gap-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleCorrectDefectSnapshot(defect.id, link)}
-                                      disabled={isCorrecting}
-                                      className="h-8 gap-1 text-xs"
-                                    >
-                                      {isCorrecting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                                      {t('correctSnapshot')}
-                                    </Button>
-                                    {failingStep && (
+                                  {canWrite && (
+                                    <div className="flex flex-wrap gap-2">
                                       <Button
-                                        variant="ghost"
+                                        variant="outline"
                                         size="sm"
-                                        onClick={() => handleCorrectDefectSnapshot(defect.id, link, true)}
+                                        onClick={() => handleCorrectDefectSnapshot(defect.id, link)}
                                         disabled={isCorrecting}
                                         className="h-8 gap-1 text-xs"
                                       >
-                                        <X className="h-3 w-3" />
-                                        {t('clearFailingStepSnapshot')}
+                                        {isCorrecting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                                        {t('correctSnapshot')}
                                       </Button>
-                                    )}
-                                  </div>
+                                      {failingStep && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => handleCorrectDefectSnapshot(defect.id, link, true)}
+                                          disabled={isCorrecting}
+                                          className="h-8 gap-1 text-xs"
+                                        >
+                                          <X className="h-3 w-3" />
+                                          {t('clearFailingStepSnapshot')}
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {failingStep && (
@@ -3261,6 +3357,41 @@ export function Defects() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!defectToDelete}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingDefect) setDefectToDelete(null);
+        }}
+      >
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('confirmDeleteDefectTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('confirmDeleteDefectDesc', {
+                id: defectToDelete?.defect_id || `#${defectToDelete?.id ?? ''}`,
+                title: defectToDelete?.title || '',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingDefect}>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                // Keep the dialog mounted until the request settles so the
+                // pending state is visible and a failure doesn't close it.
+                event.preventDefault();
+                void confirmDeleteDefect();
+              }}
+              disabled={isDeletingDefect}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeletingDefect && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!integrationToDelete} onOpenChange={(open) => !open && setIntegrationToDelete(null)}>
         <AlertDialogContent isRTL={isRTL}>
