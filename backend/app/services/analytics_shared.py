@@ -114,7 +114,14 @@ def build_coverage_report(db: Session, project_id: int, generated: bool = False)
     total_test_cases = len(test_cases)
 
     test_run_ids = _unique_ids(row.id for row in db.query(TestRun.id).filter(TestRun.project_id == project_id).all())
-    test_results = db.query(TestResult).filter(TestResult.test_run_id.in_(test_run_ids)).all() if test_run_ids else []
+    # Only live (non-deleted) cases: ghost results must not inflate coverage.
+    test_results = (
+        db.query(TestResult)
+        .filter(TestResult.test_run_id.in_(test_run_ids), TestResult.test_case_id.in_(test_case_ids))
+        .all()
+        if test_run_ids and test_case_ids
+        else []
+    )
     latest_by_test_case: dict[int, Any] = {}
     for result in test_results:
         test_case_id = getattr(result, "test_case_id", None)

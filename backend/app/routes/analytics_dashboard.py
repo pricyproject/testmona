@@ -273,10 +273,15 @@ def _metrics_for_period(db, project_id, start_at, end_at):
         models.TestSuite.project_id == project_id,
         models.TestCase.is_deleted == False,
     ).count()
-    results = db.query(models.TestResult).join(models.TestRun).filter(
+    results = db.query(models.TestResult).join(models.TestRun).join(
+        models.TestCase, models.TestCase.id == models.TestResult.test_case_id
+    ).filter(
         models.TestRun.project_id == project_id,
         models.TestResult.executed_at >= start_at,
         models.TestResult.executed_at < end_at,
+        # Soft-deleted cases are ghosts: keep coverage/member stats consistent
+        # with the execution views.
+        (models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False)),
     ).all()
     executed_statuses = {"passed", "failed", "blocked", "skipped"}
     statuses = [normalize_result_status(result.status) for result in results]
@@ -318,6 +323,11 @@ def _metrics_for_period(db, project_id, start_at, end_at):
         models.Defect.created_at >= start_at,
         models.Defect.created_at < end_at,
     ).count()
+    # Density is a stock metric (all defects / all cases), matching the KPI
+    # baseline; defects_found above stays the in-period flow count.
+    cumulative_defects = db.query(models.Defect).filter(
+        models.Defect.project_id == project_id,
+    ).count()
     period_days = max((end_at - start_at).total_seconds() / 86400, 1)
     return {
         "coverage": round((executed_cases / total_test_cases * 100) if total_test_cases else 0, 1),
@@ -325,7 +335,7 @@ def _metrics_for_period(db, project_id, start_at, end_at):
         "failure_rate": round((failed / total_tests * 100) if total_tests else 0, 1),
         "flakiness": round((flaky_tests / len(status_by_case) * 100) if status_by_case else 0, 1),
         "cycle_time": round((sum(cycle_times) / len(cycle_times)) if cycle_times else 0, 2),
-        "defect_density": round((defects_found / total_test_cases) if total_test_cases else 0, 2),
+        "defect_density": round((cumulative_defects / total_test_cases) if total_test_cases else 0, 2),
         "total_tests": total_tests,
         "passed_tests": passed,
         "failed_tests": failed,
@@ -773,11 +783,14 @@ def register_analytics_dashboard_routes(app):
             func.date(TestResult.executed_at).label("date"),
             TestResult.status.label("status"),
             func.count(TestResult.id).label("count"),
-        ).join(TestRun).filter(
+        ).join(TestRun).join(
+            TestCase, TestCase.id == TestResult.test_case_id
+        ).filter(
             TestRun.project_id == project_id,
             TestResult.executed_at >= start_dt,
             TestResult.executed_at <= end_dt,
             TestResult.executed_at.isnot(None),
+            (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
         ).group_by(func.date(TestResult.executed_at), TestResult.status).all()
 
         added_rows = db.query(

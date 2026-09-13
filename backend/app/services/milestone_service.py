@@ -112,7 +112,15 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
 
     results: List[TestResult] = []
     if test_run_ids:
-        results = db.query(TestResult).filter(TestResult.test_run_id.in_(test_run_ids)).all()
+        results = (
+            db.query(TestResult)
+            .join(TestCase, TestCase.id == TestResult.test_case_id)
+            .filter(TestResult.test_run_id.in_(test_run_ids))
+            # Soft-deleted cases are ghosts: exclude them so progress, counts
+            # and pass rate match the execution views.
+            .filter((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)))
+            .all()
+        )
 
     total_results = len(results)
     passed_results = len([result for result in results if _normalize_status(result.status) in PASS_RESULT_STATUSES])

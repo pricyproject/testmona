@@ -176,8 +176,13 @@ def _attach_test_run_progress(db: Session, test_runs: List[TestRun]) -> List[Tes
         TestResult.test_run_id,
         TestResult.status,
         func.count(TestResult.id),
+    ).join(
+        TestCase, TestCase.id == TestResult.test_case_id
     ).filter(
-        TestResult.test_run_id.in_(run_ids)
+        TestResult.test_run_id.in_(run_ids),
+        # Match get_test_results: results of soft-deleted cases are ghosts and
+        # must not inflate run totals/progress.
+        (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
     ).group_by(
         TestResult.test_run_id,
         TestResult.status,

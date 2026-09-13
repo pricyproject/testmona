@@ -1084,9 +1084,13 @@ def calculate_project_kpis(db: Session, project_id: int, time_period: str = "7d"
         TestCase.is_deleted == False,
     ).count()
 
-    current_results = db.query(TestResult).join(TestRun).filter(
+    current_results = db.query(TestResult).join(TestRun).join(
+        TestCase, TestCase.id == TestResult.test_case_id
+    ).filter(
         TestRun.project_id == project_id,
         TestResult.executed_at >= current_start_date,
+        # Ghost results of soft-deleted cases must not inflate KPIs.
+        (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
     ).all()
 
     current_statuses = [_normalized_result_status(result.status) for result in current_results]
@@ -1170,10 +1174,13 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
     end_date = datetime.now() - timedelta(days=days)
     
     # Get test results from previous period
-    previous_results = db.query(TestResult).join(TestRun).filter(
+    previous_results = db.query(TestResult).join(TestRun).join(
+        TestCase, TestCase.id == TestResult.test_case_id
+    ).filter(
         TestRun.project_id == project_id,
         TestResult.executed_at >= start_date,
-        TestResult.executed_at < end_date
+        TestResult.executed_at < end_date,
+        (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
     ).all()
     
     # Calculate previous period metrics
@@ -1255,9 +1262,12 @@ def generate_dashboard_analytics(db: Session, project_id: int, time_period: str 
     ).count()
     
     # Get tests executed today
-    tests_executed_today = db.query(TestResult).join(TestRun).filter(
+    tests_executed_today = db.query(TestResult).join(TestRun).join(
+        TestCase, TestCase.id == TestResult.test_case_id
+    ).filter(
         TestRun.project_id == project_id,
-        TestResult.executed_at >= today_start
+        TestResult.executed_at >= today_start,
+        (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
     ).count()
     
     # Get defects logged today from the defects table (actual defects, not failed runs)
