@@ -70,8 +70,9 @@ _MAX_ACTUAL_RESULT_CHARS = 8000
 
 # Shared tokenizer for splitting reference / name strings into comparable
 # tokens. Reused on both indexing and matching paths so a reference like
-# ``REQ-001:auth.login`` indexes and matches the same way.
-_TOKEN_SPLIT_RE = re.compile(r"[\s,;|.:]+")
+# ``REQ-001:auth.login`` indexes and matches the same way. Brackets/parens
+# included so ``(AUTH-123)`` / ``[AUTH-123]`` match reference ``AUTH-123``.
+_TOKEN_SPLIT_RE = re.compile(r"[\s,;|.:()\[\]{}]+")
 
 _TC_TOKEN_RE = re.compile(r"\[?TC[-_]?(\d+)\]?", re.IGNORECASE)
 _PROPERTY_KEYS = {"tc_id", "tcid", "test_case_id", "testcase_id", "case_id", "tms_id"}
@@ -266,21 +267,16 @@ def _parse_junit_case(case_elem) -> ParsedResult:
 
 
 def _extract_junit_property_case_id(case_elem) -> Optional[int]:
-    properties = next(
-        (child for child in case_elem if _strip_ns(child.tag) == "properties"),
-        None,
-    )
-    if properties is None:
-        return None
-    for prop in properties:
-        if _strip_ns(prop.tag) != "property":
-            continue
-        key = (prop.get("name") or "").strip().lower()
-        if key in _PROPERTY_KEYS:
-            value = (prop.get("value") or "").strip()
-            extracted = _coerce_case_id(value)
-            if extracted is not None:
-                return extracted
+    for properties in [c for c in case_elem if _strip_ns(c.tag) == "properties"]:
+        for prop in properties:
+            if _strip_ns(prop.tag) != "property":
+                continue
+            key = (prop.get("name") or "").strip().lower()
+            if key in _PROPERTY_KEYS:
+                value = (prop.get("value") or "").strip()
+                extracted = _coerce_case_id(value)
+                if extracted is not None:
+                    return extracted
     return None
 
 
@@ -321,11 +317,7 @@ def _parse_ctrf(content: bytes) -> List[ParsedResult]:
 
         extra = entry.get("extra") if isinstance(entry.get("extra"), dict) else {}
         explicit_case_id = _coerce_case_id(
-            extra.get("tcId")
-            or extra.get("tc_id")
-            or extra.get("test_case_id")
-            or extra.get("caseId")
-            or entry.get("tcId")
+            _first_present(extra, entry, ("tcId", "tc_id", "tcid", "test_case_id", "testcase_id", "case_id", "caseId", "tms_id", "tmsId"))
         )
 
         # CTRF ``start`` is an epoch-millisecond timestamp. Convert it so the
@@ -344,7 +336,7 @@ def _parse_ctrf(content: bytes) -> List[ParsedResult]:
             status=status,
             duration_seconds=duration_seconds,
             message=(entry.get("message") or None),
-            output=(entry.get("trace") or entry.get("stdout") or None),
+            output=_join_outputs(entry.get("trace"), entry.get("stdout"), entry.get("stderr")),
             explicit_case_id=explicit_case_id,
             raw_status=raw_status,
             started_at=started_at,
@@ -376,6 +368,30 @@ def _coerce_case_id(value) -> Optional[int]:
             return None
         return extracted if extracted > 0 else None
     return None
+
+
+def _first_present(first: dict, second: dict, keys: tuple) -> Optional[object]:
+    for d in (first, second):
+        if not isinstance(d, dict):
+            continue
+        for key in keys:
+            value = d.get(key)
+            if value is not None and str(value).strip() != "":
+                return value
+    return None
+
+
+def _join_outputs(*parts) -> Optional[str]:
+    texts = [str(p).strip() for p in parts if p and str(p).strip()]
+    return "\n\n".join(texts) if texts else None
+
+
+def _strip_tc_token(text: Optional[str]) -> str:
+    """Remove a ``[TC-123]``-style token so title fallback can match cleanly."""
+    if not text:
+        return ""
+    cleaned = _TC_TOKEN_RE.sub("", text)
+    return re.sub(r"\s+", " ", cleaned).strip().lower()
 
 
 def _strip_ns(tag: str) -> str:
@@ -468,7 +484,8 @@ def apply_results(
 
         # Only the first outcome per case_id actually writes; subsequent
         # records reuse the same id/action with an "aggregated" note so the
-        # caller knows multiple rows collapsed.
+        # caller knows multiple rows collapsed. Each input record keeps its
+        # own parsed name/status — only the id/action are shared.
         if case_id in written_for_case:
             outcome.action = written_for_case[case_id]
             outcome.test_result_id = written_result_ids.get(case_id)
@@ -477,18 +494,10 @@ def apply_results(
                 f"{aggregate_counts.get(case_id, 1)} records for this case)"
             )
             summary.results.append(outcome)
-            # Don't double-count matched/created/updated.
+            summary.matched += 1
             continue
 
         winning = aggregated_by_case[case_id]
-        # The canonical row for this case_id should reflect what was actually
-        # written to the DB, not the first CI record we happened to see.
-        if outcome.parsed is not winning:
-            outcome = MatchOutcome(
-                parsed=winning,
-                test_case_id=case_id,
-                test_case_title=outcome.test_case_title,
-            )
         if existing is None:
             db_result = models.TestResult(
                 test_run_id=test_run.id,
@@ -515,7 +524,8 @@ def apply_results(
             existing.status = winning.status
             existing.actual_result = _build_actual_result(winning)
             existing.comments = _build_comments(winning)
-            existing.execution_time = winning.duration_seconds
+            if winning.duration_seconds is not None:
+                existing.execution_time = winning.duration_seconds
             if winning.started_at is not None:
                 existing.execution_started_at = winning.started_at
             existing.executed_at = now
@@ -654,18 +664,22 @@ def _resolve_case_id(
                 score = 3 if case.id in existing_case_ids else 1
                 candidates.append((case.id, score))
 
-    # 4. Title exact match.
+    # 4. Title exact match. Fall back to the name with any [TC-id] token
+    # stripped, so "login works [TC-999]" still matches case "login works"
+    # when the id itself didn't resolve.
+    seen_keys: set[str] = set()
     for haystack in (record.name, record.full_name):
-        key = (haystack or "").strip().lower()
-        if not key:
-            continue
-        if key in case_index["ambiguous_titles"]:
-            ambiguous_hit = ambiguous_hit or f"title '{key}' matches multiple cases"
-            continue
-        case = case_index["by_title"].get(key)
-        if case:
-            score = 3 if case.id in existing_case_ids else 1
-            candidates.append((case.id, score))
+        for key in {(haystack or "").strip().lower(), _strip_tc_token(haystack)}:
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            if key in case_index["ambiguous_titles"]:
+                ambiguous_hit = ambiguous_hit or f"title '{key}' matches multiple cases"
+                continue
+            case = case_index["by_title"].get(key)
+            if case:
+                score = 3 if case.id in existing_case_ids else 1
+                candidates.append((case.id, score))
 
     if not candidates:
         return None, ambiguous_hit
