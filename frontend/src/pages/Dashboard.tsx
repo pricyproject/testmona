@@ -9,6 +9,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { auditAPI, analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useProjectStore } from '@/stores/projectStore';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { AuditAction, AuditTrail, EntityType } from '@/types';
 
 // Calm, cohesive icon-chip tones shared across stat cards and quick actions.
@@ -205,6 +206,7 @@ export function Dashboard() {
   const { formatDateTime } = useDateFormat();
   const navigate = useNavigate();
   const { selectedProject } = useProjectStore();
+  const { canWrite } = useProjectPermissions(selectedProject?.id ?? null);
   const [recentActivities, setRecentActivities] = useState<AuditTrail[]>([]);
   const [dashboardStats, setDashboardStats] = useState<DashboardStatistics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -442,13 +444,14 @@ export function Dashboard() {
     },
   ];
 
-  const quickActions: { title: string; description: string; icon: LucideIcon; tone: Tone; onClick: () => void }[] = [
+  const allQuickActions: { title: string; description: string; icon: LucideIcon; tone: Tone; onClick: () => void; write: boolean }[] = [
     {
       title: t('createTestCase'),
       description: t('addNewTestCase'),
       icon: FileText,
       tone: 'blue',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects'),
+      write: true,
     },
     {
       title: t('startTestRun'),
@@ -456,6 +459,7 @@ export function Dashboard() {
       icon: PlayCircle,
       tone: 'emerald',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects'),
+      write: true,
     },
     {
       title: t('reportDefect'),
@@ -463,6 +467,7 @@ export function Dashboard() {
       icon: Bug,
       tone: 'rose',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
+      write: true,
     },
     {
       title: t('viewReports'),
@@ -470,8 +475,10 @@ export function Dashboard() {
       icon: FileCheck,
       tone: 'violet',
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/reports` : '/projects'),
+      write: false,
     },
   ];
+  const quickActions = allQuickActions.filter((action) => canWrite || !action.write);
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
