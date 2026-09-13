@@ -57,7 +57,9 @@ def register_resolver_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         if entity == "test-cases":
-            # TestCase has no project_id column — scope via its suite.
+            # TestCase.project_id is denormalised from its suite, but scope via
+            # the suite join anyway so legacy rows with a NULL denormalised
+            # value still resolve.
             base = (
                 db.query(models.TestCase.id, models.TestCase.project_seq)
                 .join(models.TestSuite, models.TestCase.test_suite_id == models.TestSuite.id)
