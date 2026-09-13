@@ -26,6 +26,7 @@ import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Spark
 import { ToastAction } from '@/components/ui/toast';
 import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { loadProjectParameters } from '@/utils/parameters';
 import { CustomFieldDefinition } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
@@ -67,6 +68,7 @@ export function TestCaseEdit() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   // The URL carries the per-project sequence; resolve it to the global test-case id.
   const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
+  const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
   const navigate = useNavigate();
   const { setSelectedProject, projects } = useProjectStore();
   const { t, isRTL, language } = useTranslation();
@@ -975,6 +977,7 @@ export function TestCaseEdit() {
   };
 
   const handleSave = async () => {
+    if (!canWrite) return;
     // Write against the resolved global id, never the raw URL param: that param is
     // the per-project sequence, so PUTting to it would overwrite whichever test case
     // happens to own that global id.
@@ -1113,7 +1116,7 @@ export function TestCaseEdit() {
     );
   }
 
-  const aiActionsDisabled = loadingAIStatus || aiStatus?.available === false;
+  const aiActionsDisabled = loadingAIStatus || aiStatus?.available === false || !canWrite;
 
   return (
     <div className="container mx-auto p-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -1597,7 +1600,7 @@ export function TestCaseEdit() {
                   <div key={step.step_number} className="border rounded-lg p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="font-medium">{t('stepNumber', { number: step.step_number })}</h4>
-                      {testSteps.length > 1 && (
+                      {testSteps.length > 1 && canWrite && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -1647,6 +1650,7 @@ export function TestCaseEdit() {
                     </div>
                   </div>
                 ))}
+                {canWrite && (
                 <Button
                   type="button"
                   variant="outline"
@@ -1656,6 +1660,7 @@ export function TestCaseEdit() {
                   <Plus className={`h-4 w-4 ${isRTL ? 'ml-2 mr-0' : 'mr-2'}`} />
                   {t('addStep')}
                 </Button>
+                )}
               </div>
             )}
           </div>
@@ -1678,6 +1683,7 @@ export function TestCaseEdit() {
             <Button type="button" variant="outline" onClick={requestNavigateBack}>
               {t('cancel')}
             </Button>
+            {canWrite && (
             <Button
               onClick={handleSave}
               disabled={saving || formData.title.trim().length === 0 || formData.test_suite_id === null}
@@ -1694,6 +1700,7 @@ export function TestCaseEdit() {
                 </>
               )}
             </Button>
+            )}
           </div>
         </CardContent>
       </Card>

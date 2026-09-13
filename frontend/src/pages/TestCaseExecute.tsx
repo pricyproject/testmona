@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { testCasesAPI, testResultsAPI, testRunsAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 
 type CandidateRun = {
   id: number;
@@ -24,6 +25,7 @@ export function TestCaseExecute() {
   const { id, projectId } = useParams<{ id: string; projectId?: string }>();
   // The URL carries the per-project sequence; resolve it to the global test-case id.
   const { id: resolvedTcId, loading: tcIdLoading } = useResolvedEntityId(projectId, 'test-cases', id);
+  const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
   const navigate = useNavigate();
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
@@ -141,6 +143,7 @@ export function TestCaseExecute() {
   };
 
   const handleStartInSelectedRun = async () => {
+    if (!canWrite) return;
     if (!selectedRunId) {
       toast({
         title: t('warning'),
@@ -167,6 +170,7 @@ export function TestCaseExecute() {
   };
 
   const handleCreateRunAndStart = async () => {
+    if (!canWrite) return;
     if (!resolvedProjectId || !id || !testCase) return;
 
     const trimmedRunName = newRunName.trim();
@@ -273,10 +277,12 @@ export function TestCaseExecute() {
                 </Select>
               </div>
 
+              {canWrite && (
               <Button onClick={handleStartInSelectedRun} disabled={starting || !selectedRunId}>
                 <Play className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                 {starting ? t('startingExecution') : t('startInSelectedRun')}
               </Button>
+              )}
 
               {selectedRun?.hasCase && (
                 <p className="text-xs text-gray-600 dark:text-gray-400">
@@ -304,10 +310,12 @@ export function TestCaseExecute() {
             />
           </div>
 
+          {canWrite && (
           <Button onClick={handleCreateRunAndStart} disabled={creating}>
             <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             {creating ? t('creatingAndStarting') : t('createRunAndStart')}
           </Button>
+          )}
         </CardContent>
       </Card>
     </div>

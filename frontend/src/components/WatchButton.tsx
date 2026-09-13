@@ -3,6 +3,7 @@ import { Bell, BellOff, BellRing, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { usePermissions } from '@/hooks/usePermissions';
 import { watchAPI } from '@/lib/api';
 import type { WatchEntityType } from '@/types';
 
@@ -22,6 +23,7 @@ interface Props {
 export function WatchButton({ entityType, entityId, size = 'sm' }: Props) {
   const { t, isRTL } = useTranslation();
   const { toast } = useToast();
+  const { canWrite } = usePermissions();
   const [watching, setWatching] = useState(false);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -62,6 +64,9 @@ export function WatchButton({ entityType, entityId, size = 'sm' }: Props) {
       setSaving(false);
     }
   };
+
+  // Viewers are read-only server-side (watch POST 403s), so don't render the toggle for them.
+  if (!canWrite) return null;
 
   const Icon = saving ? Loader2 : watching ? BellRing : Bell;
   const iconCls = `h-4 w-4 ${saving ? 'animate-spin' : ''} ${size === 'sm' ? (isRTL ? 'ml-2' : 'mr-2') : ''}`;
