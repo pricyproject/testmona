@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -210,6 +211,7 @@ const extractSourceDocument = (rawDescription?: string | null): SourceDoc | null
 
 export function RequirementDetail() {
   const { projectId, requirementId } = useParams<{ projectId: string; requirementId: string }>();
+  const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
   const [searchParams] = useSearchParams();
   // Watch notifications deep-link here with ?compare=1 to open the version
   // history straight into diff mode and scroll the reader to it.
@@ -715,6 +717,7 @@ export function RequirementDetail() {
   };
 
   const handleUpdateRequirement = async () => {
+    if (!canWrite) return;
     if (!requirement) return;
     if (!editForm.title.trim()) {
       toast({ title: t('error'), description: t('fieldRequired', { field: t('title') }), variant: 'destructive' });
@@ -752,6 +755,7 @@ export function RequirementDetail() {
   };
 
   const handleBulkLink = async (testCaseIds: number[]): Promise<boolean> => {
+    if (!canWrite) return false;
     if (!requirement || testCaseIds.length === 0) return false;
     setBulkUpdating(true);
     try {
@@ -776,6 +780,7 @@ export function RequirementDetail() {
   };
 
   const handleBulkUnlink = async (testCaseIds: number[]) => {
+    if (!canWrite) return;
     if (!requirement || testCaseIds.length === 0) return;
     setBulkUpdating(true);
     try {
@@ -813,6 +818,7 @@ export function RequirementDetail() {
   };
 
   const handleCreateAndLinkTestCase = async () => {
+    if (!canWrite) return;
     if (!requirement) return;
     if (!newTestCaseForm.title.trim() || !newTestCaseForm.test_suite_id) {
       toast({
@@ -989,6 +995,7 @@ export function RequirementDetail() {
   };
 
   const handleGenerateRequirementTestCases = async () => {
+    if (!canWrite) return;
     if (!requirement) return;
     if (!testSuites.length) {
       toast({
@@ -1040,6 +1047,7 @@ export function RequirementDetail() {
   };
 
   const handleCreateSelectedAIDrafts = async () => {
+    if (!canWrite) return;
     if (!requirement) return;
     const selectedEntries = aiDrafts
       .map((draft, index) => ({ draft, index }))
@@ -1182,14 +1190,18 @@ export function RequirementDetail() {
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               <WatchButton entityType="requirement" entityId={requirement.id} />
+              {canWrite && (
               <Button type="button" size="sm" variant="outline" onClick={() => setAiDialogOpen(true)}>
                 <Wand2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                 {t('generateTestCases')}
               </Button>
+              )}
+              {canWrite && (
               <Button type="button" size="sm" onClick={openEditDialog}>
                 <Pencil className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                 {t('edit')}
               </Button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" variant="outline" size="sm">
@@ -1330,10 +1342,12 @@ export function RequirementDetail() {
                       {t('showingLinkedTestCases', { shown: Math.min(visibleLinkedTestCases.length, linkedTestCasesTotal), total: linkedTestCasesTotal })}
                     </p>
                   </div>
+                  {canWrite && (
                   <Button type="button" variant="outline" size="sm" onClick={() => setCreateDialogOpen(true)}>
                     <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                     {t('createAndLinkTestCase')}
                   </Button>
+                  )}
                 </div>
 
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
@@ -1383,6 +1397,7 @@ export function RequirementDetail() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {canWrite && (
                     <Button
                       type="button"
                       variant="outline"
@@ -1398,6 +1413,7 @@ export function RequirementDetail() {
                       <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                       {t('linkExistingTestCases')}
                     </Button>
+                    )}
                   </div>
                 </div>
 
@@ -1477,7 +1493,7 @@ export function RequirementDetail() {
                                 <DropdownMenuItem
                                   className="text-rose-600 focus:bg-rose-50 focus:text-rose-700 dark:text-rose-300 dark:focus:bg-rose-950/30"
                                   onClick={() => handleBulkUnlink([testCase.id])}
-                                  disabled={bulkUpdating}
+                                  disabled={bulkUpdating || !canWrite}
                                 >
                                   <X className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {bulkUpdating ? t('removing') : t('remove')}
@@ -1739,7 +1755,7 @@ export function RequirementDetail() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" onClick={handleGenerateRequirementTestCases} disabled={generatingAI || !testSuites.length || loadingAIStatus || aiStatus?.available === false}>
+                <Button type="button" onClick={handleGenerateRequirementTestCases} disabled={generatingAI || !testSuites.length || loadingAIStatus || aiStatus?.available === false || !canWrite}>
                   {generatingAI ? <Loader2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4 animate-spin`} /> : <Wand2 className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />}
                   {generatingAI ? t('generating') : t('generateDrafts')}
                 </Button>
@@ -2062,7 +2078,7 @@ export function RequirementDetail() {
                   const ok = await handleBulkLink(selectedAvailableTestCaseIds);
                   if (ok) setLinkDialogOpen(false);
                 }}
-                disabled={selectedAvailableTestCaseIds.length === 0 || bulkUpdating}
+                disabled={selectedAvailableTestCaseIds.length === 0 || bulkUpdating || !canWrite}
               >
                 {bulkUpdating && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
                 {t('linkSelected', { count: selectedAvailableTestCaseIds.length })}
@@ -2173,7 +2189,7 @@ export function RequirementDetail() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCreateDialogOpen(false)}>{t('cancel')}</Button>
-              <Button type="button" onClick={handleCreateAndLinkTestCase} disabled={creatingTestCase || !testSuites.length}>
+              <Button type="button" onClick={handleCreateAndLinkTestCase} disabled={creatingTestCase || !testSuites.length || !canWrite}>
                 {creatingTestCase ? t('saving') : t('createAndLinkTestCase')}
               </Button>
             </DialogFooter>
@@ -2327,7 +2343,7 @@ export function RequirementDetail() {
               <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={savingRequirement}>
                 {t('cancel')}
               </Button>
-              <Button type="button" onClick={handleUpdateRequirement} disabled={!canSaveRequirement}>
+              <Button type="button" onClick={handleUpdateRequirement} disabled={!canSaveRequirement || !canWrite}>
                 {savingRequirement ? t('saving') : t('updateRequirement')}
               </Button>
             </DialogFooter>

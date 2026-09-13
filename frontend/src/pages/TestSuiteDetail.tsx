@@ -53,6 +53,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { sectionsAPI, testCasesAPI, testSuitesAPI } from '@/lib/api';
 import { useTestSuiteDetail, useTestSuiteSections } from '@/hooks/queries/testSuiteDetail';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { TestCase, TestSuite } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -213,6 +214,7 @@ export function TestSuiteDetail() {
 
   // The URL carries the per-project sequence; resolve it to the global suite id.
   const { id: numericSuiteId, loading: suiteIdLoading } = useResolvedEntityId(projectId, 'test-suites', id);
+  const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
 
   const [testSuite, setTestSuite] = useState<TestSuite | null>(null);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -567,7 +569,7 @@ export function TestSuiteDetail() {
   };
 
   const handleSaveEdit = async () => {
-    if (!testSuite) return;
+    if (!canWrite || !testSuite) return;
     const trimmedName = editForm.name.trim();
     if (!trimmedName) {
       setEditError(t('testSuiteNameRequired'));
@@ -621,7 +623,7 @@ export function TestSuiteDetail() {
   };
 
   const handleRunTestSuite = async () => {
-    if (!testSuite || !numericProjectId) return;
+    if (!canWrite || !testSuite || !numericProjectId) return;
     if (testCases.length === 0) {
       toast({ title: t('noData'), description: t('noTestCasesInSuite'), variant: 'destructive' });
       return;
@@ -703,7 +705,7 @@ export function TestSuiteDetail() {
   };
 
   const handleConfirmDeleteSuite = async () => {
-    if (!testSuite || !numericProjectId) return;
+    if (!canWrite || !testSuite || !numericProjectId) return;
     setIsDeleting(true);
     try {
       await testSuitesAPI.delete(testSuite.id);
@@ -789,7 +791,7 @@ export function TestSuiteDetail() {
   };
 
   const handleSaveSection = async () => {
-    if (!numericSuiteId) return;
+    if (!canWrite || !numericSuiteId) return;
     if (!validateSectionForm()) return;
     setIsSavingSection(true);
     setSectionFormError(null);
@@ -827,7 +829,7 @@ export function TestSuiteDetail() {
   };
 
   const handleDeleteSection = async () => {
-    if (!deleteSectionTarget) return;
+    if (!canWrite || !deleteSectionTarget) return;
     setIsDeletingSection(true);
     try {
       await sectionsAPI.delete(deleteSectionTarget.id);
@@ -858,6 +860,7 @@ export function TestSuiteDetail() {
 
   const handleMoveSection = useCallback(
     async (sectionId: number, newParentId: number | null) => {
+      if (!canWrite) return;
       try {
         await sectionsAPI.update(sectionId, { parent_section_id: newParentId });
         await loadSections();
@@ -870,7 +873,7 @@ export function TestSuiteDetail() {
         });
       }
     },
-    [loadSections, toast, t],
+    [loadSections, toast, t, canWrite],
   );
 
   const handleInvalidMove = useCallback(
@@ -893,7 +896,7 @@ export function TestSuiteDetail() {
   const deselectAll = () => setSelectedTestCases([]);
 
   const handleConfirmBulkDelete = async () => {
-    if (selectedTestCases.length === 0) {
+    if (!canWrite || selectedTestCases.length === 0) {
       setShowBulkDeleteDialog(false);
       return;
     }
@@ -1044,11 +1047,14 @@ export function TestSuiteDetail() {
             <CardTitle>{t('actionsLabel') || 'Actions'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {canWrite && (
             <Button className="w-full" variant="default" onClick={openEditDialog} disabled={isUpdating}>
               {isUpdating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Edit className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('editTestSuite')}
             </Button>
+            )}
+            {canWrite && (
             <Button
               className="w-full"
               variant="outline"
@@ -1060,11 +1066,13 @@ export function TestSuiteDetail() {
               <Play className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('runTestSuite')}
             </Button>
+            )}
             <Button className="w-full" variant="outline" onClick={handleExportTestSuite} disabled={isExporting}>
               {isExporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('exportTestSuite')}
             </Button>
+            {canWrite && (
             <Button
               className="w-full"
               variant="destructive"
@@ -1075,6 +1083,7 @@ export function TestSuiteDetail() {
               <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('deleteTestSuite')}
             </Button>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -1111,10 +1120,12 @@ export function TestSuiteDetail() {
                 </Button>
               </>
             )}
+            {canWrite && (
             <Button size="sm" onClick={() => openCreateSection()}>
               <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('newSection')}
             </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -1212,6 +1223,7 @@ export function TestSuiteDetail() {
             onAddChild={(section) => openCreateSection(section)}
             onMove={handleMoveSection}
             onInvalidMove={handleInvalidMove}
+            readOnly={!canWrite}
             extraNodes={
               unsectionedCount > 0 ? (
                 <UnsectionedNode
@@ -1288,7 +1300,7 @@ export function TestSuiteDetail() {
                   <Square className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                   {t('deselectAll')}
                 </Button>
-                {selectedTestCases.length > 0 && (
+                {selectedTestCases.length > 0 && canWrite && (
                   <>
                     <span className="text-sm text-gray-600 dark:text-gray-400">
                       {t('selectedCount', { count: selectedTestCases.length })}

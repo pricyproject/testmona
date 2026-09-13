@@ -37,6 +37,7 @@ import { Input } from '@/components/ui/input';
 import { WatchButton } from '@/components/WatchButton';
 import { testPlansAPI, testRunsAPI, getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { TestRun } from '@/types';
@@ -115,6 +116,7 @@ export function TestPlanDetail() {
   const numericProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
   // The URL carries the per-project sequence; resolve it to the global test-plan id.
   const { id: numericPlanId, loading: planIdLoading } = useResolvedEntityId(projectId, 'test-plans', testPlanId);
+  const { canWrite } = useProjectPermissions(numericProjectId);
 
   const [plan, setPlan] = useState<TestPlanDetailData | null>(null);
   const [runs, setRuns] = useState<TestRun[]>([]);
@@ -227,7 +229,7 @@ export function TestPlanDetail() {
   };
 
   const saveRequirements = async () => {
-    if (!plan) return;
+    if (!canWrite || !plan) return;
     const originallyLinked = new Set(candidates.filter((c) => c.linked).map((c) => c.id));
     const selected = new Set(selectedReqIds);
     const toLink = selectedReqIds.filter((id) => !originallyLinked.has(id));
@@ -425,19 +427,23 @@ export function TestPlanDetail() {
               </span>
             )}
           </CardTitle>
+          {canWrite && (
           <Button variant="outline" size="sm" onClick={openManageRequirements} className="gap-1.5">
             <Link2 className="h-3.5 w-3.5" />
             {t('manageRequirements')}
           </Button>
+          )}
         </CardHeader>
         <CardContent>
           {linkedRequirements.length === 0 ? (
             <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
               <p>{t('noRequirementsLinked')}</p>
+              {canWrite && (
               <Button size="sm" variant="outline" onClick={openManageRequirements}>
                 <Link2 className="mr-1.5 h-3.5 w-3.5" />
                 {t('addRequirements')}
               </Button>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -575,7 +581,7 @@ export function TestPlanDetail() {
             <Button variant="outline" onClick={() => setManageOpen(false)} disabled={reqSaving}>
               {t('cancel')}
             </Button>
-            <Button onClick={saveRequirements} disabled={reqSaving}>
+            <Button onClick={saveRequirements} disabled={reqSaving || !canWrite}>
               {reqSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('save')}
             </Button>

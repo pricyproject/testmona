@@ -51,6 +51,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { milestonesAPI, testPlansAPI, getApiErrorMessage } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import type { Milestone, MilestoneHealth, MilestoneStatus } from '@/types';
 
 type CandidatePlan = { id: number; title: string; status: string | null; milestone_id: number | null };
@@ -141,6 +142,7 @@ export function MilestoneDetail() {
   const numericProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
   // The URL carries the per-project sequence; resolve it to the global milestone id.
   const { id: numericMilestoneId, loading: milestoneIdLoading } = useResolvedEntityId(projectId, 'milestones', milestoneId);
+  const { canWrite } = useProjectPermissions(numericProjectId);
 
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
@@ -231,6 +233,7 @@ export function MilestoneDetail() {
   };
 
   const saveLinks = async () => {
+    if (!canWrite) return;
     if (!numericMilestoneId || selectedPlanIds.length === 0) return;
     setLinkSaving(true);
     setError(null);
@@ -248,6 +251,7 @@ export function MilestoneDetail() {
   };
 
   const unlinkPlan = async (planId: number) => {
+    if (!canWrite) return;
     setUnlinkingId(planId);
     setError(null);
     try {
@@ -486,10 +490,12 @@ export function MilestoneDetail() {
             <span className="text-xs text-muted-foreground">
               {milestone.test_plan_count} {milestone.test_plan_count === 1 ? t('testPlanSingular') : t('testPlans').toLowerCase()}
             </span>
+            {canWrite && (
             <Button size="sm" variant="outline" onClick={openLinkDialog} className="gap-1.5">
               <Link2 className="h-3.5 w-3.5" />
               {t('linkExistingPlan')}
             </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -556,7 +562,7 @@ export function MilestoneDetail() {
                               variant="ghost"
                               className="text-muted-foreground hover:text-destructive"
                               title={t('unlinkPlan')}
-                              disabled={unlinkingId === row.planId}
+                              disabled={unlinkingId === row.planId || !canWrite}
                               onClick={() => unlinkPlan(row.planId as number)}
                             >
                               {unlinkingId === row.planId ? (
@@ -736,7 +742,7 @@ export function MilestoneDetail() {
             <Button variant="outline" onClick={() => setLinkOpen(false)} disabled={linkSaving}>
               {t('cancel')}
             </Button>
-            <Button onClick={saveLinks} disabled={linkSaving || selectedPlanIds.length === 0}>
+            <Button onClick={saveLinks} disabled={linkSaving || selectedPlanIds.length === 0 || !canWrite}>
               {linkSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('linkPlanToMilestone')}
             </Button>
