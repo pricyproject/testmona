@@ -137,6 +137,7 @@ class TestTypeDefinition(Base):
 
     __table_args__ = (
         UniqueConstraint('project_id', 'name', name='uq_test_type_definitions_project_name'),
+        Index("uq_test_type_definitions_project_seq", "project_id", "project_seq", unique=True),
     )
 
     # Relationships
@@ -163,6 +164,7 @@ class PriorityDefinition(Base):
 
     __table_args__ = (
         UniqueConstraint('project_id', 'name', name='uq_priority_definitions_project_name'),
+        Index("uq_priority_definitions_project_seq", "project_id", "project_seq", unique=True),
     )
 
     # Relationships
@@ -220,6 +222,10 @@ class SharedStepTemplate(Base):
     created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_shared_step_templates_project_seq", "project_id", "project_seq", unique=True),
+    )
 
     # Relationships
     creator = relationship("User", foreign_keys=[created_by])
