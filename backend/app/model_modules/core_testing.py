@@ -258,6 +258,7 @@ class TestResult(Base):
     __table_args__ = (
         Index("ix_test_results_test_run_id_status", "test_run_id", "status"),
         Index("ix_test_results_test_case_id_executed_at", "test_case_id", "executed_at"),
+        UniqueConstraint("test_run_id", "test_case_id", name="uq_test_results_run_case"),
     )
 
     id = Column(Integer, primary_key=True, index=True)

@@ -1,4 +1,5 @@
 from fastapi import Depends, File, Form, HTTPException, Path, Query, UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from typing import List, Optional
 from sqlalchemy import desc, case, func, cast, Date
@@ -364,6 +365,15 @@ def register_run_routes(app):
             # so refresh the milestone progress for this run explicitly.
             from ..services.milestone_service import recompute_milestones_for_test_run
             recompute_milestones_for_test_run(db, db_test_run)
+        except IntegrityError as exc:
+            # Two imports racing on the same (run, case) row: the loser hits
+            # uq_test_results_run_case. We roll back so nothing is half-written;
+            # the client retries the idempotent upload.
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="Concurrent import conflict on this test run. Retry the upload.",
+            ) from exc
         except Exception:
             db.rollback()
             raise
