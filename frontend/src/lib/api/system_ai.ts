@@ -188,8 +188,22 @@ export const aiManagerAPI = {
     return response.data;
   },
 
-  testProvider: async (provider?: AIProviderName, prompt?: string) => {
-    const response = await api.post("/ai-manager/test", { provider, prompt });
+  testProvider: async (
+    provider?: AIProviderName,
+    prompt?: string,
+    timeoutSeconds?: number,
+    overrides?: { api_key?: string; model?: string; base_url?: string },
+  ) => {
+    const timeoutMs =
+      timeoutSeconds && Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+        ? Math.min(300, Math.max(5, Math.floor(timeoutSeconds)) + 15) * 1000
+        : undefined;
+    const body: Record<string, unknown> = { provider, prompt };
+    if (overrides?.api_key?.trim()) body.api_key = overrides.api_key.trim();
+    if (overrides?.model?.trim()) body.model = overrides.model.trim();
+    if (overrides?.base_url?.trim()) body.base_url = overrides.base_url.trim();
+    if (timeoutSeconds) body.timeout_seconds = timeoutSeconds;
+    const response = await api.post("/ai-manager/test", body, timeoutMs ? { timeout: timeoutMs } : undefined);
     return response.data;
   },
 };

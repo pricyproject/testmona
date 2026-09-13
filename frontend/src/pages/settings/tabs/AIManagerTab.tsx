@@ -176,10 +176,26 @@ export function AIManagerTab() {
   const showErrorToast = (description: string) => toast({ title: t('error'), description, variant: 'destructive' });
   const getErrorDetail = (error: unknown, fallback: string): string => {
     const apiError = error as any;
+    const status = apiError?.response?.status;
+    const rawData = apiError?.response?.data;
+    // Gateway (nginx) HTML 504: body is a string, not JSON. Never surface raw HTML.
+    if (typeof rawData === 'string' && /504|gateway time-out/i.test(rawData)) {
+      return t('aiConnectionTestGateway');
+    }
+    if (status === 504 || apiError?.code === 'ECONNABORTED' || /timeout/i.test(apiError?.message || '')) {
+      return t('aiConnectionTestTimeout');
+    }
+    if (status === 503) {
+      const detail = (typeof rawData === 'object' && rawData?.detail) || null;
+      return (typeof detail === 'string' && detail) || t('aiConnectionTestWarming');
+    }
     const detail = apiError?.response?.data?.detail;
     if (Array.isArray(detail)) {
       const messages = detail.map((item) => (typeof item === 'string' ? item : item?.msg ? String(item.msg) : '')).filter(Boolean);
       if (messages.length) return messages.join(', ');
+    }
+    if (typeof rawData === 'string' && rawData.trim() && rawData.trim().startsWith('<')) {
+      return fallback;
     }
     return (typeof detail === 'string' && detail) || apiError?.message || fallback;
   };
@@ -270,7 +286,17 @@ export function AIManagerTab() {
     setTestingAIProvider(provider);
     setAITestResult(null);
     try {
-      const result = await aiManagerAPI.testProvider(provider, aiTestPrompt.trim() || undefined);
+      const providerConfig = aiManagerSettings.providers.find((p) => p.provider === provider);
+      const result = await aiManagerAPI.testProvider(
+        provider,
+        aiTestPrompt.trim() || undefined,
+        providerConfig?.request_timeout_seconds,
+        {
+          api_key: providerConfig?.api_key || undefined,
+          model: providerConfig?.model || undefined,
+          base_url: providerConfig?.base_url || undefined,
+        },
+      );
       setAITestResult(result);
       const usage = await aiManagerAPI.getUsage();
       setAIUsage(usage);
@@ -869,8 +895,8 @@ export function AIManagerTab() {
                                 variant="outline"
                                 size="sm"
                                 className="w-full sm:w-auto sm:min-w-36"
-                                onClick={() => handleTestAIProvider(provider.provider)}
-                                disabled={testingAIProvider === provider.provider || !provider.enabled}
+                                 onClick={() => handleTestAIProvider(provider.provider)}
+                                disabled={testingAIProvider === provider.provider}
                               >
                                 {testingAIProvider === provider.provider ? <Loader2 className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2 animate-spin" /> : <PlayCircle className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />}
                                 {t('testAIProvider')}
