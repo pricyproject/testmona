@@ -51,6 +51,7 @@ import { Notification, InboxSummary } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
 import { useToast } from '@/hooks/use-toast';
+import { usePermissions } from '@/hooks/usePermissions';
 
 // Per-category visual language: icon + tint + a solid avatar color, so a row
 // reads at a glance. Keys match the backend notification-engine category keys.
@@ -180,6 +181,7 @@ export function WorkInbox() {
   const { user } = useAuthStore();
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
+  const { canWrite } = usePermissions();
 
   // Persisted view shape (last-used view) — distinct from notification delivery
   // preferences. Reading individual fields keeps re-renders tight.
@@ -414,7 +416,7 @@ export function WorkInbox() {
   // (requirement update); the inbox merely marks the item done afterwards and
   // never emits a notification itself.
   const resolveReview = async (notification: Notification) => {
-    if (notification.related_entity_id == null) return;
+    if (!canWrite || notification.related_entity_id == null) return;
     try {
       if (notification.related_entity_type === 'doc') {
         await docsAPI.submitReviewDecision(notification.related_entity_id, { decision: 'approved' });
@@ -971,7 +973,7 @@ export function WorkInbox() {
                           onSnoozePick={(date) => applySnooze([notification.id], date)}
                           onSnoozeCustom={() => setCustomSnooze({ ids: [notification.id] })}
                           onResolveReview={() => resolveReview(notification)}
-                          canResolveReview={canResolveReview(notification)}
+                          canResolveReview={canWrite && canResolveReview(notification)}
                         />
                       );
                     })}

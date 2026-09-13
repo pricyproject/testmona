@@ -383,6 +383,7 @@ export function DocEditor() {
             ref={titleRef}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            readOnly={!canWrite}
             placeholder={t('docTitlePlaceholder')}
             dir="auto"
             rows={1}
@@ -394,6 +395,7 @@ export function DocEditor() {
           <ContentEditor
             value={content}
             onChange={setContent}
+            disabled={!canWrite}
             format="markdown"
             dir={dir === 'auto' ? undefined : dir}
             placeholder={t('docContentPlaceholder')}
@@ -481,7 +483,7 @@ export function DocEditor() {
                           <FolderTree className="h-3.5 w-3.5" />
                           {t('docFolder')}
                         </Label>
-                        <Select value={folderId ? String(folderId) : 'none'} onValueChange={(v) => setFolderId(v === 'none' ? null : Number(v))}>
+                        <Select value={folderId ? String(folderId) : 'none'} onValueChange={(v) => setFolderId(v === 'none' ? null : Number(v))} disabled={!canWrite}>
                           <SelectTrigger className="h-9 rounded-lg"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">{t('docNoFolder')}</SelectItem>
@@ -500,6 +502,7 @@ export function DocEditor() {
                       <Input
                         value={classification}
                         onChange={(e) => setClassification(e.target.value)}
+                        disabled={!canWrite}
                         placeholder={t('docClassificationPlaceholder')}
                         className="h-9 rounded-lg"
                       />
@@ -515,6 +518,7 @@ export function DocEditor() {
                       <Input
                         value={tags}
                         onChange={(e) => setTags(e.target.value)}
+                        disabled={!canWrite}
                         placeholder={t('docTagsPlaceholder')}
                         dir="auto"
                         className="h-9 rounded-lg"
