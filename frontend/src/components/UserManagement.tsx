@@ -129,6 +129,7 @@ export function UserManagement() {
   // Delete confirmation dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [reset2FATarget, setReset2FATarget] = useState<User | null>(null);
 
   const getRoleLabel = (role: string) => {
     const normalizedRole = normalizeRole(role);
@@ -299,10 +300,10 @@ export function UserManagement() {
     }
   };
 
-  const handleResetTwoFactor = async (user: User) => {
-    if (!window.confirm(t('reset2FAConfirm', { username: user.username || user.email }))) {
-      return;
-    }
+  const handleResetTwoFactor = async () => {
+    const user = reset2FATarget;
+    if (!user) return;
+    setReset2FATarget(null);
 
     try {
       await resetUserTwoFactor.mutateAsync(user.id);
@@ -431,7 +432,7 @@ export function UserManagement() {
                           {currentUser?.id !== user.id && (
                             <>
                               {user.two_factor_enabled && (
-                                <DropdownMenuItem onClick={() => handleResetTwoFactor(user)}>
+                                <DropdownMenuItem onClick={() => setReset2FATarget(user)}>
                                   <KeyRound className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
                                   {t('reset2FA')}
                                 </DropdownMenuItem>
@@ -723,6 +724,40 @@ export function UserManagement() {
             </Button>
             <Button onClick={handleUpdateUser} disabled={editRole === originalRole && editFullName.trim() === originalFullName}>
               {t('saveChanges')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset 2FA Confirmation Dialog */}
+      <Dialog
+        open={reset2FATarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setReset2FATarget(null);
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('reset2FA')}</DialogTitle>
+            <DialogDescription>
+              {t('reset2FAConfirm', { username: reset2FATarget?.username || reset2FATarget?.email || '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReset2FATarget(null)}
+              disabled={resetUserTwoFactor.isPending}
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleResetTwoFactor}
+              disabled={resetUserTwoFactor.isPending}
+            >
+              {resetUserTwoFactor.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {t('reset2FA')}
             </Button>
           </DialogFooter>
         </DialogContent>

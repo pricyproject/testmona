@@ -95,6 +95,7 @@ export function Requirements() {
   const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [folderToDelete, setFolderToDelete] = useState<RequirementFolder | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
@@ -490,8 +491,10 @@ export function Requirements() {
     }
   };
 
-  const handleDeleteFolder = async (folder: RequirementFolder) => {
-    if (!window.confirm(t('deleteFolderConfirm', { name: folder.name }))) return;
+  const handleDeleteFolder = async () => {
+    const folder = folderToDelete;
+    if (!folder) return;
+    setFolderToDelete(null);
     try {
       await requirementFoldersAPI.remove(folder.id);
       if (selectedFolder === folder.id) setSelectedFolder('all');
@@ -2093,7 +2096,7 @@ export function Requirements() {
                           <DropdownMenuItem onClick={() => openEditFolder(folder)}><Pencil className="mr-2 h-3.5 w-3.5" />{t('editFolder')}</DropdownMenuItem>
                           {canManageProject && (<>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => handleDeleteFolder(folder)} className="text-rose-600 focus:text-rose-700 dark:text-rose-400"><Trash2 className="mr-2 h-3.5 w-3.5" />{t('delete')}</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setFolderToDelete(folder)} className="text-rose-600 focus:text-rose-700 dark:text-rose-400"><Trash2 className="mr-2 h-3.5 w-3.5" />{t('delete')}</DropdownMenuItem>
                           </>)}
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -2634,6 +2637,27 @@ export function Requirements() {
       <Dialog open={isEditDialogOpen} onOpenChange={(open) => !open && handleDialogClose('edit')}>
         {renderRequirementDialogContent('edit')}
       </Dialog>
+
+      {/* Delete Folder Confirmation */}
+      <AlertDialog open={folderToDelete !== null} onOpenChange={(open) => { if (!open) setFolderToDelete(null); }}>
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('delete')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {folderToDelete ? t('deleteFolderConfirm', { name: folderToDelete.name }) : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => { event.preventDefault(); handleDeleteFolder(); }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {t('delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Unsaved Changes Dialog */}
       <AlertDialog open={showUnsavedDialog} onOpenChange={setShowUnsavedDialog}>

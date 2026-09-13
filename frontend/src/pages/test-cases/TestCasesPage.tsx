@@ -307,6 +307,7 @@ export function TestCases() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingTestCase, setEditingTestCase] = useState<TestCase | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [revisionToRestore, setRevisionToRestore] = useState<any>(null);
   const [selectedTestCaseForHistory, setSelectedTestCaseForHistory] = useState<TestCase | null>(null);
   const [revisions, setRevisions] = useState<any[]>([]);
   const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
@@ -2488,27 +2489,27 @@ export function TestCases() {
     }
   };
 
-  const handleRestoreRevision = async (revision: any) => {
-    if (!selectedTestCaseForHistory) return;
+  const handleRestoreRevision = async () => {
+    const revision = revisionToRestore;
+    if (!selectedTestCaseForHistory || !revision) return;
+    setRevisionToRestore(null);
 
-    if (window.confirm(t('confirmRestoreRevision') || `Are you sure you want to restore revision ${revision.revision_number}?`)) {
-      try {
-        await api.post(`/test-cases/${selectedTestCaseForHistory.id}/revisions/${revision.revision_number}/restore`);
-        toast({
-          title: t('success') || 'Success',
-          description: t('revisionRestored') || `Revision ${revision.revision_number} restored successfully`,
-        });
-        // Reload the test case data
-        loadTestCases();
-        setHistoryDialogOpen(false);
-      } catch (error) {
-        console.error('Failed to restore revision:', error);
-        toast({
-          title: t('error') || 'Error',
-          description: t('failedToRestoreRevision') || 'Failed to restore revision',
-          variant: 'destructive',
-        });
-      }
+    try {
+      await api.post(`/test-cases/${selectedTestCaseForHistory.id}/revisions/${revision.revision_number}/restore`);
+      toast({
+        title: t('success') || 'Success',
+        description: t('revisionRestored') || `Revision ${revision.revision_number} restored successfully`,
+      });
+      // Reload the test case data
+      loadTestCases();
+      setHistoryDialogOpen(false);
+    } catch (error) {
+      console.error('Failed to restore revision:', error);
+      toast({
+        title: t('error') || 'Error',
+        description: t('failedToRestoreRevision') || 'Failed to restore revision',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -2905,7 +2906,13 @@ export function TestCases() {
           user: 'Current User'
         };
 
-        const existingActivities = JSON.parse(localStorage.getItem('recentActivities') || '[]');
+        let existingActivities: unknown[] = [];
+        try {
+          const stored = JSON.parse(localStorage.getItem('recentActivities') || '[]');
+          if (Array.isArray(stored)) existingActivities = stored;
+        } catch {
+          // Corrupt activity log: start fresh rather than crashing the reorder.
+        }
         existingActivities.unshift(activity);
         localStorage.setItem('recentActivities', JSON.stringify(existingActivities.slice(0, 10)));
 
@@ -4531,7 +4538,7 @@ export function TestCases() {
                     </div>
                     <div className="flex gap-2 mt-3">
                       <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleCompareRevision(rev)}>{t('compare')}</Button>
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleRestoreRevision(rev)}>{t('restore')}</Button>
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setRevisionToRestore(rev)}>{t('restore')}</Button>
                     </div>
                   </div>
                 </div>
@@ -4981,6 +4988,28 @@ export function TestCases() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={revisionToRestore !== null}
+        onOpenChange={(open) => { if (!open) setRevisionToRestore(null); }}
+      >
+        <AlertDialogContent isRTL={isRTL}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('restoreRevisionTitle') || t('restore')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('confirmRestoreRevision') || `Are you sure you want to restore revision ${revisionToRestore?.revision_number}?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => { event.preventDefault(); handleRestoreRevision(); }}
+            >
+              {t('restore')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={testCaseToDelete !== null}

@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -110,6 +110,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
   const [previewReport, setPreviewReport] = useState<any>(null);
   const [previewContent, setPreviewContent] = useState<any>(null);
   const [formError, setFormError] = useState('');
+  const [revokeTarget, setRevokeTarget] = useState<any>(null);
 
   useEffect(() => {
     if (open) loadShareableReports();
@@ -256,8 +257,10 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
     }
   };
 
-  const handleRevoke = async (report: any) => {
-    if (!window.confirm(t('reports_shareRevokeConfirm', { title: report.title }))) return;
+  const handleRevoke = async () => {
+    const report = revokeTarget;
+    if (!report) return;
+    setRevokeTarget(null);
     setBusyReportId(report.id);
     try {
       await analyticsAPI.revokeShareableReport(report.id);
@@ -286,6 +289,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
   const previewMeta = extractMetadata(previewReport);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent isRTL={isRTL} className="sm:max-w-6xl">
         <DialogHeader>
@@ -394,7 +398,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
                                   <RefreshCcw className="h-4 w-4 mr-2" />
                                   {t('reports_regenerate')}
                                 </Button>
-                                <Button variant="outline" size="sm" onClick={() => handleRevoke(report)} disabled={busy} className="text-red-600 hover:text-red-700">
+                                <Button variant="outline" size="sm" onClick={() => setRevokeTarget(report)} disabled={busy} className="text-red-600 hover:text-red-700">
                                   <Trash2 className="h-4 w-4 mr-2" />
                                   {t('reports_revoke')}
                                 </Button>
@@ -764,5 +768,30 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
         </div>
       </DialogContent>
     </Dialog>
+
+      <Dialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevokeTarget(null);
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('reports_revoke')}</DialogTitle>
+            <DialogDescription>
+              {revokeTarget ? t('reports_shareRevokeConfirm', { title: revokeTarget.title }) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeTarget(null)}>
+              {t('cancel')}
+            </Button>
+            <Button variant="destructive" onClick={handleRevoke}>
+              {t('reports_revoke')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

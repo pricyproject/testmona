@@ -85,6 +85,7 @@ export function SharedSteps() {
   const [error, setError] = useState<string | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [deletingStepId, setDeletingStepId] = useState<number | null>(null);
+  const [stepToDelete, setStepToDelete] = useState<SharedStep | null>(null);
   const [duplicatingStepId, setDuplicatingStepId] = useState<number | null>(null);
   const [pendingCloseDialog, setPendingCloseDialog] = useState<'create' | 'edit' | null>(null);
   const [touchedFields, setTouchedFields] = useState<Record<keyof SharedStepFormData, boolean>>({
@@ -210,10 +211,13 @@ export function SharedSteps() {
     }
   };
 
-  const handleDeleteSharedStep = async (stepId: number) => {
-    if (!window.confirm(t('confirmDeleteReusableSharedStep'))) return;
+  const handleDeleteSharedStep = async () => {
+    const step = stepToDelete;
+    if (!step) return;
+    setStepToDelete(null);
 
     try {
+      const stepId = step.id;
       setDeletingStepId(stepId);
       setError(null);
       await deleteSharedStep.mutateAsync(stepId);
@@ -576,7 +580,7 @@ export function SharedSteps() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDeleteSharedStep(step.id)}
+                        onClick={() => setStepToDelete(step)}
                         disabled={deletingStepId === step.id || duplicatingStepId === step.id}
                         aria-label={t('deleteSharedStep')}
                         title={t('deleteSharedStep')}
@@ -610,6 +614,30 @@ export function SharedSteps() {
           )}
         </div>
       )}
+
+      <Dialog
+        open={stepToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setStepToDelete(null);
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('deleteSharedStep')}</DialogTitle>
+            <DialogDescription>
+              {t('confirmDeleteReusableSharedStep')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStepToDelete(null)}>
+              {t('cancel')}
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteSharedStep}>
+              {t('delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isEditDialogOpen} onOpenChange={handleEditDialogOpenChange}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[600px]">

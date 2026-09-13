@@ -303,21 +303,15 @@ export function Milestones() {
         if (
           form.targetDate &&
           form.targetDate !== previousTargetDate &&
-          (editingMilestone.linked_test_plans || []).length > 0 &&
-          window.confirm(t('syncMilestonePlanDatesConfirm', { count: editingMilestone.linked_test_plans.length }))
+          (editingMilestone.linked_test_plans || []).length > 0
         ) {
-          // The milestone itself already saved; a plan-date sync failure (e.g. a
-          // plan whose start date is after the new target) must not surface as
-          // "failed to save milestone" or block closing the dialog.
-          try {
-            await Promise.all(
-              editingMilestone.linked_test_plans.map((plan) =>
-                testPlansAPI.update(plan.id, { target_end_date: targetDateIso }),
-              ),
-            );
-          } catch (syncErr) {
-            console.warn('Milestone saved, but syncing linked plan dates failed:', syncErr);
-          }
+          // Defer the optional plan-date sync to a confirm dialog instead of a
+          // blocking native prompt, so the save flow can close first.
+          setPendingPlanSync({
+            count: editingMilestone.linked_test_plans.length,
+            plans: editingMilestone.linked_test_plans,
+            targetDateIso,
+          });
         }
       } else {
         await milestonesAPI.create({
@@ -349,13 +343,35 @@ export function Milestones() {
     }
   };
 
-  const deleteMilestone = async (milestone: Milestone) => {
+  const [pendingDeleteMilestone, setPendingDeleteMilestone] = useState<Milestone | null>(null);
+  const [pendingPlanSync, setPendingPlanSync] = useState<{ count: number; plans: { id: number }[]; targetDateIso: string | null } | null>(null);
+
+  const confirmPlanSync = async () => {
+    const pending = pendingPlanSync;
+    setPendingPlanSync(null);
+    if (!pending) return;
+    // The milestone itself already saved; a plan-date sync failure (e.g. a
+    // plan whose start date is after the new target) only warns.
+    try {
+      await Promise.all(
+        pending.plans.map((plan) =>
+          testPlansAPI.update(plan.id, { target_end_date: pending.targetDateIso }),
+        ),
+      );
+    } catch (syncErr) {
+      console.warn('Milestone saved, but syncing linked plan dates failed:', syncErr);
+    }
+  };
+
+  const deleteMilestone = async () => {
+    const milestone = pendingDeleteMilestone;
+    if (!milestone) return;
     if (milestone.test_plan_count > 0 || milestone.test_run_count > 0) {
       setError(t('unlinkMilestoneLinksBeforeDelete'));
+      setPendingDeleteMilestone(null);
       return;
     }
-
-    if (!window.confirm(t('confirmDeleteMilestone', { title: milestone.title }))) return;
+    setPendingDeleteMilestone(null);
 
     try {
       setError(null);
@@ -382,10 +398,11 @@ export function Milestones() {
     projectId: currentProjectId,
     navigate,
     onEdit: openEditDialog,
-    onDelete: deleteMilestone,
+    onDelete: (milestone: Milestone) => setPendingDeleteMilestone(milestone),
   };
 
   return (
+    <>
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* ── Hero: identity + portfolio glance ──────────────────────────── */}
       <section className="relative overflow-hidden rounded-3xl border border-border bg-card text-card-foreground shadow-sm">
@@ -526,6 +543,55 @@ export function Milestones() {
         </div>
       )}
     </div>
+
+      <Dialog
+        open={pendingPlanSync !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingPlanSync(null);
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('confirm')}</DialogTitle>
+            <DialogDescription>
+              {pendingPlanSync ? t('syncMilestonePlanDatesConfirm', { count: pendingPlanSync.count }) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingPlanSync(null)}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={confirmPlanSync}>
+              {t('confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pendingDeleteMilestone !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteMilestone(null);
+        }}
+      >
+        <DialogContent isRTL={isRTL} className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('delete')}</DialogTitle>
+            <DialogDescription>
+              {pendingDeleteMilestone ? t('confirmDeleteMilestone', { title: pendingDeleteMilestone.title }) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDeleteMilestone(null)}>
+              {t('cancel')}
+            </Button>
+            <Button variant="destructive" onClick={deleteMilestone}>
+              {t('delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
