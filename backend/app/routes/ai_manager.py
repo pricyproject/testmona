@@ -127,6 +127,16 @@ def register_ai_manager_routes(app):
     ):
         check_password_change_required(current_user)
         _require_admin(current_user)
+        overrides = {
+            key: value
+            for key, value in {
+                "api_key": payload.api_key,
+                "model": payload.model,
+                "base_url": payload.base_url,
+                "request_timeout_seconds": payload.timeout_seconds,
+            }.items()
+            if value is not None
+        } or None
         result = await generate_ai_completion(
             db,
             AICompletionRequest(
@@ -134,9 +144,11 @@ def register_ai_manager_routes(app):
                 prompt=payload.prompt,
                 max_tokens=80,
                 temperature=0,
+                timeout_seconds=payload.timeout_seconds,
             ),
             operation="connection_test",
             user_id=current_user.id,
+            provider_overrides=overrides,
         )
         return {
             "success": True,

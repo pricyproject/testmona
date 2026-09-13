@@ -178,6 +178,10 @@ class AITestRequest(BaseModel):
         description="Supported values: openai, openrouter, anthropic, huggingface, litellm",
     )
     prompt: str = Field(default="Reply with exactly: TestMona AI is ready.", min_length=1, max_length=1000)
+    api_key: Optional[str] = Field(default=None, max_length=4000, description="Unsaved key to test before saving")
+    model: Optional[str] = Field(default=None, max_length=160)
+    base_url: Optional[str] = Field(default=None, max_length=500)
+    timeout_seconds: Optional[int] = Field(default=None, ge=5, le=MAX_AI_REQUEST_TIMEOUT_SECONDS)
 
     @field_validator("provider")
     @classmethod
@@ -188,6 +192,14 @@ class AITestRequest(BaseModel):
         if normalized not in SUPPORTED_AI_PROVIDERS:
             raise ValueError("Unsupported AI provider")
         return normalized
+
+    @field_validator("api_key", "model", "base_url")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class AICompletionRequest(BaseModel):
@@ -808,24 +820,39 @@ def _record_usage(
     _persist_usage(db, usage, "AI token usage rollups and recent connection events")
 
 
-def _get_private_config(db: Session, provider: Optional[str] = None, project_id: Optional[int] = None) -> Dict[str, Any]:
+def _get_private_config(
+    db: Session,
+    provider: Optional[str] = None,
+    project_id: Optional[int] = None,
+    overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     config = _load_ai_config(db)
 
     selected_provider = provider or config["active_provider"]
     provider_config = config["providers"].get(selected_provider)
     if not provider_config:
         raise HTTPException(status_code=400, detail="Unsupported AI provider")
-    if not provider_config.get("enabled"):
+    if overrides is None and not provider_config.get("enabled"):
         raise HTTPException(status_code=400, detail="AI provider is not enabled")
+    if overrides:
+        if overrides.get("model"):
+            provider_config["model"] = overrides["model"]
+        if overrides.get("base_url"):
+            provider_config["base_url"] = overrides["base_url"]
+        if overrides.get("request_timeout_seconds"):
+            provider_config["request_timeout_seconds"] = overrides["request_timeout_seconds"]
     encrypted_key = provider_config.get("api_key")
-    if not encrypted_key and _provider_requires_api_key(selected_provider):
+    if overrides and overrides.get("api_key"):
+        provider_config["api_key_plain"] = overrides["api_key"]
+        encrypted_key = None
+    elif not encrypted_key and _provider_requires_api_key(selected_provider):
         raise HTTPException(status_code=400, detail="AI API token is not configured")
     if encrypted_key:
         try:
             provider_config["api_key_plain"] = decrypt_data(encrypted_key)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="AI API token cannot be decrypted") from exc
-    else:
+    elif not (overrides and overrides.get("api_key")):
         provider_config["api_key_plain"] = ""
     monthly_limit = _coerce_positive_int(provider_config.get("monthly_token_limit"))
     if monthly_limit:
@@ -849,6 +876,32 @@ def _get_private_config(db: Session, provider: Optional[str] = None, project_id:
 def _usage_from_openai_payload(data: Dict[str, Any]) -> tuple[int, int]:
     usage = data.get("usage") or {}
     return int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
+
+
+def _extract_provider_detail(data: Any, fallback: str) -> str:
+    """Best-effort message from OpenAI/HF/Anthropic error shapes (str/dict/list)."""
+    if isinstance(data, dict):
+        error = data.get("error", data.get("message", data.get("msg")))
+        if isinstance(error, str) and error.strip():
+            return error.strip()[:300]
+        if isinstance(error, dict):
+            message = error.get("message") or error.get("msg")
+            if isinstance(message, str) and message.strip():
+                return message.strip()[:300]
+        if isinstance(error, list) and error:
+            first = error[0]
+            if isinstance(first, str) and first.strip():
+                return first.strip()[:300]
+            if isinstance(first, dict):
+                message = first.get("message") or first.get("msg")
+                if isinstance(message, str) and message.strip():
+                    return message.strip()[:300]
+        message = data.get("message") or data.get("msg")
+        if isinstance(message, str) and message.strip():
+            return message.strip()[:300]
+    elif isinstance(data, str) and data.strip():
+        return data.strip()[:300]
+    return fallback
 
 
 def _operation_task(operation: str) -> Optional[str]:
@@ -897,9 +950,13 @@ async def generate_ai_completion(
     user_id: Optional[int] = None,
     entity_type: Optional[str] = None,
     entity_id: Optional[int] = None,
+    provider_overrides: Optional[Dict[str, Any]] = None,
 ) -> AICompletionResult:
     config = _load_ai_config(db)
     system_prompt = str(config.get("system_prompt") or "").strip()
+    prompt = (request.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt must not be empty")
 
     # Task-group routing: an operation can pin a provider/model override. Doc Hub
     # features resolve their per-feature group first, then the general "docs" group.
@@ -921,20 +978,24 @@ async def generate_ai_completion(
     async def _attempt(prov: str, model_override: Optional[str]) -> AICompletionResult:
         # Raises HTTPException on any failure (after recording usage for call
         # failures); pre-call config/limit errors propagate without a usage row.
-        provider_config = _get_private_config(db, prov, project_id=project_id)
+        active_overrides = provider_overrides if prov == candidates[0] else None
+        provider_config = _get_private_config(db, prov, project_id=project_id, overrides=active_overrides)
         provider = provider_config["provider"]
         model = model_override or provider_config.get("model") or DEFAULT_MODELS[provider]
         base_url = str(provider_config.get("base_url") or DEFAULT_BASE_URLS[provider]).rstrip("/")
         provider_timeout = int(provider_config.get("request_timeout_seconds") or DEFAULT_AI_REQUEST_TIMEOUT_SECONDS)
-        timeout = min(
-            MAX_AI_REQUEST_TIMEOUT_SECONDS,
-            max(provider_timeout, request.timeout_seconds or provider_timeout),
-        )
+        provider_timeout = min(MAX_AI_REQUEST_TIMEOUT_SECONDS, max(5, provider_timeout))
+        # Explicit per-request timeout wins (clamped); otherwise provider config.
+        requested_timeout = request.timeout_seconds if request.timeout_seconds is not None else provider_timeout
+        timeout = min(MAX_AI_REQUEST_TIMEOUT_SECONDS, max(5, int(requested_timeout)))
         api_key = provider_config["api_key_plain"]
         prompt_tokens = 0
         completion_tokens = 0
+        # ponytail: fail fast on connect (10s); full budget is for the slow read.
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout, connect=10.0, read=timeout, write=timeout, pool=timeout)
+            ) as client:
                 if provider in {"openai", "openrouter", "huggingface", "litellm"}:
                     headers = {"Content-Type": "application/json"}
                     if api_key:
@@ -942,7 +1003,7 @@ async def generate_ai_completion(
                     messages = []
                     if system_prompt:
                         messages.append({"role": "system", "content": system_prompt})
-                    messages.append({"role": "user", "content": request.prompt})
+                    messages.append({"role": "user", "content": prompt})
                     response = await client.post(
                         f"{base_url}/chat/completions",
                         headers=headers,
@@ -954,14 +1015,17 @@ async def generate_ai_completion(
                         },
                     )
                     response.raise_for_status()
-                    data = response.json()
+                    try:
+                        data = response.json()
+                    except Exception as exc:
+                        raise HTTPException(status_code=502, detail="AI provider returned an invalid response") from exc
                     choices = data.get("choices") or []
                     content = (((choices[0] if choices else {}).get("message") or {}).get("content") or "").strip()
                     prompt_tokens, completion_tokens = _usage_from_openai_payload(data)
                 elif provider == "anthropic":
                     body = {
                         "model": model,
-                        "messages": [{"role": "user", "content": request.prompt}],
+                        "messages": [{"role": "user", "content": prompt}],
                         "max_tokens": request.max_tokens,
                         "temperature": request.temperature,
                     }
@@ -977,7 +1041,10 @@ async def generate_ai_completion(
                         json=body,
                     )
                     response.raise_for_status()
-                    data = response.json()
+                    try:
+                        data = response.json()
+                    except Exception as exc:
+                        raise HTTPException(status_code=502, detail="AI provider returned an invalid response") from exc
                     content_blocks = data.get("content") or []
                     content = "\n".join(
                         str(block.get("text") or "")
@@ -991,6 +1058,10 @@ async def generate_ai_completion(
                     raise HTTPException(status_code=400, detail="Unsupported AI provider")
 
             if not content:
+                _record_usage(
+                    db, provider, model, operation, prompt_tokens, completion_tokens, False, "empty_response",
+                    project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+                )
                 raise HTTPException(status_code=502, detail="AI provider returned an empty response")
 
             _record_usage(
@@ -1016,20 +1087,38 @@ async def generate_ai_completion(
                 detail=f"AI provider request timed out after {timeout} seconds. Try fewer test cases, a faster model, or increase the provider timeout in AI Manager.",
             ) from exc
         except httpx.HTTPStatusError as exc:
-            detail = "AI provider request failed"
+            status = exc.response.status_code if exc.response is not None else 502
+            raw_detail = "AI provider request failed"
             try:
-                provider_error = exc.response.json()
-                detail = str(provider_error.get("error") or provider_error.get("message") or detail)
+                raw_detail = _extract_provider_detail(exc.response.json(), raw_detail)
             except Exception:
-                detail = exc.response.text[:300] or detail
-            logger.warning("AI provider HTTP error for %s: %s", provider, detail)
+                body_text = (exc.response.text if exc.response is not None else "") or ""
+                if body_text.strip():
+                    raw_detail = body_text.strip()[:300]
+            logger.warning("AI provider HTTP error for %s: %s (status %s)", provider, raw_detail, status)
             _record_usage(
-                db, provider, model, operation, 0, 0, False, detail[:200],
+                db, provider, model, operation, 0, 0, False, raw_detail[:200],
                 project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
             )
+            if status == 429:
+                raise HTTPException(status_code=429, detail="AI provider rate limit reached. Wait a moment and retry.") from exc
+            if status == 503:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI model is warming up or overloaded (e.g. Hugging Face cold start). Retry in a few seconds.",
+                ) from exc
+            if status in (401, 403):
+                raise HTTPException(status_code=502, detail="AI provider rejected the request. Check the API token, model access, and quota.") from exc
             raise HTTPException(status_code=502, detail="AI provider request failed. Check provider credentials, model, and quota.") from exc
         except HTTPException:
             raise
+        except (httpx.ConnectError, httpx.NetworkError) as exc:
+            logger.warning("AI provider network error for %s: %s", provider, exc)
+            _record_usage(
+                db, provider, model, operation, 0, 0, False, "network_error",
+                project_id=project_id, user_id=user_id, entity_type=entity_type, entity_id=entity_id,
+            )
+            raise HTTPException(status_code=502, detail="Cannot reach the AI provider. Check the base URL and network access.") from exc
         except Exception as exc:
             logger.exception("Unexpected AI provider error for %s", provider)
             _record_usage(

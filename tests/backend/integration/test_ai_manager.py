@@ -160,7 +160,7 @@ def test_fallback_triggers_on_token_limit(monkeypatch):
 
     calls = {"n": 0}
 
-    def fake_private_config(_db, provider=None, project_id=None):
+    def fake_private_config(_db, provider=None, project_id=None, overrides=None):
         calls["n"] += 1
         if provider == "openai":
             raise HTTPException(status_code=429, detail="AI provider monthly token limit reached")
@@ -190,7 +190,7 @@ def test_no_fallback_when_disabled(monkeypatch):
         "providers": {},
     })
 
-    def fake_private_config(_db, provider=None, project_id=None):
+    def fake_private_config(_db, provider=None, project_id=None, overrides=None):
         raise HTTPException(status_code=429, detail="limit")
 
     monkeypatch.setattr(ai_manager, "_get_private_config", fake_private_config)
@@ -211,7 +211,7 @@ def test_explicit_provider_disables_fallback(monkeypatch):
     })
     calls = {"n": 0}
 
-    def fake_private_config(_db, provider=None, project_id=None):
+    def fake_private_config(_db, provider=None, project_id=None, overrides=None):
         calls["n"] += 1
         raise HTTPException(status_code=502, detail="provider down")
 
@@ -322,7 +322,7 @@ def test_fallback_tries_providers_in_order(monkeypatch):
 
     call_order = []
 
-    def fake_private_config(_db, provider=None, project_id=None):
+    def fake_private_config(_db, provider=None, project_id=None, overrides=None):
         call_order.append(provider)
         if provider in ("openai", "bad_provider"):
             raise HTTPException(status_code=429, detail="limit")
