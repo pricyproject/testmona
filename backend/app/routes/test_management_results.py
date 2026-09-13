@@ -32,10 +32,11 @@ def register_result_routes(app):
         test_results = crud.get_test_results(db, test_run_id=test_run_id)
 
         total_tests = len(test_results)
-        passed = len([r for r in test_results if r.status == ResultStatus.PASS])
-        failed = len([r for r in test_results if r.status == ResultStatus.FAIL])
-        skipped = len([r for r in test_results if r.status == ResultStatus.SKIP])
-        blocked = len([r for r in test_results if r.status == ResultStatus.BLOCK])
+        statuses = [canonical_result_status(r.status) for r in test_results]
+        passed = len([s for s in statuses if s == ResultStatus.PASS.value])
+        failed = len([s for s in statuses if s == ResultStatus.FAIL.value])
+        skipped = len([s for s in statuses if s == ResultStatus.SKIP.value])
+        blocked = len([s for s in statuses if s == ResultStatus.BLOCK.value])
         
         pass_rate = (passed / total_tests * 100) if total_tests > 0 else 0
         execution_time = sum([r.execution_time or 0 for r in test_results])
