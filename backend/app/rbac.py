@@ -147,6 +147,13 @@ def is_role(user: User, role: Role) -> bool:
     return normalize_role(getattr(user, "role", None)) == role
 
 
+def require_admin(user: object, detail: str = "Not authorized") -> None:
+    """Raise 403 unless the user is a superuser or holds the global admin role."""
+    if getattr(user, "is_superuser", False) or is_role(user, Role.ADMIN):
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 def has_global_permission(user: User, permission: str) -> bool:
     if getattr(user, "is_superuser", False):
         return True

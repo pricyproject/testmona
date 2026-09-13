@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .. import schemas
 from ..auth import check_password_change_required, get_current_active_user
 from ..database import get_db
-from ..models import Role
+from .. import rbac
 from ..services.ai_manager import (
     AICompletionRequest,
     AIManagerSettingsPayload,
@@ -25,15 +25,6 @@ from ..services.ai_manager import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _require_admin(current_user: schemas.User) -> None:
-    if isinstance(current_user.role, str):
-        is_admin = current_user.role.lower() == Role.ADMIN.value
-    else:
-        is_admin = current_user.role == Role.ADMIN
-    if not is_admin and not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="Not authorized to manage AI settings")
 
 
 def _audit_ai_manager_change(db: Session, current_user: schemas.User, description: str) -> None:
@@ -65,7 +56,7 @@ def register_ai_manager_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         check_password_change_required(current_user)
-        _require_admin(current_user)
+        rbac.require_admin(current_user, "Not authorized to manage AI settings")
         return get_ai_manager_settings(db)
 
     @app.get("/ai-manager/status")
@@ -83,7 +74,7 @@ def register_ai_manager_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         check_password_change_required(current_user)
-        _require_admin(current_user)
+        rbac.require_admin(current_user, "Not authorized to manage AI settings")
         settings = update_ai_manager_settings(db, payload)
         _audit_ai_manager_change(db, current_user, "AI manager settings updated")
         return settings
@@ -94,7 +85,7 @@ def register_ai_manager_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         check_password_change_required(current_user)
-        _require_admin(current_user)
+        rbac.require_admin(current_user, "Not authorized to manage AI settings")
         return get_ai_usage(db)
 
     @app.delete("/ai-manager/usage")
@@ -103,7 +94,7 @@ def register_ai_manager_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         check_password_change_required(current_user)
-        _require_admin(current_user)
+        rbac.require_admin(current_user, "Not authorized to manage AI settings")
         usage = reset_ai_usage(db)
         _audit_ai_manager_change(db, current_user, "AI manager usage statistics reset")
         return usage
@@ -114,7 +105,7 @@ def register_ai_manager_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         check_password_change_required(current_user)
-        _require_admin(current_user)
+        rbac.require_admin(current_user, "Not authorized to manage AI settings")
         usage = clear_ai_recent_events(db)
         _audit_ai_manager_change(db, current_user, "AI manager recent actions cleared")
         return usage
@@ -126,7 +117,7 @@ def register_ai_manager_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         check_password_change_required(current_user)
-        _require_admin(current_user)
+        rbac.require_admin(current_user, "Not authorized to manage AI settings")
         overrides = {
             key: value
             for key, value in {

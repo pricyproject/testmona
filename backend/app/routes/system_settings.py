@@ -218,14 +218,7 @@ def register_system_settings_routes(app):
     @app.get("/system/settings", response_model=List[schemas.SystemSettings])
     def get_system_settings(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
         # Only admins can view system settings
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to view system settings")
+        rbac.require_admin(current_user, 'Not authorized to view system settings')
         
         return crud.get_system_settings(db, skip=skip, limit=limit)
 
@@ -237,14 +230,7 @@ def register_system_settings_routes(app):
     ):
         """Get audit trail configuration (admin only)"""
         # Only admins can view audit trail configuration
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to view audit trail configuration")
+        rbac.require_admin(current_user, 'Not authorized to view audit trail configuration')
         
         # Get the audit trail config from system settings
         setting = crud.get_system_setting(db, key="audit_trail_config")
@@ -267,15 +253,7 @@ def register_system_settings_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         """Get audit trail history for signup_enabled changes"""
-        # Only admins can view signup history
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to view signup history")
+        rbac.require_admin(current_user, "Not authorized to view signup history")
 
         # Validate limit
         if limit > 100:
@@ -332,14 +310,7 @@ def register_system_settings_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         # Only admins can create system settings
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to create system settings")
+        rbac.require_admin(current_user, 'Not authorized to create system settings')
 
         setting.value = validate_system_setting_value(setting.key, setting.value)
         
@@ -378,14 +349,7 @@ def register_system_settings_routes(app):
         check_password_change_required(current_user)
         
         # Only admins can update audit trail configuration
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to update audit trail configuration")
+        rbac.require_admin(current_user, 'Not authorized to update audit trail configuration')
         
         # Get current configuration
         setting = crud.get_system_setting(db, key="audit_trail_config")
@@ -452,14 +416,7 @@ def register_system_settings_routes(app):
         check_password_change_required(current_user)
         
         # Only admins can reset audit trail configuration
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to reset audit trail configuration")
+        rbac.require_admin(current_user, 'Not authorized to reset audit trail configuration')
         
         # Reset to default configuration
         default_config = {"enabled": True, "entity_settings": {}}
@@ -512,14 +469,7 @@ def register_system_settings_routes(app):
         check_password_change_required(current_user)
         
         # Only admins can delete all audit trails
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to delete audit trails")
+        rbac.require_admin(current_user, 'Not authorized to delete audit trails')
         
         try:
             from ..models import AuditTrail
@@ -564,14 +514,7 @@ def register_system_settings_routes(app):
         check_password_change_required(current_user)
         
         # Only admins can update system settings
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to update system settings")
+        rbac.require_admin(current_user, 'Not authorized to update system settings')
 
         if "value" in setting.model_fields_set:
             setting.value = validate_system_setting_value(key, setting.value)
@@ -611,14 +554,7 @@ def register_system_settings_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         # Only admins can delete system settings
-        from ..models import Role
-        if isinstance(current_user.role, str):
-            is_admin = current_user.role.lower() == Role.ADMIN.value
-        else:
-            is_admin = current_user.role == Role.ADMIN
-        
-        if not is_admin and not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="Not authorized to delete system settings")
+        rbac.require_admin(current_user, 'Not authorized to delete system settings')
         
         # Store data for audit trail before deletion
         db_setting = crud.get_system_setting(db, key=key)
