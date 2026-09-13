@@ -1164,7 +1164,7 @@ export const fa = {
     joined: 'پیوست',
     active: 'فعال',
     inactive: 'غیرفعال',
-    admin: 'مدیر',
+    admin: 'مدیر کل',
     owner: 'مالک',
     viewer: 'بیننده',
     readOnly: 'فقط خواندنی',
