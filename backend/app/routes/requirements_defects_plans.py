@@ -835,9 +835,11 @@ def register_requirements_defects_plans_routes(app):
         # (prevents spoofing and invalid-foreign-key failures).
         requirement.created_by = current_user.id
 
-        # The human-facing key (REQ-NNN) is derived from the project sequence on
-        # insert — the client no longer supplies or can collide on it.
-        requirement.requirement_id = None
+        # A client-supplied key (REQ-NNN) donates its number to the project
+        # sequence on insert, so badge and URL agree; taken numbers fail as 400
+        # via the listener's ValueError mapping below. Blank keys are derived.
+        if requirement.requirement_id is not None and not requirement.requirement_id.strip():
+            requirement.requirement_id = None
 
         # Validate optional references so bad input fails clearly (not as a 500).
         if requirement.parent_requirement_id is not None:

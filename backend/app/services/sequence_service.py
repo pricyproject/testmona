@@ -9,9 +9,10 @@ Allocation is centralised as SQLAlchemy ``before_insert`` listeners (registered 
 mapper level means **every** ORM create path — direct CRUD, clone, CSV/Gherkin
 import, CI ingestion, AI generation — gets a number automatically, instead of each
 call site having to remember. The value is ``MAX(project_seq)+1`` within the project.
-``project_seq`` is authoritative: the human keys (``requirement_id``, ``defect_id``)
-are derived from it, so the URL number always matches the displayed badge. Callers
-must not pre-compute keys — a second numbering source diverges from the URL.
+``project_seq`` and the human badge agree by construction: blank keys are derived
+from the allocated sequence, while an explicit ``requirement_id`` donates its
+number to the sequence when free (taken numbers fail loudly instead of
+diverging). ``defect_id`` is server-derived; clients cannot set it.
 
 ``project_seq`` is nullable, so global rows (e.g. a project-less Doc/Space/Global
 Parameter) and any bulk-`Core`-insert path that bypasses mapper events simply leave
@@ -20,6 +21,8 @@ it NULL; the frontend falls back to the global ``id`` in that case. The unique
 migration is the backstop against the rare concurrent-insert race.
 """
 from __future__ import annotations
+
+import re
 
 from sqlalchemy import event, func, select
 
@@ -101,18 +104,52 @@ def _make_direct_listener():
     return _before_insert
 
 
-def _requirement_before_insert(_mapper, connection, target):
-    """``project_seq`` is the single source of identity; derive REQ-NNN from it.
+def _key_number(key) -> int | None:
+    """Trailing number of a human key, e.g. ``REQ-007`` -> ``7``."""
+    if not key:
+        return None
+    match = re.search(r"(\d+)\s*$", str(key))
+    if not match:
+        return None
+    try:
+        number = int(match.group(1))
+    except ValueError:
+        return None
+    return number if number > 0 else None
 
-    The key is only filled when the caller didn't supply one — production create
-    paths leave it blank (so it's always derived and can never diverge from the URL
-    number), while fixtures that set an explicit key keep it.
+
+def _requirement_before_insert(_mapper, connection, target):
+    """Keep the REQ-NNN badge and the URL number (``project_seq``) in sync.
+
+    A caller-supplied key donates its number: ``REQ-007`` takes sequence 7 when
+    free, so badge and URL always agree. A taken number fails loudly (400 via
+    the route's ``ValueError`` mapping) instead of silently diverging. Blank
+    keys are derived from the allocated sequence as before.
     """
     project_id = getattr(target, "project_id", None)
     if project_id is None:
         return
     if getattr(target, "project_seq", None) is None:
-        target.project_seq = _allocate_seq(connection, target, project_id)
+        key = (getattr(target, "requirement_id", None) or "").strip()
+        number = _key_number(key)
+        if number is not None:
+            table = target.__table__
+            taken = connection.execute(
+                select(func.count())
+                .select_from(table)
+                .where(table.c.project_id == project_id)
+                .where(
+                    (table.c.project_seq == number)
+                    | (table.c.requirement_id == key)
+                )
+            ).scalar()
+            if taken:
+                raise ValueError(
+                    f"Requirement number {number} is already taken in this project"
+                )
+            target.project_seq = number
+        if getattr(target, "project_seq", None) is None:
+            target.project_seq = _allocate_seq(connection, target, project_id)
     if not getattr(target, "requirement_id", None):
         target.requirement_id = f"REQ-{int(target.project_seq):03d}"
 
