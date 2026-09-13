@@ -334,9 +334,10 @@ export function ApiTokens() {
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p>{t('apiTokenHowToUseBody')}</p>
           <pre className="rounded-lg bg-muted p-3 text-xs overflow-auto">
-{`curl -X POST http://localhost:8000/test-runs/123/import-results \\
+{`curl --max-time 30 -X POST http://localhost:8000/test-runs/123/import-results \\
   -H "Authorization: Bearer tmona_..." \\
-  -F "file=@junit.xml"`}
+  -F "file=@junit.xml" \\
+  -F "auto_create=false"`}
           </pre>
           <p>
             <Badge variant="outline">{t('apiTokenScopeBadge')}</Badge>{' '}
