@@ -172,9 +172,10 @@ export const testAssetHealthAPI = {
     if (filters.debt_type && filters.debt_type !== 'all') params.append('debt_type', filters.debt_type);
     if (filters.severity && filters.severity !== 'all') params.append('severity', filters.severity);
     const response = await api.get(`/projects/${projectId}/test-asset-health/debt-items?${params}`);
+    const parsed = parseInt(response.headers['x-total-count'] ?? '0', 10);
     return {
-      items: response.data,
-      total: parseInt(response.headers['x-total-count'] ?? '0', 10),
+      items: Array.isArray(response.data) ? response.data : [],
+      total: Number.isFinite(parsed) ? parsed : 0,
     };
   },
   detect: async (projectId: number): Promise<TestAssetDebtDetectionResult> => {

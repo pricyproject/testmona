@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Activity,
@@ -66,7 +66,9 @@ const PAGE_SIZE = 25;
 export function TestAssetHealth() {
   const { projectId } = useParams<{ projectId: string }>();
   const parsedProjectId = projectId ? Number(projectId) : null;
-  const projectIdNum = parsedProjectId && Number.isFinite(parsedProjectId) ? parsedProjectId : null;
+  const projectIdNum = parsedProjectId !== null && Number.isInteger(parsedProjectId) && parsedProjectId > 0
+    ? parsedProjectId
+    : null;
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
   const { canWrite } = usePermissions();
@@ -82,12 +84,16 @@ export function TestAssetHealth() {
   const [debtType, setDebtType] = useState<TestDebtType | 'all'>('all');
   const [severity, setSeverity] = useState<TestDebtSeverity | 'all'>('all');
   const [resolved, setResolved] = useState<ResolvedFilter>('active');
+  // Monotonic request id: filter/page changes fire overlapping fetches, and
+  // only the latest response may touch state.
+  const loadSeq = useRef(0);
 
   const load = async () => {
     if (!projectIdNum) {
       setLoading(false);
       return;
     }
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
       const [nextSummary, { items: nextItems, total: nextTotal }] = await Promise.all([
@@ -100,14 +106,24 @@ export function TestAssetHealth() {
           limit: PAGE_SIZE,
         }),
       ]);
+      if (seq !== loadSeq.current) return;
+      const safeTotal = Number.isFinite(nextTotal) ? nextTotal : 0;
+      const maxPage = Math.max(0, Math.ceil(safeTotal / PAGE_SIZE) - 1);
+      if (page > maxPage) {
+        // The page we are on no longer exists (e.g. bulk-resolve emptied it):
+        // step back instead of showing a misleading empty backlog.
+        setPage(maxPage);
+        return;
+      }
       setSummary(nextSummary);
       setItems(nextItems);
-      setTotal(nextTotal);
+      setTotal(safeTotal);
       setSelected(new Set());
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestAssetHealth')), variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   };
 
@@ -187,6 +203,10 @@ export function TestAssetHealth() {
   };
 
   const lastScan = formatRelativeTime(summary?.last_detected_at, language);
+  // In RTL locales the pagination direction flips: "previous" points right.
+  const PrevIcon = isRTL ? ChevronRight : ChevronLeft;
+  const NextIcon = isRTL ? ChevronLeft : ChevronRight;
+  const showOverviewSkeleton = loading && summary === null;
 
   return (
     <div className="p-6 space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -216,6 +236,14 @@ export function TestAssetHealth() {
       </div>
 
       {/* Overview: health score + stats + severity bar */}
+      {showOverviewSkeleton ? (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card><CardContent className="flex h-48 items-center justify-center p-5"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></CardContent></Card>
+          <Card className="lg:col-span-2"><CardContent className="grid h-full grid-cols-2 gap-4 p-5 sm:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => (<div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />))}
+          </CardContent></Card>
+        </div>
+      ) : (
       <div className="grid gap-4 lg:grid-cols-3">
         <HealthScoreCard score={summary?.health_score ?? 100} t={t} />
 
@@ -231,6 +259,7 @@ export function TestAssetHealth() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Debt by type */}
       <Card>
@@ -364,7 +393,7 @@ export function TestAssetHealth() {
                   </TableHeader>
                   <TableBody>
                     {items.map((item) => {
-                      const Icon = debtTypeIcon[item.debt_type];
+                      const Icon = debtTypeIcon[item.debt_type] ?? Clock;
                       const isResolved = !!item.resolved_at;
                       const checked = selected.has(item.id);
                       return (
@@ -391,7 +420,7 @@ export function TestAssetHealth() {
                               {t(`debtType_${item.debt_type}` as any)}
                             </span>
                           </TableCell>
-                          <TableCell><Badge className={severityClass[item.severity]}>{t(item.severity)}</Badge></TableCell>
+                          <TableCell><Badge className={severityClass[item.severity] ?? severityClass.medium}>{t(item.severity)}</Badge></TableCell>
                           <TableCell className="whitespace-nowrap">{t(`debtAction_${item.suggested_action}` as any)}</TableCell>
                           <TableCell className="max-w-md text-sm text-muted-foreground">{item.details || t('noDetails')}</TableCell>
                           <TableCell>
@@ -418,12 +447,12 @@ export function TestAssetHealth() {
                   </p>
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={() => setPage((p) => p - 1)} disabled={page === 0}>
-                      <ChevronLeft className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                      <PrevIcon className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                       {t('previous')}
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)} disabled={(page + 1) * PAGE_SIZE >= total}>
                       {t('next')}
-                      <ChevronRight className={`h-4 w-4 ${isRTL ? 'mr-1' : 'ml-1'}`} />
+                      <NextIcon className={`h-4 w-4 ${isRTL ? 'mr-1' : 'ml-1'}`} />
                     </Button>
                   </div>
                 </div>
