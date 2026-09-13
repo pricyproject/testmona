@@ -24,7 +24,7 @@ from ..services.tracker_import_service import fetch_requirement_from_tracker
 from ..services import feature_file_service
 from ..services import notification_engine
 from ..services import watch_service
-from ..services.doc_conversion_service import markdown_to_html, next_requirement_id
+from ..services.doc_conversion_service import markdown_to_html
 from ..crud import (
     create_requirement, get_requirements, get_requirement, update_requirement, delete_requirement,
     create_defect, get_defects, get_defect, update_defect, delete_defect,
@@ -1207,7 +1207,6 @@ def register_requirements_defects_plans_routes(app):
                         title=feat.title or stem,
                         description=description_html,
                         acceptance_criteria=feat.scenarios,
-                        requirement_id=next_requirement_id(db, project_id),
                         folder_id=folder_id,
                         tags=tags,
                         project_id=project_id,

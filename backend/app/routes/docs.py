@@ -3074,7 +3074,6 @@ def register_docs_routes(app) -> None:
             title=title,
             description=description_html,
             acceptance_criteria=_feature_acceptance_html(title, acceptance_html, description_html),
-            requirement_id=conv.next_requirement_id(db, project_id),
             status=payload.default_status,
             priority=payload.default_priority,
             folder_id=payload.folder_id,

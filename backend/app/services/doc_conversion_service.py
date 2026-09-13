@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import markdown as _markdown
-from sqlalchemy.orm import Session
 
 from .. import models
 
@@ -270,17 +269,4 @@ def build_plan(doc: models.Doc, mode: str, heading_level: int = 2) -> ConvertPla
     return ConvertPlan(mode="split", sections=result)
 
 
-def next_requirement_id(db: Session, project_id: int) -> str:
-    """Next ``REQ-NNN`` id for a project (3+ digits, dense increment)."""
-    rows = (
-        db.query(models.Requirement.requirement_id)
-        .filter(models.Requirement.project_id == project_id)
-        .all()
-    )
-    max_n = 0
-    pattern = re.compile(r"^REQ-(\d+)$", re.IGNORECASE)
-    for (rid,) in rows:
-        m = pattern.match((rid or "").strip())
-        if m:
-            max_n = max(max_n, int(m.group(1)))
-    return f"REQ-{max_n + 1:03d}"
+
