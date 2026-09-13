@@ -45,6 +45,7 @@ import { sanitizeHtml } from '@/lib/sanitize';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { DateField } from '@/components/ui/DateField';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { docsAPI } from '@/lib/api';
@@ -84,6 +85,7 @@ export function ReleaseNotes() {
   const navigate = useNavigate();
   const { projectId: projectIdParam } = useParams<{ projectId?: string }>();
   const projectId = parsePositiveIntegerParam(projectIdParam);
+  const { canWrite } = useProjectPermissions(projectId);
   const docsPath = projectId ? `/projects/${projectId}/docs` : '/docs';
 
   const [notes, setNotes] = useState<ReleaseNoteListItem[]>([]);
@@ -128,7 +130,7 @@ export function ReleaseNotes() {
   );
 
   const handleGenerate = async (opts: GenerateOptions) => {
-    if (!projectId || generating) return;
+    if (!canWrite || !projectId || generating) return;
     // Custom range: validate the dates before spending an AI call.
     let since: string | undefined;
     let until: string | undefined;
@@ -207,14 +209,14 @@ export function ReleaseNotes() {
     try {
       const note = await docsAPI.getReleaseNote(id);
       setDraft(noteToDraft(note));
-      setMode(forEdit && note.status === 'draft' ? 'edit' : 'view');
+      setMode(forEdit && canWrite && note.status === 'draft' ? 'edit' : 'view');
     } catch {
       toast({ title: t('error'), description: t('releaseNotesLoadError'), variant: 'destructive' });
     }
   };
 
   const handleSave = async (publish = false): Promise<ReleaseNote | null> => {
-    if (!draft || !projectId) return null;
+    if (!canWrite || !draft || !projectId) return null;
     if (!draft.title.trim()) {
       toast({ title: t('error'), description: t('releaseNotesTitleRequired'), variant: 'destructive' });
       return null;
@@ -261,7 +263,7 @@ export function ReleaseNotes() {
   };
 
   const handleUnpublish = async () => {
-    if (!draft?.id) return;
+    if (!canWrite || !draft?.id) return;
     setSaving(true);
     try {
       const saved = await docsAPI.unpublishReleaseNote(draft.id);
@@ -277,7 +279,7 @@ export function ReleaseNotes() {
   };
 
   const confirmDelete = async () => {
-    if (deleteId == null) return;
+    if (!canWrite || deleteId == null) return;
     try {
       await docsAPI.deleteReleaseNote(deleteId);
       if (draft?.id === deleteId) { setDraft(null); setMode('list'); }
@@ -304,12 +306,14 @@ export function ReleaseNotes() {
           <h1 className="text-2xl font-bold tracking-tight">{t('releaseNotes')}</h1>
           <p className="text-sm text-muted-foreground">{t('releaseNotesSubtitle')}</p>
         </div>
+        {canWrite && (
         <Button onClick={() => setGenOpen(true)} disabled={generating}>
           {generating
             ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />
             : <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
           {t('releaseNotesGenerate')}
         </Button>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
@@ -359,12 +363,14 @@ export function ReleaseNotes() {
               <Rocket className="mb-3 h-10 w-10 text-muted-foreground" />
               <h3 className="text-lg font-semibold">{t('releaseNotesStartTitle')}</h3>
               <p className="mt-1 max-w-md text-sm text-muted-foreground">{t('releaseNotesStartHint')}</p>
+              {canWrite && (
               <Button className="mt-4" onClick={() => setGenOpen(true)} disabled={generating}>
                 {generating
                   ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   : <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
                 {t('releaseNotesGenerate')}
               </Button>
+              )}
             </div>
           )}
 
@@ -383,6 +389,8 @@ export function ReleaseNotes() {
                 </Button>
                 {mode === 'view' ? (
                   <>
+                    {canWrite && (
+                    <>
                     <Button variant="outline" size="sm" onClick={handleUnpublish} disabled={saving}>
                       <Undo2 className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                       {t('releaseNotesUnpublish')}
@@ -392,23 +400,29 @@ export function ReleaseNotes() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
+                    </>
+                    )}
                   </>
                 ) : (
                   <>
                     <Button variant="ghost" size="sm" onClick={backToList}>{t('cancel')}</Button>
-                    {draft.id != null && (
+                    {draft.id != null && canWrite && (
                       <Button variant="outline" size="sm" className="text-rose-600" onClick={() => setDeleteId(draft.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
+                    {canWrite && (
                     <Button variant="outline" size="sm" onClick={() => handleSave(false)} disabled={saving}>
                       {saving ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : null}
                       {t('releaseNotesSaveDraft')}
                     </Button>
+                    )}
+                    {canWrite && (
                     <Button size="sm" onClick={() => handleSave(true)} disabled={saving}>
                       <Rocket className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                       {t('releaseNotesPublish')}
                     </Button>
+                    )}
                   </>
                 )}
               </div>

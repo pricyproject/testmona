@@ -57,6 +57,8 @@ interface SectionTreeProps {
   onAddChild: (section: SectionTreeNode) => void;
   onMove: (sectionId: number, newParentId: number | null) => void | Promise<void>;
   onInvalidMove?: (message: string) => void;
+  /** Hides section mutation affordances (add/edit/delete/drag) for read-only viewers. */
+  readOnly?: boolean;
 }
 
 const collectDescendantIds = (node: SectionTreeNode): Set<number> => {
@@ -99,6 +101,7 @@ export function SectionTree({
   onAddChild,
   onMove,
   onInvalidMove,
+  readOnly = false,
 }: SectionTreeProps) {
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -182,6 +185,7 @@ export function SectionTree({
             onEdit={onEdit}
             onDelete={onDelete}
             onAddChild={onAddChild}
+            readOnly={readOnly}
           />
         ))}
         {extraNodes}
@@ -259,6 +263,7 @@ function SectionTreeNodeView({
   onEdit,
   onDelete,
   onAddChild,
+  readOnly = false,
 }: {
   section: SectionTreeNode;
   level: number;
@@ -271,10 +276,12 @@ function SectionTreeNodeView({
   onEdit: (section: SectionTreeNode) => void;
   onDelete: (section: SectionTreeNode) => void;
   onAddChild: (section: SectionTreeNode) => void;
+  readOnly?: boolean;
 }) {
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: `section-${section.id}`,
     data: { type: 'section', sectionId: section.id },
+    disabled: readOnly,
   });
   const {
     setNodeRef: setDraggableRef,
@@ -285,6 +292,7 @@ function SectionTreeNodeView({
   } = useDraggable({
     id: section.id,
     data: { type: 'section', sectionId: section.id, testSuiteId: section.test_suite_id },
+    disabled: readOnly,
   });
 
   const transformStyle = useMemo(
@@ -309,6 +317,7 @@ function SectionTreeNodeView({
           isSelected ? 'bg-accent border-l-4 border-blue-500' : 'hover:bg-accent/60'
         } ${isOver && isDragging ? 'bg-blue-50/70 ring-1 ring-blue-400 dark:bg-blue-900/30' : ''}`}
       >
+        {!readOnly && (
         <button
           type="button"
           aria-label="Drag handle"
@@ -318,6 +327,7 @@ function SectionTreeNodeView({
         >
           <GripVertical className="h-4 w-4" />
         </button>
+        )}
 
         <Button
           type="button"
@@ -371,6 +381,7 @@ function SectionTreeNodeView({
         </button>
 
         {/* Actions: always visible on touch (no hover available); fade in on hover on md+. */}
+        {!readOnly && (
         <div className="flex items-center gap-1 opacity-100 transition-opacity md:opacity-40 md:group-hover:opacity-100">
           <Button
             type="button"
@@ -415,6 +426,7 @@ function SectionTreeNodeView({
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
+        )}
       </div>
 
       {hasSubsections && isExpanded && (
@@ -433,6 +445,7 @@ function SectionTreeNodeView({
               onEdit={onEdit}
               onDelete={onDelete}
               onAddChild={onAddChild}
+              readOnly={readOnly}
             />
           ))}
         </div>

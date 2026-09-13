@@ -47,6 +47,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI, projectAssignmentsAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
+import { usePermissions } from '@/hooks/usePermissions';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/utils/datetime';
@@ -78,6 +80,9 @@ export function DocEditor() {
   const { id: resolvedDocId, loading: docIdLoading } = useResolvedEntityId(projectId, 'docs', docId);
   const parsedDocId = projectId ? resolvedDocId : rawDocId;
   const parsedProjectId = parsePositiveIntegerParam(projectId);
+  const { canWrite: projectCanWrite } = useProjectPermissions(parsedProjectId);
+  const { canWrite: globalCanWrite } = usePermissions();
+  const canWrite = projectId ? projectCanWrite : globalCanWrite;
   const basePath = parsedProjectId ? `/projects/${parsedProjectId}/docs` : '/docs';
   // Project docs are addressed by their per-project sequence in the URL; the global
   // /docs route (and rows not yet numbered) fall back to the raw id. Using the global
@@ -224,7 +229,7 @@ export function DocEditor() {
   }, [docProjectId]);
 
   const save = useCallback(async (changeNote?: string) => {
-    if (!doc) return;
+    if (!doc || !canWrite) return;
     const snapshot = currentSnapshot;
     if (snapshot === savedRef.current) return;
     // An empty title is a validation gap, not a save failure. Manual Save is already
@@ -254,7 +259,7 @@ export function DocEditor() {
       setSaveState('error');
       toast({ title: t('error'), description: t('docSaveFailed'), variant: 'destructive' });
     }
-  }, [doc, currentSnapshot, title, content, status, classification, tags, dir, folderId, t, toast]);
+  }, [doc, currentSnapshot, title, content, status, classification, tags, dir, folderId, t, toast, canWrite]);
 
   // Keep a ref to the latest save so the unmount-flush effect can call it
   // without depending on `save` (whose identity changes on every keystroke).
@@ -340,12 +345,13 @@ export function DocEditor() {
         <Badge className={`border-0 ${statusTone[status] || statusTone.draft}`}>{t(`docStatus_${status}` as any)}</Badge>
         <div className="text-xs">{saveIndicator()}</div>
         <span className="flex-1" />
-        {hasLinkedRequirements && (
+        {hasLinkedRequirements && canWrite && (
           <Button variant="outline" size="sm" onClick={() => setImpactOpen(true)} title={t('docImpactBeforePublish')}>
             <Sparkles className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
             {t('docImpactAnalyze')}
           </Button>
         )}
+        {canWrite && (
         <Button
           variant="ghost"
           size="sm"
@@ -356,10 +362,13 @@ export function DocEditor() {
           <StickyNote className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('docSaveWithNote')}
         </Button>
+        )}
+        {canWrite && (
         <Button variant="outline" size="sm" onClick={() => void save()} disabled={saveState === 'saving' || currentSnapshot === savedRef.current || !title.trim()}>
           <Save className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('save')}
         </Button>
+        )}
         <Button variant="ghost" size="icon" onClick={() => setShowMeta((v) => !v)} title={t('docMetadata')}>
           {showMeta
             ? (isRTL ? <PanelLeftClose className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />)
@@ -596,6 +605,7 @@ export function DocEditor() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNoteOpen(false)} disabled={saveState === 'saving'}>{t('cancel')}</Button>
+            {canWrite && (
             <Button
               onClick={() => { setNoteOpen(false); void save(noteText); }}
               disabled={saveState === 'saving' || !noteText.trim()}
@@ -603,6 +613,7 @@ export function DocEditor() {
               <Save className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
               {t('save')}
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
