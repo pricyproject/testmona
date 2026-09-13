@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, Optional
 
-from sqlalchemy import case, distinct, func, or_
+from sqlalchemy import and_, case, distinct, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -48,7 +48,7 @@ def _compute_health_score(total_cases: int, by_severity: Dict[str, int]) -> int:
     scales sensibly whether a project has 10 cases or 10,000.
     """
     if total_cases <= 0:
-        return 100
+        return 0 if sum(by_severity.values()) > 0 else 100
     penalty = sum(SEVERITY_WEIGHTS.get(sev, 1) * count for sev, count in by_severity.items())
     worst = total_cases * _MAX_SEVERITY_WEIGHT
     score = 100.0 * (1.0 - penalty / worst) if worst else 100.0
@@ -101,8 +101,14 @@ def _candidate(test_case_id: int, debt_type: str, details: str) -> DebtCandidate
 
 
 def _active_case_query(db: Session, project_id: int):
+    # A case belongs to the project via its own project_id, or — for legacy
+    # rows with a NULL project_id — via its suite. Matching on the suite alone
+    # would leak in cases owned by other projects.
     return db.query(TestCase).outerjoin(TestSuite, TestCase.test_suite_id == TestSuite.id).filter(
-        or_(TestCase.project_id == project_id, TestSuite.project_id == project_id),
+        or_(
+            TestCase.project_id == project_id,
+            and_(TestCase.project_id.is_(None), TestSuite.project_id == project_id),
+        ),
         or_(TestCase.is_deleted.is_(None), TestCase.is_deleted.is_(False)),
     )
 
@@ -365,7 +371,8 @@ def _detect_execution_debt(db: Session, case_ids: list[int]) -> tuple[list[DebtC
 
 def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: bool = True) -> dict:
     now = _utc_now()
-    stale_cutoff = now - timedelta(days=max(1, settings.test_asset_stale_days))
+    stale_days = max(1, settings.test_asset_stale_days)
+    stale_cutoff = now - timedelta(days=stale_days)
     cases = _active_case_query(db, project_id).all()
     case_ids = [case.id for case in cases]
 
@@ -391,7 +398,7 @@ def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: boo
         last_content_change = _case_changed_at(test_case)
         last_execution = last_executed_at.get(test_case.id)
         if last_content_change < stale_cutoff and (last_execution is None or last_execution < stale_cutoff):
-            candidate = _candidate(test_case.id, "stale", f"No test case update or execution in the last {settings.test_asset_stale_days} days.")
+            candidate = _candidate(test_case.id, "stale", f"No test case update or execution in the last {stale_days} days.")
             candidates[(candidate.test_case_id, candidate.debt_type)] = candidate
 
     existing_items = db.query(TestDebtItem).filter(TestDebtItem.project_id == project_id).all()
