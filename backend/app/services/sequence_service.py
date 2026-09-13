@@ -8,9 +8,10 @@ Allocation is centralised as SQLAlchemy ``before_insert`` listeners (registered 
 :func:`register_sequence_listeners`, called once from ``models.py``). Doing it at the
 mapper level means **every** ORM create path — direct CRUD, clone, CSV/Gherkin
 import, CI ingestion, AI generation — gets a number automatically, instead of each
-call site having to remember. The value is ``MAX(project_seq)+1`` within the project;
-for Requirements/Defects it is derived from the numeric part of the existing
-``requirement_id``/``defect_id`` so the URL matches the displayed REQ-/DEF- badge.
+call site having to remember. The value is ``MAX(project_seq)+1`` within the project.
+``project_seq`` is authoritative: the human keys (``requirement_id``, ``defect_id``)
+are derived from it, so the URL number always matches the displayed badge. Callers
+must not pre-compute keys — a second numbering source diverges from the URL.
 
 ``project_seq`` is nullable, so global rows (e.g. a project-less Doc/Space/Global
 Parameter) and any bulk-`Core`-insert path that bypasses mapper events simply leave
@@ -20,30 +21,7 @@ migration is the backstop against the rare concurrent-insert race.
 """
 from __future__ import annotations
 
-import re
-
 from sqlalchemy import event, func, select
-from sqlalchemy.orm import Session
-
-_TRAILING_DIGITS = re.compile(r"(\d+)\s*$")
-
-
-def seq_from_key(key) -> int | None:
-    """Numeric suffix of a human key, e.g. ``REQ-007`` -> ``7`` (``None`` if absent)."""
-    if not key:
-        return None
-    match = _TRAILING_DIGITS.search(str(key))
-    return int(match.group(1)) if match else None
-
-
-def next_project_seq(db: Session, model, project_id: int) -> int:
-    """Session-based helper: next per-project sequence for a model with a ``project_id`` column."""
-    current = (
-        db.query(func.coalesce(func.max(model.project_seq), 0))
-        .filter(model.project_id == project_id)
-        .scalar()
-    )
-    return int(current or 0) + 1
 
 
 def _max_seq_for_project(connection, table, project_id) -> int:
@@ -109,7 +87,7 @@ def _allocate_seq(connection, target, project_id) -> int:
     return next_seq + 1
 
 
-def _make_direct_listener(key_attr: str | None):
+def _make_direct_listener():
     """before_insert for models that have a real ``project_id`` column."""
 
     def _before_insert(_mapper, connection, target):
@@ -118,10 +96,7 @@ def _make_direct_listener(key_attr: str | None):
         project_id = getattr(target, "project_id", None)
         if project_id is None:
             return  # global row (no project) — leave NULL
-        seq = seq_from_key(getattr(target, key_attr, None)) if key_attr else None
-        if seq is None:
-            seq = _allocate_seq(connection, target, project_id)
-        target.project_seq = seq
+        target.project_seq = _allocate_seq(connection, target, project_id)
 
     return _before_insert
 
@@ -175,6 +150,34 @@ def _test_case_before_insert(_mapper, connection, target):
     target.project_seq = _allocate_seq(connection, target, project_id)
 
 
+def _doc_before_update(_mapper, connection, target):
+    """Reallocate ``project_seq`` when a doc moves to a space in another project.
+
+    Same hazard as a test case changing suites across projects: ``project_seq``
+    is only unique *within* a project, so carrying the old number over would
+    collide on the unique ``(project_id, project_seq)`` index and 500 the
+    update. Moving into a global (project-less) space keeps the old number —
+    global rows are excluded from per-project lookups, so it is harmless.
+    """
+    from sqlalchemy.orm import attributes
+
+    if not attributes.get_history(target, "space_id").has_changes():
+        return
+    from .. import models
+
+    space_id = getattr(target, "space_id", None)
+    if space_id is None:
+        return
+    spaces = models.DocSpace.__table__
+    new_project_id = connection.execute(
+        select(spaces.c.project_id).where(spaces.c.id == space_id)
+    ).scalar()
+    old_project_id = getattr(target, "project_id", None)
+    target.project_id = new_project_id
+    if new_project_id is not None and new_project_id != old_project_id:
+        target.project_seq = _allocate_seq(connection, target, new_project_id)
+
+
 def _test_case_before_update(_mapper, connection, target):
     """Re-derive the denormalised ``project_id`` when a case's suite changes.
 
@@ -212,30 +215,30 @@ def register_sequence_listeners() -> None:
         return
     from .. import models
 
-    # model -> the human-key attribute to derive seq from (None => MAX+1)
     direct = {
-        models.CustomFieldDefinition: None,
-        models.SharedStep: None,
-        models.GlobalParameter: None,
-        models.TestDataset: None,
-        models.TestSuite: None,
-        models.TestRun: None,
-        models.MatrixRun: None,
-        models.RequirementFolder: None,
-        models.TestPlan: None,
-        models.Milestone: None,
-        models.ExecutionEnvironment: None,
-        models.DocSpace: None,
-        models.Doc: None,
-        models.TestTypeDefinition: None,
-        models.PriorityDefinition: None,
-        models.SharedStepTemplate: None,
+        models.CustomFieldDefinition,
+        models.SharedStep,
+        models.GlobalParameter,
+        models.TestDataset,
+        models.TestSuite,
+        models.TestRun,
+        models.MatrixRun,
+        models.RequirementFolder,
+        models.TestPlan,
+        models.Milestone,
+        models.ExecutionEnvironment,
+        models.DocSpace,
+        models.Doc,
+        models.TestTypeDefinition,
+        models.PriorityDefinition,
+        models.SharedStepTemplate,
     }
-    for model, key_attr in direct.items():
-        event.listen(model, "before_insert", _make_direct_listener(key_attr))
+    for model in direct:
+        event.listen(model, "before_insert", _make_direct_listener())
     # Requirement/Defect: project_seq is authoritative, the human key derived from it.
     event.listen(models.Requirement, "before_insert", _requirement_before_insert)
     event.listen(models.Defect, "before_insert", _defect_before_insert)
     event.listen(models.TestCase, "before_insert", _test_case_before_insert)
     event.listen(models.TestCase, "before_update", _test_case_before_update)
+    event.listen(models.Doc, "before_update", _doc_before_update)
     _REGISTERED = True
