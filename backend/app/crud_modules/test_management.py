@@ -659,20 +659,6 @@ def _auto_create_defect_for_failed_result(db: Session, test_result: TestResult, 
 
 
 def create_test_result(db: Session, test_result: TestResultCreate):
-    # One row per (run, case): adding the same case twice (double-click, retry,
-    # concurrent CI pushes) returns the existing row instead of inflating run
-    # totals with a duplicate. Enforced by uq_test_results_run_case; this check
-    # is the friendly path, the constraint is the backstop.
-    existing = (
-        db.query(TestResult)
-        .filter(
-            TestResult.test_run_id == test_result.test_run_id,
-            TestResult.test_case_id == test_result.test_case_id,
-        )
-        .first()
-    )
-    if existing is not None:
-        return existing
     test_result_data = test_result.model_dump()
     db_test_result = TestResult(**test_result_data)
     apply_test_result_execution_timing(db_test_result, test_result_data)
