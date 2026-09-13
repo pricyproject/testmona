@@ -181,7 +181,10 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "write", project_id, db):
+        # Renaming, archiving (status) and ownership transfer are project
+        # management — same bar as delete/features, not plain write. Owners
+        # keep access through the ownership bypass in has_permission.
+        if not rbac.has_permission(current_user, "manage_projects", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         db_project = crud.update_project(db, project_id=project_id, project=project)
