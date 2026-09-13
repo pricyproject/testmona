@@ -344,6 +344,11 @@ def register_run_routes(app):
             parsed = parse(content, chosen_format)
         except CIIngestError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not parsed:
+            raise HTTPException(
+                status_code=400,
+                detail="No test cases found in file. Check the reporter output format.",
+            )
 
         try:
             summary = apply_results(
