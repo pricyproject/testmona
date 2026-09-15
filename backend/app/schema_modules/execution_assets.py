@@ -131,6 +131,8 @@ class TestDebtItem(TestDebtItemBase):
     id: int
     project_id: int
     auto_detected: bool
+    is_false_positive: bool = False
+    false_positive_reason: Optional[str] = None
     resolved_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -144,6 +146,7 @@ class TestAssetHealthSummary(BaseModel):
     total_cases: int
     active_debt_items: int
     resolved_debt_items: int
+    false_positive_items: int = 0
     affected_cases: int = 0
     healthy_cases: int = 0
     health_score: int = 100
@@ -163,6 +166,31 @@ class TestAssetDebtDetectionResult(BaseModel):
 
 class TestDebtBulkResolve(BaseModel):
     item_ids: List[int] = Field(..., min_length=1, max_length=500)
+
+
+class TestDebtFalsePositive(BaseModel):
+    reason: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_fp_reason(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class TestDebtBulkFalsePositive(BaseModel):
+    item_ids: List[int] = Field(..., min_length=1, max_length=500)
+    reason: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_bulk_fp_reason(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class TestDebtBulkResolveResult(BaseModel):

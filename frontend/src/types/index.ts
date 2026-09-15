@@ -326,6 +326,8 @@ export type TestDebtType = 'stale' | 'duplicate' | 'orphan' | 'always_pass' | 'n
 export type TestDebtSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type TestDebtAction = 'update' | 'merge' | 'archive' | 'link_req' | 'review';
 
+export type TestDebtResolution = 'active' | 'false_positive' | 'resolved' | 'all';
+
 export interface TestDebtItem {
   id: number;
   project_id: number;
@@ -335,6 +337,8 @@ export interface TestDebtItem {
   suggested_action: TestDebtAction;
   details?: string | null;
   auto_detected: boolean;
+  is_false_positive: boolean;
+  false_positive_reason?: string | null;
   resolved_at?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -352,6 +356,7 @@ export interface TestAssetHealthSummary {
   total_cases: number;
   active_debt_items: number;
   resolved_debt_items: number;
+  false_positive_items: number;
   affected_cases: number;
   healthy_cases: number;
   health_score: number;

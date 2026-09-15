@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 DEBT_TYPE_PATTERN = "^(stale|duplicate|orphan|always_pass|never_run|no_requirement_link)$"
 SEVERITY_PATTERN = "^(low|medium|high|critical)$"
+RESOLVED_PATTERN = "^(active|false_positive|resolved|all)$"
 
 
 def _ensure_project_access(db: Session, current_user, project_id: int, permission: str) -> models.Project:
@@ -51,7 +52,8 @@ def register_test_asset_health_routes(app):
         response: Response,
         debt_type: Optional[str] = Query(None, pattern=DEBT_TYPE_PATTERN),
         severity: Optional[str] = Query(None, pattern=SEVERITY_PATTERN),
-        resolved: str = Query("active", pattern="^(active|resolved|all)$"),
+        resolved: str = Query("active", pattern=RESOLVED_PATTERN),
+        q: Optional[str] = Query(None, max_length=200),
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=500),
         db: Session = Depends(get_db),
@@ -64,6 +66,7 @@ def register_test_asset_health_routes(app):
             debt_type=debt_type,
             severity=severity,
             resolved=resolved,
+            search=q,
             skip=skip,
             limit=limit,
         )
@@ -136,6 +139,73 @@ def register_test_asset_health_routes(app):
         _ensure_project_access(db, current_user, project_id, "write")
         resolved = health_service.bulk_resolve_test_debt_items(db, project_id, payload.item_ids)
         return {"resolved": resolved, "summary": health_service.get_health_summary(db, project_id)}
+
+    @app.post(
+        "/projects/{project_id}/test-asset-health/debt-items/{item_id}/false-positive",
+        response_model=schemas.TestDebtItem,
+        dependencies=dependencies,
+    )
+    def mark_test_debt_false_positive(
+        project_id: int,
+        item_id: int,
+        payload: schemas.TestDebtFalsePositive,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _ensure_project_access(db, current_user, project_id, "write")
+        item = health_service.get_test_debt_item(db, project_id, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Test debt item not found")
+        return health_service.mark_test_debt_false_positive(db, item, payload.reason)
+
+    @app.post(
+        "/projects/{project_id}/test-asset-health/debt-items/{item_id}/unmark-false-positive",
+        response_model=schemas.TestDebtItem,
+        dependencies=dependencies,
+    )
+    def unmark_test_debt_false_positive(
+        project_id: int,
+        item_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _ensure_project_access(db, current_user, project_id, "write")
+        item = health_service.get_test_debt_item(db, project_id, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Test debt item not found")
+        return health_service.unmark_test_debt_false_positive(db, item)
+
+    @app.post(
+        "/projects/{project_id}/test-asset-health/debt-items/{item_id}/reopen",
+        response_model=schemas.TestDebtItem,
+        dependencies=dependencies,
+    )
+    def reopen_test_debt_item(
+        project_id: int,
+        item_id: int,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _ensure_project_access(db, current_user, project_id, "write")
+        item = health_service.get_test_debt_item(db, project_id, item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Test debt item not found")
+        return health_service.reopen_test_debt_item(db, item)
+
+    @app.post(
+        "/projects/{project_id}/test-asset-health/debt-items/bulk-false-positive",
+        response_model=schemas.TestDebtBulkResolveResult,
+        dependencies=dependencies,
+    )
+    def bulk_mark_test_debt_false_positive(
+        project_id: int,
+        payload: schemas.TestDebtBulkFalsePositive,
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        _ensure_project_access(db, current_user, project_id, "write")
+        marked = health_service.bulk_mark_test_debt_false_positive(db, project_id, payload.item_ids, payload.reason)
+        return {"resolved": marked, "summary": health_service.get_health_summary(db, project_id)}
 
     @app.post(
         "/projects/{project_id}/test-asset-health/detect",

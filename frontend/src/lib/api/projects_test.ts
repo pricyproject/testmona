@@ -162,7 +162,7 @@ export const testAssetHealthAPI = {
   },
   listDebtItems: async (
     projectId: number,
-    filters: { debt_type?: TestDebtType | 'all'; severity?: TestDebtSeverity | 'all'; resolved?: 'active' | 'resolved' | 'all'; skip?: number; limit?: number } = {},
+    filters: { debt_type?: TestDebtType | 'all'; severity?: TestDebtSeverity | 'all'; resolved?: 'active' | 'false_positive' | 'resolved' | 'all'; q?: string; skip?: number; limit?: number } = {},
   ): Promise<{ items: TestDebtItem[]; total: number }> => {
     const params = new URLSearchParams({
       skip: String(filters.skip ?? 0),
@@ -171,6 +171,7 @@ export const testAssetHealthAPI = {
     });
     if (filters.debt_type && filters.debt_type !== 'all') params.append('debt_type', filters.debt_type);
     if (filters.severity && filters.severity !== 'all') params.append('severity', filters.severity);
+    if (filters.q?.trim()) params.append('q', filters.q.trim().slice(0, 200));
     const response = await api.get(`/projects/${projectId}/test-asset-health/debt-items?${params}`);
     const parsed = parseInt(response.headers['x-total-count'] ?? '0', 10);
     return {
@@ -188,6 +189,22 @@ export const testAssetHealthAPI = {
   },
   resolveBulk: async (projectId: number, itemIds: number[]): Promise<TestDebtBulkResolveResult> => {
     const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items/bulk-resolve`, { item_ids: itemIds });
+    return response.data;
+  },
+  markFalsePositive: async (projectId: number, itemId: number, reason?: string | null): Promise<TestDebtItem> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items/${itemId}/false-positive`, { reason: reason ?? null });
+    return response.data;
+  },
+  unmarkFalsePositive: async (projectId: number, itemId: number): Promise<TestDebtItem> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items/${itemId}/unmark-false-positive`);
+    return response.data;
+  },
+  reopen: async (projectId: number, itemId: number): Promise<TestDebtItem> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items/${itemId}/reopen`);
+    return response.data;
+  },
+  bulkFalsePositive: async (projectId: number, itemIds: number[], reason?: string | null): Promise<TestDebtBulkResolveResult> => {
+    const response = await api.post(`/projects/${projectId}/test-asset-health/debt-items/bulk-false-positive`, { item_ids: itemIds, reason: reason ?? null });
     return response.data;
   },
   update: async (

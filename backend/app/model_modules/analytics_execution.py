@@ -206,6 +206,8 @@ class TestDebtItem(Base):
     suggested_action = Column(String(40), nullable=False)
     details = Column(Text)
     auto_detected = Column(Boolean, default=True, server_default="1", nullable=False)
+    is_false_positive = Column(Boolean, default=False, server_default="0", nullable=False)
+    false_positive_reason = Column(Text, nullable=True)
     resolved_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -127,6 +127,7 @@ def list_test_debt_items(
     debt_type: Optional[str] = None,
     severity: Optional[str] = None,
     resolved: str = "active",
+    search: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> tuple[list[TestDebtItem], int]:
@@ -136,9 +137,20 @@ def list_test_debt_items(
     if severity:
         query = query.filter(TestDebtItem.severity == severity)
     if resolved == "active":
-        query = query.filter(TestDebtItem.resolved_at.is_(None))
+        query = query.filter(TestDebtItem.resolved_at.is_(None), TestDebtItem.is_false_positive.is_(False))
     elif resolved == "resolved":
-        query = query.filter(TestDebtItem.resolved_at.is_not(None))
+        query = query.filter(TestDebtItem.resolved_at.is_not(None), TestDebtItem.is_false_positive.is_(False))
+    elif resolved == "false_positive":
+        query = query.filter(TestDebtItem.is_false_positive.is_(True))
+    needle = (search or "").strip()
+    if needle:
+        query = query.join(TestCase, TestDebtItem.test_case_id == TestCase.id)
+        clauses = [TestCase.title.ilike(f"%{needle}%")]
+        if needle.isdigit():
+            case_id = int(needle.lstrip("0") or "0")
+            clauses.append(TestDebtItem.test_case_id == case_id)
+            clauses.append(TestCase.project_seq == case_id)
+        query = query.filter(or_(*clauses))
     total = query.count()
     severity_rank = case(
         (TestDebtItem.severity == "critical", 0),
@@ -169,6 +181,7 @@ def get_health_summary(db: Session, project_id: int) -> dict:
     ).filter(
         TestDebtItem.project_id == project_id,
         TestDebtItem.resolved_at.is_(None),
+        TestDebtItem.is_false_positive.is_(False),
     ).group_by(
         TestDebtItem.debt_type,
         TestDebtItem.severity,
@@ -178,11 +191,18 @@ def get_health_summary(db: Session, project_id: int) -> dict:
     affected_cases = db.query(func.count(distinct(TestDebtItem.test_case_id))).filter(
         TestDebtItem.project_id == project_id,
         TestDebtItem.resolved_at.is_(None),
+        TestDebtItem.is_false_positive.is_(False),
     ).scalar() or 0
 
     resolved_count = db.query(func.count(TestDebtItem.id)).filter(
         TestDebtItem.project_id == project_id,
         TestDebtItem.resolved_at.is_not(None),
+        TestDebtItem.is_false_positive.is_(False),
+    ).scalar() or 0
+
+    false_positive_count = db.query(func.count(TestDebtItem.id)).filter(
+        TestDebtItem.project_id == project_id,
+        TestDebtItem.is_false_positive.is_(True),
     ).scalar() or 0
 
     last_detected_at = db.query(
@@ -207,6 +227,7 @@ def get_health_summary(db: Session, project_id: int) -> dict:
         "total_cases": total_cases,
         "active_debt_items": active_count,
         "resolved_debt_items": int(resolved_count),
+        "false_positive_items": int(false_positive_count),
         "affected_cases": int(affected_cases),
         "healthy_cases": max(0, total_cases - int(affected_cases)),
         "health_score": _compute_health_score(total_cases, by_severity),
@@ -250,7 +271,36 @@ def update_test_debt_item(db: Session, item: TestDebtItem, payload) -> TestDebtI
 
 
 def resolve_test_debt_item(db: Session, item: TestDebtItem) -> TestDebtItem:
+    item.is_false_positive = False
+    item.false_positive_reason = None
     item.resolved_at = _utc_now()
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def reopen_test_debt_item(db: Session, item: TestDebtItem) -> TestDebtItem:
+    item.is_false_positive = False
+    item.false_positive_reason = None
+    item.resolved_at = None
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def mark_test_debt_false_positive(db: Session, item: TestDebtItem, reason: Optional[str] = None) -> TestDebtItem:
+    item.is_false_positive = True
+    item.false_positive_reason = (reason or "").strip() or None
+    item.resolved_at = None
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def unmark_test_debt_false_positive(db: Session, item: TestDebtItem) -> TestDebtItem:
+    item.is_false_positive = False
+    item.false_positive_reason = None
+    item.resolved_at = None
     db.commit()
     db.refresh(item)
     return item
@@ -267,11 +317,41 @@ def bulk_resolve_test_debt_items(db: Session, project_id: int, item_ids: Iterabl
             TestDebtItem.project_id == project_id,
             TestDebtItem.id.in_(ids),
             TestDebtItem.resolved_at.is_(None),
+            TestDebtItem.is_false_positive.is_(False),
         )
-        .update({TestDebtItem.resolved_at: _utc_now()}, synchronize_session=False)
+        .update(
+            {TestDebtItem.resolved_at: _utc_now(), TestDebtItem.false_positive_reason: None},
+            synchronize_session=False,
+        )
     )
     db.commit()
     return int(resolved or 0)
+
+
+def bulk_mark_test_debt_false_positive(
+    db: Session, project_id: int, item_ids: Iterable[int], reason: Optional[str] = None
+) -> int:
+    ids = {int(item_id) for item_id in item_ids}
+    if not ids:
+        return 0
+    marked = (
+        db.query(TestDebtItem)
+        .filter(
+            TestDebtItem.project_id == project_id,
+            TestDebtItem.id.in_(ids),
+            TestDebtItem.is_false_positive.is_(False),
+        )
+        .update(
+            {
+                TestDebtItem.is_false_positive: True,
+                TestDebtItem.false_positive_reason: (reason or "").strip() or None,
+                TestDebtItem.resolved_at: None,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return int(marked or 0)
 
 
 def _detect_duplicate_cases(cases: Iterable[TestCase], now: datetime) -> list[DebtCandidate]:
@@ -417,9 +497,12 @@ def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: boo
                 suggested_action=candidate.suggested_action,
                 details=candidate.details,
                 auto_detected=True,
+                is_false_positive=False,
                 resolved_at=None,
             ))
             created += 1
+            continue
+        if item.is_false_positive:
             continue
         if not item.auto_detected:
             if item.resolved_at is not None:
@@ -440,6 +523,8 @@ def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: boo
 
     auto_resolved = 0
     for key, item in existing_by_key.items():
+        if item.is_false_positive:
+            continue
         if item.auto_detected and key not in candidates and item.resolved_at is None:
             item.resolved_at = now
             auto_resolved += 1

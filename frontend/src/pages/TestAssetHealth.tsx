@@ -10,11 +10,16 @@ import {
   ChevronRight,
   Clock,
   Copy,
+  Download,
+  Flag,
+  FlagOff,
   Ghost,
   HeartPulse,
   Link2Off,
   Loader2,
   RefreshCw,
+  RotateCcw,
+  Search,
   ShieldCheck,
   X,
 } from 'lucide-react';
@@ -23,7 +28,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getApiErrorMessage, testAssetHealthAPI } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -32,7 +40,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 
-type ResolvedFilter = 'active' | 'resolved' | 'all';
+type ResolvedFilter = 'active' | 'false_positive' | 'resolved' | 'all';
 
 const severityClass: Record<TestDebtSeverity, string> = {
   low: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
@@ -84,11 +92,18 @@ export function TestAssetHealth() {
   const [debtType, setDebtType] = useState<TestDebtType | 'all'>('all');
   const [severity, setSeverity] = useState<TestDebtSeverity | 'all'>('all');
   const [resolved, setResolved] = useState<ResolvedFilter>('active');
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [fpTarget, setFpTarget] = useState<TestDebtItem | null>(null);
+  const [fpReason, setFpReason] = useState('');
+  const [fpSaving, setFpSaving] = useState(false);
+  const [bulkFpOpen, setBulkFpOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   // Monotonic request id: filter/page changes fire overlapping fetches, and
   // only the latest response may touch state.
   const loadSeq = useRef(0);
 
-  const load = async () => {
+  const load = async (searchOverride?: string) => {
     if (!projectIdNum) {
       setLoading(false);
       return;
@@ -102,6 +117,7 @@ export function TestAssetHealth() {
           debt_type: debtType,
           severity,
           resolved,
+          q: searchOverride ?? search,
           skip: page * PAGE_SIZE,
           limit: PAGE_SIZE,
         }),
@@ -129,7 +145,18 @@ export function TestAssetHealth() {
 
   useEffect(() => {
     load();
-  }, [projectIdNum, debtType, severity, resolved, page]);
+  }, [projectIdNum, debtType, severity, resolved, search, page]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage((prev) => {
+        if (searchInput.trim() !== search) return 0;
+        return prev;
+      });
+      setSearch(searchInput.trim());
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const detectDebt = async () => {
     if (!projectIdNum) return;
@@ -179,8 +206,100 @@ export function TestAssetHealth() {
     }
   };
 
+  const markFalsePositive = async () => {
+    if (!projectIdNum || !fpTarget) return;
+    setFpSaving(true);
+    try {
+      await testAssetHealthAPI.markFalsePositive(projectIdNum, fpTarget.id, fpReason.trim() || null);
+      toast({ title: t('success'), description: t('falsePositiveMarked') });
+      setFpTarget(null);
+      setFpReason('');
+      await load();
+    } catch (err) {
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToMarkFalsePositive')), variant: 'destructive' });
+    } finally {
+      setFpSaving(false);
+    }
+  };
+
+  const unmarkFalsePositive = async (item: TestDebtItem) => {
+    if (!projectIdNum) return;
+    try {
+      await testAssetHealthAPI.unmarkFalsePositive(projectIdNum, item.id);
+      toast({ title: t('success'), description: t('falsePositiveUnmarked') });
+      await load();
+    } catch (err) {
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToUnmarkFalsePositive')), variant: 'destructive' });
+    }
+  };
+
+  const reopenItem = async (item: TestDebtItem) => {
+    if (!projectIdNum) return;
+    try {
+      await testAssetHealthAPI.reopen(projectIdNum, item.id);
+      toast({ title: t('success'), description: t('testDebtItemReopened') });
+      await load();
+    } catch (err) {
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToReopenTestDebtItem')), variant: 'destructive' });
+    }
+  };
+
+  const bulkFalsePositive = async (reason: string | null) => {
+    if (!projectIdNum || selected.size === 0) return;
+    setResolvingBulk(true);
+    try {
+      const result = await testAssetHealthAPI.bulkFalsePositive(projectIdNum, Array.from(selected), reason);
+      setSummary(result.summary);
+      toast({ title: t('success'), description: t('bulkFalsePositiveComplete', { count: String(result.resolved) }) });
+      setBulkFpOpen(false);
+      await load();
+    } catch (err) {
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToBulkFalsePositive')), variant: 'destructive' });
+    } finally {
+      setResolvingBulk(false);
+    }
+  };
+
+  const exportCsv = async () => {
+    if (!projectIdNum || items.length === 0) return;
+    setExporting(true);
+    try {
+      const { items: all } = await testAssetHealthAPI.listDebtItems(projectIdNum, {
+        debt_type: debtType,
+        severity,
+        resolved,
+        q: search,
+        skip: 0,
+        limit: 500,
+      });
+      const rows = (all.length > 0 ? all : items).map((item) => ({
+        id: item.id,
+        test_case: item.test_case?.title ?? `#${item.test_case_id}`,
+        debt_type: item.debt_type,
+        severity: item.severity,
+        suggested_action: item.suggested_action,
+        status: item.is_false_positive ? 'false_positive' : item.resolved_at ? 'resolved' : 'active',
+        reason: item.is_false_positive ? (item.false_positive_reason ?? '') : '',
+        details: (item.details ?? '').replace(/[\r\n]+/g, ' '),
+      }));
+      const header = Object.keys(rows[0]);
+      const csv = [header.join(','), ...rows.map((r) => header.map((h) => JSON.stringify((r as Record<string, unknown>)[h] ?? '')).join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `test-debt-project-${projectIdNum}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({ title: t('error'), description: getApiErrorMessage(err, t('failedToLoadTestAssetHealth')), variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const selectableIds = useMemo(
-    () => items.filter((item) => !item.resolved_at).map((item) => item.id),
+    () => items.filter((item) => !item.resolved_at && !item.is_false_positive).map((item) => item.id),
     [items],
   );
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
@@ -248,12 +367,13 @@ export function TestAssetHealth() {
         <HealthScoreCard score={summary?.health_score ?? 100} t={t} />
 
         <Card className="lg:col-span-2">
-          <CardContent className="grid h-full grid-cols-2 gap-4 p-5 sm:grid-cols-4">
+          <CardContent className="grid h-full grid-cols-2 gap-4 p-5 sm:grid-cols-3 xl:grid-cols-5">
             <StatTile icon={Activity} label={t('totalTestCases')} value={summary?.total_cases ?? 0} />
             <StatTile icon={AlertTriangle} label={t('activeDebtItems')} value={summary?.active_debt_items ?? 0} tone="warning" />
             <StatTile icon={ShieldCheck} label={t('healthyCases')} value={summary?.healthy_cases ?? 0} tone="success" />
             <StatTile icon={CheckCircle2} label={t('resolvedDebtItems')} value={summary?.resolved_debt_items ?? 0} tone="muted" />
-            <div className="col-span-2 mt-1 sm:col-span-4">
+            <StatTile icon={Flag} label={t('falsePositives')} value={summary?.false_positive_items ?? 0} tone="muted" />
+            <div className="col-span-2 mt-1 sm:col-span-3 xl:col-span-5">
               <SeverityBar summary={summary} t={t} />
             </div>
           </CardContent>
@@ -289,7 +409,8 @@ export function TestAssetHealth() {
                     {count > 0 && <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />}
                   </div>
                   <p className="mt-2 text-2xl font-semibold tabular-nums">{count}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{t(`debtType_${type}` as any)}</p>
+                  <p className="mt-0.5 text-xs font-medium">{t(`debtType_${type}` as any)}</p>
+                  <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">{t(`debtDesc_${type}` as any)}</p>
                 </button>
               );
             })}
@@ -304,44 +425,68 @@ export function TestAssetHealth() {
             <CardTitle className="flex items-center gap-2 text-lg">
               <AlertTriangle className="h-5 w-5 text-amber-600" /> {t('testDebtBacklog')}
             </CardTitle>
-            <div className="grid gap-2 sm:grid-cols-3 lg:w-[660px]">
-              <Select value={debtType} onValueChange={(value) => { setDebtType(value as TestDebtType | 'all'); setPage(0); }}>
-                <SelectTrigger><SelectValue placeholder={t('debtType')} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('allDebtTypes')}</SelectItem>
-                  {DEBT_TYPES.map((type) => (
-                    <SelectItem key={type} value={type}>{t(`debtType_${type}` as any)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={severity} onValueChange={(value) => { setSeverity(value as TestDebtSeverity | 'all'); setPage(0); }}>
-                <SelectTrigger><SelectValue placeholder={t('severity')} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('allSeverities')}</SelectItem>
-                  {(['low', 'medium', 'high', 'critical'] as TestDebtSeverity[]).map((level) => (
-                    <SelectItem key={level} value={level}>{t(level)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={resolved} onValueChange={(value) => { setResolved(value as ResolvedFilter); setPage(0); }}>
-                <SelectTrigger><SelectValue placeholder={t('statusLabel')} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">{t('activeDebt')}</SelectItem>
-                  <SelectItem value="resolved">{t('resolvedDebt')}</SelectItem>
-                  <SelectItem value="all">{t('allDebt')}</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="relative sm:w-64">
+                <Search className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground ${isRTL ? 'right-3' : 'left-3'}`} />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder={t('searchDebtPlaceholder')}
+                  aria-label={t('searchDebtItems')}
+                  className={isRTL ? 'pr-9' : 'pl-9'}
+                />
+              </div>
+              <Button variant="outline" size="default" onClick={exportCsv} disabled={exporting || items.length === 0}>
+                {exporting ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Download className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                {t('exportCsv')}
+              </Button>
             </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <Select value={debtType} onValueChange={(value) => { setDebtType(value as TestDebtType | 'all'); setPage(0); }}>
+              <SelectTrigger><SelectValue placeholder={t('debtType')} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('allDebtTypes')}</SelectItem>
+                {DEBT_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>{t(`debtType_${type}` as any)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={severity} onValueChange={(value) => { setSeverity(value as TestDebtSeverity | 'all'); setPage(0); }}>
+              <SelectTrigger><SelectValue placeholder={t('severity')} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('allSeverities')}</SelectItem>
+                {(['low', 'medium', 'high', 'critical'] as TestDebtSeverity[]).map((level) => (
+                  <SelectItem key={level} value={level}>{t(level)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={resolved} onValueChange={(value) => { setResolved(value as ResolvedFilter); setPage(0); }}>
+              <SelectTrigger><SelectValue placeholder={t('statusLabel')} /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">{t('activeDebt')}</SelectItem>
+                <SelectItem value="false_positive">{t('falsePositiveDebt')}</SelectItem>
+                <SelectItem value="resolved">{t('resolvedDebt')}</SelectItem>
+                <SelectItem value="all">{t('allDebt')}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" onClick={() => { setDebtType('all'); setSeverity('all'); setResolved('active'); setSearchInput(''); setSearch(''); setPage(0); }}>
+              <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {t('clearFilters')}
+            </Button>
           </div>
 
           {/* Bulk action toolbar */}
           {canWrite && selected.size > 0 && (
-            <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 dark:border-blue-900 dark:bg-blue-950/30">
-              <span className="text-sm font-medium text-blue-700 dark:text-blue-300">{selected.size}</span>
-              <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 dark:border-blue-900 dark:bg-blue-950/30">
+              <span className="text-sm font-medium text-blue-700 dark:text-blue-300">{t('testCasesSelectedCount', { count: String(selected.size) })}</span>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" onClick={resolveSelected} disabled={resolvingBulk}>
                   {resolvingBulk ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <CheckCheck className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
                   {t('resolveSelected', { count: String(selected.size) })}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setBulkFpOpen(true)} disabled={resolvingBulk}>
+                  <Flag className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                  {t('markFalsePositiveSelected', { count: String(selected.size) })}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
                   <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {t('clearSelection')}
@@ -394,17 +539,19 @@ export function TestAssetHealth() {
                   <TableBody>
                     {items.map((item) => {
                       const Icon = debtTypeIcon[item.debt_type] ?? Clock;
-                      const isResolved = !!item.resolved_at;
+                      const isFp = !!item.is_false_positive;
+                      const isResolved = !!item.resolved_at && !isFp;
+                      const isTerminal = isResolved || isFp;
                       const checked = selected.has(item.id);
                       return (
                         <TableRow
                           key={item.id}
-                          className={cn('relative', checked && 'bg-blue-50/60 dark:bg-blue-950/20', isResolved && 'opacity-60')}
+                          className={cn('relative', checked && 'bg-blue-50/60 dark:bg-blue-950/20', isTerminal && 'opacity-60')}
                         >
                           {canWrite && (
                             <TableCell className="relative">
-                              <span className={cn('absolute inset-y-0 start-0 w-1', isResolved ? 'bg-transparent' : severityAccent[item.severity])} />
-                              {!isResolved && (
+                              <span className={cn('absolute inset-y-0 start-0 w-1', isTerminal ? 'bg-transparent' : severityAccent[item.severity])} />
+                              {!isTerminal && (
                                 <Checkbox checked={checked} onCheckedChange={() => toggleOne(item.id)} aria-label={item.test_case?.title || String(item.test_case_id)} />
                               )}
                             </TableCell>
@@ -413,6 +560,11 @@ export function TestAssetHealth() {
                             <Link className="text-blue-600 hover:underline" to={`/projects/${projectIdNum}/test-cases/${item.test_case?.project_seq || item.test_case_id}`}>
                               {item.test_case?.title || t('testCaseIdValue', { id: String(item.test_case_id) })}
                             </Link>
+                            {isFp && item.false_positive_reason && (
+                              <p className="mt-1 max-w-xs truncate text-xs font-normal text-muted-foreground" title={item.false_positive_reason}>
+                                {t('falsePositiveReasonLabel')}: {item.false_positive_reason}
+                              </p>
+                            )}
                           </TableCell>
                           <TableCell>
                             <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm">
@@ -424,13 +576,44 @@ export function TestAssetHealth() {
                           <TableCell className="whitespace-nowrap">{t(`debtAction_${item.suggested_action}` as any)}</TableCell>
                           <TableCell className="max-w-md text-sm text-muted-foreground">{item.details || t('noDetails')}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="font-normal">{item.auto_detected ? t('autoDetected') : t('manual')}</Badge>
+                            <div className="flex flex-wrap gap-1">
+                              <Badge variant="outline" className="font-normal">{item.auto_detected ? t('autoDetected') : t('manual')}</Badge>
+                              {isFp && (
+                                <Badge variant="secondary" className="gap-1 font-normal"><Flag className="h-3 w-3" /> {t('falsePositiveDebt')}</Badge>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right">
-                            {!isResolved && canWrite ? (
-                              <Button variant="outline" size="sm" onClick={() => resolveItem(item)}>{t('resolve')}</Button>
+                            {isFp ? (
+                              <div className="flex justify-end gap-1.5">
+                                {canWrite && (
+                                  <>
+                                    <Button variant="outline" size="sm" onClick={() => unmarkFalsePositive(item)} title={t('unmarkFalsePositive')}>
+                                      <FlagOff className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={() => reopenItem(item)} title={t('reopen')}>
+                                      <RotateCcw className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </>
+                                )}
+                                {!canWrite && <Badge variant="secondary" className="gap-1"><Flag className="h-3 w-3" /> {t('falsePositiveDebt')}</Badge>}
+                              </div>
                             ) : isResolved ? (
-                              <Badge variant="secondary" className="gap-1"><CheckCircle2 className="h-3 w-3" /> {t('resolved')}</Badge>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Badge variant="secondary" className="gap-1"><CheckCircle2 className="h-3 w-3" /> {t('resolved')}</Badge>
+                                {canWrite && (
+                                  <Button variant="ghost" size="sm" onClick={() => reopenItem(item)} title={t('reopen')}>
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                            ) : canWrite ? (
+                              <div className="flex justify-end gap-1.5">
+                                <Button variant="outline" size="sm" onClick={() => resolveItem(item)}>{t('resolve')}</Button>
+                                <Button variant="ghost" size="sm" onClick={() => { setFpTarget(item); setFpReason(''); }} title={t('markFalsePositive')}>
+                                  <Flag className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
                             ) : null}
                           </TableCell>
                         </TableRow>
@@ -461,6 +644,65 @@ export function TestAssetHealth() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={fpTarget !== null} onOpenChange={(open) => { if (!open) { setFpTarget(null); setFpReason(''); } }}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flag className="h-5 w-5 text-amber-600" /> {t('markFalsePositive')}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              {fpTarget?.test_case?.title || (fpTarget ? t('testCaseIdValue', { id: String(fpTarget.test_case_id) }) : '')}
+            </p>
+            <Textarea
+              value={fpReason}
+              onChange={(e) => setFpReason(e.target.value)}
+              placeholder={t('falsePositiveReasonPlaceholder')}
+              aria-label={t('falsePositiveReason')}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setFpTarget(null); setFpReason(''); }} disabled={fpSaving}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={markFalsePositive} disabled={fpSaving}>
+              {fpSaving && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('markFalsePositive')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkFpOpen} onOpenChange={setBulkFpOpen}>
+        <DialogContent isRTL={isRTL} className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flag className="h-5 w-5 text-amber-600" /> {t('markFalsePositiveSelected', { count: String(selected.size) })}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Textarea
+              value={fpReason}
+              onChange={(e) => setFpReason(e.target.value)}
+              placeholder={t('falsePositiveReasonPlaceholder')}
+              aria-label={t('falsePositiveReason')}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setBulkFpOpen(false); setFpReason(''); }} disabled={resolvingBulk}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={() => bulkFalsePositive(fpReason.trim() || null)} disabled={resolvingBulk}>
+              {resolvingBulk && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+              {t('markFalsePositive')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
