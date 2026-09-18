@@ -160,7 +160,7 @@ def _get_test_case_linked_requirements(db: Session, test_case: TestCase, project
 
 
 def _normalize_status_value(status: object) -> str:
-    return getattr(status, "value", status) or ""
+    return canonical_result_status(getattr(status, "value", status) or "")
 
 
 def _is_completed_result_status(status: object) -> bool:
