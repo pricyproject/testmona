@@ -20,9 +20,6 @@ export async function resolveProjectSeq(
     const response = await api.get(`/projects/${projectId}/lookup/${entity}/${seqOrId}`);
     return response.data.id as number;
   } catch (error: unknown) {
-    if (axios.isAxiosError(error) && error.response?.status === 404) {
-      return seqOrId;
-    }
     throw error;
   }
 }
