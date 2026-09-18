@@ -59,7 +59,7 @@ const BACKEND_STEP_TO_STATUS: Record<string, ExecutionStatus> = {
   passed: 'passed', pass: 'passed',
   failed: 'failed', fail: 'failed',
   blocked: 'blocked', block: 'blocked',
-  skipped: 'pending', skip: 'pending', pending: 'pending',
+  skipped: 'skipped', skip: 'skipped', pending: 'pending',
 };
 // Stable, order-independent fingerprint of per-step outcomes for dirty detection.
 const serializeStepMap = (steps: TestStep[], map: Record<number, ExecutionStatus>): string =>
