@@ -881,7 +881,7 @@ export function useTestCaseExecution() {
         // Persist per-step outcomes for multistep cases.
         if (testSteps.length > 0) {
           const stepPayload = testSteps
-            .filter((s) => ['passed', 'failed', 'blocked'].includes(stepStatuses[s.step_number]))
+            .filter((s) => ['passed', 'failed', 'blocked', 'skipped'].includes(stepStatuses[s.step_number]))
             .map((s) => ({
               step_number: s.step_number,
               step_name: (s.action || `Step ${s.step_number}`).slice(0, 500),
