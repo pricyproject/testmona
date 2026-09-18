@@ -58,12 +58,14 @@ def register_result_routes(app):
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         test_case = crud.get_test_case(db, test_case_id=test_result.test_case_id)
-        if not test_case:
+        if not test_case or getattr(test_case, "is_deleted", False):
             raise HTTPException(status_code=404, detail="Test case not found")
 
         test_run = crud.get_test_run(db, test_run_id=test_result.test_run_id)
         if not test_run:
             raise HTTPException(status_code=404, detail="Test run not found")
+        if test_run.status == "completed":
+            raise HTTPException(status_code=400, detail="Test run is completed")
 
         test_case_project_id = test_case.test_suite.project_id if test_case.test_suite else None
         if test_case_project_id != test_run.project_id:
