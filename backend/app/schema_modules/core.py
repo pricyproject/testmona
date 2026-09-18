@@ -252,19 +252,6 @@ class TestCaseCreate(TestCaseBase):
     test_suite_id: int
     test_steps: Optional[List['TestCaseStepCreate']] = None  # Multi-step support; test_case_id is assigned by the API
 
-    @model_validator(mode='before')
-    @classmethod
-    def set_defaults(cls, data):
-        """Set default values for required fields if not provided"""
-        if isinstance(data, dict):
-            if 'preconditions' not in data or data['preconditions'] is None or data['preconditions'] == "":
-                data['preconditions'] = "No preconditions defined"
-            if 'steps' not in data or data['steps'] is None or data['steps'] == "":
-                data['steps'] = "No steps defined"
-            if 'expected_result' not in data or data['expected_result'] is None or data['expected_result'] == "":
-                data['expected_result'] = "No expected results defined"
-        return data
-
 
 class TestCaseUpdate(BaseModel):
     title: Optional[str] = None
