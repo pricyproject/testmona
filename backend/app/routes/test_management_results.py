@@ -159,12 +159,12 @@ def register_result_routes(app):
         if not scoped_project_ids:
             return []
 
-        # A stable order is what makes `skip`/`limit` paging correct: without an
-        # ORDER BY the backend may return rows in a different order per page, so
-        # a client walking the pages would duplicate some rows and drop others.
+        # Latest-first: the execution page updates `results[0]`, and history
+        # allows multiple rows per run+case, so oldest-first would silently
+        # keep editing a stale row while newer ones pile up.
         return (
             query.filter(models.TestRun.project_id.in_(scoped_project_ids))
-            .order_by(models.TestResult.id)
+            .order_by(models.TestResult.id.desc())
             .offset(skip)
             .limit(limit)
             .all()
