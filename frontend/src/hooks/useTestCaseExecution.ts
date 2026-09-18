@@ -857,8 +857,8 @@ export function useTestCaseExecution() {
       paused_at: null,
       executed_by: parseInt(assignee) || null,
       logs: executionLogs,
-      defect_link: isFailedOrBlocked ? defectLink.trim() : '',
-      custom_link: isFailedOrBlocked ? customLink.trim() : '',
+      defect_link: defectLink.trim(),
+      custom_link: customLink.trim(),
       blocker_reason: executionStatus === 'blocked' ? (blockerReason || null) : null,
     };
 
