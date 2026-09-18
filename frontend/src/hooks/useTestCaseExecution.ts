@@ -607,6 +607,7 @@ export function useTestCaseExecution() {
     if (statuses.includes('failed')) return 'failed';
     if (statuses.includes('blocked')) return 'blocked';
     if (statuses.some((s) => s === 'pending')) return 'pending';
+    if (statuses.every((s) => s === 'skipped')) return 'skipped';
     return 'passed';
   }, [hasIterations, dataset, iterationStatuses]);
 
