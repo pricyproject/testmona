@@ -426,6 +426,25 @@ class TestRunBase(BaseModel):
     priority: Optional[str] = "medium"
     estimated_duration: Optional[int] = None
 
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        allowed = {"pending", "running", "in_progress", "passed", "failed", "skipped", "blocked", "completed"}
+        normalized = str(v or "").strip().lower()
+        if normalized not in allowed:
+            raise ValueError("Unsupported test run status")
+        return normalized
+
+    @field_validator("priority")
+    @classmethod
+    def validate_priority(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        normalized = str(v).strip().lower()
+        if normalized not in {"low", "medium", "high", "critical"}:
+            raise ValueError("Unsupported priority")
+        return normalized
+
 
 class TestRunCreate(TestRunBase):
     project_id: int
