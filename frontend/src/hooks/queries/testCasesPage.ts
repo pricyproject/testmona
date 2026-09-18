@@ -29,7 +29,7 @@ export function useProjectTestCases(
       // count: it is a separate request, so it can be stale (or missing) and
       // would otherwise truncate the list - or, at 0, render an empty table for
       // a project that does have cases. MAX_PAGES bounds a misbehaving server.
-      const MAX_PAGES = 200;
+      const MAX_PAGES = 20;
       for (let page = 0; page < MAX_PAGES; page += 1) {
         const batch = await testCasesAPI.getAll(
           projectId as number,
@@ -43,6 +43,7 @@ export function useProjectTestCases(
         if (!Array.isArray(batch) || batch.length === 0) break;
         testCases.push(...batch);
         if (batch.length < PAGE_SIZE) break;
+        if (Number.isFinite(reportedCount) && reportedCount > 0 && testCases.length >= reportedCount) break;
       }
 
       return {
