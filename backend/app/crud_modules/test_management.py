@@ -665,6 +665,13 @@ def create_test_result(db: Session, test_result: TestResultCreate):
     db.add(db_test_result)
     safe_commit(db)
     db.refresh(db_test_result)
+    run = db.query(TestRun).filter(TestRun.id == db_test_result.test_run_id).first()
+    if run is not None and run.status == "pending":
+        run.status = "running"
+        if run.started_at is None:
+            run.started_at = datetime.now(timezone.utc)
+        safe_commit(db)
+        db.refresh(run)
     _refresh_milestone_progress_for_run(db, db_test_result.test_run_id)
     return db_test_result
 
