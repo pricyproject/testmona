@@ -572,7 +572,7 @@ class TestResultBase(BaseModel):
     status: str
     actual_result: Optional[str] = None
     comments: Optional[str] = None
-    execution_time: Optional[float] = Field(None, description="Elapsed execution time in seconds")
+    execution_time: Optional[float] = Field(None, ge=0, description="Elapsed execution time in seconds")
     execution_started_at: Optional[datetime] = None
     executed_by: Optional[int] = None
     # New fields for pause/resume functionality
@@ -602,7 +602,7 @@ class TestResultUpdate(BaseModel):
     status: Optional[str] = None
     actual_result: Optional[str] = None
     comments: Optional[str] = None
-    execution_time: Optional[float] = Field(None, description="Elapsed execution time in seconds")  # Allow negative for updates
+    execution_time: Optional[float] = Field(None, ge=0, description="Elapsed execution time in seconds")
     execution_started_at: Optional[datetime] = None
     executed_by: Optional[int] = None
     # New fields for pause/resume functionality
