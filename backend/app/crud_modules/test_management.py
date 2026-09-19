@@ -523,7 +523,7 @@ def get_test_results(db: Session, test_run_id: Optional[int] = None, test_case_i
         query = query.filter(TestResult.test_run_id == test_run_id)
     if test_case_id:
         query = query.filter(TestResult.test_case_id == test_case_id)
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(TestResult.id.asc()).offset(skip).limit(limit).all()
 
 
 def _refresh_milestone_progress_for_run(db: Session, test_run_id):

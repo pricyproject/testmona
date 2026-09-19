@@ -16,12 +16,8 @@ export async function resolveProjectSeq(
   entity: string,
   seqOrId: number,
 ): Promise<number> {
-  try {
-    const response = await api.get(`/projects/${projectId}/lookup/${entity}/${seqOrId}`);
-    return response.data.id as number;
-  } catch (error: unknown) {
-    throw error;
-  }
+  const response = await api.get(`/projects/${projectId}/lookup/${entity}/${seqOrId}`);
+  return response.data.id as number;
 }
 
 export const seqAPI = { resolve: resolveProjectSeq };

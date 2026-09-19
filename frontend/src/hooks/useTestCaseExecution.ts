@@ -245,8 +245,9 @@ export function useTestCaseExecution() {
       try {
         const results = await testResultsAPI.getAll(runGlobalId, tcGlobalId);
         if (results.length > 0) {
-          rebaseTimer(results[0].execution_time || 0);
-          setManualTimeAdjustment(results[0].manual_time_adjustment || 0);
+          const latest = results[results.length - 1];
+          rebaseTimer(latest.execution_time || 0);
+          setManualTimeAdjustment(latest.manual_time_adjustment || 0);
         }
       } catch (error) {
         console.error('Failed to load final execution time:', error);
@@ -426,7 +427,7 @@ export function useTestCaseExecution() {
         setSelectedFailureStepNumber('');
         setFailureStepActual('');
         if (results.length > 0) {
-          const result = results[0];
+          const result = results[results.length - 1];
           setExecutionStatus(BACKEND_TO_STATUS[result.status] || 'pending');
           setExecutionNotes(result.actual_result || result.comments || '');
           setExecutionLogs(result.logs || '');
@@ -870,7 +871,7 @@ export function useTestCaseExecution() {
     try {
       const existing = await testResultsAPI.getAll(runGlobalId, tcGlobalId);
       const savedResult = existing.length > 0
-        ? await testResultsAPI.update(existing[0].id, executionData)
+        ? await testResultsAPI.update(existing[existing.length - 1].id, executionData)
         : await testResultsAPI.create(executionData);
 
       if (savedResult?.id) {

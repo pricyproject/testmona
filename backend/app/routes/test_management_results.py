@@ -161,12 +161,13 @@ def register_result_routes(app):
         if not scoped_project_ids:
             return []
 
-        # Latest-first: the execution page updates `results[0]`, and history
-        # allows multiple rows per run+case, so oldest-first would silently
-        # keep editing a stale row while newer ones pile up.
+        # Stable oldest-first order: the test-run detail and execution pages
+        # walk this list a page at a time, which is only correct with a
+        # deterministic order. Callers needing the latest row for a run+case
+        # take the last element.
         return (
             query.filter(models.TestRun.project_id.in_(scoped_project_ids))
-            .order_by(models.TestResult.id.desc())
+            .order_by(models.TestResult.id.asc())
             .offset(skip)
             .limit(limit)
             .all()
