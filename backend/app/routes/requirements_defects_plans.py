@@ -1300,7 +1300,7 @@ def register_requirements_defects_plans_routes(app):
             search_filters = [
                 models.TestCase.title.ilike(f"%{search_value}%"),
                 models.TestCase.reference.ilike(f"%{search_value}%"),
-                models.TestCase.tags.ilike(f"%{search_value}%"),
+                models.TestCase.tags_cache.ilike(f"%{search_value}%"),
                 cast(models.TestCase.id, String).ilike(f"%{search_value}%"),
             ]
             numeric_search = search_value.upper().replace("TC-", "")

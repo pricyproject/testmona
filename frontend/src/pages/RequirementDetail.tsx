@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
-import { useAuthStore } from '@/stores/authStore';
-import { isAdminUser } from '@/utils/roles';
+
 import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -214,7 +213,6 @@ const extractSourceDocument = (rawDescription?: string | null): SourceDoc | null
 export function RequirementDetail() {
   const { projectId, requirementId } = useParams<{ projectId: string; requirementId: string }>();
   const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
-  const isAdmin = isAdminUser(useAuthStore((s) => s.user));
   const [searchParams] = useSearchParams();
   // Watch notifications deep-link here with ?compare=1 to open the version
   // history straight into diff mode and scroll the reader to it.
@@ -236,6 +234,8 @@ export function RequirementDetail() {
   const [availableTestCasesTotal, setAvailableTestCasesTotal] = useState(0);
   const [linkedTestCasesLoading, setLinkedTestCasesLoading] = useState(false);
   const [availableTestCasesLoading, setAvailableTestCasesLoading] = useState(false);
+  const [availableTestCasesError, setAvailableTestCasesError] = useState('');
+  const [loadingMoreAvailable, setLoadingMoreAvailable] = useState(false);
   const [linkedTestCasesError, setLinkedTestCasesError] = useState('');
   const [relationshipError, setRelationshipError] = useState('');
   const [traceabilitySummary, setTraceabilitySummary] = useState<RequirementTraceabilitySummary>(emptyTraceabilitySummary);
@@ -248,6 +248,7 @@ export function RequirementDetail() {
   const [selectedAvailableTestCaseIds, setSelectedAvailableTestCaseIds] = useState<number[]>([]);
   const [testCaseSearchInput, setTestCaseSearchInput] = useState('');
   const [testCaseSearchQuery, setTestCaseSearchQuery] = useState('');
+  const [linkedSearchInput, setLinkedSearchInput] = useState('');
   const [linkedSearchQuery, setLinkedSearchQuery] = useState('');
   const [linkedStatusFilter, setLinkedStatusFilter] = useState('all');
   const [linkedPriorityFilter, setLinkedPriorityFilter] = useState('all');
@@ -350,6 +351,7 @@ export function RequirementDetail() {
           setVisibleLinkedTestCasesCount(10);
           setSelectedAvailableTestCaseIds([]);
           setTestCaseSearchQuery('');
+          setLinkedSearchInput('');
           setLinkedSearchQuery('');
           setLinkedStatusFilter('all');
           setLinkedPriorityFilter('all');
@@ -504,12 +506,19 @@ export function RequirementDetail() {
     };
   }, [requirement?.id, linkedSearchQuery, linkedStatusFilter, linkedPriorityFilter, visibleLinkedTestCasesCount, refreshLinkedKey, t]);
 
-  // Debounce the raw search box into the committed query that drives the fetch,
-  // so typing doesn't fire one request per keystroke.
+  // Debounce the raw search boxes into the committed queries that drive the
+  // fetches, so typing doesn't fire one request per keystroke.
   useEffect(() => {
     const handle = window.setTimeout(() => setTestCaseSearchQuery(testCaseSearchInput), 300);
     return () => window.clearTimeout(handle);
   }, [testCaseSearchInput]);
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setLinkedSearchQuery(linkedSearchInput);
+      setVisibleLinkedTestCasesCount(10);
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [linkedSearchInput]);
 
   const availableSearchRequestId = useRef(0);
 
@@ -535,6 +544,7 @@ export function RequirementDetail() {
       // Guard against out-of-order responses overwriting newer results.
       const requestId = ++availableSearchRequestId.current;
       setAvailableTestCasesLoading(true);
+      setAvailableTestCasesError('');
       try {
         const data = await requirementsAPI.searchTestCases(requirement.id, {
           linked: false,
@@ -552,6 +562,7 @@ export function RequirementDetail() {
         if (isMounted && requestId === availableSearchRequestId.current) {
           setAvailableTestCases([]);
           setAvailableTestCasesTotal(0);
+          setAvailableTestCasesError(t('failedToLoadTestCasesForSelectionError'));
         }
       } finally {
         if (isMounted && requestId === availableSearchRequestId.current) setAvailableTestCasesLoading(false);
@@ -562,7 +573,7 @@ export function RequirementDetail() {
     return () => {
       isMounted = false;
     };
-  }, [requirement?.id, testCaseSearchQuery, linkScopeSuiteId, linkScopeSectionId, refreshLinkedKey]);
+  }, [requirement?.id, testCaseSearchQuery, linkScopeSuiteId, linkScopeSectionId, refreshLinkedKey, t]);
 
   useEffect(() => {
     let isMounted = true;
@@ -839,6 +850,33 @@ export function RequirementDetail() {
     setSelectedAvailableTestCaseIds((current) => (
       current.includes(testCaseId) ? current.filter((id) => id !== testCaseId) : [...current, testCaseId]
     ));
+  };
+
+  const loadMoreAvailableTestCases = async () => {
+    if (!requirement?.id || loadingMoreAvailable || availableTestCasesLoading) return;
+    const requestId = ++availableSearchRequestId.current;
+    setLoadingMoreAvailable(true);
+    try {
+      const data = await requirementsAPI.searchTestCases(requirement.id, {
+        linked: false,
+        search: testCaseSearchQuery.trim() || undefined,
+        suite_id: linkScopeSuiteId ? Number(linkScopeSuiteId) : undefined,
+        section_id: linkScopeSectionId ? Number(linkScopeSectionId) : undefined,
+        skip: availableTestCases.length,
+        limit: 10,
+      });
+      if (requestId !== availableSearchRequestId.current) return;
+      const seen = new Set(availableTestCases.map((testCase) => testCase.id));
+      setAvailableTestCases((current) => [
+        ...current,
+        ...(data.items || []).filter((testCase: RequirementLinkedTestCase) => !seen.has(testCase.id)),
+      ]);
+      setAvailableTestCasesTotal(data.total || 0);
+    } catch (error) {
+      console.error('Failed to load more available test cases:', error);
+    } finally {
+      if (requestId === availableSearchRequestId.current) setLoadingMoreAvailable(false);
+    }
   };
 
   const resetCreateForm = () => {
@@ -1406,10 +1444,9 @@ export function RequirementDetail() {
                 <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
                   <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">
                     <Input
-                      value={linkedSearchQuery}
+                      value={linkedSearchInput}
                       onChange={(event) => {
-                        setLinkedSearchQuery(event.target.value);
-                        setVisibleLinkedTestCasesCount(10);
+                        setLinkedSearchInput(event.target.value);
                       }}
                       placeholder={t('searchLinkedTestCases')}
                     />
@@ -1443,6 +1480,7 @@ export function RequirementDetail() {
                         setTestCaseSearchInput('');
                         setTestCaseSearchQuery('');
                         setSelectedAvailableTestCaseIds([]);
+                        setAvailableTestCasesError('');
                         setLinkScopeSuiteId('');
                         setLinkScopeSectionId('');
                         setLinkDialogOpen(true);
@@ -1515,11 +1553,11 @@ export function RequirementDetail() {
                                   <FileText className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('viewTestCase')}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/edit`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/edit`)} disabled={!canWrite}>
                                   <Pencil className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('edit')}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`)} disabled={!canWrite}>
                                   <Play className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('execute')}
                                 </DropdownMenuItem>
@@ -2065,7 +2103,7 @@ export function RequirementDetail() {
               <DialogDescription>{t('searchTestCasesToLink')}</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
-              {isAdmin && (
+              {testSuites.length > 0 && (
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="link-scope-suite">{t('testSuite')}</Label>
@@ -2118,6 +2156,10 @@ export function RequirementDetail() {
                   <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                   <div className="h-14 animate-pulse rounded-md bg-slate-100 dark:bg-slate-800" />
                 </div>
+              ) : availableTestCasesError ? (
+                <p className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-300">
+                  {availableTestCasesError}
+                </p>
               ) : availableTestCases.length === 0 ? (
                 <EmptyState label={t('noTestCasesMatchSearch')} />
               ) : (
@@ -2137,7 +2179,19 @@ export function RequirementDetail() {
                 </div>
               )}
               {availableTestCasesTotal > availableTestCases.length && (
-                <p className="text-xs text-slate-500">{t('showingTopTestCaseMatches', { shown: availableTestCases.length, total: availableTestCasesTotal })}</p>
+                <div className="flex flex-col items-center gap-1 pt-1">
+                  <p className="text-xs text-slate-500">{t('showingTopTestCaseMatches', { shown: availableTestCases.length, total: availableTestCasesTotal })}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={loadMoreAvailableTestCases}
+                    disabled={loadingMoreAvailable || availableTestCasesLoading || bulkUpdating}
+                  >
+                    {loadingMoreAvailable && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
+                    {t('loadMore')}
+                  </Button>
+                </div>
               )}
             </div>
             <DialogFooter>
