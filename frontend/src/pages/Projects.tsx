@@ -32,8 +32,8 @@ import { Plus, FolderOpen, Settings, Trash2, TestTube, FileText, PlayCircle, Che
 import { useProjectStore, type Project } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { projectsAPI } from '@/lib/api';
-import { validateProject, getCharacterCount, sanitizeInput } from '@/utils/validation';
+import { projectsAPI, getApiErrorMessage } from '@/lib/api';
+import { sanitizeInput } from '@/utils/validation';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useEnhancedApiCall } from '@/hooks/useEnhancedApiCall';
 import { useAppName } from '@/hooks/useAppName';
@@ -153,7 +153,7 @@ export function Projects() {
     } else {
       console.error('Failed to fetch archived projects:', result.error);
       setArchivedProjects([]);
-      setArchivedError(result.error?.message || t('archivedProjectsFetchFailed'));
+      setArchivedError(getApiErrorMessage(result.error, t('archivedProjectsFetchFailed')));
     }
 
     setIsArchivedLoading(false);
@@ -190,7 +190,7 @@ export function Projects() {
         setIsBackendDown(true);
         setProjects([]);
         setStoreProjects([]);
-        setError(result.error?.message || 'Unable to connect to the backend server. Please check your connection and try again.');
+        setError(getApiErrorMessage(result.error, t('backendConnectionFailed')));
       }
 
       setIsRetrying(false);
@@ -228,7 +228,8 @@ export function Projects() {
   // Auto-focus on project name input when dialog opens
   useEffect(() => {
     if (isDialogOpen && projectNameInputRef.current) {
-      setTimeout(() => projectNameInputRef.current?.focus(), 100);
+      const timer = window.setTimeout(() => projectNameInputRef.current?.focus(), 100);
+      return () => window.clearTimeout(timer);
     }
   }, [isDialogOpen]);
 
@@ -282,10 +283,9 @@ export function Projects() {
         setIsDialogOpen(false);
       } else {
         console.error('Error creating project:', result.error);
-        const errorMessage = result.error?.response?.data?.detail || result.error?.message || t('failedToCreateProject');
         toast({
           title: t('error'),
-          description: errorMessage,
+          description: getApiErrorMessage(result.error, t('failedToCreateProject')),
           variant: "destructive",
         });
       }
@@ -370,6 +370,7 @@ export function Projects() {
   };
 
   const handleDeleteProject = async () => {
+    if (!projectToDelete) return;
     if (!isOnline) {
       toast({
         title: t('offlineMode'),
@@ -421,10 +422,9 @@ export function Projects() {
       setDeleteConfirmationName('');
     } else {
       console.error('Error deleting project:', result.error);
-      const errorMessage = result.error?.response?.data?.detail || result.error?.message || t('failedToDeleteProject');
       toast({
         title: t('error'),
-        description: errorMessage,
+        description: getApiErrorMessage(result.error, t('failedToDeleteProject')),
         variant: "destructive",
       });
     }
@@ -438,6 +438,7 @@ export function Projects() {
   };
 
   const handleUpdateProject = async () => {
+    if (!editingProject) return;
     if (!isOnline) {
       toast({
         title: t('offlineMode'),
@@ -485,10 +486,9 @@ export function Projects() {
       setProjectDescription('');
     } else {
       console.error('Error updating project:', result.error);
-      const errorMessage = result.error?.response?.data?.detail || result.error?.message || t('failedToUpdateProject');
       toast({
         title: t('error'),
-        description: errorMessage,
+        description: getApiErrorMessage(result.error, t('failedToUpdateProject')),
         variant: "destructive",
       });
     }
@@ -518,8 +518,8 @@ export function Projects() {
 
     if (!isOnline) {
       toast({
-        title: "Offline Mode",
-        description: "Cannot delete projects while offline. Please check your connection.",
+        title: t('offlineMode'),
+        description: t('cannotDeleteProjectsOffline'),
         variant: "destructive",
       });
       return;
@@ -527,8 +527,8 @@ export function Projects() {
 
     if (bulkConfirmationText !== `DELETE ${selectedProjects.size}`) {
       toast({
-        title: "Error",
-        description: "Confirmation text doesn't match. Please type exact confirmation text.",
+        title: t('error'),
+        description: t('bulkDeleteConfirmMismatch'),
         variant: "destructive",
       });
       return;
@@ -556,14 +556,14 @@ export function Projects() {
 
       if (bulkResult.failureCount > 0) {
         toast({
-          title: "Partial Success",
-          description: `${bulkResult.successCount} of ${bulkResult.results.length} project(s) deleted successfully. ${bulkResult.failureCount} failed.`,
+          title: t('partialFailure'),
+          description: t('bulkDeletePartial', { success: bulkResult.successCount, total: bulkResult.results.length, failed: bulkResult.failureCount }),
           variant: "default",
         });
       } else {
         toast({
-          title: "Success",
-          description: `${bulkResult.successCount} project(s) deleted successfully.`,
+          title: t('success'),
+          description: t('bulkDeleteSuccess', { count: bulkResult.successCount }),
         });
       }
 
@@ -573,10 +573,9 @@ export function Projects() {
       setPartialFailure(null);
     } else {
       console.error('Error bulk deleting projects:', bulkResult.results[0].error);
-      const errorMessage = bulkResult.results[0].error?.response?.data?.detail || bulkResult.results[0].error?.message || "Failed to delete projects. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(bulkResult.results[0].error, t('failedToBulkDelete')),
         variant: "destructive",
       });
     }
@@ -587,8 +586,8 @@ export function Projects() {
 
     if (!isOnline) {
       toast({
-        title: "Offline Mode",
-        description: "Cannot archive projects while offline. The request has been queued.",
+        title: t('offlineMode'),
+        description: t('cannotArchiveProjectsOffline'),
         variant: "default",
       });
       return;
@@ -624,14 +623,14 @@ export function Projects() {
 
       if (bulkResult.failureCount > 0) {
         toast({
-          title: "Partial Success",
-          description: `${bulkResult.successCount} of ${bulkResult.results.length} project(s) archived successfully. ${bulkResult.failureCount} failed.`,
+          title: t('partialFailure'),
+          description: t('bulkArchivePartial', { success: bulkResult.successCount, total: bulkResult.results.length, failed: bulkResult.failureCount }),
           variant: "default",
         });
       } else {
         toast({
-          title: "Success",
-          description: `${bulkResult.successCount} project(s) archived successfully.`,
+          title: t('success'),
+          description: t('bulkArchiveSuccess', { count: bulkResult.successCount }),
         });
       }
 
@@ -640,10 +639,9 @@ export function Projects() {
       setPartialFailure(null);
     } else {
       console.error('Error bulk archiving projects:', bulkResult.results[0].error);
-      const errorMessage = bulkResult.results[0].error?.response?.data?.detail || bulkResult.results[0].error?.message || "Failed to archive projects. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(bulkResult.results[0].error, t('failedToBulkArchive')),
         variant: "destructive",
       });
     }
@@ -655,8 +653,8 @@ export function Projects() {
 
     if (!isOnline) {
       toast({
-        title: "Offline Mode",
-        description: "Cannot update project status while offline. The request has been queued.",
+        title: t('offlineMode'),
+        description: t('cannotChangeStatusOffline'),
         variant: "default",
       });
       return;
@@ -706,10 +704,9 @@ export function Projects() {
       setNewStatus('');
     } else {
       console.error('Error updating project status:', result.error);
-      const errorMessage = result.error?.response?.data?.detail || result.error?.message || "Failed to update project status. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(result.error, t('failedToUpdateProjectStatus')),
         variant: "destructive",
       });
     }
@@ -720,8 +717,8 @@ export function Projects() {
 
     if (!isOnline) {
       toast({
-        title: "Offline Mode",
-        description: "Cannot clone project while offline. The request has been queued.",
+        title: t('offlineMode'),
+        description: t('cannotCloneProjectOffline'),
         variant: "default",
       });
       return;
@@ -756,8 +753,8 @@ export function Projects() {
       }
 
       toast({
-        title: "Success",
-        description: `Project "${cloneName}" cloned successfully.`,
+        title: t('success'),
+        description: t('projectClonedSuccessfully', { name: cloneName }),
       });
 
       setIsCloneDialogOpen(false);
@@ -766,10 +763,9 @@ export function Projects() {
       setCloneDescription('');
     } else {
       console.error('Error cloning project:', result.error);
-      const errorMessage = result.error?.response?.data?.detail || result.error?.message || "Failed to clone project. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(result.error, t('failedToCloneProject')),
         variant: "destructive",
       });
     }
@@ -779,8 +775,8 @@ export function Projects() {
   const handleExportProjects = async () => {
     if (!canImportExport) {
       toast({
-        title: "Access Denied",
-        description: "Only admin and manager roles can export projects",
+        title: t('accessDenied'),
+        description: t('exportProjectsAccessDenied'),
         variant: "destructive",
       });
       return;
@@ -805,18 +801,17 @@ export function Projects() {
         );
 
         toast({
-          title: "Success",
-          description: `Projects exported successfully as ${exportFormat.toUpperCase()}`,
+          title: t('success'),
+          description: t('projectsExportedSuccessfully', { format: exportFormat.toUpperCase() }),
         });
 
         setIsExportDialogOpen(false);
       }
     } catch (error: any) {
       console.error('Error exporting projects:', error);
-      const errorMessage = error.response?.data?.detail || error.message || "Failed to export projects. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToExportProjects')),
         variant: "destructive",
       });
     } finally {
@@ -839,27 +834,27 @@ export function Projects() {
     // Validate file size (10MB limit)
     const MAX_FILE_SIZE = 10 * 1024 * 1024;
     if (file.size > MAX_FILE_SIZE) {
-      validationErrors.push(`File size exceeds 10MB limit (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
+      validationErrors.push(t('fileTooLargeDesc', { size: (file.size / 1024 / 1024).toFixed(2) }));
     }
 
     // Validate file type
     if (!file.name.endsWith('.json') && !file.name.endsWith('.csv')) {
-      validationErrors.push("Only JSON and CSV files are supported");
+      validationErrors.push(t('invalidFileTypeDesc'));
     }
 
     // Validate file name
     if (file.name.length > 255) {
-      validationErrors.push("File name is too long (max 255 characters)");
+      validationErrors.push(t('fileNameTooLong'));
     }
 
     // Validate file content (basic check)
     if (file.size === 0) {
-      validationErrors.push("File is empty");
+      validationErrors.push(t('fileEmpty'));
     }
 
     if (validationErrors.length > 0) {
       toast({
-        title: "File Validation Failed",
+        title: t('fileValidationFailed'),
         description: validationErrors.join("; "),
         variant: "destructive",
       });
@@ -874,8 +869,8 @@ export function Projects() {
   const handleValidateImport = async () => {
     if (!importFile) {
       toast({
-        title: "No File Selected",
-        description: "Please select a file to import",
+        title: t('noFileSelected'),
+        description: t('selectFileToImport'),
         variant: "destructive",
       });
       return;
@@ -887,24 +882,23 @@ export function Projects() {
 
       if (result.valid) {
         toast({
-          title: "Validation Successful",
-          description: `All ${result.valid_rows} rows are valid`,
+          title: t('success'),
+          description: t('importValidationSuccess', { count: result.valid_rows }),
         });
         setShowImportPreview(true);
       } else {
         toast({
-          title: "Validation Completed",
-          description: `${result.valid_rows} valid, ${result.invalid_rows} invalid rows. Review in preview.`,
+          title: t('success'),
+          description: t('importValidationCompleted', { valid: result.valid_rows, invalid: result.invalid_rows }),
           variant: result.invalid_rows > 0 ? "destructive" : "default",
         });
         setShowImportPreview(true);
       }
     } catch (error: any) {
       console.error('Error validating import file:', error);
-      const errorMessage = error.response?.data?.detail || error.message || "Failed to validate file. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToValidateFile')),
         variant: "destructive",
       });
     }
@@ -913,8 +907,8 @@ export function Projects() {
   const handleImportProjects = async (strategy: string, partial: boolean, selectedRows: number[]) => {
     if (!canImportExport) {
       toast({
-        title: "Access Denied",
-        description: "Only admin and manager roles can import projects",
+        title: t('accessDenied'),
+        description: t('importProjectsAccessDenied'),
         variant: "destructive",
       });
       return;
@@ -922,8 +916,8 @@ export function Projects() {
 
     if (!importFile) {
       toast({
-        title: "No File Selected",
-        description: "Please select a file to import",
+        title: t('noFileSelected'),
+        description: t('selectFileToImport'),
         variant: "destructive",
       });
       return;
@@ -934,8 +928,8 @@ export function Projects() {
       const result = await projectImportExportAPI.importProjects(importFile, strategy, partial, selectedRows);
 
       toast({
-        title: "Import Completed",
-        description: result.message,
+        title: t('importCompleted'),
+        description: result.message || t('importCompleted'),
       });
 
       // Refresh projects list
@@ -954,10 +948,9 @@ export function Projects() {
       setValidationResult(null);
     } catch (error: any) {
       console.error('Error importing projects:', error);
-      const errorMessage = error.response?.data?.detail || error.message || "Failed to import projects. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToImportProjects')),
         variant: "destructive",
       });
     } finally {
@@ -976,15 +969,14 @@ export function Projects() {
       );
 
       toast({
-        title: "Template Downloaded",
-        description: `Import template downloaded as ${format.toUpperCase()}`,
+        title: t('success'),
+        description: t('importTemplateDownloaded', { format: format.toUpperCase() }),
       });
     } catch (error: any) {
       console.error('Error downloading template:', error);
-      const errorMessage = error.response?.data?.detail || error.message || "Failed to download template. Please try again.";
       toast({
-        title: "Error",
-        description: errorMessage,
+        title: t('error'),
+        description: getApiErrorMessage(error, t('failedToDownloadTemplate')),
         variant: "destructive",
       });
     }
@@ -1071,7 +1063,7 @@ export function Projects() {
       {(!isOnline || isBackendDown) && (
         <Card className={`${!isOnline ? 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20' : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20'}`}>
           <CardContent className="pt-6">
-            <div className="flex items-start space-x-4">
+            <div className="flex items-start space-x-4 rtl:space-x-reverse">
               <div className="shrink-0">
                 {!isOnline ? (
                   <WifiOff className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
@@ -1094,7 +1086,7 @@ export function Projects() {
                     {t('retrying')} ({t('attempt')} {retryCount}/3)
                   </div>
                 )}
-                <div className="mt-3 flex space-x-2">
+                <div className="mt-3 flex space-x-2 rtl:space-x-reverse">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1137,7 +1129,7 @@ export function Projects() {
       {partialFailure && (
         <Card className="border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-900/20">
           <CardContent className="pt-6">
-            <div className="flex items-start space-x-4">
+            <div className="flex items-start space-x-4 rtl:space-x-reverse">
               <div className="shrink-0">
                 <AlertTriangle className="h-6 w-6 text-orange-600 dark:text-orange-400" />
               </div>
@@ -1166,7 +1158,7 @@ export function Projects() {
       {isOnline && isSlowConnection && (
         <Card className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
           <CardContent className="pt-4 pb-4">
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 rtl:space-x-reverse">
               <Clock className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               <p className="text-sm text-blue-700 dark:text-blue-300">
                 {t('slowConnection')}
@@ -1884,11 +1876,11 @@ export function Projects() {
                   onChange={(e) => setProjectName(e.target.value)}
                   className={projectName.trim() === '' ? 'border-red-300 focus:border-red-500' : ''}
                   placeholder={t('enterProjectName')}
-                  maxLength={200}
+                  maxLength={100}
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{t('enterProjectName')}</span>
-                  <span>{projectName.length}/200</span>
+                  <span>{projectName.length}/100</span>
                 </div>
               </div>
             </div>
@@ -1913,7 +1905,7 @@ export function Projects() {
             </div>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <div className="text-xs text-muted-foreground mb-2 sm:mb-0 sm:mr-auto">
+            <div className="text-xs text-muted-foreground mb-2 sm:mb-0 sm:ms-auto">
               {t('toSubmit')}
             </div>
             <Button
@@ -2155,7 +2147,7 @@ export function Projects() {
                   <p className="font-semibold text-red-800 dark:text-red-200 mb-2">
                     {t('bulkDeleteWarningText')}
                   </p>
-                  <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 ml-4 list-disc">
+                  <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 ms-4 list-disc">
                     <li>{t('bulkDeleteItem1')}</li>
                     <li>{t('bulkDeleteItem2')}</li>
                     <li>{t('bulkDeleteItem3')}</li>
@@ -2225,7 +2217,7 @@ export function Projects() {
                   <p className="font-semibold text-yellow-800 dark:text-yellow-200 mb-2">
                     {t('bulkArchiveActionText')}
                   </p>
-                  <ul className="text-xs text-yellow-700 dark:text-yellow-300 space-y-1 ml-4 list-disc">
+                  <ul className="text-xs text-yellow-700 dark:text-yellow-300 space-y-1 ms-4 list-disc">
                     <li>{t('bulkArchiveItem1')}</li>
                     <li>{t('bulkArchiveItem2')}</li>
                     <li>{t('bulkArchiveItem3')}</li>
@@ -2278,7 +2270,7 @@ export function Projects() {
                   <p className="font-semibold text-red-800 dark:text-red-200 mb-2">
                     {t('deleteProjectWarningText')}
                   </p>
-                  <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 ml-4 list-disc">
+                  <ul className="text-xs text-red-700 dark:text-red-300 space-y-1 ms-4 list-disc">
                     <li>{t('deleteProjectItem1')}</li>
                     <li>{t('deleteProjectItem2')}</li>
                     <li>{t('deleteProjectItem3')}</li>
@@ -2359,7 +2351,7 @@ export function Projects() {
             </div>
 
             {exportFormat === 'json' && (
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 rtl:space-x-reverse">
                 <Checkbox
                   id="include-data"
                   checked={includeData}

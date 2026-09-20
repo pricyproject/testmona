@@ -73,6 +73,18 @@ class ProjectUpdate(BaseModel):
     status: Optional[Status] = None
     owner_id: Optional[int] = None
 
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError('Project name cannot be empty')
+        if len(v) > 100:
+            raise ValueError('Project name cannot exceed 100 characters')
+        return v
+
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
