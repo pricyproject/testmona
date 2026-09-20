@@ -80,6 +80,10 @@ export function useTestManagementData(projectId?: number) {
   const [categoryPrefs, setCategoryPrefs] = useState<NotificationCategoryInfo[]>([]);
   const [savingCategoryPrefs, setSavingCategoryPrefs] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const categoryPrefsRef = useRef<NotificationCategoryInfo[]>([]);
+  useEffect(() => {
+    categoryPrefsRef.current = categoryPrefs;
+  }, [categoryPrefs]);
 
   // ---- toast helpers ------------------------------------------------------
   const showSuccess = useCallback(
@@ -121,7 +125,8 @@ export function useTestManagementData(projectId?: number) {
     setLoading(true);
     setError(null);
     try {
-      const scope = projectId ? `?project_id=${projectId}` : '';
+      const validProjectId = Number.isInteger(projectId) && (projectId as number) > 0 ? projectId : undefined;
+      const scope = validProjectId ? `?project_id=${validProjectId}` : '';
       const [typesRes, prioritiesRes] = await Promise.all([
         api.get('/test-type-definitions/' + scope),
         api.get('/priority-definitions/' + scope),
@@ -162,9 +167,9 @@ export function useTestManagementData(projectId?: number) {
 
       try {
         const [exec, notif, autom, userPrefs, catPrefs] = await Promise.all([
-          testManagementAPI.getTestExecutionSettings(),
+          testManagementAPI.getTestExecutionSettings(validProjectId),
           testManagementAPI.getNotificationSettings(),
-          testManagementAPI.getAutomationSettings(),
+          testManagementAPI.getAutomationSettings(validProjectId),
           testManagementAPI.getUserNotificationPreferences(),
           notificationCategoryPrefsAPI.get().catch(() => []),
         ]);
@@ -422,19 +427,18 @@ export function useTestManagementData(projectId?: number) {
 
   // ---- notification category prefs (saved immediately on toggle) ----------
   const toggleCategoryChannel = useCallback((key: string, channel: 'in_app' | 'email', value: boolean) => {
-    setCategoryPrefs((previous) => {
-      const next = previous.map((c) => (c.key === key ? { ...c, [channel]: value } : c));
-      setSavingCategoryPrefs(true);
-      notificationCategoryPrefsAPI
-        .update(next.map((c) => ({ category: c.key, in_app: c.in_app, email: c.email })))
-        .then((saved) => setCategoryPrefs(saved))
-        .catch((err) => {
-          setCategoryPrefs(previous); // roll back
-          showError(errorDetail(err, t('failedToSave')));
-        })
-        .finally(() => setSavingCategoryPrefs(false));
-      return next;
-    });
+    const previous = categoryPrefsRef.current;
+    const next = previous.map((c) => (c.key === key ? { ...c, [channel]: value } : c));
+    setCategoryPrefs(next);
+    setSavingCategoryPrefs(true);
+    notificationCategoryPrefsAPI
+      .update(next.map((c) => ({ category: c.key, in_app: c.in_app, email: c.email })))
+      .then((saved) => setCategoryPrefs(saved))
+      .catch((err) => {
+        setCategoryPrefs(previous);
+        showError(errorDetail(err, t('failedToSave')));
+      })
+      .finally(() => setSavingCategoryPrefs(false));
   }, [showError, errorDetail, t]);
 
   // ---- batch save of execution / notification / automation settings -------

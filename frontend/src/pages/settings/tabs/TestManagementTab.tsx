@@ -23,12 +23,12 @@ export function TestManagementTab({ projectId }: { projectId?: number }) {
       <TestTypesSection data={data} canManage={canManageProject} />
       <PrioritiesSection data={data} canManage={canManageProject} />
       <TagsSection projectId={projectId} canManage={canManageProject} />
-      <SharedStepsSection data={data} />
-      <TestSettingsSection data={data} />
+      <SharedStepsSection data={data} canManage={canManageProject} />
+      <TestSettingsSection data={data} canManage={canManageProject} />
 
       {/* Sticky save bar for the batch-saved execution/notification/automation settings. */}
       <div className="sticky bottom-0 z-10 -mx-1 flex justify-end border-t border-border/60 bg-background/80 px-1 py-3 backdrop-blur">
-        <Button onClick={data.saveSettings} disabled={data.savingSettings}>
+        <Button onClick={data.saveSettings} disabled={!canManageProject || data.savingSettings}>
           {data.savingSettings && <Loader2 className="mr-2 h-4 w-4 animate-spin rtl:ml-2 rtl:mr-0" />}
           {data.savingSettings ? t('saving') : t('saveTestManagementSettings')}
         </Button>

@@ -28,7 +28,7 @@ import { TestManagementData } from '../hooks/useTestManagementData';
 const CATEGORIES = ['authentication', 'database', 'api', 'ui', 'setup', 'cleanup', 'validation', 'reporting'] as const;
 const COMPLEXITIES = ['simple', 'medium', 'complex'] as const;
 
-export function SharedStepsSection({ data }: { data: TestManagementData }) {
+export function SharedStepsSection({ data, canManage }: { data: TestManagementData; canManage: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -86,6 +86,7 @@ export function SharedStepsSection({ data }: { data: TestManagementData }) {
       tone="violet"
       title={t('sharedStepTemplates')}
       action={
+        canManage ? (
         <Dialog open={open} onOpenChange={(o) => (o ? openCreate() : (setOpen(false), reset()))}>
           <DialogTrigger asChild>
             <Button><Plus className="mr-2 h-4 w-4 rtl:ml-2 rtl:mr-0" />{t('addTemplate')}</Button>
@@ -186,13 +187,14 @@ export function SharedStepsSection({ data }: { data: TestManagementData }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        ) : undefined
       }
     >
       {activeSteps.length === 0 ? (
         <SettingsEmptyState
           icon={Layers}
           title={t('noSharedStepTemplatesFoundDesc')}
-          action={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4 rtl:ml-2 rtl:mr-0" />{t('addTemplate')}</Button>}
+          action={canManage ? <Button onClick={openCreate}><Plus className="mr-2 h-4 w-4 rtl:ml-2 rtl:mr-0" />{t('addTemplate')}</Button> : undefined}
         />
       ) : (
         <div className="space-y-3">
@@ -221,6 +223,7 @@ export function SharedStepsSection({ data }: { data: TestManagementData }) {
                   </div>
                 )}
               </div>
+              {canManage && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm"><MoreHorizontal className="h-4 w-4" /></Button>
@@ -234,6 +237,7 @@ export function SharedStepsSection({ data }: { data: TestManagementData }) {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              )}
             </div>
           ))}
         </div>

@@ -83,7 +83,9 @@ function RedirectToTestSuites() {
 // to the project rather than the old global /administrator tab.
 function ProjectTestManagement() {
   const { projectId } = useParams<{ projectId: string }>();
-  return <Settings projectId={Number(projectId)} singleTab="test-management" />;
+  const parsed = Number(projectId);
+  if (!Number.isInteger(parsed) || parsed <= 0) return <Navigate to="/projects" replace />;
+  return <Settings projectId={parsed} singleTab="test-management" />;
 }
 
 // An already-authenticated user landing on /login or /signup (e.g. via a

@@ -35,8 +35,9 @@ export const testManagementAPI = {
     const response = await api.delete(`/shared-step-templates/${templateId}`);
     return response.data;
   },
-  getTestExecutionSettings: async () => {
-    const response = await api.get('/test-execution-settings');
+  getTestExecutionSettings: async (projectId?: number) => {
+    const params = Number.isInteger(projectId) && (projectId as number) > 0 ? `?project_id=${projectId}` : '';
+    const response = await api.get(`/test-execution-settings${params}`);
     return response.data;
   },
   updateTestExecutionSettings: async (settingsId: number, settings: any) => {
@@ -51,8 +52,9 @@ export const testManagementAPI = {
     const response = await api.put(`/notification-settings/${settingsId}`, settings);
     return response.data;
   },
-  getAutomationSettings: async () => {
-    const response = await api.get('/automation-settings');
+  getAutomationSettings: async (projectId?: number) => {
+    const params = Number.isInteger(projectId) && (projectId as number) > 0 ? `?project_id=${projectId}` : '';
+    const response = await api.get(`/automation-settings${params}`);
     return response.data;
   },
   updateAutomationSettings: async (settingsId: number, settings: any) => {

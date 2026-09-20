@@ -15,7 +15,7 @@ const clampInt = (raw: string, min: number, max: number, fallback: number) => {
   return Math.min(max, Math.max(min, n));
 };
 
-export function TestSettingsSection({ data }: { data: TestManagementData }) {
+export function TestSettingsSection({ data, canManage }: { data: TestManagementData; canManage: boolean }) {
   const { t } = useTranslation();
   const { formatDateTime } = useDateFormat();
   const exec = data.testExecutionSettings;
@@ -33,14 +33,15 @@ export function TestSettingsSection({ data }: { data: TestManagementData }) {
               <Input
                 type="number" min={10} max={300} className="w-24"
                 value={exec.auto_save_interval}
+                disabled={!canManage}
                 onChange={(e) => data.setTestExecutionSettings({ ...exec, auto_save_interval: clampInt(e.target.value, 10, 300, 30) })}
               />
             </SettingToggleRow>
             <SettingToggleRow label={t('screenshotOnFailure')} description={t('screenshotOnFailureDesc')}>
-              <Switch checked={exec.screenshot_on_failure} onCheckedChange={(c) => data.setTestExecutionSettings({ ...exec, screenshot_on_failure: c })} />
+              <Switch checked={exec.screenshot_on_failure} disabled={!canManage} onCheckedChange={(c) => data.setTestExecutionSettings({ ...exec, screenshot_on_failure: c })} />
             </SettingToggleRow>
             <SettingToggleRow label={t('videoRecording')} description={t('videoRecordingDesc')}>
-              <Switch checked={exec.video_recording} onCheckedChange={(c) => data.setTestExecutionSettings({ ...exec, video_recording: c })} />
+              <Switch checked={exec.video_recording} disabled={!canManage} onCheckedChange={(c) => data.setTestExecutionSettings({ ...exec, video_recording: c })} />
             </SettingToggleRow>
           </div>
           <div className="space-y-4">
@@ -48,6 +49,7 @@ export function TestSettingsSection({ data }: { data: TestManagementData }) {
               <Input
                 type="number" min={30} max={3600} className="w-24"
                 value={exec.step_timeout}
+                disabled={!canManage}
                 onChange={(e) => data.setTestExecutionSettings({ ...exec, step_timeout: clampInt(e.target.value, 30, 3600, 300) })}
               />
             </SettingToggleRow>
@@ -55,11 +57,12 @@ export function TestSettingsSection({ data }: { data: TestManagementData }) {
               <Input
                 type="number" min={0} max={5} className="w-24"
                 value={exec.retry_attempts}
+                disabled={!canManage}
                 onChange={(e) => data.setTestExecutionSettings({ ...exec, retry_attempts: clampInt(e.target.value, 0, 5, 2) })}
               />
             </SettingToggleRow>
             <SettingToggleRow label={t('parallelExecution')} description={t('parallelExecutionDesc')}>
-              <Switch checked={exec.parallel_execution} onCheckedChange={(c) => data.setTestExecutionSettings({ ...exec, parallel_execution: c })} />
+              <Switch checked={exec.parallel_execution} disabled={!canManage} onCheckedChange={(c) => data.setTestExecutionSettings({ ...exec, parallel_execution: c })} />
             </SettingToggleRow>
           </div>
         </div>
@@ -152,21 +155,21 @@ export function TestSettingsSection({ data }: { data: TestManagementData }) {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="space-y-4">
             <SettingToggleRow label={t('aiSuggestions')} description={t('aiSuggestionsDesc')}>
-              <Switch checked={autom.ai_suggestions} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, ai_suggestions: c })} />
+              <Switch checked={autom.ai_suggestions} disabled={!canManage} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, ai_suggestions: c })} />
             </SettingToggleRow>
             <SettingToggleRow label={t('smartStepRecommendations')} description={t('smartStepRecommendationsDesc')}>
-              <Switch checked={autom.smart_step_recommendations} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, smart_step_recommendations: c })} />
+              <Switch checked={autom.smart_step_recommendations} disabled={!canManage} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, smart_step_recommendations: c })} />
             </SettingToggleRow>
           </div>
           <div className="space-y-4">
             <SettingToggleRow label={t('autoCategorization')} description={t('autoCategorizationDesc')}>
-              <Switch checked={autom.auto_categorization} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, auto_categorization: c })} />
+              <Switch checked={autom.auto_categorization} disabled={!canManage} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, auto_categorization: c })} />
             </SettingToggleRow>
             <SettingToggleRow label={t('duplicateDetection')} description={t('duplicateDetectionDesc')}>
-              <Switch checked={autom.duplicate_detection} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, duplicate_detection: c })} />
+              <Switch checked={autom.duplicate_detection} disabled={!canManage} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, duplicate_detection: c })} />
             </SettingToggleRow>
             <SettingToggleRow label={t('performanceOptimization')} description={t('performanceOptimizationDesc')}>
-              <Switch checked={autom.performance_optimization} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, performance_optimization: c })} />
+              <Switch checked={autom.performance_optimization} disabled={!canManage} onCheckedChange={(c) => data.setAutomationSettings({ ...autom, performance_optimization: c })} />
             </SettingToggleRow>
           </div>
         </div>
