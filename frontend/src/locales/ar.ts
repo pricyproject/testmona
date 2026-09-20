@@ -1842,10 +1842,12 @@ export const ar = {
     searchTestPlans: 'البحث عن خطط الاختبار بالاسم أو الوصف أو الأهداف...',
     // Test Plans Error Messages
     permissionDeniedViewTestPlans: 'ليس لديك إذن لعرض خطط الاختبار لهذا المشروع.',
+  permissionDeniedViewTestSuites: 'ليس لديك إذن لعرض مجموعات الاختبار لهذا المشروع.',
     permissionDeniedViewTestSuite: 'ليس لديك إذن لعرض مجموعة الاختبار هذه.',
     failedToLoadTestPlans: 'فشل في تحميل خطط الاختبار. يرجى المحاولة مرة أخرى لاحقًا.',
     missingRequiredInfo: 'معلومات مطلوبة مفقودة',
     permissionDeniedCreateTestPlans: 'ليس لديك إذن لإنشاء خطط الاختبار.',
+  permissionDeniedCreateTestSuites: 'ليس لديك إذن لإنشاء مجموعات الاختبار.',
     invalidDataProvided: 'بيانات غير صالحة. يرجى التحقق من المدخلات.',
     failedToCreateTestPlan: 'فشل في إنشاء خطة الاختبار. يرجى المحاولة مرة أخرى.',
     testPlanCreatedSuccessfully: 'تم إنشاء خطة الاختبار بنجاح',

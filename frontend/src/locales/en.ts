@@ -1641,6 +1641,7 @@ export const en = {
   // Test Plans Error Messages
   invalidProjectId: 'Invalid project ID',
   permissionDeniedViewTestPlans: 'You do not have permission to view test plans for this project.',
+  permissionDeniedViewTestSuites: 'You do not have permission to view test suites for this project.',
   permissionDeniedViewTestSuite: 'You do not have permission to view this test suite.',
   projectNotFound: 'Project not found.',
   testRunNotFound: 'Test run not found.',
@@ -1651,6 +1652,7 @@ export const en = {
   failedToLoadTestPlans: 'Failed to load test plans. Please try again later.',
   missingRequiredInfo: 'Missing required information',
   permissionDeniedCreateTestPlans: 'You do not have permission to create test plans.',
+  permissionDeniedCreateTestSuites: 'You do not have permission to create test suites.',
   invalidDataProvided: 'Invalid data provided. Please check your inputs.',
   failedToCreateTestPlan: 'Failed to create test plan. Please try again.',
   testPlanCreatedSuccessfully: 'Test plan created successfully',

@@ -1873,10 +1873,12 @@ export const fa = {
     searchTestPlans: 'جستجوی برنامه‌های تست بر اساس نام، توضیحات یا اهداف...',
     // Test Plans Error Messages
     permissionDeniedViewTestPlans: 'شما مجوز مشاهده برنامه‌های تست این پروژه را ندارید.',
+  permissionDeniedViewTestSuites: 'شما مجوز مشاهده مجموعه‌های تست این پروژه را ندارید.',
     permissionDeniedViewTestSuite: 'شما مجوز مشاهده این مجموعه تست را ندارید.',
     failedToLoadTestPlans: 'بارگذاری برنامه‌های تست شکست خورد. لطفاً بعداً دوباره تلاش کنید.',
     missingRequiredInfo: 'اطلاعات مورد نیاز موجود نیست',
     permissionDeniedCreateTestPlans: 'شما مجوز ایجاد برنامه‌های تست را ندارید.',
+  permissionDeniedCreateTestSuites: 'شما مجوز ایجاد مجموعه‌های تست را ندارید.',
     invalidDataProvided: 'داده‌های نامعتبر ارائه شده است. لطفاً ورودی‌ها را بررسی کنید.',
     failedToCreateTestPlan: 'ایجاد برنامه تست شکست خورد. لطفاً دوباره تلاش کنید.',
     testPlanCreatedSuccessfully: 'برنامه تست با موفقیت ایجاد شد',

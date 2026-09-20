@@ -144,11 +144,11 @@ export function TestSuites() {
       const status = (testSuitesQuery.error as any)?.response?.status;
       const message =
         status === 401
-          ? t('authenticationRequired') || t('failedToLoadTestSuitesError')
+          ? t('authenticationRequired')
           : status === 403
-          ? t('permissionDeniedViewTestPlans') || t('failedToLoadTestSuitesError')
+          ? t('permissionDeniedViewTestSuites')
           : status === 404
-          ? t('projectNotFound') || t('failedToLoadTestSuitesError')
+          ? t('projectNotFound')
           : t('failedToLoadTestSuitesError');
       setError(message);
       toast({ title: t('error'), description: message, variant: 'destructive' });
@@ -217,8 +217,7 @@ export function TestSuites() {
   };
 
   const selectAllFiltered = () => {
-    const allIds = filteredAndPaginatedTestCases.map(tc => tc.id);
-    setSelectedTestCases(allIds);
+    setSelectedTestCases(filteredTestCases.map(tc => tc.id));
   };
 
   const deselectAll = () => {
@@ -348,9 +347,9 @@ export function TestSuites() {
       const apiMessage = typeof detail === 'string' ? detail : null;
       const message =
         status === 403
-          ? apiMessage || t('permissionDeniedCreateTestPlans') || t('failedToCreateTestSuiteRetryError')
+          ? apiMessage || t('permissionDeniedCreateTestSuites')
           : status === 400 || status === 422
-          ? apiMessage || t('invalidDataProvided') || t('failedToCreateTestSuiteError')
+          ? apiMessage || t('invalidDataProvided')
           : apiMessage || t('failedToCreateTestSuiteRetryError');
       setError(message);
       toast({ title: t('error'), description: message, variant: 'destructive' });
@@ -865,15 +864,15 @@ export function TestSuites() {
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            { label: t('totalSuites'), value: testSuites.length, icon: Layers3, accent: 'from-blue-500 to-cyan-500' },
-            { label: t('active'), value: suiteStats.activeSuites, icon: CheckCircle2, accent: 'from-emerald-500 to-teal-500' },
-            { label: t('totalCases'), value: suiteStats.totalCases, icon: FileText, accent: 'from-amber-500 to-orange-500' },
-            { label: t('archived'), value: suiteStats.archivedSuites, icon: FolderOpen, accent: 'from-slate-500 to-slate-700' },
+            { id: 'total-suites', label: t('totalSuites'), value: testSuites.length, icon: Layers3, accent: 'from-blue-500 to-cyan-500' },
+            { id: 'active-suites', label: t('active'), value: suiteStats.activeSuites, icon: CheckCircle2, accent: 'from-emerald-500 to-teal-500' },
+            { id: 'total-cases', label: t('totalCases'), value: suiteStats.totalCases, icon: FileText, accent: 'from-amber-500 to-orange-500' },
+            { id: 'archived-suites', label: t('archived'), value: suiteStats.archivedSuites, icon: FolderOpen, accent: 'from-slate-500 to-slate-700' },
           ].map((stat) => {
             const Icon = stat.icon;
 
             return (
-              <Card key={stat.label} className="overflow-hidden border-white bg-white/90 shadow-xs backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
+              <Card key={stat.id} className="overflow-hidden border-white bg-white/90 shadow-xs backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900/80">
                 <CardContent className="p-5">
                   <div className="flex items-center justify-between gap-4">
                     <div>
@@ -1018,7 +1017,7 @@ export function TestSuites() {
                                 {suite.description}
                               </CardDescription>
                             ) : (
-                              <CardDescription className="mt-2">{t('suiteDescription')}</CardDescription>
+                              <CardDescription className="mt-2">{t('noDescription')}</CardDescription>
                             )}
                           </div>
                         </div>

@@ -119,9 +119,17 @@ class ProjectFeaturesUpdate(BaseModel):
 
 
 class TestSuiteBase(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
     status: Status = Status.ACTIVE
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError('Name must not be blank')
+        return v
 
     @model_validator(mode='before')
     @classmethod
@@ -145,6 +153,18 @@ class TestSuiteUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[Status] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError('Name must not be blank')
+        if len(v) > 255:
+            raise ValueError('Name must not exceed 255 characters')
+        return v
 
     @model_validator(mode='before')
     @classmethod
