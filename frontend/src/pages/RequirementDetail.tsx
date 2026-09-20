@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
+import { useAuthStore } from '@/stores/authStore';
+import { isAdminUser } from '@/utils/roles';
 import { AlertTriangle, ArrowLeft, ArrowRight, Calendar, CheckCircle2, Clock, CopyCheck, ExternalLink, Eye, EyeOff, FileText, History, ListChecks, Loader2, MoreVertical, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Play, Plus, Settings2, ShieldAlert, Tag, Wand2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -212,6 +214,7 @@ const extractSourceDocument = (rawDescription?: string | null): SourceDoc | null
 export function RequirementDetail() {
   const { projectId, requirementId } = useParams<{ projectId: string; requirementId: string }>();
   const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
+  const isAdmin = isAdminUser(useAuthStore((s) => s.user));
   const [searchParams] = useSearchParams();
   // Watch notifications deep-link here with ?compare=1 to open the version
   // history straight into diff mode and scroll the reader to it.
@@ -220,7 +223,7 @@ export function RequirementDetail() {
   const { t, isRTL } = useTranslation();
   const { formatDate: fmtDate } = useDateFormat();
   const formatDate = (value?: string | null): string =>
-    value ? fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) || 'N/A' : 'N/A';
+    value ? fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) || t('notAvailable') : t('notAvailable');
   const { toast } = useToast();
   const [requirement, setRequirement] = useState<Requirement | null>(null);
   const [requirementRefreshKey, setRequirementRefreshKey] = useState(0);
@@ -251,6 +254,8 @@ export function RequirementDetail() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [refreshLinkedKey, setRefreshLinkedKey] = useState(0);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkScopeSuiteId, setLinkScopeSuiteId] = useState('');
+  const [linkScopeSectionId, setLinkScopeSectionId] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creatingTestCase, setCreatingTestCase] = useState(false);
   const [aiDialogOpen, setAiDialogOpen] = useState(false);
@@ -519,7 +524,8 @@ export function RequirementDetail() {
       }
 
       const searchValue = testCaseSearchQuery.trim();
-      if (searchValue.length < 2) {
+      const scopeActive = linkScopeSuiteId !== '' || linkScopeSectionId !== '';
+      if (searchValue.length < 2 && !scopeActive) {
         setAvailableTestCases([]);
         setAvailableTestCasesTotal(0);
         setSelectedAvailableTestCaseIds([]);
@@ -532,14 +538,15 @@ export function RequirementDetail() {
       try {
         const data = await requirementsAPI.searchTestCases(requirement.id, {
           linked: false,
-          search: searchValue,
+          search: searchValue || undefined,
+          suite_id: linkScopeSuiteId ? Number(linkScopeSuiteId) : undefined,
+          section_id: linkScopeSectionId ? Number(linkScopeSectionId) : undefined,
           skip: 0,
           limit: 10,
         });
         if (!isMounted || requestId !== availableSearchRequestId.current) return;
         setAvailableTestCases(data.items || []);
         setAvailableTestCasesTotal(data.total || 0);
-        setSelectedAvailableTestCaseIds((current) => current.filter((id) => (data.items || []).some((testCase: RequirementLinkedTestCase) => testCase.id === id)));
       } catch (error) {
         console.error('Failed to load available test cases:', error);
         if (isMounted && requestId === availableSearchRequestId.current) {
@@ -555,7 +562,7 @@ export function RequirementDetail() {
     return () => {
       isMounted = false;
     };
-  }, [requirement?.id, testCaseSearchQuery, refreshLinkedKey]);
+  }, [requirement?.id, testCaseSearchQuery, linkScopeSuiteId, linkScopeSectionId, refreshLinkedKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -648,6 +655,35 @@ export function RequirementDetail() {
     if (!newTestCaseForm.test_suite_id) return [];
     return sections.filter((section) => String(section.test_suite_id) === newTestCaseForm.test_suite_id);
   }, [newTestCaseForm.test_suite_id, sections]);
+  const linkScopeSections = useMemo(() => {
+    const inSuite = linkScopeSuiteId ? sections.filter((s) => String(s.test_suite_id) === linkScopeSuiteId) : sections;
+    const byId = new Map(inSuite.map((s) => [s.id, s]));
+    const depthOf = (section: TestCaseSection): number => {
+      let depth = 0;
+      let parent = section.parent_section_id;
+      const seen = new Set<number>([section.id]);
+      while (parent != null && byId.has(parent) && !seen.has(parent)) {
+        seen.add(parent);
+        depth += 1;
+        parent = byId.get(parent)?.parent_section_id;
+      }
+      return depth;
+    };
+    return inSuite.map((s) => ({ ...s, depth: depthOf(s) }));
+  }, [sections, linkScopeSuiteId]);
+  const handleLinkScopeSuiteChange = (value: string) => {
+    setLinkScopeSuiteId(value === 'all' ? '' : value);
+    setLinkScopeSectionId('');
+  };
+  const handleLinkScopeSectionChange = (value: string) => {
+    if (value === 'all') {
+      setLinkScopeSectionId('');
+      return;
+    }
+    setLinkScopeSectionId(value);
+    const section = sections.find((s) => String(s.id) === value);
+    if (section?.test_suite_id) setLinkScopeSuiteId(String(section.test_suite_id));
+  };
   const selectedAIDraftsCount = aiDrafts.filter((draft) => draft.selected !== false && draft.title.trim()).length;
   const activeAIDraft = aiDrafts[activeAIDraftIndex];
   const activeDuplicateFinding = dupFindings[activeAIDraftIndex];
@@ -1384,7 +1420,7 @@ export function RequirementDetail() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">{t('allStatuses')}</SelectItem>
-                          {TEST_CASE_STATUSES.map((status) => <SelectItem key={status} value={status} className="capitalize">{status}</SelectItem>)}
+                          {TEST_CASE_STATUSES.map((status) => <SelectItem key={status} value={status}>{t(status)}</SelectItem>)}
                         </SelectContent>
                       </Select>
                       <Select value={linkedPriorityFilter} onValueChange={(value) => { setLinkedPriorityFilter(value); setVisibleLinkedTestCasesCount(10); }}>
@@ -1393,7 +1429,7 @@ export function RequirementDetail() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">{t('allPriorities')}</SelectItem>
-                          {TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority} className="capitalize">{priority}</SelectItem>)}
+                          {TEST_CASE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{t(priority)}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1407,6 +1443,8 @@ export function RequirementDetail() {
                         setTestCaseSearchInput('');
                         setTestCaseSearchQuery('');
                         setSelectedAvailableTestCaseIds([]);
+                        setLinkScopeSuiteId('');
+                        setLinkScopeSectionId('');
                         setLinkDialogOpen(true);
                       }}
                     >
@@ -2027,6 +2065,38 @@ export function RequirementDetail() {
               <DialogDescription>{t('searchTestCasesToLink')}</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
+              {isAdmin && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="link-scope-suite">{t('testSuite')}</Label>
+                    <Select value={linkScopeSuiteId || 'all'} onValueChange={handleLinkScopeSuiteChange} disabled={bulkUpdating}>
+                      <SelectTrigger id="link-scope-suite">
+                        <SelectValue placeholder={t('testSuite')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t('allSuites')}</SelectItem>
+                        {testSuites.map((suite) => (
+                          <SelectItem key={suite.id} value={String(suite.id)}>{suite.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="link-scope-section">{t('section')}</Label>
+                    <Select value={linkScopeSectionId || 'all'} onValueChange={handleLinkScopeSectionChange} disabled={bulkUpdating}>
+                      <SelectTrigger id="link-scope-section">
+                        <SelectValue placeholder={t('section')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t('allSections')}</SelectItem>
+                        {linkScopeSections.map((section) => (
+                          <SelectItem key={section.id} value={String(section.id)}>{`${'— '.repeat(section.depth)}${section.name}`}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
               <div className="relative">
                 <Input
                   value={testCaseSearchInput}
@@ -2034,13 +2104,14 @@ export function RequirementDetail() {
                   placeholder={t('searchTestCasesToLink')}
                   aria-label={t('searchTestCasesToLink')}
                   maxLength={100}
+                  disabled={bulkUpdating}
                   className={isRTL ? 'pl-9' : 'pr-9'}
                 />
                 {availableTestCasesLoading && (
                   <Loader2 className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400 ${isRTL ? 'left-3' : 'right-3'}`} />
                 )}
               </div>
-              {testCaseSearchInput.trim().length < 2 ? (
+              {testCaseSearchInput.trim().length < 2 && linkScopeSuiteId === '' && linkScopeSectionId === '' ? (
                 <EmptyState label={t('typeToSearchTestCases')} />
               ) : (availableTestCasesLoading || testCaseSearchInput.trim() !== testCaseSearchQuery.trim()) ? (
                 <div className="space-y-2">
@@ -2058,7 +2129,7 @@ export function RequirementDetail() {
                         onCheckedChange={() => toggleAvailableSelection(testCase.id)}
                       />
                       <span className="min-w-0">
-                        <span className="block font-medium text-slate-900 wrap-anywhere dark:text-white">TC-{String(testCase.id).padStart(3, '0')} · {testCase.title}</span>
+                        <span className="block font-medium text-slate-900 wrap-anywhere dark:text-white">{testCase.reference || `TC-${String(testCase.id).padStart(3, '0')}`} · {testCase.title}</span>
                         <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
                       </span>
                     </label>
