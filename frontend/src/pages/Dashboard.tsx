@@ -244,7 +244,7 @@ export function Dashboard() {
         setDashboardStats(stats);
       } catch (error) {
         if (controller.signal.aborted) return;
-        console.error('❌ Failed to load dashboard statistics:', error);
+        console.error('Failed to load dashboard statistics:', error);
         setDashboardStats(null);
         setStatsError(getApiErrorMessage(error, t('failedToLoadDashboardStats')));
       } finally {
@@ -411,6 +411,7 @@ export function Dashboard() {
   // Quality-gate blockers. Pass rate is intentionally omitted here — it is
   // already surfaced by the signal ring and the top "Pass Rate" stat card.
   const readinessMetrics: {
+    id: string;
     label: string;
     value: number;
     detail: string;
@@ -419,6 +420,7 @@ export function Dashboard() {
     onClick: () => void;
   }[] = [
     {
+      id: 'open-critical-defects',
       label: t('openCriticalDefects'),
       value: stats.releaseReadiness.openCriticalDefects,
       detail: t('openCriticalDefectsHelp'),
@@ -427,6 +429,7 @@ export function Dashboard() {
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
     },
     {
+      id: 'untested-requirements',
       label: t('untestedRequirements'),
       value: stats.releaseReadiness.untestedRequirements,
       detail: t('untestedRequirementsHelp'),
@@ -435,6 +438,7 @@ export function Dashboard() {
       onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/requirements` : '/projects'),
     },
     {
+      id: 'stale-tests',
       label: t('staleTests'),
       value: stats.releaseReadiness.staleTests,
       detail: t('staleTestsHelp'),
@@ -444,8 +448,9 @@ export function Dashboard() {
     },
   ];
 
-  const allQuickActions: { title: string; description: string; icon: LucideIcon; tone: Tone; onClick: () => void; write: boolean }[] = [
+  const allQuickActions: { id: string; title: string; description: string; icon: LucideIcon; tone: Tone; onClick: () => void; write: boolean }[] = [
     {
+      id: 'create-test-case',
       title: t('createTestCase'),
       description: t('addNewTestCase'),
       icon: FileText,
@@ -454,6 +459,7 @@ export function Dashboard() {
       write: true,
     },
     {
+      id: 'start-test-run',
       title: t('startTestRun'),
       description: t('executeTests'),
       icon: PlayCircle,
@@ -462,6 +468,7 @@ export function Dashboard() {
       write: true,
     },
     {
+      id: 'report-defect',
       title: t('reportDefect'),
       description: t('logNewIssue'),
       icon: Bug,
@@ -470,6 +477,7 @@ export function Dashboard() {
       write: true,
     },
     {
+      id: 'view-reports',
       title: t('viewReports'),
       description: t('checkAnalytics'),
       icon: FileCheck,
@@ -691,7 +699,7 @@ export function Dashboard() {
                 const hasIssue = metric.value > 0;
                 return (
                   <button
-                    key={metric.label}
+                    key={metric.id}
                     type="button"
                     onClick={metric.onClick}
                     className="group flex items-center gap-4 rounded-2xl border border-gray-200 bg-gray-50/70 p-4 text-start transition hover:border-blue-200 hover:bg-white hover:shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:border-gray-800 dark:bg-gray-900/70 dark:hover:border-blue-900 dark:hover:bg-gray-900"
@@ -791,7 +799,7 @@ export function Dashboard() {
               const Icon = action.icon;
               return (
                 <button
-                  key={action.title}
+                  key={action.id}
                   type="button"
                   onClick={action.onClick}
                   className="group flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-start transition-all duration-200 hover:border-gray-200 hover:bg-gray-50 hover:shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring dark:hover:border-gray-800 dark:hover:bg-gray-900"

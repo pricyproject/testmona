@@ -40,7 +40,7 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
     }
   }
 
-  return error instanceof Error ? error.message : fallback;
+  return fallback;
 };
 
 // Single-flight refresh coordination + a one-shot password-change prompt.
