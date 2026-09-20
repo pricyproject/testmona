@@ -367,6 +367,7 @@ class User(BaseModel):
     location: Optional[str] = None
     website: Optional[str] = None
     company: Optional[str] = None
+    avatar_url: Optional[str] = None
     role: Role = Role.TESTER
     is_active: bool = True
     is_superuser: bool = False

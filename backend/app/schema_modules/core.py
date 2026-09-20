@@ -769,6 +769,7 @@ class UserProfileUpdate(BaseModel):
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
+        v = v.strip()
         if len(v) < 3:
             raise ValueError('Username must be at least 3 characters')
         if len(v) > 30:
@@ -797,9 +798,10 @@ class UserProfileUpdate(BaseModel):
     def validate_email(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
+        v = v.strip().lower()
         if len(v) > 255:
             raise ValueError('Email must not exceed 255 characters')
-        return v.strip().lower()
+        return v
     
     @field_validator('full_name')
     @classmethod
@@ -824,17 +826,20 @@ class UserProfileUpdate(BaseModel):
     def validate_location(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
+        v = v.strip()
         if len(v) > 100:
             raise ValueError('Location must not exceed 100 characters')
-        # Basic validation for location format (allow letters, numbers, commas, periods, spaces, hyphens)
-        if not re.match(r'^[a-zA-Z0-9,\.\s-]+$', v):
+        if v and not re.match(r"^[\w\s,.\-'،؛]+$", v, re.UNICODE):
             raise ValueError('Location contains invalid characters')
-        return v.strip()
+        return v
     
     @field_validator('website')
     @classmethod
     def validate_website(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or v.strip() == '':
+        if v is None:
+            return v
+        v = v.strip()
+        if v == '':
             return v
         if len(v) > 255:
             raise ValueError('Website must not exceed 255 characters')
@@ -855,12 +860,12 @@ class UserProfileUpdate(BaseModel):
     def validate_company(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
+        v = v.strip()
         if len(v) > 100:
             raise ValueError('Company must not exceed 100 characters')
-        # Basic validation for company name (allow letters, numbers, spaces, hyphens, apostrophes, periods, commas)
-        if not re.match(r'^[a-zA-Z0-9\s\-\'\.,]+$', v):
+        if v and not re.match(r"^[\w\s\-'.,&()]+$", v, re.UNICODE):
             raise ValueError('Company name contains invalid characters')
-        return v.strip()
+        return v
 
 
 # NOTE: The public ``User`` response schema is defined later in this module

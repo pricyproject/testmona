@@ -142,6 +142,15 @@ export const validateApiResponse = <T>(
  */
 export const CONCURRENT_EDIT_KEY = 'profile_edit_lock';
 
+let editLockHeartbeat: ReturnType<typeof setInterval> | null = null;
+
+const stopEditLockHeartbeat = (): void => {
+  if (editLockHeartbeat !== null) {
+    clearInterval(editLockHeartbeat);
+    editLockHeartbeat = null;
+  }
+};
+
 export const acquireEditLock = (userId: number): boolean => {
   try {
     const lockData = localStorage.getItem(CONCURRENT_EDIT_KEY);
@@ -160,7 +169,8 @@ export const acquireEditLock = (userId: number): boolean => {
     }));
     
     // Set up heartbeat to keep lock alive
-    const heartbeat = setInterval(() => {
+    stopEditLockHeartbeat();
+    editLockHeartbeat = setInterval(() => {
       const currentLock = localStorage.getItem(CONCURRENT_EDIT_KEY);
       if (currentLock) {
         const lock = JSON.parse(currentLock);
@@ -169,7 +179,7 @@ export const acquireEditLock = (userId: number): boolean => {
           localStorage.setItem(CONCURRENT_EDIT_KEY, JSON.stringify(lock));
         }
       } else {
-        clearInterval(heartbeat);
+        stopEditLockHeartbeat();
       }
     }, 60000); // Update every minute
     
@@ -181,6 +191,7 @@ export const acquireEditLock = (userId: number): boolean => {
 };
 
 export const releaseEditLock = (userId: number): void => {
+  stopEditLockHeartbeat();
   try {
     const lockData = localStorage.getItem(CONCURRENT_EDIT_KEY);
     if (lockData) {

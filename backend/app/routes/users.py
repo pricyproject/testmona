@@ -14,7 +14,6 @@ from .. import crud, schemas, auth, crud_rbac, models, rbac
 from ..database import get_db
 from ..auth import get_current_active_user, check_password_change_required, verify_password, get_password_hash
 from ..security_utils import validate_file_size, validate_file_type, MAX_AVATAR_SIZE
-from ..utils import sanitize_data
 
 
 logger = logging.getLogger(__name__)
@@ -432,40 +431,31 @@ def register_user_routes(app):
             "success_rate": round(success_rate, 1)
         }
 
-    @app.put("/users/me")
+    @app.put("/users/me", response_model=schemas.User)
     def update_current_user(
-        user_update: schemas.UserUpdate,
+        user_update: schemas.UserProfileUpdate,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
         """Update current user's profile"""
         # Check if user needs to change password
         check_password_change_required(current_user)
-        # Create a regular UserUpdate object, excluding fields that shouldn't be updated via profile
+        # Schema already validated + sanitized; re-sanitizing would double-escape.
         update_data = user_update.model_dump(exclude_unset=True)
 
-        # Remove sensitive fields that shouldn't be updated via profile endpoint
-        update_data.pop('role', None)
-        update_data.pop('is_active', None)
-        update_data.pop('password', None)
-
         # Check username uniqueness if username is being updated
-        if 'username' in update_data and update_data['username'] != current_user.username:
+        if 'username' in update_data and update_data['username'] != (current_user.username or ''):
             existing_user = crud.get_user_by_username(db, username=update_data['username'])
             if existing_user and existing_user.id != current_user.id:
                 raise HTTPException(status_code=400, detail="Username already taken")
 
-        # Check email uniqueness if email is being updated
-        if 'email' in update_data and update_data['email'] != current_user.email:
+        # Check email uniqueness if email is being updated (case-insensitive)
+        if 'email' in update_data and (update_data['email'] or '').lower() != (current_user.email or '').lower():
             existing_user = crud.get_user_by_email(db, email=update_data['email'])
             if existing_user and existing_user.id != current_user.id:
                 raise HTTPException(status_code=400, detail="Email already taken")
 
-        # Sanitize all data to prevent XSS attacks (including nested structures and JSON)
-        # Website field is validated for URL format but not escaped
-        update_data = sanitize_data(update_data, skip_fields={'website'})
-
-        db_user = crud.update_user(db=db, user_id=current_user.id, user=schemas.UserUpdate(**update_data))
+        db_user = crud.update_user(db=db, user_id=current_user.id, user=user_update)
         
         # Create audit trail
         try:

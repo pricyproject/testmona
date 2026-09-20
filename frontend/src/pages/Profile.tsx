@@ -38,18 +38,6 @@ const RESERVED_USERNAMES = [
   'about', 'terms', 'privacy', 'legal', 'copyright', 'license'
 ];
 
-// XSS sanitization function
-const sanitizeInput = (input: string): string => {
-  if (!input) return input;
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;');
-};
-
-// Validation functions
 const validateUsername = (username: string, t: any): { valid: boolean; error?: string } => {
   if (!username || username.trim().length === 0) {
     return { valid: false, error: t('usernameRequired') };
@@ -202,16 +190,27 @@ export function Profile() {
   
   // Ref for cleanup
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
   
   const [formData, setFormData] = useState({
     username: user?.username || '',
     email: user?.email || '',
     full_name: user?.full_name || '',
-    bio: 'Software testing enthusiast with 5+ years of experience in QA automation and manual testing.',
-    location: 'San Francisco, CA',
-    website: 'https://example.com',
-    company: 'TechCorp Inc.',
-    role: 'tester'
+    bio: user?.bio || '',
+    location: user?.location || '',
+    website: user?.website || '',
+    company: user?.company || '',
+    role: user?.role || ''
   });
   
   const [originalFormData, setOriginalFormData] = useState({ ...formData });
@@ -223,11 +222,11 @@ export function Profile() {
         username: safeUserData(user.username, ''),
         email: safeUserData(user.email, ''),
         full_name: safeUserData(user.full_name, ''),
-        bio: safeUserData(user.bio, 'Software testing enthusiast with 5+ years of experience in QA automation and manual testing.'),
-        location: safeUserData(user.location, 'San Francisco, CA'),
-        website: safeUserData(user.website, 'https://example.com'),
-        company: safeUserData(user.company, 'TechCorp Inc.'),
-        role: safeUserData(user.role, 'tester')
+        bio: safeUserData(user.bio, ''),
+        location: safeUserData(user.location, ''),
+        website: safeUserData(user.website, ''),
+        company: safeUserData(user.company, ''),
+        role: safeUserData(user.role, '')
       };
       setFormData(newFormData);
       setOriginalFormData(newFormData);
@@ -295,7 +294,7 @@ export function Profile() {
         } else if (err.message?.includes('offline')) {
           setError(t('offlineMessage'));
         } else {
-          setError(t('failedToSaveProfile'));
+          setError(t('failedToLoadStatistics'));
         }
       } finally {
         setStatisticsLoading(false);
@@ -474,15 +473,15 @@ export function Profile() {
       setFieldErrors({});
       setIsSaving(true);
       
-      // Sanitize all inputs before sending to backend
+      // Backend sanitizes on parse; only trim here to avoid double-escaping.
       const sanitizedFormData = {
-        username: sanitizeInput(formData.username.trim()),
-        email: sanitizeInput(formData.email.trim().toLowerCase()),
-        full_name: sanitizeInput(formData.full_name.trim()),
-        bio: sanitizeInput(formData.bio.trim()),
-        location: sanitizeInput(formData.location.trim()),
-        website: sanitizeInput(formData.website.trim()),
-        company: sanitizeInput(formData.company.trim())
+        username: formData.username.trim(),
+        email: formData.email.trim().toLowerCase(),
+        full_name: formData.full_name.trim(),
+        bio: formData.bio.trim(),
+        location: formData.location.trim(),
+        website: formData.website.trim(),
+        company: formData.company.trim()
       };
       
       const response = await apiCallWithRetry(() => api.put('/users/me', sanitizedFormData));
@@ -565,21 +564,21 @@ export function Profile() {
       username: safeUserData(user?.username, ''),
       email: safeUserData(user?.email, ''),
       full_name: safeUserData(user?.full_name, ''),
-      bio: safeUserData(user?.bio, 'Software testing enthusiast with 5+ years of experience in QA automation and manual testing.'),
-      location: safeUserData(user?.location, 'San Francisco, CA'),
-      website: safeUserData(user?.website, 'https://example.com'),
-      company: safeUserData(user?.company, 'TechCorp Inc.'),
-      role: safeUserData(user?.role, 'tester')
+      bio: safeUserData(user?.bio, ''),
+      location: safeUserData(user?.location, ''),
+      website: safeUserData(user?.website, ''),
+      company: safeUserData(user?.company, ''),
+      role: safeUserData(user?.role, '')
     });
     setOriginalFormData({
       username: safeUserData(user?.username, ''),
       email: safeUserData(user?.email, ''),
       full_name: safeUserData(user?.full_name, ''),
-      bio: safeUserData(user?.bio, 'Software testing enthusiast with 5+ years of experience in QA automation and manual testing.'),
-      location: safeUserData(user?.location, 'San Francisco, CA'),
-      website: safeUserData(user?.website, 'https://example.com'),
-      company: safeUserData(user?.company, 'TechCorp Inc.'),
-      role: safeUserData(user?.role, 'tester')
+      bio: safeUserData(user?.bio, ''),
+      location: safeUserData(user?.location, ''),
+      website: safeUserData(user?.website, ''),
+      company: safeUserData(user?.company, ''),
+      role: safeUserData(user?.role, '')
     });
     setIsEditing(false);
   };
@@ -798,11 +797,20 @@ export function Profile() {
   };
 
   const getRoleColor = (role: string) => {
-    switch (role.toLowerCase()) {
+    switch ((role || '').toLowerCase()) {
       case 'admin': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
       case 'manager': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
       case 'tester': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
+  };
+
+  const getRoleLabel = (role: string) => {
+    switch ((role || '').toLowerCase()) {
+      case 'admin': return t('admin');
+      case 'manager': return t('manager');
+      case 'viewer': return t('viewer');
+      default: return t('tester');
     }
   };
 
@@ -839,7 +847,7 @@ export function Profile() {
             {t('profileDescription')}
           </p>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           {isEditing && (
             <>
               <Button
@@ -869,17 +877,17 @@ export function Profile() {
           >
             {isSaving ? (
               <>
-                <Save className="mr-2 h-4 w-4 animate-spin" />
+                <Save className="me-2 h-4 w-4 animate-spin" />
                 {t('saving')}
               </>
             ) : isEditing ? (
               <>
-                <Save className="mr-2 h-4 w-4" />
+                <Save className="me-2 h-4 w-4" />
                 {t('saveChanges')}
               </>
             ) : (
               <>
-                <Edit2 className="mr-2 h-4 w-4" />
+                <Edit2 className="me-2 h-4 w-4" />
                 {t('editProfile')}
               </>
             )}
@@ -935,7 +943,7 @@ export function Profile() {
                     {(user?.username || 'U').charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <label htmlFor="avatar-upload" className="absolute bottom-0 right-0 bg-white dark:bg-gray-700 rounded-full p-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 shadow-lg">
+                <label htmlFor="avatar-upload" className="absolute bottom-0 end-0 bg-white dark:bg-gray-700 rounded-full p-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 shadow-lg">
                   <Camera className="h-4 w-4 text-gray-600 dark:text-gray-300" />
                 </label>
                 <input
@@ -951,24 +959,24 @@ export function Profile() {
               </div>
               <CardTitle className="mt-4">{user?.full_name || user?.username}</CardTitle>
               <Badge className={`mt-2 ${getRoleColor(formData.role)}`}>
-                {formData.role.charAt(0).toUpperCase() + formData.role.slice(1)}
+                {getRoleLabel(formData.role)}
               </Badge>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                <Mail className="mr-2 h-4 w-4" />
+                <Mail className="me-2 h-4 w-4" />
                 {formData.email}
               </div>
               <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                <User className="mr-2 h-4 w-4" />
+                <User className="me-2 h-4 w-4" />
                 @{formData.username}
               </div>
               <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                <Calendar className="mr-2 h-4 w-4" />
-                Joined {user?.created_at ? formatDate(user.created_at, { month: 'long', year: 'numeric' }) : 'N/A'}
+                <Calendar className="me-2 h-4 w-4" />
+                {t('joined')} {user?.created_at ? formatDate(user.created_at, { month: 'long', year: 'numeric' }) : t('notAvailable')}
               </div>
               <div className="flex items-center text-sm text-gray-600 dark:text-gray-400">
-                <Shield className="mr-2 h-4 w-4" />
+                <Shield className="me-2 h-4 w-4" />
                 {user?.is_active ? t('accountActive') : t('accountInactive')}
               </div>
               <div className="pt-4 space-y-2">
@@ -978,7 +986,7 @@ export function Profile() {
                   className="w-full"
                   onClick={() => setShowPasswordDialog(true)}
                 >
-                  <Lock className="mr-2 h-4 w-4" />
+                  <Lock className="me-2 h-4 w-4" />
                   {t('changePassword')}
                 </Button>
                 <Button
@@ -987,7 +995,7 @@ export function Profile() {
                   className="w-full"
                   onClick={() => setShow2FADialog(true)}
                 >
-                  <Key className="mr-2 h-4 w-4" />
+                  <Key className="me-2 h-4 w-4" />
                   {t('twoFactorAuth')}
                 </Button>
                 <Button
@@ -996,7 +1004,7 @@ export function Profile() {
                   className="w-full"
                   onClick={() => setShowDeleteDialog(true)}
                 >
-                  <Trash2 className="mr-2 h-4 w-4" />
+                  <Trash2 className="me-2 h-4 w-4" />
                   {t('deleteAccount')}
                 </Button>
               </div>
@@ -1027,10 +1035,10 @@ export function Profile() {
                       {formData.username.length}/{FIELD_LIMITS.username.max} {t('characters')}
                       {isCheckingUsername && ` (${t('checking')})`}
                       {usernameAvailable === false && formData.username !== user?.username && (
-                        <span className="text-red-500 ml-2">{t('usernameAlreadyTaken')}</span>
+                        <span className="text-red-500 ms-2">{t('usernameAlreadyTaken')}</span>
                       )}
                       {usernameAvailable === true && formData.username !== user?.username && (
-                        <span className="text-green-500 ml-2">{t('available')}</span>
+                        <span className="text-green-500 ms-2">{t('available')}</span>
                       )}
                     </div>
                   )}
@@ -1054,10 +1062,10 @@ export function Profile() {
                       {formData.email.length}/{FIELD_LIMITS.email.max} {t('characters')}
                       {isCheckingEmail && ` (${t('checking')})`}
                       {emailAvailable === false && formData.email !== user?.email && (
-                        <span className="text-red-500 ml-2">{t('emailAlreadyTaken')}</span>
+                        <span className="text-red-500 ms-2">{t('emailAlreadyTaken')}</span>
                       )}
                       {emailAvailable === true && formData.email !== user?.email && (
-                        <span className="text-green-500 ml-2">{t('available')}</span>
+                        <span className="text-green-500 ms-2">{t('available')}</span>
                       )}
                     </div>
                   )}
@@ -1171,7 +1179,7 @@ export function Profile() {
               </div>
 
               {isEditing && (
-                <div className="flex space-x-2 pt-4">
+                <div className="flex gap-2 pt-4">
                   <Button 
                     onClick={handleSave} 
                     className="bg-green-600 hover:bg-green-700"
@@ -1179,18 +1187,18 @@ export function Profile() {
                   >
                     {isSaving ? (
                       <>
-                        <Save className="mr-2 h-4 w-4 animate-spin" />
+                        <Save className="me-2 h-4 w-4 animate-spin" />
                         {t('saving')}
                       </>
                     ) : (
                       <>
-                        <Save className="mr-2 h-4 w-4" />
+                        <Save className="me-2 h-4 w-4" />
                         {t('saveChanges')}
                       </>
                     )}
                   </Button>
                   <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
-                    <X className="mr-2 h-4 w-4" />
+                    <X className="me-2 h-4 w-4" />
                     {t('cancel')}
                   </Button>
                 </div>
