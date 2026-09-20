@@ -211,11 +211,18 @@ export function MilestoneDetail() {
     setSelectedPlanIds([]);
     setCandidatesLoading(true);
     try {
-      const plans = await testPlansAPI.getAll(numericProjectId, { limit: 500 });
+      const all: any[] = [];
+      const PAGE = 500;
+      for (let page = 0; page < 4; page += 1) {
+        const batch = await testPlansAPI.getAll(numericProjectId, { skip: page * PAGE, limit: PAGE });
+        const items = Array.isArray(batch) ? batch : [];
+        all.push(...items);
+        if (items.length < PAGE) break;
+      }
       // Only offer plans not already attached to a milestone. Re-assigning a plan
       // that already belongs to another milestone is the job of the bulk "move"
       // action on the Test Plans page, so we don't silently steal it here.
-      const list: CandidatePlan[] = (Array.isArray(plans) ? plans : []).filter(
+      const list: CandidatePlan[] = all.filter(
         (p: CandidatePlan) => p.milestone_id == null,
       );
       setCandidatePlans(list);
@@ -244,7 +251,7 @@ export function MilestoneDetail() {
       setLinkOpen(false);
       await reload();
     } catch (err) {
-      setError(getApiErrorMessage(err, t('failedToLoadMilestone')));
+      setError(getApiErrorMessage(err, t('failedToUpdateTestPlan')));
     } finally {
       setLinkSaving(false);
     }
@@ -258,7 +265,7 @@ export function MilestoneDetail() {
       await testPlansAPI.update(planId, { milestone_id: null });
       await reload();
     } catch (err) {
-      setError(getApiErrorMessage(err, t('failedToLoadMilestone')));
+      setError(getApiErrorMessage(err, t('failedToUpdateTestPlan')));
     } finally {
       setUnlinkingId(null);
     }
@@ -267,7 +274,7 @@ export function MilestoneDetail() {
   const filteredCandidatePlans = useMemo(() => {
     const q = planSearch.trim().toLowerCase();
     if (!q) return candidatePlans;
-    return candidatePlans.filter((p) => p.title.toLowerCase().includes(q));
+    return candidatePlans.filter((p) => (p.title ?? '').toLowerCase().includes(q));
   }, [candidatePlans, planSearch]);
 
   // Per-plan rollup: aggregate the runs returned for this milestone, grouped

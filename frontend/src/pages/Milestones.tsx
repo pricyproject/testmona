@@ -63,7 +63,6 @@ import { Milestone, MilestoneHealth, MilestoneStats, MilestoneStatus } from '@/t
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { DateField } from '@/components/ui/DateField';
-import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useTestPlanMembers, type TestPlanMember } from '@/hooks/queries/testPlans';
 
@@ -113,8 +112,8 @@ export function Milestones() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { t, isRTL } = useTranslation();
-  const { canWrite } = usePermissions();
   const currentProjectId = useMemo(() => parsePositiveInteger(projectId), [projectId]);
+  const { canWrite } = useProjectPermissions(currentProjectId);
 
   const milestonesQuery = useQuery({
     queryKey: ['milestones', 'list', currentProjectId],
@@ -184,7 +183,7 @@ export function Milestones() {
       .filter((milestone) => {
         const matchesSearch =
           !query ||
-          milestone.title.toLowerCase().includes(query) ||
+          (milestone.title || '').toLowerCase().includes(query) ||
           (milestone.description || '').toLowerCase().includes(query);
         const matchesStatus = statusFilter === 'all' || milestone.status === statusFilter;
         const matchesHealth = healthFilter === 'all' || milestone.health === healthFilter;
@@ -351,7 +350,7 @@ export function Milestones() {
     setPendingPlanSync(null);
     if (!pending) return;
     // The milestone itself already saved; a plan-date sync failure (e.g. a
-    // plan whose start date is after the new target) only warns.
+    // plan whose start date is after the new target) warns visibly.
     try {
       await Promise.all(
         pending.plans.map((plan) =>
@@ -360,6 +359,7 @@ export function Milestones() {
       );
     } catch (syncErr) {
       console.warn('Milestone saved, but syncing linked plan dates failed:', syncErr);
+      setError(t('failedToUpdateTestPlan'));
     }
   };
 
@@ -520,7 +520,7 @@ export function Milestones() {
           hasFilters={hasActiveFilters}
           onCreate={openCreateDialog}
           onClear={clearFilters}
-          disabled={!currentProjectId}
+          disabled={!currentProjectId || !canWrite}
         />
       ) : (
         <div className="space-y-3">
@@ -706,7 +706,7 @@ function ViewToggleButton({
 function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDelete }: CardProps) {
   const linked = milestone.test_plan_count > 0 || milestone.test_run_count > 0;
   // Milestones are project planning artifacts: deletion is a manager+ action.
-  const { canManageProject } = useProjectPermissions(projectId);
+  const { canManageProject, canWrite } = useProjectPermissions(projectId);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -715,10 +715,12 @@ function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDel
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
+        {canWrite && (
         <DropdownMenuItem onClick={() => onEdit(milestone)}>
           <Pencil className="mr-2 h-3.5 w-3.5" />
           {t('editMilestone')}
         </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/milestones/${milestone.project_seq ?? milestone.id}`)}>
           <ArrowUpRight className="mr-2 h-3.5 w-3.5" />
           {t('openMilestoneDetail')}
