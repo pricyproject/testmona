@@ -25,7 +25,7 @@ export function useTestSuiteSelectionData(projectId: number | null, enabled: boo
     queryKey: testSuiteKeys.selection(projectId),
     queryFn: async () => {
       const [testCasesData, hierarchyData] = await Promise.all([
-        testCasesAPI.getAll(projectId as number).catch(() => []),
+        testCasesAPI.getAllPages(projectId as number).catch(() => []),
         sectionsAPI.getProjectSectionHierarchy(projectId as number).catch(() => null),
       ]);
       const flatSections: any[] = [];

@@ -245,14 +245,22 @@ export function TestSuites() {
     return filtered;
   }, [testCases, searchQuery, priorityFilter]);
 
-  // Paginated test cases for better performance
+  // Unsectioned cases for the "all" group; sectioned cases render under
+  // their own section below, so the "all" group must exclude them to
+  // avoid double-listing the same case twice.
+  const unsectionedTestCases = useMemo(
+    () => filteredTestCases.filter((tc) => tc.section_id == null),
+    [filteredTestCases],
+  );
+
+  // Paginated test cases for better performance (applies to the "all" group only)
   const filteredAndPaginatedTestCases = useMemo(() => {
     const startIndex = (testCasePage - 1) * testCasesPerPage;
     const endIndex = startIndex + testCasesPerPage;
-    return filteredTestCases.slice(startIndex, endIndex);
-  }, [filteredTestCases, testCasePage]);
+    return unsectionedTestCases.slice(startIndex, endIndex);
+  }, [unsectionedTestCases, testCasePage]);
 
-  const totalPages = Math.ceil(filteredTestCases.length / testCasesPerPage);
+  const totalPages = Math.ceil(unsectionedTestCases.length / testCasesPerPage);
 
   // Filter test suites
   const filteredTestSuites = useMemo(() => {
@@ -330,6 +338,7 @@ export function TestSuites() {
       setSuiteDescription('');
       setSelectedTestCases([]);
       setSearchQuery('');
+      setPriorityFilter('all');
       setTestCasePage(1);
       setHasUnsavedChanges(false);
       setIsDialogOpen(false);
@@ -371,7 +380,6 @@ export function TestSuites() {
       const apiMessage = typeof detail === 'string' ? detail : null;
       const message = apiMessage || t('failedToDeleteTestSuite');
       toast({ title: t('error'), description: message, variant: 'destructive' });
-      setDeleteTarget(null);
     }
   };
 
@@ -403,10 +411,12 @@ export function TestSuites() {
     } else {
       setIsDialogOpen(open);
       if (!open) {
-        // Reset form when closing
         setSuiteName('');
         setSuiteDescription('');
         setSelectedTestCases([]);
+        setSearchQuery('');
+        setPriorityFilter('all');
+        setTestCasePage(1);
         setHasUnsavedChanges(false);
       }
     }
@@ -418,6 +428,9 @@ export function TestSuites() {
       setSuiteName('');
       setSuiteDescription('');
       setSelectedTestCases([]);
+      setSearchQuery('');
+      setPriorityFilter('all');
+      setTestCasePage(1);
       setHasUnsavedChanges(false);
       setIsDialogOpen(false);
     }
@@ -593,7 +606,7 @@ export function TestSuites() {
                                 }}
                               />
                             </div>
-                            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                            <Select value={priorityFilter} onValueChange={(v) => { setPriorityFilter(v); setTestCasePage(1); }}>
                               <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
                                 <SelectValue placeholder={t('priority')} />
                               </SelectTrigger>
@@ -650,14 +663,14 @@ export function TestSuites() {
                                         {t('allTestCases')}
                                       </span>
                                       <Badge variant="secondary" className="bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                                        {filteredTestCases.length}
+                                        {unsectionedTestCases.length}
                                       </Badge>
                                     </button>
                                     <div className="flex gap-2">
-                                      <Button variant="ghost" size="sm" onClick={() => selectAllInSection(filteredTestCases)} className="h-8 rounded-lg">
+                                      <Button variant="ghost" size="sm" onClick={() => selectAllInSection(unsectionedTestCases)} className="h-8 rounded-lg">
                                         {t('selectAll')}
                                       </Button>
-                                      <Button variant="ghost" size="sm" onClick={() => deselectAllInSection(filteredTestCases)} className="h-8 rounded-lg">
+                                      <Button variant="ghost" size="sm" onClick={() => deselectAllInSection(unsectionedTestCases)} className="h-8 rounded-lg">
                                         {t('deselectAll')}
                                       </Button>
                                     </div>
@@ -782,7 +795,7 @@ export function TestSuites() {
                           {totalPages > 1 && (
                             <div className="flex flex-col gap-3 text-sm text-slate-600 dark:text-slate-400 sm:flex-row sm:items-center sm:justify-between">
                               <span>
-                                {t('showingRange', { start: ((testCasePage - 1) * testCasesPerPage) + 1, end: Math.min(testCasePage * testCasesPerPage, filteredTestCases.length), total: filteredTestCases.length })}
+                                {t('showingRange', { start: ((testCasePage - 1) * testCasesPerPage) + 1, end: Math.min(testCasePage * testCasesPerPage, unsectionedTestCases.length), total: unsectionedTestCases.length })}
                               </span>
                               <div className="flex items-center gap-2">
                                 <Button
