@@ -115,7 +115,7 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
               <h2 className="mb-2 text-xl font-semibold text-gray-900">{t('projectGuardProjectUnavailableTitle')}</h2>
               <p className="mb-6 text-gray-600">{projectError}</p>
               <Button onClick={() => navigate('/projects')} className="w-full">
-                <FolderOpen className="mr-2 h-4 w-4" />
+                <FolderOpen className="me-2 h-4 w-4" />
                 {t('goToProjects')}
               </Button>
             </div>
@@ -144,9 +144,9 @@ export function ProjectGuard({ children, fallback }: ProjectGuardProps) {
                 onClick={() => navigate('/projects')}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
-                <FolderOpen className="h-4 w-4 mr-2" />
+                <FolderOpen className="h-4 w-4 me-2" />
                 {t('goToProjects')}
-                <ArrowRight className="h-4 w-4 ml-2 rtl:rotate-180" />
+                <ArrowRight className="h-4 w-4 ms-2 rtl:rotate-180" />
               </Button>
             </div>
           </CardContent>

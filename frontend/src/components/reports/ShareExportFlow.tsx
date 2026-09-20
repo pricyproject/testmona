@@ -724,7 +724,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
                         <div key={item.key} className="rounded-lg border dark:border-gray-700 px-2 py-2">
                           <div className="text-lg font-semibold">
                             {item.key === 'release_deadline'
-                              ? (previewContent.upcoming[item.key] ?? 'N/A')
+                              ? (previewContent.upcoming[item.key] ?? t('notAvailable'))
                               : upcomingCount(previewContent.upcoming, item.key, item.listKey || '')}
                           </div>
                           <div className="text-xs text-gray-500">{t(item.label)}</div>
@@ -733,7 +733,7 @@ export function ShareExportFlow({ ctx, open, onOpenChange }: Props) {
                     </div>
                     {previewContent.upcoming.milestone && (
                       <p className="mt-2 text-xs text-gray-600">
-                        {t('reports_upcomingMilestone', { title: previewContent.upcoming.milestone.title, date: previewContent.upcoming.milestone.target_date ? formatDate(previewContent.upcoming.milestone.target_date) : 'N/A' })}
+                            {t('reports_upcomingMilestone', { title: previewContent.upcoming.milestone.title, date: previewContent.upcoming.milestone.target_date ? formatDate(previewContent.upcoming.milestone.target_date) : t('notAvailable') })}
                       </p>
                     )}
                     {Array.isArray(previewContent.upcoming.scheduled_runs) && previewContent.upcoming.scheduled_runs.length > 0 && (

@@ -53,7 +53,7 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
 
         {coverageLoading && (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mr-2" />
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600 me-2" />
             <span className="text-gray-600">{t('reports_loadingCoverage')}</span>
           </div>
         )}
@@ -281,7 +281,7 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
               </SelectContent>
             </Select>
             <Button variant="outline" onClick={() => loadGranularInsights()}>
-              <RefreshCw className="h-4 w-4 mr-2" />
+            <RefreshCw className="h-4 w-4 me-2" />
               {t('reports_refresh')}
             </Button>
           </div>

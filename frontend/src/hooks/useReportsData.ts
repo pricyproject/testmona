@@ -17,6 +17,12 @@ import {
 const timeRangeToDays = (timeRange: string) =>
   timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
 
+const parseReportProjectId = (value: string | undefined): number | null => {
+  if (!value) return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
+
 export interface TraceabilityFilters {
   priority: string;
   coverage_status: string;
@@ -46,7 +52,7 @@ export function useReportsData(projectId: string | undefined) {
   const setTabLoading = (tab: LoadKey, value: boolean) =>
     setLoadingByTab((prev) => ({ ...prev, [tab]: value }));
   const [error, setError] = useState<string | null>(null);
-  const [selectedProject, setSelectedProject] = useState(parseInt(projectId || '') || 1);
+  const [selectedProject, setSelectedProject] = useState<number | null>(() => parseReportProjectId(projectId));
 
   const requestSeq = useRef(0);
   // Per-tab record of the most recent request's sequence. The loading flag is
@@ -86,7 +92,10 @@ export function useReportsData(projectId: string | undefined) {
   const [granularInsights, setGranularInsights] = useState<any>(null);
   const [shareableReports, setShareableReports] = useState<any[]>([]);
   const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidgetDef[]>(
-    () => loadWidgetLayout(parseInt(projectId || '') || 1)
+    () => {
+      const id = parseReportProjectId(projectId);
+      return id == null ? DEFAULT_WIDGETS : loadWidgetLayout(id);
+    }
   );
 
   const [traceabilityData, setTraceabilityData] = useState<any>(null);
@@ -108,9 +117,8 @@ export function useReportsData(projectId: string | undefined) {
 
   // Update selected project (and its saved widget layout) when the URL parameter changes.
   useEffect(() => {
-    if (!projectId) return;
-    const id = parseInt(projectId);
-    if (Number.isNaN(id)) return;
+    const id = parseReportProjectId(projectId);
+    if (id == null) return;
     setSelectedProject(id);
     setDashboardWidgets(loadWidgetLayout(id));
     setLayoutWidgetId(null);
@@ -159,7 +167,7 @@ export function useReportsData(projectId: string | undefined) {
       if (!isLatestRequest('dashboard', seq)) return false;
       setDashboardAnalytics(null);
       setAnalyticsTimeSeries(null);
-      setError('Failed to load dashboard analytics.');
+      setError(t('reports_errorDashboardAnalytics'));
       return false;
     } finally {
       endRequest('dashboard', seq);
@@ -183,7 +191,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load granular insights:', err);
       if (!isLatestRequest('granular', seq)) return false;
       setGranularInsights(null);
-      setError('Failed to load granular insights.');
+      setError(t('reports_errorGranularInsights'));
       return false;
     } finally {
       endRequest('granular', seq);
@@ -203,7 +211,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load shareable reports:', err);
       if (!isLatestRequest('shareable', seq)) return false;
       setShareableReports([]);
-      setError('Failed to load shareable reports.');
+      setError(t('reports_errorShareableReports'));
       return false;
     } finally {
       endRequest('shareable', seq);
@@ -230,7 +238,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load traceability data:', err);
       if (!isLatestRequest('traceability', seq)) return false;
       setTraceabilityData(null);
-      setError('Failed to load traceability data.');
+      setError(t('reports_errorTraceabilityData'));
       return false;
     } finally {
       endRequest('traceability', seq);
@@ -258,7 +266,7 @@ export function useReportsData(projectId: string | undefined) {
       if (!isLatestRequest('coverage', seq)) return false;
       setCoverageReports([]);
       setTestExecutionStatus(null);
-      setError('Failed to load coverage data.');
+      setError(t('reports_errorCoverageData'));
       return false;
     } finally {
       endRequest('coverage', seq);
@@ -279,7 +287,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load activity statistics:', err);
       if (!isLatestRequest('activity', seq)) return false;
       setActivityStats(null);
-      setError('Failed to load activity statistics.');
+      setError(t('reports_errorActivityStatistics'));
       return false;
     } finally {
       endRequest('activity', seq);
@@ -302,7 +310,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load test activity:', err);
       if (!isLatestRequest('test-activity', seq)) return false;
       setTestActivity(null);
-      setError('Failed to load test activity.');
+      setError(t('reports_errorTestActivity'));
       return false;
     } finally {
       endRequest('test-activity', seq);
@@ -348,7 +356,7 @@ export function useReportsData(projectId: string | undefined) {
 
   // Toggle dashboard edit mode; persist the widget layout when leaving edit mode.
   const handleToggleEditMode = async () => {
-    if (isEditMode) {
+    if (isEditMode && selectedProject) {
       const local = saveWidgetLayout(selectedProject, dashboardWidgets);
       let synced = local;
       if (currentUser) {

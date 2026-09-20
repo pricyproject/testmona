@@ -98,11 +98,11 @@ export function ReportsLayout() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setShareOpen(true)}>
-            <Share2 className="h-4 w-4 mr-2" />
+            <Share2 className="h-4 w-4 me-2" />
             {t('reports_shareExportTitle')}
           </Button>
           <Button onClick={handleGenerateAnalytics}>
-            <BarChart3 className="h-4 w-4 mr-2" />
+            <BarChart3 className="h-4 w-4 me-2" />
             {t('reportsGenerateAnalytics')}
           </Button>
         </div>
