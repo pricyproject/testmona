@@ -31,7 +31,6 @@ import {
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { DateField } from '@/components/ui/DateField';
-import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -185,9 +184,14 @@ const EXECUTION_META: Record<
 export function TestPlans() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
+  const numericProjectId = useMemo(() => {
+    if (!projectId) return null;
+    const parsed = Number(projectId);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }, [projectId]);
   // Test plans are project planning artifacts: testers can create/edit but
   // deletion is a manager+ action.
-  const { canManageProject } = useProjectPermissions(projectId ? parseInt(projectId) : null);
+  const { canManageProject, canWrite: canWriteProject } = useProjectPermissions(numericProjectId);
   const [searchParams] = useSearchParams();
   const fromMilestoneIdParam = searchParams.get('milestone_id');
   const createFromQuery = searchParams.get('create') === '1';
@@ -203,13 +207,7 @@ export function TestPlans() {
     }
     return fmtDate(value, { year: 'numeric', month: 'short', day: 'numeric' }) || fallback;
   };
-  const { canWrite } = usePermissions();
-
-  const numericProjectId = useMemo(() => {
-    if (!projectId) return null;
-    const parsed = Number(projectId);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-  }, [projectId]);
+  const canWrite = canWriteProject;
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState<number | null>(null);
@@ -246,6 +244,7 @@ export function TestPlans() {
   const [selectedReqIds, setSelectedReqIds] = useState<number[]>([]);
   const [initialReqIds, setInitialReqIds] = useState<number[]>([]);
   const [reqSearch, setReqSearch] = useState('');
+  const reqTouched = useRef(false);
 
   const sameIdSet = (a: number[], b: number[]) => {
     if (a.length !== b.length) return false;
@@ -336,6 +335,8 @@ export function TestPlans() {
       pending: testPlans.filter((p) => p.status === 'pending').length,
       running: testPlans.filter((p) => p.status === 'running').length,
       completed: testPlans.filter((p) => p.status === 'completed').length,
+      failed: testPlans.filter((p) => p.status === 'failed').length,
+      blocked: testPlans.filter((p) => p.status === 'blocked').length,
     }),
     [testPlans],
   );
@@ -357,9 +358,12 @@ export function TestPlans() {
     if (form.startDate && form.endDate && form.endDate < form.startDate) {
       errors.endDate = t('endDateAfterStartDate');
     }
+    if (form.actualStartDate && form.actualEndDate && form.actualEndDate < form.actualStartDate) {
+      errors.actualEndDate = t('endDateAfterStartDate');
+    }
     setValidationErrors(errors);
     if (errors.title || errors.milestoneId) setActiveTab('overview');
-    else if (errors.endDate) setActiveTab('schedule');
+    else if (errors.endDate || errors.actualEndDate) setActiveTab('schedule');
     return Object.keys(errors).length === 0;
   };
 
@@ -403,6 +407,7 @@ export function TestPlans() {
     setSelectedReqIds([]);
     setInitialReqIds([]);
     setReqSearch('');
+    reqTouched.current = false;
   };
 
   const syncPlanRequirements = async (planId: number) => {
@@ -417,6 +422,7 @@ export function TestPlans() {
   };
 
   const toggleReqOption = (id: number) => {
+    reqTouched.current = true;
     setSelectedReqIds((current) =>
       current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
     );
@@ -567,16 +573,19 @@ export function TestPlans() {
   const openEdit = (plan: TestPlan) => {
     setSelectedPlan(plan);
     setReqSearch('');
-    
+    reqTouched.current = false;
+
     // Seed the requirement selection from the plan's currently-linked requirements.
     testPlansAPI
       .getRequirements(plan.id, { linked: true, limit: 500 })
       .then((data) => {
+        if (reqTouched.current) return;
         const ids = Array.isArray(data?.items) ? data.items.map((r: any) => r.id) : [];
         setSelectedReqIds(ids);
         setInitialReqIds(ids);
       })
       .catch(() => {
+        if (reqTouched.current) return;
         setSelectedReqIds([]);
         setInitialReqIds([]);
       });
@@ -670,15 +679,30 @@ export function TestPlans() {
   };
 
   const handleBulkMove = async () => {
-    if (selectedPlanIds.length === 0) return;
+    if (selectedPlanIds.length === 0 || !canWrite) return;
     setIsSubmitting(true);
     setError(null);
     try {
       const milestone_id = bulkMilestoneId === 'none' ? null : Number(bulkMilestoneId);
-      await Promise.all(selectedPlanIds.map((id) => testPlansAPI.update(id, { milestone_id })));
-      showSuccess(t('testPlansMovedSuccessfully', { count: selectedPlanIds.length }));
-      clearSelection();
-      await invalidatePlans();
+      if (milestone_id !== null && (!Number.isInteger(milestone_id) || milestone_id <= 0)) {
+        setError(t('invalidDataProvided'));
+        return;
+      }
+      const results = await Promise.allSettled(selectedPlanIds.map((id) => testPlansAPI.update(id, { milestone_id })));
+      const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+      const failed = results.length - succeeded;
+      if (succeeded > 0) {
+        showSuccess(t('testPlansMovedSuccessfully', { count: succeeded }));
+        setSelectedPlanIds((current) =>
+          current.filter((_, idx) => results[idx]?.status !== 'fulfilled'),
+        );
+        if (failed === 0) clearSelection();
+        await invalidatePlans();
+      }
+      if (failed > 0) {
+        const firstError = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        setError(extractApiError(firstError?.reason) || t('failedToUpdateTestPlan'));
+      }
     } catch (err: any) {
       const apiMsg = extractApiError(err);
       setError(apiMsg || t('failedToUpdateTestPlan'));
@@ -933,7 +957,10 @@ export function TestPlans() {
               reqOptions
                 .filter((r) => {
                   const q = reqSearch.trim().toLowerCase();
-                  return !q || r.title.toLowerCase().includes(q) || r.requirement_id.toLowerCase().includes(q);
+                  if (!q) return true;
+                  const title = (r.title ?? '').toLowerCase();
+                  const reqId = (r.requirement_id ?? '').toLowerCase();
+                  return title.includes(q) || reqId.includes(q);
                 })
                 .map((r) => (
                   <label
@@ -1000,7 +1027,11 @@ export function TestPlans() {
                 value={form.actualEndDate}
                 min={form.actualStartDate || undefined}
                 onChange={(value) => setField('actualEndDate', value)}
+                className={validationErrors.actualEndDate ? 'border-red-400 focus-visible:ring-red-300' : ''}
               />
+              {validationErrors.actualEndDate && (
+                <p className="text-xs text-red-500">{validationErrors.actualEndDate}</p>
+              )}
             </div>
           </div>
           <div className="space-y-1.5">
@@ -1211,6 +1242,18 @@ export function TestPlans() {
               icon: <CheckCircle2 className="h-4 w-4" />,
               color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
             },
+            {
+              label: t('testRunStatusFailed'),
+              value: stats.failed,
+              icon: <AlertCircle className="h-4 w-4" />,
+              color: 'text-red-600 bg-red-50 dark:bg-red-950/30 dark:text-red-300 border-red-200 dark:border-red-800',
+            },
+            {
+              label: t('testPlansBlocked'),
+              value: stats.blocked,
+              icon: <ShieldAlert className="h-4 w-4" />,
+              color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+            },
           ].map(({ label, value, icon, color }) => (
             <div key={label} className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${color}`}>
               <div className="rounded-xl bg-white/70 p-2 dark:bg-slate-900/40">{icon}</div>
@@ -1331,7 +1374,7 @@ export function TestPlans() {
       </Card>
 
       {/* Content */}
-      {!isLoading && selectedPlanIds.length > 0 && (
+      {!isLoading && canWrite && selectedPlanIds.length > 0 && (
         <Card>
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm font-medium">
@@ -1407,12 +1450,14 @@ export function TestPlans() {
                 <div className={`h-1 ${statusCfg.barClass}`} />
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between gap-3">
+                    {canWrite && (
                     <Checkbox
                       checked={selectedPlanIds.includes(plan.id)}
                       onCheckedChange={() => togglePlanSelection(plan.id)}
                       aria-label={t('selectTestPlan')}
                       className="mt-1 shrink-0"
                     />
+                    )}
                     <div className="min-w-0 flex-1">
                       <div className="mb-2 flex flex-wrap items-center gap-2">
                         {plan.execution_status && (
@@ -1543,10 +1588,12 @@ export function TestPlans() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        {canWrite && (
                         <DropdownMenuItem onClick={() => openEdit(plan)}>
                           <Edit className="mr-2 h-3.5 w-3.5" />
                           {t('edit')}
                         </DropdownMenuItem>
+                        )}
                         {canManageProject && (<>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem

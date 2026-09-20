@@ -253,18 +253,21 @@ export function TestPlanDetail() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveRequirements();
-    }
+    if (e.key !== 'Enter') return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+    e.preventDefault();
+    saveRequirements();
   };
 
   const filteredCandidates = useMemo(() => {
     const q = reqSearch.trim().toLowerCase();
     if (!q) return candidates;
-    return candidates.filter(
-      (c) => c.title.toLowerCase().includes(q) || c.requirement_id.toLowerCase().includes(q),
-    );
+    return candidates.filter((c) => {
+      const title = (c.title ?? '').toLowerCase();
+      const reqId = (c.requirement_id ?? '').toLowerCase();
+      return title.includes(q) || reqId.includes(q);
+    });
   }, [candidates, reqSearch]);
 
   const goToRuns = (create = false) => {
@@ -362,10 +365,12 @@ export function TestPlanDetail() {
             {runs.length === 0 ? <CirclePlus className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {runs.length === 0 ? t('startNewRun') : t('viewTestRuns')}
           </Button>
+          {canWrite && (
           <Button variant="outline" onClick={() => navigate(`/projects/${projectId}/test-plans?edit=${plan.id}`)} className="gap-1">
             <Pencil className="h-4 w-4" />
             {t('edit')}
           </Button>
+          )}
         </div>
       </div>
 

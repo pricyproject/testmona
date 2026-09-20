@@ -81,9 +81,16 @@ export function useTestPlanReqOptions(projectId: number | null, enabled: boolean
   return useQuery({
     queryKey: testPlanKeys.reqOptions(projectId),
     queryFn: async () => {
-      const data = await requirementsAPI.getAll(projectId as number, 0, 500);
-      const list = Array.isArray(data) ? data : [];
-      return list.map((r: any) => ({ id: r.id, requirement_id: r.requirement_id, title: r.title, status: r.status }));
+      const all: any[] = [];
+      const PAGE = 500;
+      const MAX_PAGES = 4;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const data = await requirementsAPI.getAll(projectId as number, page * PAGE, PAGE);
+        const batch = Array.isArray(data) ? data : [];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all.map((r: any) => ({ id: r.id, requirement_id: r.requirement_id, title: r.title, status: r.status }));
     },
     enabled,
   });
