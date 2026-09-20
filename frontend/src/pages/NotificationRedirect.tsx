@@ -31,8 +31,12 @@ export function NotificationRedirect() {
       }
       try {
         const { data } = await api.get(`/notifications/${notificationId}`);
-        // Best-effort mark-as-read so the badge reflects the opened item.
-        api.put(`/notifications/${notificationId}`, { is_read: true }).catch(() => {});
+        try {
+          await api.put(`/notifications/${notificationId}`, { is_read: true });
+          window.dispatchEvent(new CustomEvent('notifications:refresh'));
+        } catch {
+          /* Best-effort mark-as-read; navigation still proceeds. */
+        }
         const target = await resolveNotificationTarget(data);
         if (cancelled) return;
         if (target) navigate(target, { replace: true });

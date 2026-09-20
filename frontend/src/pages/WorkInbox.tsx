@@ -187,8 +187,7 @@ export function WorkInbox() {
   // preferences. Reading individual fields keeps re-renders tight.
   const status = useInboxViewStore((s) => s.status);
   const activeCategory = useInboxViewStore((s) => s.activeCategory);
-  const persistedUnreadOnly = useInboxViewStore((s) => s.unreadOnly);
-  const unreadOnly = false;
+  const unreadOnly = useInboxViewStore((s) => s.unreadOnly);
   const groupBy = useInboxViewStore((s) => s.groupBy);
   const sort = useInboxViewStore((s) => s.sort);
   const setView = useInboxViewStore((s) => s.setView);
@@ -261,47 +260,59 @@ export function WorkInbox() {
 
   const fetchActors = useCallback(async () => {
     try {
-      const data = await inboxAPI.actors({ status, category: activeCategory, unreadOnly, search: deferredSearch, projectId: projectFilter });
+      const data = await inboxAPI.actors({ status, category: activeCategory, unreadOnly, search: deferredSearch });
       setActorOptions(data);
-      setActorFilter((current) => (current && !data.some((actor) => actor.id === current) ? null : current));
     } catch (error) {
       console.error('Failed to load inbox actors:', error);
     }
-  }, [status, activeCategory, unreadOnly, deferredSearch, projectFilter]);
+  }, [status, activeCategory, unreadOnly, deferredSearch]);
 
   const fetchProjects = useCallback(async () => {
     try {
-      const data = await inboxAPI.projects({ status, category: activeCategory, unreadOnly, search: deferredSearch, actorId: actorFilter });
+      const data = await inboxAPI.projects({ status, category: activeCategory, unreadOnly, search: deferredSearch });
       setProjectOptions(data);
-      setProjectFilter((current) => (current && !data.some((project) => project.id === current) ? null : current));
     } catch (error) {
       console.error('Failed to load inbox projects:', error);
     }
-  }, [status, activeCategory, unreadOnly, deferredSearch, actorFilter]);
+  }, [status, activeCategory, unreadOnly, deferredSearch]);
 
   // Offset paging keyed off the loaded count. Archiving/restoring removes an item
   // from both the local list and the server-side set, so skip=items.length stays
-  // aligned; the id de-dup absorbs any boundary drift.
+  // aligned; the id de-dup absorbs any boundary drift. When a page returns only
+  // duplicates (concurrent sweep moved rows), chase up to 3 further pages so the
+  // button doesn't stall on a full page of already-seen ids.
   const loadMore = async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      const data = await inboxAPI.list({
-        status,
-        category: activeCategory,
-        unreadOnly,
-        search: deferredSearch,
-        actorId: actorFilter,
-        projectId: projectFilter,
-        sort,
-        skip: items.length,
-        limit: PAGE_SIZE,
-      });
-      setItems((prev) => {
-        const seen = new Set(prev.map((n) => n.id));
-        return [...prev, ...data.filter((n) => !seen.has(n.id))];
-      });
-      setHasMore(data.length === PAGE_SIZE);
+      const seen = new Set(items.map((n) => n.id));
+      const fresh: Notification[] = [];
+      let skip = items.length;
+      let lastPageFull = false;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const data = await inboxAPI.list({
+          status,
+          category: activeCategory,
+          unreadOnly,
+          search: deferredSearch,
+          actorId: actorFilter,
+          projectId: projectFilter,
+          sort,
+          skip,
+          limit: PAGE_SIZE,
+        });
+        lastPageFull = data.length === PAGE_SIZE;
+        skip += data.length;
+        for (const n of data) {
+          if (!seen.has(n.id)) {
+            seen.add(n.id);
+            fresh.push(n);
+          }
+        }
+        if (!lastPageFull || fresh.length > 0) break;
+      }
+      if (fresh.length > 0) setItems((prev) => [...prev, ...fresh]);
+      setHasMore(lastPageFull);
     } catch (error) {
       console.error('Failed to load more inbox items:', error);
     } finally {
@@ -336,10 +347,6 @@ export function WorkInbox() {
   }, [status, activeCategory, unreadOnly, sort, deferredSearch, actorFilter, projectFilter]);
 
   useEffect(() => {
-    if (persistedUnreadOnly) setView({ unreadOnly: false });
-  }, [setView, persistedUnreadOnly]);
-
-  useEffect(() => {
     const state = location.state as { notificationRedirectError?: string } | null;
     if (!state?.notificationRedirectError) return;
     toast({ title: t(state.notificationRedirectError), variant: 'destructive' });
@@ -371,6 +378,7 @@ export function WorkInbox() {
       else broadcast();
     } catch (error) {
       console.error('Failed to mark read:', error);
+      toast({ title: t('inboxActionFailed'), variant: 'destructive' });
       fetchItems();
     }
   };
@@ -441,6 +449,7 @@ export function WorkInbox() {
       if (ids.length === 1) await inboxAPI.snooze(ids[0], iso);
       else await inboxAPI.bulk(ids, 'snooze', iso);
       clearSelection();
+      if (status === 'snoozed') await fetchItems();
       await afterMutation();
       toast({ title: t('inboxSnoozedToast', { count: ids.length }) });
     } catch (error) {
@@ -615,7 +624,7 @@ export function WorkInbox() {
   const totalSnoozed = summary?.total_snoozed ?? 0;
   const totalDone = summary?.categories.reduce((sum, c) => sum + c.done, 0) ?? 0;
   const countFor = (s: InboxStatus) => (s === 'open' ? totalOpen : s === 'snoozed' ? totalSnoozed : totalDone);
-  const hasTransientFilter = Boolean(deferredSearch || actorFilter || projectFilter);
+  const hasTransientFilter = Boolean(deferredSearch || actorFilter || projectFilter || unreadOnly);
   const archiveAllCount = activeCategory
     ? summary?.categories.find((c) => c.key === activeCategory)?.open ?? 0
     : totalOpen;
@@ -757,7 +766,7 @@ export function WorkInbox() {
               label={t('inboxAll')}
               icon={<Inbox className="h-4 w-4" />}
               count={countFor(status)}
-              unread={0}
+              unread={status === 'open' ? (summary?.total_unread ?? 0) : 0}
               onClick={() => setActiveCategory(null)}
             />
             {railCategories.map((cat) => {
@@ -769,7 +778,7 @@ export function WorkInbox() {
                   label={categoryLabel(cat.key, cat.label)}
                   icon={<visual.Icon className="h-4 w-4" />}
                   count={catCount(cat)}
-                  unread={0}
+                  unread={status === 'open' ? cat.unread : 0}
                   onClick={() => setActiveCategory(cat.key)}
                 />
               );
@@ -849,6 +858,16 @@ export function WorkInbox() {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+
+            <button
+              type="button"
+              onClick={() => setView({ unreadOnly: !unreadOnly })}
+              aria-pressed={unreadOnly}
+              className={`inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm shadow-sm transition-colors ${unreadOnly ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+            >
+              <span className={`flex h-2 w-2 rounded-full ${unreadOnly ? 'bg-white' : 'bg-blue-600'}`} />
+              {t('unreadFilter')}
+            </button>
 
             {/* Sort by age (W4) */}
             <DropdownMenu>
