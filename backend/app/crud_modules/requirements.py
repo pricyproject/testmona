@@ -504,6 +504,48 @@ def update_requirement(
     return db_requirement
 
 
+_VERIFY_BAD_RESULT_STATUSES = ("fail", "failed", "block", "blocked")
+
+
+def requirement_verify_blockers(db: Session, requirement) -> List[str]:
+    """Reasons a requirement cannot transition to VERIFIED (empty = clear).
+
+    Verification needs at least one linked, non-deleted test case in the same
+    project and no failing/blocked runs against them — mirroring the
+    traceability summary so the two views can never contradict each other.
+    """
+    case_ids = [
+        row[0]
+        for row in db.query(requirement_test_case_links.c.test_case_id)
+        .filter(requirement_test_case_links.c.requirement_id == requirement.id)
+        .all()
+    ]
+    cases = (
+        db.query(TestCase)
+        .join(TestSuite)
+        .filter(
+            TestCase.id.in_(case_ids),
+            TestSuite.project_id == requirement.project_id,
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        ).all()
+        if case_ids
+        else []
+    )
+    if not cases:
+        return ["no linked test coverage"]
+    bad = (
+        db.query(TestResult)
+        .filter(
+            TestResult.test_case_id.in_([case.id for case in cases]),
+            TestResult.status.in_(_VERIFY_BAD_RESULT_STATUSES),
+        )
+        .count()
+    )
+    if bad:
+        return ["failing or blocked related test runs"]
+    return []
+
+
 def delete_requirement(db: Session, requirement_id: int):
     db_requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if db_requirement:

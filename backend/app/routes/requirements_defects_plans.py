@@ -1840,6 +1840,20 @@ def register_requirements_defects_plans_routes(app):
             if folder is None or folder.project_id != db_requirement.project_id:
                 raise HTTPException(status_code=400, detail="Folder not found in this project")
 
+        # Verification must be earned: block the transition while coverage is
+        # missing or runs are failing, so VERIFIED can never contradict the
+        # traceability summary. Editing an already-verified requirement stays free.
+        if (
+            update_data.get("status") == models.RequirementStatus.VERIFIED
+            and db_requirement.status != models.RequirementStatus.VERIFIED
+        ):
+            verify_blockers = crud.requirement_verify_blockers(db, db_requirement)
+            if verify_blockers:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot mark requirement verified: {', '.join(verify_blockers)}.",
+                )
+
         # Capture the prior assignee before the update so we only notify on a real
         # change (and never re-notify when other fields are edited).
         prior_assigned_to = db_requirement.assigned_to

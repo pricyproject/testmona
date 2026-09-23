@@ -516,6 +516,16 @@ def register_saved_filters_and_bulk_routes(app) -> None:
                 skipped.append(requirement_id)
                 continue
 
+            # Bulk can't show a 409 per row, so requirements that couldn't
+            # transition to VERIFIED individually are skipped instead.
+            if (
+                payload.status == models.RequirementStatus.VERIFIED
+                and requirement.status != models.RequirementStatus.VERIFIED
+                and crud.requirement_verify_blockers(db, requirement)
+            ):
+                skipped.append(requirement_id)
+                continue
+
             if assignee_user is not None:
                 ok = assignee_project_cache.get(project_id)
                 if ok is None:
