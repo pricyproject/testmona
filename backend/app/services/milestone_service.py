@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from typing import Iterable, List
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -141,22 +141,6 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
             or 0
         )
 
-    # Scope defects to this milestone's runs. Without a run link there is no
-    # established relationship between the defect and the milestone, so we avoid
-    # mixing in every defect in the project (which would inflate every
-    # milestone's counts identically and mislead "quality risks").
-    if test_run_ids:
-        defects: List[Defect] = (
-            db.query(Defect)
-            .filter(Defect.project_id == milestone.project_id)
-            .filter(Defect.test_run_id.in_(test_run_ids))
-            .all()
-        )
-    else:
-        defects = []
-    open_defects = len([defect for defect in defects if defect.status in OPEN_DEFECT_STATUSES])
-    critical_defects = len([defect for defect in defects if defect.severity == DefectSeverity.CRITICAL and defect.status in OPEN_DEFECT_STATUSES])
-
     requirements: List[Requirement] = []
     if test_plan_ids:
         requirements = (
@@ -168,6 +152,32 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
             .all()
         )
     verified_requirements = len([requirement for requirement in requirements if requirement.status == RequirementStatus.VERIFIED])
+
+    # Scope defects to this milestone through any of their links: the runs, the
+    # executed test cases, or the planned requirements. A run link alone would
+    # hide defects filed directly against a case or requirement (the common
+    # path outside execution), leaving health and the completion gate blind to
+    # them. Unlinked defects stay out so project-wide noise can't inflate every
+    # milestone identically.
+    defects: List[Defect] = []
+    link_filters = []
+    if test_run_ids:
+        link_filters.append(Defect.test_run_id.in_(test_run_ids))
+    executed_case_ids = {result.test_case_id for result in results if result.test_case_id is not None}
+    if executed_case_ids:
+        link_filters.append(Defect.test_case_id.in_(executed_case_ids))
+    requirement_ids = [requirement.id for requirement in requirements]
+    if requirement_ids:
+        link_filters.append(Defect.requirement_id.in_(requirement_ids))
+    if link_filters:
+        defects = (
+            db.query(Defect)
+            .filter(Defect.project_id == milestone.project_id)
+            .filter(or_(*link_filters))
+            .all()
+        )
+    open_defects = len([defect for defect in defects if defect.status in OPEN_DEFECT_STATUSES])
+    critical_defects = len([defect for defect in defects if defect.severity == DefectSeverity.CRITICAL and defect.status in OPEN_DEFECT_STATUSES])
 
     blocked_plans = len([plan for plan in test_plans if _normalize_status(plan.status) == "blocked"])
 
