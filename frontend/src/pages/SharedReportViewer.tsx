@@ -7,6 +7,7 @@ import { Loader2, AlertCircle, Printer, ShieldCheck } from 'lucide-react';
 import { analyticsAPI } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { useAuthStore } from '@/stores/authStore';
 
 const activityValue = (activity: any, key: string, legacyKey?: string) =>
   activity?.[key] ?? (legacyKey ? activity?.[legacyKey] : undefined) ?? 0;
@@ -22,9 +23,15 @@ export function SharedReportViewer() {
   const { token } = useParams<{ token: string }>();
   const { t, isRTL } = useTranslation();
   const { formatDate, formatDateTime } = useDateFormat();
+  const { isAuthenticated } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<any>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const signIn = () => {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+  };
 
   useEffect(() => {
     if (!token) {
@@ -54,7 +61,7 @@ export function SharedReportViewer() {
     return () => {
       cancelled = true;
     };
-  }, [token, t]);
+  }, [token, t, retryCount]);
 
   if (loading) {
     return (
@@ -71,11 +78,18 @@ export function SharedReportViewer() {
           <CardContent className="flex flex-col items-center py-10 text-center">
             <AlertCircle className="h-10 w-10 text-red-500 mb-3" />
             <p className="text-gray-700 dark:text-gray-200">{error || t('reports_sharedUnavailable')}</p>
-            {error === t('reports_sharedRestricted') && (
-              <Button className="mt-4" onClick={() => { window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`; }}>
-                {t('reports_sharedSignIn')}
-              </Button>
-            )}
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {token && (
+                <Button variant="outline" onClick={() => setRetryCount((c) => c + 1)}>
+                  {t('retry')}
+                </Button>
+              )}
+              {!isAuthenticated && (
+                <Button onClick={signIn}>
+                  {t('reports_sharedSignIn')}
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -98,10 +112,17 @@ export function SharedReportViewer() {
             <p className="text-xs uppercase tracking-wide text-gray-500">{t('reports_sharedReportEyebrow')}</p>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{report.title}</h1>
           </div>
-          <Button variant="outline" onClick={() => window.print()}>
-            <Printer className="h-4 w-4 mr-2" />
-            {t('reports_printPdf')}
-          </Button>
+          <div className="flex gap-2 print:hidden">
+            {!isAuthenticated && (
+              <Button variant="ghost" onClick={signIn}>
+                {t('reports_sharedSignIn')}
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => window.print()}>
+              <Printer className="h-4 w-4 mr-2" />
+              {t('reports_printPdf')}
+            </Button>
+          </div>
         </div>
 
         {/* Header card */}
