@@ -37,6 +37,17 @@ const normalizeMonthlyTokenLimit = (value: unknown): number | null => {
   return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : null;
 };
 
+const isValidProxyUrl = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !!parsed.hostname;
+  } catch {
+    return false;
+  }
+};
+
 const defaultRequirementChatSettings = {
   enabled: true,
   max_context_requirements: 40,
@@ -64,6 +75,7 @@ const defaultAIManagerSettings: AIManagerSettings = {
   test_case_generation: { default_count: 5, max_tokens: 3000 },
   routing: defaultRoutingSettings,
   fallback: { enabled: false, order: [] },
+  proxy: { enabled: false, url: '' },
   providers: defaultAIProviders,
 };
 
@@ -213,6 +225,7 @@ export function AIManagerTab() {
         test_case_generation: settings.test_case_generation ?? defaultAIManagerSettings.test_case_generation,
         routing: settings.routing ?? defaultRoutingSettings,
         fallback: settings.fallback ?? { enabled: false, order: [] },
+        proxy: { enabled: settings.proxy?.enabled ?? false, url: settings.proxy?.url ?? '' },
         providers: defaultAIProviders.map((defaults) => ({
           ...defaults,
           ...(settings.providers.find((provider) => provider.provider === defaults.provider) || {}),
@@ -240,6 +253,11 @@ export function AIManagerTab() {
   };
 
   const handleSaveAIManager = async () => {
+    const proxyUrl = aiManagerSettings.proxy?.url?.trim() || '';
+    if (aiManagerSettings.proxy?.enabled && !isValidProxyUrl(proxyUrl)) {
+      showErrorToast(t('aiProxyInvalidUrl'));
+      return;
+    }
     setSavingAIManager(true);
     try {
       const payload: AIManagerSettings = {
@@ -251,6 +269,7 @@ export function AIManagerTab() {
         test_case_generation: aiManagerSettings.test_case_generation ?? defaultAIManagerSettings.test_case_generation,
         routing: aiManagerSettings.routing ?? defaultRoutingSettings,
         fallback: aiManagerSettings.fallback ?? { enabled: false, order: [] },
+        proxy: { enabled: aiManagerSettings.proxy?.enabled ?? false, url: proxyUrl || null },
         providers: aiManagerSettings.providers.map((provider) => ({
           ...provider,
           api_key: provider.api_key?.trim() || undefined,
@@ -267,6 +286,7 @@ export function AIManagerTab() {
         test_case_generation: savedSettings.test_case_generation ?? defaultAIManagerSettings.test_case_generation,
         routing: savedSettings.routing ?? defaultRoutingSettings,
         fallback: savedSettings.fallback ?? { enabled: false, order: [] },
+        proxy: { enabled: savedSettings.proxy?.enabled ?? false, url: savedSettings.proxy?.url ?? '' },
         providers: defaultAIProviders.map((defaults) => ({
           ...defaults,
           ...(savedSettings.providers.find((provider) => provider.provider === defaults.provider) || {}),
@@ -283,6 +303,11 @@ export function AIManagerTab() {
   };
 
   const handleTestAIProvider = async (provider: AIProviderName) => {
+    const proxyUrl = aiManagerSettings.proxy?.url?.trim() || '';
+    if (aiManagerSettings.proxy?.enabled && !isValidProxyUrl(proxyUrl)) {
+      showErrorToast(t('aiProxyInvalidUrl'));
+      return;
+    }
     setTestingAIProvider(provider);
     setAITestResult(null);
     try {
@@ -295,6 +320,8 @@ export function AIManagerTab() {
           api_key: providerConfig?.api_key || undefined,
           model: providerConfig?.model || undefined,
           base_url: providerConfig?.base_url || undefined,
+          proxy_enabled: aiManagerSettings.proxy?.enabled ?? false,
+          proxy_url: aiManagerSettings.proxy?.url?.trim() || undefined,
         },
       );
       setAITestResult(result);
@@ -357,6 +384,7 @@ export function AIManagerTab() {
     normalizedAIActionPage * aiActionPageSize,
   );
   const activeAIProvider = aiManagerSettings.providers.find((provider) => provider.provider === aiManagerSettings.active_provider);
+  const proxyEffectiveActive = (aiManagerSettings.proxy?.enabled ?? false) && isValidProxyUrl(aiManagerSettings.proxy?.url ?? '');
   const aiUsageLimits = aiUsage?.limits;
   const activeProviderLimit = aiUsageLimits?.active_provider_limit || null;
   const projectMonthlyLimit = aiUsageLimits?.project_monthly_limit;
@@ -975,6 +1003,40 @@ export function AIManagerTab() {
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Shared HTTP proxy for every AI provider (admin-only) */}
+                <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                        {t('aiProxyTitle')}
+                        <Badge variant={proxyEffectiveActive ? 'default' : 'secondary'}>
+                          {t(proxyEffectiveActive ? 'aiProxyActive' : 'aiProxyInactive')}
+                        </Badge>
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{t('aiProxyDesc')}</p>
+                    </div>
+                    <Switch
+                      checked={aiManagerSettings.proxy?.enabled ?? false}
+                      onCheckedChange={(checked) => setAIManagerSettings((current) => ({
+                        ...current,
+                        proxy: { enabled: checked, url: current.proxy?.url ?? '' },
+                      }))}
+                    />
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <Label>{t('aiProxyUrl')}</Label>
+                    <Input
+                      value={aiManagerSettings.proxy?.url ?? ''}
+                      disabled={!(aiManagerSettings.proxy?.enabled ?? false)}
+                      onChange={(event) => setAIManagerSettings((current) => ({
+                        ...current,
+                        proxy: { enabled: current.proxy?.enabled ?? false, url: event.target.value },
+                      }))}
+                    />
+                    <p className="text-xs text-slate-400">{t('aiProxyHint')}</p>
+                  </div>
                 </div>
 
                 {aiTestResult && (

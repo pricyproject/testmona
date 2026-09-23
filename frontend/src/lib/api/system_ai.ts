@@ -88,6 +88,11 @@ export interface AIFallbackSettings {
   order: AIProviderName[];
 }
 
+export interface AIProxySettings {
+  enabled: boolean;
+  url?: string | null;
+}
+
 export interface AITestCaseGenerationSettings {
   default_count: number;
   max_tokens: number;
@@ -102,6 +107,7 @@ export interface AIManagerSettings {
   test_case_generation?: AITestCaseGenerationSettings;
   routing?: AIRoutingSettings;
   fallback?: AIFallbackSettings;
+  proxy?: AIProxySettings;
   providers: AIProviderConfig[];
 }
 
@@ -192,7 +198,7 @@ export const aiManagerAPI = {
     provider?: AIProviderName,
     prompt?: string,
     timeoutSeconds?: number,
-    overrides?: { api_key?: string; model?: string; base_url?: string },
+    overrides?: { api_key?: string; model?: string; base_url?: string; proxy_enabled?: boolean; proxy_url?: string },
   ) => {
     const timeoutMs =
       timeoutSeconds && Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
@@ -202,6 +208,8 @@ export const aiManagerAPI = {
     if (overrides?.api_key?.trim()) body.api_key = overrides.api_key.trim();
     if (overrides?.model?.trim()) body.model = overrides.model.trim();
     if (overrides?.base_url?.trim()) body.base_url = overrides.base_url.trim();
+    if (overrides?.proxy_enabled !== undefined) body.proxy_enabled = overrides.proxy_enabled;
+    if (overrides?.proxy_url?.trim()) body.proxy_url = overrides.proxy_url.trim();
     if (timeoutSeconds) body.timeout_seconds = timeoutSeconds;
     const response = await api.post("/ai-manager/test", body, timeoutMs ? { timeout: timeoutMs } : undefined);
     return response.data;
