@@ -99,7 +99,7 @@ def _build_entities() -> Dict[str, EntitySpec]:
         # everywhere — instead of re-deriving the project through a TestSuite
         # join here — means TQL can never disagree with the rest of the app
         # about which project a case belongs to.
-        return q.filter(TestCase.project_id == project_id, TestCase.is_deleted.is_(False))
+        return q.filter(TestCase.project_id == project_id, ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))))
 
     def testcase_row(tc: TestCase) -> dict:
         return {

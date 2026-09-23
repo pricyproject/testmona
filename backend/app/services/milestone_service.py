@@ -136,7 +136,7 @@ def enrich_milestone(db: Session, milestone: Milestone) -> Milestone:
             db.query(func.count(func.distinct(TestResult.test_case_id)))
             .join(TestCase, TestCase.id == TestResult.test_case_id)
             .filter(TestResult.test_run_id.in_(test_run_ids))
-            .filter(TestCase.is_deleted == False)  # noqa: E712 - soft-deleted cases must not inflate the count
+            .filter((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)))  # soft-deleted cases must not inflate the count
             .scalar()
             or 0
         )
