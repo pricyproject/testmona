@@ -1,6 +1,8 @@
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
@@ -152,6 +154,40 @@ class FallbackSettingsPayload(BaseModel):
         return seen
 
 
+PROXY_URL_ERROR = "Proxy URL must be an http(s) URL with a host (e.g. http://proxy.local:8080)"
+
+
+def _clean_proxy_url(value: Any) -> Optional[str]:
+    """Stripped proxy URL when it is a valid http(s) URL with a host, else None."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped or any(char.isspace() for char in stripped):
+        return None
+    parsed = urlparse(stripped)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    return stripped
+
+
+class ProxySettingsPayload(BaseModel):
+    enabled: bool = False
+    url: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        cleaned = _clean_proxy_url(stripped)
+        if cleaned is None:
+            raise ValueError(PROXY_URL_ERROR)
+        return cleaned
+
+
 class AIManagerSettingsPayload(BaseModel):
     active_provider: str = Field(..., description="Supported values: openai, openrouter, anthropic, huggingface, litellm")
     per_project_monthly_token_limit: Optional[int] = Field(default=None, ge=1, le=1_000_000_000)
@@ -161,6 +197,7 @@ class AIManagerSettingsPayload(BaseModel):
     test_case_generation: Optional[TestCaseGenerationSettingsPayload] = None
     routing: Optional[RoutingSettingsPayload] = None
     fallback: Optional[FallbackSettingsPayload] = None
+    proxy: Optional[ProxySettingsPayload] = None
     providers: List[AIProviderConfigPayload] = Field(default_factory=list)
 
     @field_validator("active_provider")
@@ -182,6 +219,8 @@ class AITestRequest(BaseModel):
     model: Optional[str] = Field(default=None, max_length=160)
     base_url: Optional[str] = Field(default=None, max_length=500)
     timeout_seconds: Optional[int] = Field(default=None, ge=5, le=MAX_AI_REQUEST_TIMEOUT_SECONDS)
+    proxy_enabled: Optional[bool] = Field(default=None, description="Unsaved proxy toggle to test before saving")
+    proxy_url: Optional[str] = Field(default=None, max_length=500, description="Unsaved proxy URL to test before saving")
 
     @field_validator("provider")
     @classmethod
@@ -200,6 +239,19 @@ class AITestRequest(BaseModel):
             return None
         stripped = value.strip()
         return stripped or None
+
+    @field_validator("proxy_url")
+    @classmethod
+    def validate_proxy_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        cleaned = _clean_proxy_url(stripped)
+        if cleaned is None:
+            raise ValueError(PROXY_URL_ERROR)
+        return cleaned
 
 
 class AICompletionRequest(BaseModel):
@@ -243,6 +295,7 @@ def default_ai_config() -> Dict[str, Any]:
         "test_case_generation": dict(DEFAULT_TEST_CASE_GENERATION),
         "routing": {task: dict(target) for task, target in DEFAULT_ROUTING.items()},
         "fallback": dict(DEFAULT_FALLBACK),
+        "proxy": {"enabled": False, "url": None},
         "providers": {
             provider: {
                 "provider": provider,
@@ -365,6 +418,8 @@ def _load_ai_config(db: Session) -> Dict[str, Any]:
                 "enabled": bool(stored["fallback"].get("enabled")),
                 "order": list(stored["fallback"].get("order") or []),
             }
+        if isinstance(stored.get("proxy"), dict):
+            config["proxy"] = _normalize_proxy(stored["proxy"])
         for provider, provider_config in (stored.get("providers") or {}).items():
             normalized_provider = str(provider or "").strip().lower()
             if normalized_provider in config["providers"] and isinstance(provider_config, dict):
@@ -474,6 +529,35 @@ def _normalize_fallback(raw: Any) -> Dict[str, Any]:
     return fb
 
 
+def _normalize_proxy(raw: Any) -> Dict[str, Any]:
+    proxy = {"enabled": False, "url": None}
+    if isinstance(raw, dict):
+        proxy["enabled"] = bool(raw.get("enabled"))
+        proxy["url"] = _clean_proxy_url(raw.get("url"))
+    return proxy
+
+
+# Hosts that never go through the forward proxy. httpx ignores NO_PROXY once
+# a proxy is set explicitly, so loopback (e.g. the default LiteLLM
+# http://localhost:4000) plus NO_PROXY/no_proxy entries are bypassed here.
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _host_bypasses_proxy(hostname: str) -> bool:
+    host = (hostname or "").strip().lower()
+    if not host:
+        return False
+    entries = list(_LOOPBACK_HOSTS)
+    for key in ("NO_PROXY", "no_proxy"):
+        for entry in os.environ.get(key, "").split(","):
+            cleaned = entry.strip().lower().lstrip(".")
+            if cleaned == "*":
+                return True
+            if cleaned and cleaned not in entries:
+                entries.append(cleaned)
+    return any(host == entry or host.endswith("." + entry) for entry in entries)
+
+
 def get_requirement_chat_settings(db: Session) -> Dict[str, Any]:
     return _normalize_requirement_chat(_load_ai_config(db).get("requirement_chat"))
 
@@ -497,6 +581,7 @@ def get_ai_manager_settings(db: Session) -> Dict[str, Any]:
         "test_case_generation": _normalize_test_case_generation(config.get("test_case_generation")),
         "routing": _normalize_routing(config.get("routing")),
         "fallback": _normalize_fallback(config.get("fallback")),
+        "proxy": _normalize_proxy(config.get("proxy")),
         "providers": [_public_provider_config(config["providers"][provider]) for provider in sorted(config["providers"])],
     }
 
@@ -549,6 +634,8 @@ def update_ai_manager_settings(db: Session, payload: AIManagerSettingsPayload) -
         config["routing"] = _normalize_routing(payload.routing.model_dump())
     if payload.fallback is not None:
         config["fallback"] = _normalize_fallback(payload.fallback.model_dump())
+    if payload.proxy is not None:
+        config["proxy"] = _normalize_proxy(payload.proxy.model_dump())
     for provider_payload in payload.providers:
         provider_config = config["providers"][provider_payload.provider]
         provider_config.update(
@@ -991,10 +1078,25 @@ async def generate_ai_completion(
         api_key = provider_config["api_key_plain"]
         prompt_tokens = 0
         completion_tokens = 0
+        # Saved proxy applies everywhere; either test-override key pins the
+        # connection test to the unsaved form state. Disabled/no URL = direct.
+        proxy = _normalize_proxy(config.get("proxy"))
+        proxy_url = proxy["url"] if proxy["enabled"] else None
+        if active_overrides is not None and ("proxy_enabled" in active_overrides or "proxy_url" in active_overrides):
+            test_proxy = _normalize_proxy({
+                "enabled": active_overrides.get("proxy_enabled"),
+                "url": active_overrides.get("proxy_url"),
+            })
+            proxy_url = test_proxy["url"] if test_proxy["enabled"] else None
+        if proxy_url and _host_bypasses_proxy(urlparse(base_url).hostname or ""):
+            proxy_url = None
         # ponytail: fail fast on connect (10s); full budget is for the slow read.
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout, connect=10.0, read=timeout, write=timeout, pool=timeout)
+                timeout=httpx.Timeout(timeout, connect=10.0, read=timeout, write=timeout, pool=timeout),
+                # Explicit proxy wins over env; None keeps httpx trust_env
+                # behavior (existing env-proxy deployments unaffected).
+                proxy=proxy_url,
             ) as client:
                 if provider in {"openai", "openrouter", "huggingface", "litellm"}:
                     headers = {"Content-Type": "application/json"}

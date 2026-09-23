@@ -125,6 +125,8 @@ def register_ai_manager_routes(app):
                 "model": payload.model,
                 "base_url": payload.base_url,
                 "request_timeout_seconds": payload.timeout_seconds,
+                "proxy_enabled": payload.proxy_enabled,
+                "proxy_url": payload.proxy_url,
             }.items()
             if value is not None
         } or None
