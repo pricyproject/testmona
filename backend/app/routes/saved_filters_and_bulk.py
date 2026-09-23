@@ -410,6 +410,17 @@ def register_saved_filters_and_bulk_routes(app) -> None:
                 skipped.append(defect_id)
                 continue
 
+            # Bulk carries no per-defect resolution, so a close without a
+            # recorded resolution can't be completed here — skip before any
+            # mutation instead of bypassing the single-update guard.
+            if (
+                payload.status == models.DefectStatus.CLOSED
+                and defect.status != models.DefectStatus.CLOSED
+                and not str(defect.resolution or "").strip()
+            ):
+                skipped.append(defect_id)
+                continue
+
             if assignee_user is not None:
                 ok = assignee_project_cache.get(project_id)
                 if ok is None:

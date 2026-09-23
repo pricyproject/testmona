@@ -2234,6 +2234,18 @@ def register_requirements_defects_plans_routes(app):
             requirement_id=effective_requirement_id,
             assigned_to=effective_assigned_to,
         )
+        # Closing is terminal: require a recorded resolution so release notes
+        # and root-cause analytics never silently lose the outcome. Reopening,
+        # editing an already-closed defect, or resolving via FIXED stays free.
+        if (
+            update_data.get("status") == models.DefectStatus.CLOSED
+            and db_defect.status != models.DefectStatus.CLOSED
+            and not str(update_data.get("resolution", db_defect.resolution) or "").strip()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot close a defect without recording a resolution.",
+            )
         # Snapshot the watched fields before the write so we can tell watchers what
         # actually changed (and suppress the broadcast on a no-op edit).
         watch_before = {

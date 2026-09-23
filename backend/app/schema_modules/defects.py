@@ -126,6 +126,8 @@ class DefectUpdate(BaseModel):
     environment: Optional[str] = Field(default=None, max_length=255)
     browser_info: Optional[str] = Field(default=None, max_length=255)
     attachments: Optional[str] = None
+    resolution: Optional[str] = None
+    root_cause: Optional[str] = None
     estimated_fix_time: Optional[float] = None
     actual_fix_time: Optional[float] = None
     external_issue_id: Optional[str] = Field(default=None, max_length=100)
