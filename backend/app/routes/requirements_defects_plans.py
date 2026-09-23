@@ -1844,7 +1844,8 @@ def register_requirements_defects_plans_routes(app):
         # missing or runs are failing, so VERIFIED can never contradict the
         # traceability summary. Editing an already-verified requirement stays free.
         if (
-            update_data.get("status") == models.RequirementStatus.VERIFIED
+            "status" in update_fields
+            and requirement.status == models.RequirementStatus.VERIFIED
             and db_requirement.status != models.RequirementStatus.VERIFIED
         ):
             verify_blockers = crud.requirement_verify_blockers(db, db_requirement)
