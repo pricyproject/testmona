@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { markdownToHtml } from '@/components/ui/content-editor';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { docsAPI } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useAuthStore } from '@/stores/authStore';
 import type { DocPublicView } from '@/types';
 
 export function PublicDoc() {
   const { publicId } = useParams<{ publicId: string }>();
   const { t, isRTL } = useTranslation();
+  const { isAuthenticated } = useAuthStore();
   const [doc, setDoc] = useState<DocPublicView | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const signIn = () => {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +40,7 @@ export function PublicDoc() {
       }
     })();
     return () => { cancelled = true; };
-  }, [publicId]);
+  }, [publicId, retryCount]);
 
   const html = useMemo(() => sanitizeHtml(markdownToHtml(doc?.content_markdown || '')), [doc]);
   const tags = useMemo(() => doc?.tags?.split(',').map((tag) => tag.trim()).filter(Boolean) || [], [doc]);
@@ -42,7 +50,22 @@ export function PublicDoc() {
   }
 
   if (!doc) {
-    return <div className="p-8 text-center text-muted-foreground">{t('docNotFound')}</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6" dir={isRTL ? 'rtl' : 'ltr'}>
+        <div className="flex max-w-md flex-col items-center py-10 text-center">
+          <AlertCircle className="mb-3 h-10 w-10 text-red-500" />
+          <p className="text-gray-700 dark:text-gray-200">{t('docNotFound')}</p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {publicId && (
+              <Button variant="outline" onClick={() => setRetryCount((c) => c + 1)}>
+                {t('retry')}
+              </Button>
+            )}
+            {!isAuthenticated && <Button onClick={signIn}>{t('signIn')}</Button>}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -62,6 +85,13 @@ export function PublicDoc() {
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>
+      {!isAuthenticated && (
+        <div className="mt-8 flex justify-center">
+          <Button variant="outline" onClick={signIn}>
+            {t('signIn')}
+          </Button>
+        </div>
+      )}
     </main>
   );
 }
