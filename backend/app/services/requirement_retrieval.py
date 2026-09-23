@@ -12,6 +12,7 @@ import html
 import logging
 import re
 from dataclasses import dataclass
+from itertools import zip_longest
 from typing import Any, List, Optional
 
 from .. import crud
@@ -272,12 +273,14 @@ def retrieve_relevant_docs(
     query and greedily select within ``char_budget`` / ``max_docs``."""
     types = [t for t in (source_types or []) if t in _LOADERS] or ["requirements"]
     candidates: List[RetrievedDoc] = []
+    source_docs: List[List[RetrievedDoc]] = []
     source_counts = {t: 0 for t in SOURCE_TYPES}
     for t in types:
         try:
             loaded = _LOADERS[t](db, project_id)
             source_counts[t] = len(loaded)
             candidates.extend(loaded)
+            source_docs.append(loaded)
         except Exception:  # a single type's loader must not break the whole answer
             logger.warning("Source loader for %r failed in project %s", t, project_id, exc_info=True)
             continue
@@ -299,20 +302,30 @@ def retrieve_relevant_docs(
     best_score = max((doc.score for doc in candidates), default=0.0)
 
     if all(doc.score == 0.0 for doc in candidates):
-        candidates.sort(key=lambda d: d.id, reverse=True)  # recency fallback
+        # IDs are unrelated across tables; rotate sources before using recency
+        # so a busy entity type cannot hide every item of another type.
+        candidates = [
+            doc for batch in zip_longest(*(
+                sorted(group, key=lambda d: d.id, reverse=True) for group in source_docs
+            )) for doc in batch if doc is not None
+        ]
     else:
         candidates.sort(key=lambda d: d.score, reverse=True)
 
     cap = max_docs if (max_docs and max_docs > 0) else len(candidates)
     selected: List[RetrievedDoc] = []
     used = 0
+    per_doc_budget = max(1, char_budget // cap)
     for doc in candidates:
         if len(selected) >= cap:
             break
-        if selected and used + len(doc.content) > char_budget:
+        # The prompt packs only a bounded excerpt per item. A single long doc
+        # must not consume the entire budget before the other types are seen.
+        blob_len = min(len(doc.content), per_doc_budget)
+        if selected and used + blob_len > char_budget:
             break
         selected.append(doc)
-        used += len(doc.content)
+        used += blob_len
 
     selected_counts = {t: 0 for t in SOURCE_TYPES}
     plural_type = {"requirement": "requirements", "defect": "defects", "test_plan": "test_plans", "test_case": "test_cases", "doc": "docs"}

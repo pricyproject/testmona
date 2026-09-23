@@ -52,7 +52,7 @@ interface RequirementChatProps {
 }
 
 const STARTER_KEYS = ['reqChatStarter1', 'reqChatStarter2', 'reqChatStarter3'] as const;
-const SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases'];
+const SOURCE_TYPES: AISourceType[] = ['requirements', 'defects', 'test_plans', 'test_cases', 'docs'];
 
 // Ask AI source type -> the project feature toggle that gates it. A source whose
 // entity module is disabled for the project is hidden from the scope selector
@@ -555,7 +555,7 @@ export function RequirementChat({
   const sourceHref = (s: { type?: string; id?: number | null; requirement_id?: number | null }) => {
     const id = s.id ?? s.requirement_id;
     if (id == null) return null;
-    const segment = ({ defect: 'defects', test_plan: 'test-plans', test_case: 'test-cases' } as Record<string, string>)[s.type || 'requirement'] || 'requirements';
+    const segment = ({ defect: 'defects', test_plan: 'test-plans', test_case: 'test-cases', doc: 'docs' } as Record<string, string>)[s.type || 'requirement'] || 'requirements';
     return `/projects/${projectId}/${segment}/${id}`;
   };
 
@@ -571,6 +571,8 @@ export function RequirementChat({
         return { icon: ListPlus, scope: 'test_plans' as AISourceType, openLabel: t('reqChatOpenTestPlan') };
       case 'test_case':
         return { icon: ExternalLink, scope: 'test_cases' as AISourceType, openLabel: t('reqChatOpenTestCase') };
+      case 'doc':
+        return { icon: FilePlus2, scope: 'docs' as AISourceType, openLabel: t('open') };
       default:
         return { icon: FilePlus2, scope: 'requirements' as AISourceType, openLabel: t('reqChatOpenRequirement') };
     }

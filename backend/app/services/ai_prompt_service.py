@@ -361,7 +361,6 @@ def build_requirement_qa_prompt(
     return prompt
 
 
-_DOC_ROW_OVERHEAD = 300
 _DOC_QA_INSTRUCTIONS = (
     "You are a QA documentation assistant for a software project. Answer the user's "
     "question using ONLY the project items provided below (TOON format: the header "
@@ -396,21 +395,21 @@ def build_doc_qa_prompt(
     if n == 0:
         return assemble([])
 
-    fixed = len(_DOC_QA_INSTRUCTIONS) + len(history_block) + len(question_text) + 80
-    available = max(0, QA_PROMPT_CHAR_CEILING - fixed - n * _DOC_ROW_OVERHEAD)
-    per_doc = available // n
-
     # Build budget-limited shallow copies (don't mutate the retrieval objects).
+    # Probe the fixed overhead with empty contents, then split what remains
+    # evenly so every selected item keeps an excerpt (a single long doc must
+    # not starve the defects at the other end of the table).
     class _Row:
         __slots__ = ("type", "key", "title", "content")
 
-        def __init__(self, d):
+        def __init__(self, d, budget: int):
             self.type = d.type
             self.key = d.key
             self.title = d.title
-            self.content = clean_ai_text(_plain_text(d.content), max(0, per_doc))
+            self.content = clean_ai_text(_plain_text(d.content), max(0, budget))
 
-    rows = [_Row(d) for d in docs]
+    per_doc = max(0, QA_PROMPT_CHAR_CEILING - len(assemble([_Row(d, 0) for d in docs]))) // n
+    rows = [_Row(d, per_doc) for d in docs]
     prompt = assemble(rows)
     while len(prompt) > QA_PROMPT_CHAR_CEILING and len(rows) > 1:
         rows = rows[:-1]

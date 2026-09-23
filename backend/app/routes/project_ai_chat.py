@@ -104,6 +104,7 @@ _SOURCE_TYPE_TO_SCOPE = {
     "defect": "defects",
     "test_plan": "test_plans",
     "test_case": "test_cases",
+    "doc": "docs",
 }
 
 
