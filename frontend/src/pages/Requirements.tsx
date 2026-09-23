@@ -636,7 +636,11 @@ export function Requirements() {
     try {
       setBulkBusy(true);
       const result = await bulkAPI.requirements({ ids, ...payload });
-      toast({ title: t('success'), description: t('bulkUpdated', { count: result.updated }) });
+      toast({
+        title: t('success'),
+        description: t('bulkUpdated', { count: result.updated })
+          + (result.skipped_ids.length > 0 ? ` · ${t('bulkSkippedCount', { count: String(result.skipped_ids.length) })}` : ''),
+      });
       clearSelection();
       loadRequirements();
     } catch (error: any) {
@@ -1724,6 +1728,9 @@ export function Requirements() {
             ))}
           </SelectContent>
         </Select>
+        {reqStatus === 'verified' && (
+          <p className="text-xs text-gray-500">{t('verifiedRequiresCoverageHint')}</p>
+        )}
       </div>
 
       <div className="space-y-2">

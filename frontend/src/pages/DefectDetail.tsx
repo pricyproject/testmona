@@ -93,6 +93,7 @@ type DefectEditForm = {
   tags: string;
   external_issue_url: string;
   requirement_id: string;
+  resolution: string;
 };
 
 // Enum values are stored snake_case but their translation keys are camelCase,
@@ -148,6 +149,7 @@ const buildEditForm = (defect: any): DefectEditForm => ({
   tags: defect?.tags || '',
   external_issue_url: defect?.external_issue_url || '',
   requirement_id: defect?.requirement_id ? String(defect.requirement_id) : 'none',
+  resolution: defect?.resolution || '',
 });
 
 const statusClass = (status?: string | null): string => {
@@ -309,6 +311,18 @@ export function DefectDetail() {
       return;
     }
 
+    // Closing is terminal on the server: it 409s without a recorded resolution.
+    const isClosing = editForm.status === 'closed' && defect?.status !== 'closed';
+    const trimmedResolution = editForm.resolution.trim();
+    if (isClosing && !trimmedResolution) {
+      toast({
+        title: t('validationError'),
+        description: t('defectResolutionRequired'),
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       const updatedDefect = await updateDefect.mutateAsync({
         defect_id: trimmedId,
@@ -325,6 +339,7 @@ export function DefectDetail() {
         tags: editForm.tags.trim(),
         external_issue_url: externalUrl || null,
         requirement_id: selectedRequirementId,
+        resolution: trimmedResolution || null,
       });
       setEditForm(buildEditForm(updatedDefect));
       setIsEditing(false);
@@ -341,6 +356,18 @@ export function DefectDetail() {
 
   // Quick inline edit: patch a single field (or few) without the full edit form.
   const patchDefect = async (partial: Record<string, unknown>): Promise<boolean> => {
+    if (
+      partial.status === 'closed'
+      && defect?.status !== 'closed'
+      && !String(defect?.resolution || '').trim()
+    ) {
+      toast({
+        title: t('validationError'),
+        description: t('defectResolutionRequired'),
+        variant: 'destructive',
+      });
+      return false;
+    }
     try {
       await updateDefect.mutateAsync(partial);
       toast({ title: t('success'), description: t('defectUpdatedSuccessfully') });
@@ -600,6 +627,18 @@ export function DefectDetail() {
                 maxLength={2000}
               />
             </Field>
+
+            {editForm.status === 'closed' && (
+              <Field label={`${t('defectResolution')} *`}>
+                <Textarea
+                  value={editForm.resolution}
+                  onChange={(event) => updateEditField('resolution', event.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                />
+                <p className="text-xs text-gray-500">{t('defectResolutionHint')}</p>
+              </Field>
+            )}
 
             <div className="grid gap-4 md:grid-cols-2">
               <Field label={t('expectedResult')}>

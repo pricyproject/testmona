@@ -600,6 +600,7 @@ export function Defects() {
   const [defectJiraLink, setDefectJiraLink] = useState('');
   const [defectTestCaseId, setDefectTestCaseId] = useState('none');
   const [defectRequirementId, setDefectRequirementId] = useState('none');
+  const [defectResolution, setDefectResolution] = useState('');
   const [defectTouchedFields, setDefectTouchedFields] = useState<Record<string, boolean>>({});
 
   // Draft state
@@ -676,6 +677,7 @@ export function Defects() {
     setDefectJiraLink('');
     setDefectTestCaseId('none');
     setDefectRequirementId('none');
+    setDefectResolution('');
     setDefectTouchedFields({});
   };
 
@@ -1214,6 +1216,7 @@ export function Defects() {
     setDefectJiraLink(defect.external_issue_url || defect.jira_link || '');
     setDefectTestCaseId(defect.test_case_id?.toString() || 'none');
     setDefectRequirementId(defect.requirement_id?.toString() || 'none');
+    setDefectResolution(defect.resolution || '');
     // Stale "touched" flags from a previous create attempt would light up the
     // edit form's error styling on fields the user hasn't touched yet.
     setDefectTouchedFields({});
@@ -1279,6 +1282,16 @@ export function Defects() {
       return;
     }
 
+    const trimmedResolution = defectResolution.trim();
+    if (defectStatus === 'closed' && editingDefect.status !== 'closed' && !trimmedResolution) {
+      toast({
+        title: t('validationError'),
+        description: t('defectResolutionRequired'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsUpdating(true);
     try {
       const defectData = {
@@ -1296,6 +1309,7 @@ export function Defects() {
         external_issue_url: externalIssueValue || null,
         test_case_id: selectedTestCaseId,
         requirement_id: selectedRequirementId,
+        resolution: trimmedResolution || null,
       };
 
       const updatedDefect = await defectsAPI.update(editingDefect.id, defectData);
@@ -3410,6 +3424,20 @@ export function Defects() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {defectStatus === 'closed' && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="editDefectResolution" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('defectResolution')} *</Label>
+                        <Textarea
+                          id="editDefectResolution"
+                          value={defectResolution}
+                          onChange={(e) => setDefectResolution(e.target.value)}
+                          rows={3}
+                          maxLength={2000}
+                          className="min-h-20 resize-y rounded-md bg-background text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">{t('defectResolutionHint')}</p>
+                      </div>
+                    )}
                     <PillPickerRow
                       label={t('defectSeverity')}
                       value={defectSeverity}

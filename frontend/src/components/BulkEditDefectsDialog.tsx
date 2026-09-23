@@ -66,6 +66,14 @@ export function BulkEditDefectsDialog({
   }, [open]);
 
   const handleApply = async () => {
+    if (status === 'closed') {
+      toast({
+        title: t('error'),
+        description: t('bulkCloseNeedsResolution'),
+        variant: 'destructive',
+      });
+      return;
+    }
     const payload: Parameters<typeof bulkAPI.defects>[0] = { ids };
     if (status !== UNCHANGED) payload.status = status;
     if (severity !== UNCHANGED) payload.severity = severity;
