@@ -390,7 +390,7 @@ class RequirementChatConversationUpdate(BaseModel):
         return seen
 
 
-_CHAT_SOURCE_TYPES = {"requirements", "defects", "test_plans", "test_cases"}
+_CHAT_SOURCE_TYPES = {"requirements", "defects", "test_plans", "test_cases", "docs"}
 
 
 def _clean_source_types(value: Optional[List[str]]) -> Optional[List[str]]:
@@ -413,7 +413,9 @@ class RequirementChatAsk(BaseModel):
     conversation_id: Optional[int] = Field(default=None, ge=1)
     # Optional per-ask scope override; intersected server-side with the
     # admin-enabled scopes so a user can only narrow, never broaden.
-    source_types: Optional[List[str]] = None
+    source_types: Optional[List[str]] = Field(
+        default=None, description=f"Allowed source types: {', '.join(sorted(_CHAT_SOURCE_TYPES))}"
+    )
 
     @field_validator("question")
     @classmethod
@@ -430,7 +432,9 @@ class RequirementChatAsk(BaseModel):
 
 
 class RequirementChatRegenerate(BaseModel):
-    source_types: Optional[List[str]] = None
+    source_types: Optional[List[str]] = Field(
+        default=None, description=f"Allowed source types: {', '.join(sorted(_CHAT_SOURCE_TYPES))}"
+    )
 
     @field_validator("source_types")
     @classmethod
