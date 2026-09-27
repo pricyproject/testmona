@@ -41,7 +41,7 @@ export const systemSettingsAPI = {
   },
 };
 
-export type AIProviderName = "openai" | "openrouter" | "anthropic" | "huggingface" | "litellm";
+export type AIProviderName = "openai" | "openrouter" | "anthropic" | "huggingface" | "litellm" | "deepseek";
 
 export interface AIProviderConfig {
   provider: AIProviderName;

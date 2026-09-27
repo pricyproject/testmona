@@ -16,13 +16,14 @@ logger = logging.getLogger(__name__)
 
 AI_MANAGER_CONFIG_KEY = "ai_manager_config"
 AI_MANAGER_USAGE_KEY = "ai_manager_usage"
-SUPPORTED_AI_PROVIDERS = {"openai", "openrouter", "anthropic", "huggingface", "litellm"}
+SUPPORTED_AI_PROVIDERS = {"openai", "openrouter", "anthropic", "huggingface", "litellm", "deepseek"}
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "openrouter": "openai/gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-latest",
     "huggingface": "openai/gpt-oss-20b",
     "litellm": "gpt-4o-mini",
+    "deepseek": "deepseek-chat",
 }
 DEFAULT_BASE_URLS = {
     "openai": "https://api.openai.com/v1",
@@ -30,6 +31,7 @@ DEFAULT_BASE_URLS = {
     "anthropic": "https://api.anthropic.com/v1",
     "huggingface": "https://router.huggingface.co/v1",
     "litellm": "http://localhost:4000/v1",
+    "deepseek": "https://api.deepseek.com/v1",
 }
 MAX_RECENT_USAGE_EVENTS = 50
 DEFAULT_AI_REQUEST_TIMEOUT_SECONDS = 60
@@ -48,7 +50,7 @@ REASONING_TOKEN_HEADROOM = 2048
 
 
 class AIProviderConfigPayload(BaseModel):
-    provider: str = Field(..., description="Supported values: openai, openrouter, anthropic, huggingface, litellm")
+    provider: str = Field(..., description="Supported values: openai, openrouter, anthropic, huggingface, litellm, deepseek")
     enabled: bool = False
     api_key: Optional[str] = Field(default=None, max_length=4000)
     model: Optional[str] = Field(default=None, max_length=160)
@@ -189,7 +191,7 @@ class ProxySettingsPayload(BaseModel):
 
 
 class AIManagerSettingsPayload(BaseModel):
-    active_provider: str = Field(..., description="Supported values: openai, openrouter, anthropic, huggingface, litellm")
+    active_provider: str = Field(..., description="Supported values: openai, openrouter, anthropic, huggingface, litellm, deepseek")
     per_project_monthly_token_limit: Optional[int] = Field(default=None, ge=1, le=1_000_000_000)
     requirement_chat: Optional[RequirementChatSettingsPayload] = None
     system_prompt: Optional[str] = Field(default=None, max_length=2000)
@@ -212,7 +214,7 @@ class AIManagerSettingsPayload(BaseModel):
 class AITestRequest(BaseModel):
     provider: Optional[str] = Field(
         default=None,
-        description="Supported values: openai, openrouter, anthropic, huggingface, litellm",
+        description="Supported values: openai, openrouter, anthropic, huggingface, litellm, deepseek",
     )
     prompt: str = Field(default="Reply with exactly: TestMona AI is ready.", min_length=1, max_length=1000)
     api_key: Optional[str] = Field(default=None, max_length=4000, description="Unsaved key to test before saving")
@@ -1098,7 +1100,7 @@ async def generate_ai_completion(
                 # behavior (existing env-proxy deployments unaffected).
                 proxy=proxy_url,
             ) as client:
-                if provider in {"openai", "openrouter", "huggingface", "litellm"}:
+                if provider in {"openai", "openrouter", "huggingface", "litellm", "deepseek"}:
                     headers = {"Content-Type": "application/json"}
                     if api_key:
                         headers["Authorization"] = f"Bearer {api_key}"

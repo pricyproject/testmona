@@ -29,6 +29,7 @@ const defaultAIProviders: AIProviderConfig[] = [
   { provider: 'anthropic', enabled: false, model: 'claude-3-5-haiku-latest', base_url: 'https://api.anthropic.com/v1', request_timeout_seconds: 60, monthly_token_limit: null },
   { provider: 'huggingface', enabled: false, model: 'openai/gpt-oss-20b', base_url: 'https://router.huggingface.co/v1', request_timeout_seconds: 60, monthly_token_limit: null },
   { provider: 'litellm', enabled: false, model: 'gpt-4o-mini', base_url: 'http://localhost:4000/v1', request_timeout_seconds: 60, monthly_token_limit: null },
+  { provider: 'deepseek', enabled: false, model: 'deepseek-chat', base_url: 'https://api.deepseek.com/v1', request_timeout_seconds: 60, monthly_token_limit: null },
 ];
 
 const normalizeMonthlyTokenLimit = (value: unknown): number | null => {
@@ -89,6 +90,7 @@ const aiProviderLabels: Record<AIProviderName, string> = {
   anthropic: 'Claude',
   huggingface: 'Hugging Face',
   litellm: 'LiteLLM',
+  deepseek: 'DeepSeek',
 };
 
 const aiOperationLabel = (operation: string, t: (k: string) => string): string => {
