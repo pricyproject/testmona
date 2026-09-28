@@ -296,9 +296,17 @@ def retrieve_relevant_docs(
             best_score=0.0,
         )
 
-    query_tokens = _tokens(f"{query} {extra_context or ''}")
+    question_tokens = _tokens(query)
+    context_tokens = _tokens(extra_context or "")
     for doc in candidates:
-        doc.score = _score(query_tokens, _tokens(doc.content))
+        doc_tokens = _tokens(doc.content)
+        # Score the question and the prior-turn context separately, then take the
+        # stronger match (context weighted down). Unioning the tokens first would
+        # grow the denominator and depress every score on follow-up questions.
+        score = _score(question_tokens, doc_tokens)
+        if context_tokens:
+            score = max(score, 0.5 * _score(context_tokens, doc_tokens))
+        doc.score = score
     best_score = max((doc.score for doc in candidates), default=0.0)
 
     if all(doc.score == 0.0 for doc in candidates):

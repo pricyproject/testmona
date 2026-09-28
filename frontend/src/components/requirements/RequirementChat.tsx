@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -75,8 +75,16 @@ interface ProjectMemberOption {
 const tomorrowDate = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  // Read local Y/M/D directly; toISOString() would shift across the UTC
+  // boundary and could yield the day after tomorrow in western timezones.
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
 };
+
+// A share is only usable while it isn't private and hasn't expired.
+const isShareActive = (conv: Pick<RequirementChatConversation, 'share_scope' | 'share_expires_at'>) =>
+  conv.share_scope !== 'private' && (!conv.share_expires_at || new Date(conv.share_expires_at) > new Date());
 
 export function RequirementChat({
   projectId, scopeMode, variant, active, initialPublicId, onClose, headerActions,
@@ -85,6 +93,7 @@ export function RequirementChat({
   const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [conversations, setConversations] = useState<RequirementChatConversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
@@ -117,7 +126,8 @@ export function RequirementChat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const deepLinkRef = useRef<string | null>(initialPublicId ?? null);
+  // Monotonic id so a slow open-response can't overwrite a newer selection.
+  const openSeqRef = useRef(0);
 
   // Restrict the admin-enabled sources to entity modules that are enabled for
   // this project, so disabled features never appear as a selectable scope.
@@ -141,6 +151,7 @@ export function RequirementChat({
   // The active conversation may be one of the user's own (in the list) or a
   // read-only shared conversation opened via a link (not in the list).
   const activeConversation = conversations.find((c) => c.id === activeId) || activeConvObj;
+  const activeShareActive = activeConversation ? isShareActive(activeConversation) : false;
   const isAbortError = (e: any) => e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.name === 'AbortError';
 
   const filteredConversations = useMemo(() => {
@@ -175,22 +186,22 @@ export function RequirementChat({
       .finally(() => setMembersLoading(false));
   }, [active, projectId]);
 
-  // Open a deep-linked (possibly shared) conversation once, after activation.
+  // Open a deep-linked (possibly shared) conversation when activated, and
+  // re-open if the link target changes (e.g. /ask?c=A -> /ask?c=B).
   useEffect(() => {
-    if (active && deepLinkRef.current) {
-      const pid = deepLinkRef.current;
-      deepLinkRef.current = null;
-      openByLink(pid);
-    }
-  }, [active]);
+    if (active && initialPublicId) openByLink(initialPublicId);
+  }, [active, initialPublicId]);
 
   useEffect(() => {
     setSelectedSources(enabledSources);
   }, [enabledSources.join(',')]);
 
   useEffect(() => {
+    // Only follow new turns when the user is already at the bottom, so a
+    // deliberate scroll-up to read isn't yanked away on every message.
+    if (!atBottom) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, sending]);
+  }, [messages, sending, atBottom]);
 
   // Auto-grow the composer with its content, capped so it never eats the
   // conversation. Runs on reset to '' too, snapping back to one row.
@@ -246,7 +257,7 @@ export function RequirementChat({
     member.full_name || member.username || member.email || `#${member.user_id}`;
 
   const aiUnavailableDescription = () => {
-    if (featureDisabled) return t('reqChatDisabled');
+    if (featureDisabled) return scopeMode === 'all' ? t('reqChatProjectDisabled') : t('reqChatDisabled');
     if (aiStatusLoading) return t('reqChatCheckingStatus');
     if (aiStatus?.reason === 'token_missing') return t('reqChatTokenMissingDesc');
     if (aiStatus?.reason === 'active_provider_disabled') return t('reqChatProviderDisabledDesc');
@@ -255,29 +266,37 @@ export function RequirementChat({
 
   const openConversation = async (id: number) => {
     if (sending) return;
+    const seq = ++openSeqRef.current;
     try {
       const data = await requirementChatAPI.getConversation(projectId, id);
+      if (seq !== openSeqRef.current) return;
       setActiveId(id);
       setMessages(data.messages || []);
       setActiveConvObj(data);
       setReadOnly(false);
       setLastResult(null);
       setQuoteSel(null);
+      setAtBottom(true);
     } catch {
+      if (seq !== openSeqRef.current) return;
       toast({ title: t('error'), description: t('reqChatLoadFailed'), variant: 'destructive' });
     }
   };
 
   const openByLink = async (publicId: string) => {
+    const seq = ++openSeqRef.current;
     try {
       const data = await requirementChatAPI.getConversationByLink(projectId, publicId);
+      if (seq !== openSeqRef.current) return;
       setActiveId(data.conversation.id);
       setMessages(data.conversation.messages || []);
       setActiveConvObj(data.conversation);
       setReadOnly(!!data.read_only);
       setLastResult(null);
       setQuoteSel(null);
+      setAtBottom(true);
     } catch {
+      if (seq !== openSeqRef.current) return;
       toast({ title: t('error'), description: t('reqChatLoadFailed'), variant: 'destructive' });
     }
   };
@@ -290,13 +309,21 @@ export function RequirementChat({
     setActiveConvObj(null);
     setReadOnly(false);
     setQuoteSel(null);
+    setAtBottom(true);
   };
 
   const startNewConversation = () => {
     if (sending) return;
+    openSeqRef.current += 1; // cancel any in-flight open
     resetView();
     setQuestion('');
     setShowArchived(false);
+    // Drop a deep-linked shared conversation (?c=...) so a refresh doesn't
+    // reopen the chat the user just left. Page variant only; the modal keeps
+    // the host page's query string.
+    if (variant === 'page' && location.search) {
+      navigate(location.pathname, { replace: true });
+    }
   };
 
   const toggleArchivedView = () => {
@@ -371,7 +398,7 @@ export function RequirementChat({
 
   const handleExport = () => {
     if (messages.length === 0) return;
-    const title = activeConversation?.title || t('reqChatTitle');
+    const title = activeConversation?.title || (scopeMode === 'requirements' ? t('reqChatTitle') : t('reqChatProjectTitle'));
     const lines = [`# ${title}`, ''];
     for (const m of messages) {
       lines.push(m.role === 'user' ? `## 🧑 ${t('reqChatYou')}` : `## 🤖 ${t('reqChatAssistant')}`);
@@ -403,7 +430,7 @@ export function RequirementChat({
   };
 
   const copySharedLink = (conv: RequirementChatConversation) => {
-    if (conv.share_scope === 'private') {
+    if (!isShareActive(conv)) {
       openShareDialog(conv);
       toast({ title: t('reqChatPrivateLinkTitle'), description: t('reqChatPrivateLinkDesc') });
       return;
@@ -412,10 +439,13 @@ export function RequirementChat({
   };
 
   const openShareDialog = (conv: RequirementChatConversation) => {
+    const active = isShareActive(conv);
     setShareTarget(conv);
     setShareScopeState(conv.share_scope === 'restricted' ? 'restricted' : 'project');
-    setShareExpiry(conv.share_expires_at ? conv.share_expires_at.slice(0, 10) : '');
-    setShareRecipients(conv.share_allowed_user_ids || []);
+    // An expired share must be re-issued; don't prefill a past date the
+    // backend would reject.
+    setShareExpiry(active && conv.share_expires_at ? conv.share_expires_at.slice(0, 10) : '');
+    setShareRecipients(active ? (conv.share_allowed_user_ids || []) : []);
   };
 
   const saveShareSettings = async () => {
@@ -483,11 +513,13 @@ export function RequirementChat({
     // Only offer the action for selections inside an assistant message bubble.
     if (!host || !host.closest('[data-role="assistant"]') || !container.contains(host)) { setQuoteSel(null); return; }
     const rect = sel.getRangeAt(0).getBoundingClientRect();
-    const box = container.getBoundingClientRect();
+    // The popup is positioned against the conversation panel (the scroll
+    // container's offset parent), not the scroll area, so measure that box.
+    const box = (container.parentElement ?? container).getBoundingClientRect();
     setQuoteSel({
       text: text.slice(0, 500),
       top: Math.max(4, rect.top - box.top - 34),
-      left: Math.min(Math.max(4, rect.left - box.left), box.width - 130),
+      left: Math.min(Math.max(4, rect.left - box.left), Math.max(4, box.width - 130)),
     });
   };
 
@@ -581,7 +613,10 @@ export function RequirementChat({
   const fmtTime = (iso: string) =>
     formatDateTime(iso, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  const featureDisabled = aiStatus !== null && aiStatus.requirement_chat_enabled === false;
+  // The global AI Manager toggle AND the project's own ask_ai feature must both
+  // be on, otherwise the composer would let a user spend a request that 403s.
+  const askFeatureEnabled = isFeatureEnabled(projectFeatures, 'ask_ai');
+  const featureDisabled = aiStatus !== null && (aiStatus.requirement_chat_enabled === false || !askFeatureEnabled);
   const aiUnavailable = aiStatus !== null && (!aiStatus.available || featureDisabled);
 
   return (
@@ -594,7 +629,7 @@ export function RequirementChat({
             <Sparkles className="h-5 w-5" />
           </span>
           <div>
-            <h2 className="text-sm font-semibold leading-tight text-slate-900 dark:text-white">{t('reqChatTitle')}</h2>
+            <h2 className="text-sm font-semibold leading-tight text-slate-900 dark:text-white">{scopeMode === 'requirements' ? t('reqChatTitle') : t('reqChatProjectTitle')}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {scopeMode === 'requirements' ? t('reqChatDescription') : t('reqChatProjectDescription')}
             </p>
@@ -658,14 +693,14 @@ export function RequirementChat({
                 <button type="button" className="flex w-full min-w-0 items-center gap-1 text-start" onClick={() => openConversation(c.id)} title={c.title}>
                   {c.pinned && <Pin className="h-3 w-3 shrink-0" />}
                   <span className="min-w-0 flex-1 truncate font-medium">{c.title}</span>
-                  {c.share_scope !== 'private' && <Globe className="h-3 w-3 shrink-0 text-emerald-500" />}
+                  {isShareActive(c) && <Globe className="h-3 w-3 shrink-0 text-emerald-500" />}
                   {c.archived && <Archive className="h-3 w-3 shrink-0 text-amber-500" />}
                 </button>
                 <div className="mt-1.5 flex shrink-0 items-center justify-end gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                   <button type="button" className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-primary dark:hover:bg-slate-800" onClick={() => togglePinned(c)} aria-label={c.pinned ? t('reqChatUnpin') : t('reqChatPin')} title={c.pinned ? t('reqChatUnpin') : t('reqChatPin')}>
                     {c.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
                   </button>
-                  <button type="button" className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-primary dark:hover:bg-slate-800" onClick={() => copySharedLink(c)} aria-label={t('reqChatCopyLink')} title={linkedId === c.public_id ? t('reqChatLinkCopied') : c.share_scope === 'private' ? t('reqChatShareOff') : t('reqChatCopyLink')}>
+                  <button type="button" className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-primary dark:hover:bg-slate-800" onClick={() => copySharedLink(c)} aria-label={t('reqChatCopyLink')} title={linkedId === c.public_id ? t('reqChatLinkCopied') : isShareActive(c) ? t('reqChatCopyLink') : t('reqChatShareOff')}>
                     {linkedId === c.public_id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Link2 className="h-3.5 w-3.5" />}
                   </button>
                   <button type="button" className="flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-950/30" onClick={() => handleArchiveToggle(c)} aria-label={c.archived ? t('reqChatUnarchive') : t('reqChatArchive')} title={c.archived ? t('reqChatUnarchive') : t('reqChatArchive')}>
@@ -715,7 +750,7 @@ export function RequirementChat({
                 >
                   {c.pinned && <Pin className="h-3 w-3 shrink-0" />}
                   <span className="min-w-0 flex-1 truncate text-start">{c.title}</span>
-                  {c.share_scope !== 'private' && <Globe className="h-3 w-3 shrink-0 text-emerald-500" />}
+                  {isShareActive(c) && <Globe className="h-3 w-3 shrink-0 text-emerald-500" />}
                   {c.archived && <Archive className="h-3 w-3 shrink-0 text-amber-500" />}
                 </button>
               ))}
@@ -773,16 +808,28 @@ export function RequirementChat({
                     <span className="hidden xl:inline">{activeConversation.pinned ? t('reqChatUnpin') : t('reqChatPin')}</span>
                   </button>
                 )}
+                {/* On phones the conversations sidebar (with its per-row
+                    actions) is hidden, so keep archive/delete reachable here. */}
+                {!readOnly && (
+                  <button type="button" disabled={sending} onClick={() => handleArchiveToggle(activeConversation)} className="inline-flex h-8 w-8 items-center justify-center rounded text-slate-500 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-40 dark:hover:bg-amber-950/30 sm:hidden" title={activeConversation.archived ? t('reqChatUnarchive') : t('reqChatArchive')} aria-label={activeConversation.archived ? t('reqChatUnarchive') : t('reqChatArchive')}>
+                    {activeConversation.archived ? <ArchiveRestore className="h-3.5 w-3.5 shrink-0" /> : <Archive className="h-3.5 w-3.5 shrink-0" />}
+                  </button>
+                )}
+                {!readOnly && (
+                  <button type="button" disabled={sending} onClick={() => setDeleteTarget(activeConversation)} className="inline-flex h-8 w-8 items-center justify-center rounded text-slate-500 hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40 dark:hover:bg-rose-950/30 sm:hidden" title={t('delete')} aria-label={t('delete')}>
+                    <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                  </button>
+                )}
                 {!readOnly && (
                   <button
                     type="button"
                     disabled={sharingId === activeConversation.id}
-                    onClick={() => activeConversation.share_scope === 'private' ? openShareDialog(activeConversation) : revokeShare(activeConversation)}
-                    className={`inline-flex h-8 items-center justify-center gap-1 rounded px-2 text-xs disabled:opacity-50 ${activeConversation.share_scope === 'project' ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200'}`}
-                    title={activeConversation.share_scope === 'private' ? t('reqChatShareOff') : t('reqChatRevokeShare')}
+                    onClick={() => activeShareActive ? revokeShare(activeConversation) : openShareDialog(activeConversation)}
+                    className={`inline-flex h-8 items-center justify-center gap-1 rounded px-2 text-xs disabled:opacity-50 ${activeShareActive ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200'}`}
+                    title={activeShareActive ? t('reqChatRevokeShare') : t('reqChatShareOff')}
                   >
-                    {activeConversation.share_scope === 'private' ? <Lock className="h-3.5 w-3.5 shrink-0" /> : activeConversation.share_scope === 'restricted' ? <Users className="h-3.5 w-3.5 shrink-0" /> : <Globe className="h-3.5 w-3.5 shrink-0" />}
-                    <span className="hidden xl:inline">{activeConversation.share_scope === 'private' ? t('reqChatShare') : t('reqChatRevoke')}</span>
+                    {!activeShareActive ? <Lock className="h-3.5 w-3.5 shrink-0" /> : activeConversation.share_scope === 'restricted' ? <Users className="h-3.5 w-3.5 shrink-0" /> : <Globe className="h-3.5 w-3.5 shrink-0" />}
+                    <span className="hidden xl:inline">{activeShareActive ? t('reqChatRevoke') : t('reqChatShare')}</span>
                   </button>
                 )}
                 {!readOnly && (
@@ -791,7 +838,7 @@ export function RequirementChat({
                     <span className="hidden xl:inline">{t('reqChatRegenerate')}</span>
                   </button>
                 )}
-                <button type="button" onClick={() => copySharedLink(activeConversation)} className="inline-flex h-8 items-center justify-center gap-1 rounded px-2 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" title={activeConversation.share_scope === 'private' ? t('reqChatShareOff') : t('reqChatCopyLink')}>
+                <button type="button" onClick={() => copySharedLink(activeConversation)} className="inline-flex h-8 items-center justify-center gap-1 rounded px-2 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200" title={activeShareActive ? t('reqChatCopyLink') : t('reqChatShareOff')}>
                   {linkedId === activeConversation.public_id ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <Link2 className="h-3.5 w-3.5 shrink-0" />}
                   <span className="hidden xl:inline">{linkedId === activeConversation.public_id ? t('reqChatLinkCopied') : t('reqChatCopyLink')}</span>
                 </button>
@@ -814,7 +861,7 @@ export function RequirementChat({
             <div className="m-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="min-w-0 flex-1">
-                <div className="font-medium">{featureDisabled ? t('reqChatDisabled') : t('reqChatUnavailable')}</div>
+                <div className="font-medium">{featureDisabled ? (scopeMode === 'all' ? t('reqChatProjectDisabled') : t('reqChatDisabled')) : t('reqChatUnavailable')}</div>
                 <div className="mt-0.5 text-xs">{aiUnavailableDescription()}</div>
               </div>
               <Button type="button" size="sm" variant="outline" onClick={() => navigate('/settings')}>
@@ -953,9 +1000,11 @@ export function RequirementChat({
                 {sourceCountSummary(lastResult.source_counts) && <span>{t('reqChatSearchedSources')}: {sourceCountSummary(lastResult.source_counts)}</span>}
                 {sourceCountSummary(lastResult.selected_source_counts) && <span>{t('reqChatUsedSources')}: {sourceCountSummary(lastResult.selected_source_counts)}</span>}
               </div>
-              {lastResult.coverage_note && (
+              {(lastResult.coverage_code || lastResult.coverage_note) && (
                 <div className={lastResult.insufficient_context ? 'text-amber-600 dark:text-amber-300' : ''}>
-                  {lastResult.coverage_note}
+                  {lastResult.coverage_code
+                    ? t(`reqChatCoverage_${lastResult.coverage_code}`)
+                    : lastResult.coverage_note}
                 </div>
               )}
             </div>
@@ -1064,7 +1113,7 @@ export function RequirementChat({
               </div>
             </div>
           )}
-          {shareTarget && shareTarget.share_scope !== 'private' && (
+          {shareTarget && isShareActive(shareTarget) && (
             <Button type="button" variant="outline" onClick={() => shareTarget && copyLink(shareTarget.public_id)}>
               <Link2 className="me-1.5 h-4 w-4" />
               {linkedId === shareTarget.public_id ? t('reqChatLinkCopied') : t('reqChatCopyLink')}
@@ -1072,7 +1121,7 @@ export function RequirementChat({
           )}
         </div>
         <DialogFooter>
-          {shareTarget && shareTarget.share_scope !== 'private' && (
+          {shareTarget && isShareActive(shareTarget) && (
             <Button type="button" variant="outline" onClick={() => shareTarget && revokeShare(shareTarget)} disabled={sharingId === shareTarget?.id}>
               {t('reqChatRevokeShare')}
             </Button>

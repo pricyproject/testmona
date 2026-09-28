@@ -115,10 +115,14 @@ def _backfill_source_excerpts(db, project_id: int, view):
     each needed source type's docs at most once."""
     from ..services.requirement_retrieval import _LOADERS
 
+    def ref_id(source):
+        # Legacy rows stored only requirement_id; newer rows use id.
+        return source.id if source.id is not None else source.requirement_id
+
     needed_scopes: set[str] = set()
     for message in view.messages:
         for source in message.sources:
-            if not source.excerpt and source.id is not None:
+            if not source.excerpt and ref_id(source) is not None:
                 scope = _SOURCE_TYPE_TO_SCOPE.get(source.type or "requirement")
                 if scope:
                     needed_scopes.add(scope)
@@ -138,8 +142,9 @@ def _backfill_source_excerpts(db, project_id: int, view):
 
     for message in view.messages:
         for source in message.sources:
-            if not source.excerpt and source.id is not None:
-                content = content_by_ref.get((source.type or "requirement", source.id))
+            rid = ref_id(source)
+            if not source.excerpt and rid is not None:
+                content = content_by_ref.get((source.type or "requirement", rid))
                 if content:
                     source.excerpt = _source_excerpt(content)
     return view
@@ -155,14 +160,24 @@ def _confidence(best_score: float, selected_count: int) -> str:
     return "low"
 
 
-def _coverage_note(retrieval) -> str:
+def _coverage_code(retrieval) -> str:
+    """Stable code for the coverage banner so the client can localize it."""
     if retrieval.considered == 0:
-        return "No items exist in the selected sources for this project."
+        return "no_items"
     if retrieval.best_score <= 0:
-        return "No strong lexical match was found; the answer used representative recent items from the selected sources."
+        return "weak_match"
     if retrieval.truncated:
-        return "Some matching items were omitted to fit the AI context window."
-    return "Answer is grounded in the selected project sources."
+        return "truncated"
+    return "grounded"
+
+
+def _coverage_note(retrieval) -> str:
+    return {
+        "no_items": "No items exist in the selected sources for this project.",
+        "weak_match": "No strong lexical match was found; the answer used representative recent items from the selected sources.",
+        "truncated": "Some matching items were omitted to fit the AI context window.",
+        "grounded": "Answer is grounded in the selected project sources.",
+    }[_coverage_code(retrieval)]
 
 
 async def _cancel_on_disconnect(request: Request, work):
@@ -354,6 +369,7 @@ def register_project_ai_chat_routes(app):
     @app.get(
         "/projects/{project_id}/ai/conversations/by-link/{public_id}",
         response_model=schemas.RequirementChatSharedView,
+        dependencies=[Depends(require_project_feature("ask_ai"))],
     )
     def get_shared_conversation(
         project_id: int,
@@ -498,6 +514,7 @@ def register_project_ai_chat_routes(app):
             selected_source_counts=produced["retrieval"].selected_counts,
             confidence=_confidence(produced["retrieval"].best_score, len(produced["retrieval"].selected)),
             insufficient_context=produced["retrieval"].considered == 0 or produced["retrieval"].best_score <= 0,
+            coverage_code=_coverage_code(produced["retrieval"]),
             coverage_note=_coverage_note(produced["retrieval"]),
         )
 
@@ -558,6 +575,7 @@ def register_project_ai_chat_routes(app):
             selected_source_counts=produced["retrieval"].selected_counts,
             confidence=_confidence(produced["retrieval"].best_score, len(produced["retrieval"].selected)),
             insufficient_context=produced["retrieval"].considered == 0 or produced["retrieval"].best_score <= 0,
+            coverage_code=_coverage_code(produced["retrieval"]),
             coverage_note=_coverage_note(produced["retrieval"]),
         )
 

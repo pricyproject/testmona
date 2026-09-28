@@ -454,6 +454,9 @@ class RequirementChatAskResponse(BaseModel):
     selected_source_counts: Dict[str, int] = Field(default_factory=dict)
     confidence: str = "low"
     insufficient_context: bool = False
+    # Stable coverage code ("no_items"|"weak_match"|"truncated"|"grounded") so
+    # the client can localize the banner; coverage_note stays an English fallback.
+    coverage_code: Optional[str] = None
     coverage_note: Optional[str] = None
 
 

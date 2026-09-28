@@ -357,10 +357,17 @@ def update_chat_conversation(db: Session, conversation_id: int,
         conversation.pinned = pinned
     if share_scope is not None:
         conversation.share_scope = share_scope
-    if share_expires_at is not _UNSET or share_scope == "private":
+    # Never write the _UNSET sentinel into a column: assigning it when the
+    # caller omitted the field (e.g. a PATCH that only changes share_scope)
+    # would fail JSON serialization on commit.
+    if share_expires_at is not _UNSET:
         conversation.share_expires_at = share_expires_at
-    if share_allowed_user_ids is not _UNSET or share_scope in {"private", "project"}:
+    elif share_scope == "private":
+        conversation.share_expires_at = None
+    if share_allowed_user_ids is not _UNSET:
         conversation.share_allowed_user_ids = share_allowed_user_ids
+    elif share_scope in {"private", "project"}:
+        conversation.share_allowed_user_ids = None
     db.commit()
     db.refresh(conversation)
     return conversation

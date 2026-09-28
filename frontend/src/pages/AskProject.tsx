@@ -37,7 +37,18 @@ export function AskProject() {
         active
         initialPublicId={publicId}
         headerActions={(
-          <Button type="button" variant="outline" size="sm" onClick={() => navigate(`/projects/${projectId}/requirements`)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // The assistant is reachable from anywhere, so prefer returning to
+              // where the user came from; fall back to the project list on a
+              // direct deep link (no in-app history).
+              if ((window.history.state?.idx ?? 0) > 0) navigate(-1);
+              else navigate('/projects');
+            }}
+          >
             <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ms-0 me-1.5 rotate-180' : 'me-1.5'}`} />
             {t('reqChatBack')}
           </Button>

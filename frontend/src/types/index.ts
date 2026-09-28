@@ -668,7 +668,7 @@ export interface RequirementComment {
   replies: RequirementComment[];
 }
 
-export type RequirementChatSourceType = 'requirement' | 'defect' | 'test_plan' | 'test_case';
+export type RequirementChatSourceType = 'requirement' | 'defect' | 'test_plan' | 'test_case' | 'doc';
 
 export interface RequirementChatSource {
   type?: RequirementChatSourceType;
@@ -722,6 +722,7 @@ export interface RequirementChatAskResponse {
   selected_source_counts?: Record<string, number>;
   confidence?: 'none' | 'low' | 'medium' | 'high';
   insufficient_context?: boolean;
+  coverage_code?: 'no_items' | 'weak_match' | 'truncated' | 'grounded' | null;
   coverage_note?: string | null;
 }
 
