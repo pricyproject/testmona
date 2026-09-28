@@ -124,10 +124,10 @@ export function RequirementVersionHistory({ requirementId, canEdit, onRestored, 
 
   return (
     <section id="version-history" className="scroll-mt-24 rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <History className="h-5 w-5 text-slate-500" />
-          <h2 className="text-lg font-semibold">{t('versionHistory')}</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <History className="h-5 w-5 shrink-0 text-slate-500" />
+          <h2 className="truncate text-lg font-semibold">{t('versionHistory')}</h2>
           {!loading && <Badge variant="secondary">{versions.length}</Badge>}
         </div>
         <Button
@@ -136,6 +136,7 @@ export function RequirementVersionHistory({ requirementId, canEdit, onRestored, 
           variant={compareMode ? 'default' : 'outline'}
           onClick={() => setCompareMode((v) => !v)}
           disabled={versions.length < 2}
+          className="w-full shrink-0 sm:w-auto"
         >
           <GitCompare className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
           {t('compareChanges')}
@@ -167,7 +168,8 @@ export function RequirementVersionHistory({ requirementId, canEdit, onRestored, 
                     <button
                       type="button"
                       onClick={() => setExpandedId(isExpanded ? null : version.id)}
-                      className="flex items-center gap-1.5 text-sm font-semibold"
+                      aria-expanded={isExpanded}
+                      className="-ms-1 flex min-h-8 items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-semibold focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                       <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       v{version.version_number}
@@ -183,7 +185,7 @@ export function RequirementVersionHistory({ requirementId, canEdit, onRestored, 
                     )}
                     <span className="flex-1" />
                     {canEdit && !isLatest && (
-                      <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => setRestoreTarget(version)}>
+                      <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5" onClick={() => setRestoreTarget(version)}>
                         <RotateCcw className={`h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} />
                         {t('restore')}
                       </Button>

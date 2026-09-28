@@ -157,17 +157,17 @@ export function RequirementComments({ requirementId, projectId, canComment }: Pr
               {canComment && (
                 <div className="mt-2 flex flex-wrap items-center gap-1">
                   {depth === 0 && (
-                    <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setReplyTo(replyTo === comment.id ? null : comment.id); setReplyBody(''); }}>
+                    <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => { setReplyTo(replyTo === comment.id ? null : comment.id); setReplyBody(''); }}>
                       <Reply className="me-1 h-3.5 w-3.5" /> {t('reply')}
                     </Button>
                   )}
                   {depth === 0 && (
-                    <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => toggleResolved(comment)}>
+                    <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => toggleResolved(comment)}>
                       <Check className="me-1 h-3.5 w-3.5" /> {comment.is_resolved ? t('reopen') : t('resolve')}
                     </Button>
                   )}
                   {(ownsComment(comment) || canModerate) && (
-                    <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs text-rose-600 hover:text-rose-700" onClick={() => setDeleteTarget(comment)}>
+                    <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs text-rose-600 hover:text-rose-700" onClick={() => setDeleteTarget(comment)}>
                       <Trash2 className="me-1 h-3.5 w-3.5" /> {t('delete')}
                     </Button>
                   )}

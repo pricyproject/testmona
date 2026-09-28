@@ -627,9 +627,11 @@ def _requirement_to_test_plan_response(requirement, linked: bool = False):
 
 
 def _project_test_case_query(db: Session, project_id: int):
+    # NULL-tolerant soft-delete check: rows predating the flag (or written by a
+    # Core path) carry NULL, which must count as not-deleted.
     return db.query(models.TestCase).join(models.TestSuite).filter(
         models.TestSuite.project_id == project_id,
-        models.TestCase.is_deleted == False,
+        ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
     )
 
 
@@ -646,6 +648,7 @@ def _test_case_to_linked_response(db: Session, test_case, link_id: Optional[int]
     latest_result = _latest_test_result(db, test_case.id)
     return schemas.RequirementLinkedTestCase(
         id=test_case.id,
+        project_seq=test_case.project_seq,
         title=test_case.title,
         priority=test_case.priority,
         status=test_case.status,
@@ -746,7 +749,7 @@ def _requirement_traceability_summary(db: Session, requirement) -> schemas.Requi
     test_cases = db.query(models.TestCase).join(models.TestSuite).filter(
         models.TestCase.id.in_(test_case_ids),
         models.TestSuite.project_id == requirement.project_id,
-        models.TestCase.is_deleted == False,
+        ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
     ).all()
     active_count = len([test_case for test_case in test_cases if test_case.status == "active"])
     failed_related_runs = db.query(models.TestResult).filter(
@@ -800,6 +803,32 @@ def _audit_requirement_tc_link(
         audit_service.create_audit_trail(audit_data)
     except Exception as e:
         logger.warning("Failed to create requirement test case link audit trail: %s", e)
+
+
+def _audit_trail_matches_requirement(audit_row, requirement) -> bool:
+    """True only when a traceability audit row belongs to ``requirement``.
+
+    Metadata is authoritative and compared exactly, so requirement 1 never
+    matches requirement 10/11/12 through a substring. Legacy rows written before
+    that metadata existed carry the id in the description; match ``requirement
+    <id>`` with a digit boundary so ``requirement 1`` does not match
+    ``requirement 12``.
+    """
+    metadata = audit_row.additional_metadata
+    if isinstance(metadata, dict) and metadata:
+        if metadata.get("requirement_id") == requirement.id:
+            return True
+        requirement_key = metadata.get("requirement_key")
+        return bool(
+            requirement_key
+            and requirement.requirement_id
+            and requirement_key == requirement.requirement_id
+        )
+    return re.search(
+        rf"requirement\s+{requirement.id}(?!\d)",
+        audit_row.description or "",
+        flags=re.IGNORECASE,
+    ) is not None
 
 
 def _get_valid_project_test_cases(db: Session, requirement, test_case_ids: List[int]):
@@ -1474,33 +1503,52 @@ def register_requirements_defects_plans_routes(app):
         if not rbac.has_permission(current_user, "read", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        metadata_text = cast(models.AuditTrail.additional_metadata, String)
-        requirement_filters = [
-            models.AuditTrail.description.ilike(f"%requirement {requirement.id}%"),
-            metadata_text.ilike(f'%"requirement_id": {requirement.id}%'),
-            metadata_text.ilike(f'%"requirement_id":"{requirement.id}"%'),
-            metadata_text.ilike(f'%"requirement_key": "{requirement.requirement_id}"%'),
-            metadata_text.ilike(f'%"requirement_key":"{requirement.requirement_id}"%'),
-        ]
-        query = db.query(models.AuditTrail).options(
+        # Fetch the project's traceability audit rows once and filter in Python:
+        # an exact id/key compare is the only portable way to avoid requirement 1
+        # matching requirement 10/11/12 (a JSON text pattern cannot bound the
+        # number). # ponytail: in-Python match; move to a JSON-path query if audit
+        # volume per project grows large.
+        candidate_rows = db.query(models.AuditTrail).options(
             joinedload(models.AuditTrail.user)
         ).filter(
             models.AuditTrail.project_id == requirement.project_id,
             models.AuditTrail.entity_type == models.EntityType.TRACEABILITY_ENTRY,
             models.AuditTrail.action.in_([models.AuditAction.CREATE, models.AuditAction.DELETE]),
-            or_(*requirement_filters),
+        ).order_by(models.AuditTrail.created_at.desc()).all()
+        matched_rows = [
+            audit_row for audit_row in candidate_rows
+            if _audit_trail_matches_requirement(audit_row, requirement)
+        ]
+        total = len(matched_rows)
+        audit_rows = matched_rows[offset:offset + limit]
+
+        # Resolve each linked test case's per-project seq (frontend URLs/badges).
+        test_case_ids = {
+            audit_row.additional_metadata.get("test_case_id")
+            for audit_row in audit_rows
+            if isinstance(audit_row.additional_metadata, dict)
+        }
+        test_case_ids.discard(None)
+        test_case_seq_by_id = (
+            dict(
+                db.query(models.TestCase.id, models.TestCase.project_seq)
+                .filter(models.TestCase.id.in_(test_case_ids))
+                .all()
+            )
+            if test_case_ids
+            else {}
         )
 
-        total = query.count()
-        audit_rows = query.order_by(models.AuditTrail.created_at.desc()).offset(offset).limit(limit).all()
         requirement_history = []
         for audit_row in audit_rows:
             metadata = audit_row.additional_metadata or {}
             action = metadata.get("link_action") or ("link" if _enum_value(audit_row.action) == "create" else "unlink")
+            test_case_id = metadata.get("test_case_id")
             requirement_history.append(schemas.RequirementLinkedTestCaseHistoryItem(
                 id=audit_row.id,
                 action=action,
-                test_case_id=metadata.get("test_case_id"),
+                test_case_id=test_case_id,
+                test_case_seq=test_case_seq_by_id.get(test_case_id) if test_case_id else None,
                 test_case_title=metadata.get("test_case_title"),
                 user_id=audit_row.user_id,
                 username=audit_row.user.username if audit_row.user else None,

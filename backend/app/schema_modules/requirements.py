@@ -520,6 +520,7 @@ class RequirementTraceabilitySummary(BaseModel):
 
 class RequirementLinkedTestCase(BaseModel):
     id: int
+    project_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     title: str
     priority: str
     status: str
@@ -566,6 +567,7 @@ class RequirementLinkedTestCaseHistoryItem(BaseModel):
     id: int
     action: str
     test_case_id: Optional[int] = None
+    test_case_seq: Optional[int] = None  # per-project sequence (URLs/badges)
     test_case_title: Optional[str] = None
     user_id: int
     username: Optional[str] = None

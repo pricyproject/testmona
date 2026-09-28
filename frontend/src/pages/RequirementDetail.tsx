@@ -34,6 +34,7 @@ import { WatchButton } from '@/components/WatchButton';
 import { RequirementComments } from '@/components/requirements/RequirementComments';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { entityKey, entitySeq } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { aiManagerAPI, AIManagerStatus, requirementsAPI, sectionsAPI, testSuitesAPI } from '@/lib/api';
 import { sanitizeHtml } from '@/lib/sanitize';
@@ -1417,7 +1418,7 @@ export function RequirementDetail() {
                     </p>
                   </div>
                   {canWrite && (
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCreateDialogOpen(true)}>
+                  <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setCreateDialogOpen(true)}>
                     <Plus className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                     {t('createAndLinkTestCase')}
                   </Button>
@@ -1474,6 +1475,7 @@ export function RequirementDetail() {
                     <Button
                       type="button"
                       variant="outline"
+                      className="w-full sm:w-auto"
                       onClick={() => {
                         // Open with a clean slate so a prior search/selection
                         // doesn't carry over into a new linking session.
@@ -1516,13 +1518,13 @@ export function RequirementDetail() {
                         <div key={testCase.id} className={`relative grid gap-3 border-b border-slate-100 px-4 py-4 transition-colors last:border-b-0 hover:bg-slate-50/70 dark:border-slate-800 dark:hover:bg-slate-950/40 xl:grid-cols-[minmax(260px,1.5fr)_minmax(180px,0.75fr)_minmax(150px,0.65fr)] xl:items-start xl:gap-4 ${isRTL ? 'pl-14' : 'pr-14'}`}>
                           <div className="min-w-0">
                             <div className="mb-1 flex flex-wrap items-center gap-2">
-                              <Badge variant="outline" className="font-mono">TC-{String(testCase.id).padStart(3, '0')}</Badge>
+                              <Badge variant="outline" className="font-mono">{entityKey('TC', testCase)}</Badge>
                               {testCase.reference && <span className="max-w-full truncate text-xs text-slate-500">{testCase.reference}</span>}
                             </div>
                             <button
                               type="button"
                               className={`block min-w-0 wrap-break-word text-sm font-medium leading-6 text-blue-700 wrap-anywhere hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-blue-300 dark:focus-visible:ring-offset-slate-900 ${isRTL ? 'text-right' : 'text-left'}`}
-                              onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}
+                              onClick={() => navigate(`/projects/${projectId}/test-cases/${entitySeq(testCase)}`)}
                             >
                               {testCase.title}
                             </button>
@@ -1542,26 +1544,26 @@ export function RequirementDetail() {
                           <div className={`absolute top-3 ${isRTL ? 'left-3' : 'right-3'}`}>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={t('actions')}>
+                                <Button type="button" variant="ghost" size="icon" className="h-9 w-9" aria-label={t('actions')}>
                                   <MoreVertical className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-48">
                                 <DropdownMenuLabel>{t('actions')}</DropdownMenuLabel>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${entitySeq(testCase)}`)}>
                                   <FileText className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('viewTestCase')}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/edit`)} disabled={!canWrite}>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${entitySeq(testCase)}/edit`)} disabled={!canWrite}>
                                   <Pencil className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('edit')}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execute`)} disabled={!canWrite}>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${entitySeq(testCase)}/execute`)} disabled={!canWrite}>
                                   <Play className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('execute')}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${testCase.id}/execution-history`)}>
+                                <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-cases/${entitySeq(testCase)}/execution-history`)}>
                                   <History className={`${isRTL ? 'ml-2' : 'mr-2'} h-4 w-4`} />
                                   {t('executionHistory')}
                                 </DropdownMenuItem>
@@ -1586,6 +1588,7 @@ export function RequirementDetail() {
                           type="button"
                           variant="outline"
                           size="sm"
+                          className="w-full sm:w-auto"
                           onClick={() => setVisibleLinkedTestCasesCount((current) => current + 10)}
                         >
                           {t('loadMore')}
@@ -1628,7 +1631,7 @@ export function RequirementDetail() {
                                   {item.action === 'link' ? t('linked') : t('unlinked')}
                                 </Badge>
                                 <span className="wrap-break-word wrap-anywhere">
-                                  {item.test_case_id ? `TC-${String(item.test_case_id).padStart(3, '0')}` : t('testCase')} {item.test_case_title || ''}
+                                  {item.test_case_id ? entityKey('TC', { id: item.test_case_id, project_seq: item.test_case_seq }) : t('testCase')} {item.test_case_title || ''}
                                 </span>
                               </span>
                               <span className="shrink-0 text-xs text-slate-500">
@@ -1647,14 +1650,14 @@ export function RequirementDetail() {
             {requirement && (
               <RequirementVersionHistory
                 requirementId={requirement.id}
-                canEdit
+                canEdit={canWrite}
                 defaultCompare={compareDeepLink}
                 onRestored={() => setRequirementRefreshKey((key) => key + 1)}
               />
             )}
 
             {requirement && (
-              <RequirementComments requirementId={requirement.id} projectId={requirement.project_id} canComment />
+              <RequirementComments requirementId={requirement.id} projectId={requirement.project_id} canComment={canWrite} />
             )}
           </main>
 
@@ -2171,7 +2174,7 @@ export function RequirementDetail() {
                         onCheckedChange={() => toggleAvailableSelection(testCase.id)}
                       />
                       <span className="min-w-0">
-                        <span className="block font-medium text-slate-900 wrap-anywhere dark:text-white">{testCase.reference || `TC-${String(testCase.id).padStart(3, '0')}`} · {testCase.title}</span>
+                        <span className="block font-medium text-slate-900 wrap-anywhere dark:text-white">{testCase.reference || entityKey('TC', testCase)} · {testCase.title}</span>
                         <span className="mt-1 block text-xs text-slate-500">{testCase.suite_name || t('suite')}{testCase.section_name ? ` / ${testCase.section_name}` : ''}</span>
                       </span>
                     </label>
@@ -2185,6 +2188,7 @@ export function RequirementDetail() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    className="w-full sm:w-auto"
                     onClick={loadMoreAvailableTestCases}
                     disabled={loadingMoreAvailable || availableTestCasesLoading || bulkUpdating}
                   >

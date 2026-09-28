@@ -754,6 +754,7 @@ export interface RequirementLinkedTestCaseHistoryItem {
   id: number;
   action: 'link' | 'unlink' | string;
   test_case_id?: number;
+  test_case_seq?: number;
   test_case_title?: string;
   user_id: number;
   username?: string;

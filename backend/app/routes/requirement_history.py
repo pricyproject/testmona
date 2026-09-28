@@ -398,7 +398,8 @@ def register_requirement_history_routes(app) -> None:
             .join(models.TestSuite)
             .filter(
                 models.TestSuite.project_id == project_id,
-                models.TestCase.is_deleted == False,  # noqa: E712
+                # NULL-tolerant: rows predating the flag count as not-deleted.
+                ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
             )
             .all()
         }

@@ -392,7 +392,9 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/requirements/:requirementId" element={
           <ProjectGuard>
-            <RequirementDetail />
+            <FeatureGuard feature="requirements">
+              <RequirementDetail />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/docs" element={
