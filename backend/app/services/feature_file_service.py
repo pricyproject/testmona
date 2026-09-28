@@ -37,7 +37,7 @@ _HTML_TAGS = (
     "a|abbr|b|blockquote|br|code|del|div|em|h[1-6]|hr|i|img|ins|kbd|li|ol|p|pre|"
     "s|span|strong|sub|sup|table|tbody|td|th|thead|tr|u|ul"
 )
-_STRUCTURAL_TAG_RE = re.compile(r"<\s*br\s*/?>|</\s*(?:p|div|li|h[1-6]|tr)\s*>", re.IGNORECASE)
+_STRUCTURAL_TAG_RE = re.compile(r"<\s*br\s*/?>|</\s*(?:p|div|li|h[1-6]|tr|pre)\s*>", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(rf"</?(?:{_HTML_TAGS})(?:\s[^>]*)?/?>", re.IGNORECASE)
 
 
@@ -69,6 +69,238 @@ def gherkin_text_from_acceptance(value: Optional[str]) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[ \t]+\n", "\n", text)
     return text.strip("\n").rstrip()
+
+
+# ---------------------------------------------------------------------------
+# Deterministic acceptance criteria → Gherkin (no AI involved)
+# ---------------------------------------------------------------------------
+
+# Localized Gherkin keywords (Persian/Arabic) mapped to canonical English so the
+# rest of the pipeline works against a single grammar.
+_LOCALIZED_GHERKIN_PATTERNS: List[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^\s*(ویژگی|قابلیت)\s*[:：]\s*", re.IGNORECASE), "Feature: "),
+    (re.compile(r"^\s*(خاصية|ميزة|الميزة)\s*[:：]\s*", re.IGNORECASE), "Feature: "),
+    (re.compile(r"^\s*(طرح سناریو|مخطط السيناريو)\s*[:：]\s*", re.IGNORECASE), "Scenario Outline: "),
+    (re.compile(r"^\s*(سناریو|سيناريو)\s*[:：]\s*", re.IGNORECASE), "Scenario: "),
+    (re.compile(r"^\s*(پیش‌زمینه|پیش زمینه|الخلفية|خلفية)\s*[:：]\s*", re.IGNORECASE), "Background: "),
+    (re.compile(r"^\s*(با فرض|فرض|بفرض)\s+", re.IGNORECASE), "Given "),
+    (re.compile(r"^\s*(وقتی|زمانی که|هنگامی که|عندما|متى)\s+", re.IGNORECASE), "When "),
+    (re.compile(r"^\s*(آنگاه|سپس|إذن|اذاً|عندئذ)\s+", re.IGNORECASE), "Then "),
+    (re.compile(r"^\s*(اما|ولی|لكن)\s+", re.IGNORECASE), "But "),
+    (re.compile(r"^\s*(و)\s+", re.IGNORECASE), "And "),
+]
+
+# Leading list/section markers an author may bake into a criterion line.
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
+# Markdown task-list checkbox ("- [ ] foo" / "- [x] foo"). The list marker is
+# stripped first, so this only needs to handle the bare "[ ]"/"[x]" prefix.
+_CHECKBOX_RE = re.compile(r"^\s*\[[ xX]?\]\s*")
+_CRITERIA_STEP_RE = re.compile(r"^(Given|When|Then|And|But)\b[ \t]*(.*)$", re.IGNORECASE)
+_CRITERIA_STAR_RE = re.compile(r"^\*[ \t]+(.*)$")
+_FEATURE_LINE_RE = re.compile(r"^\s*Feature:\s*(.*)$", re.IGNORECASE)
+_AC_HEADER_RE = re.compile(r"^\s*(?:acceptance\s+(?:criteria|tests?|conditions?)|success\s+criteria|definition\s+of\s+done|done\s+criteria)\s*[:：]?\s*$", re.IGNORECASE)
+_CONDITIONAL_RE = re.compile(r"^(?:if|when)\s+(.+?)\s*,?\s*then\s+(.+)$", re.IGNORECASE)
+_CONDITION_ONLY_RE = re.compile(r"^(?:if|when)\s+(.+)$", re.IGNORECASE)
+_MAX_CRITERIA_SCENARIOS = 30
+
+
+def _normalize_localized_keywords(value: str) -> str:
+    """Rewrite Persian/Arabic Gherkin keywords on each line to English."""
+    out: List[str] = []
+    for line in value.split("\n"):
+        stripped = line.lstrip()
+        indent = line[: len(line) - len(stripped)]
+        replaced: Optional[str] = None
+        for pattern, prefix in _LOCALIZED_GHERKIN_PATTERNS:
+            if pattern.search(stripped):
+                replaced = indent + pattern.sub(prefix, stripped)
+                break
+        out.append(replaced if replaced is not None else line)
+    return "\n".join(out)
+
+
+def _strip_code_fence(value: str) -> str:
+    text = re.sub(r"^```(?:gherkin|feature)?\s*", "", value.strip(), flags=re.IGNORECASE)
+    return re.sub(r"```$", "", text, flags=re.IGNORECASE).strip()
+
+
+def _criteria_lines(text: str) -> List[str]:
+    """Flatten acceptance prose/HTML-ish text into clean criterion lines: list
+    markers, task-list checkboxes and a leading "Acceptance Criteria" header are
+    removed and blank lines dropped. Structured Gherkin lines (blocks, steps,
+    Examples, tables, doc strings) are kept as-is."""
+    lines: List[str] = []
+    for raw in text.split("\n"):
+        line = _CHECKBOX_RE.sub("", _LIST_MARKER_RE.sub("", raw)).strip()
+        if not line or _AC_HEADER_RE.match(line):
+            continue
+        lines.append(line)
+    return lines
+
+
+@dataclass
+class _Scenario:
+    kind: str  # Scenario | Scenario Outline | Background
+    title: str
+    steps: List[tuple[str, str]] = field(default_factory=list)
+    extras: List[str] = field(default_factory=list)  # Examples line + table rows
+
+
+def _build_scenarios(title: str, lines: List[str]) -> tuple[str, List[_Scenario]]:
+    """Group criterion lines into Gherkin scenarios.
+
+    Explicit Gherkin (``Feature``/``Scenario``/``Examples`` + ``Given/When/Then``)
+    is grouped verbatim; plain prose criteria each become their own ``Then``
+    scenario, and ``If/When … then …`` prose is split into When/Then steps. This
+    never emits a bare non-step line inside a scenario, so the result always
+    parses as valid Gherkin."""
+    feature_title = title
+    scenarios: List[_Scenario] = []
+    current: Optional[_Scenario] = None
+
+    def open_scenario(kind: str, scenario_title: str) -> None:
+        nonlocal current
+        current = _Scenario(kind=kind, title=scenario_title)
+        scenarios.append(current)
+
+    def has_then() -> bool:
+        return current is not None and any(keyword == "Then" for keyword, _ in current.steps)
+
+    for line in lines:
+        feature_match = _FEATURE_LINE_RE.match(line)
+        if feature_match:
+            feature_title = feature_match.group(1).strip() or title
+            current = None
+            continue
+        if re.match(r"^Rule:", line, re.IGNORECASE):
+            current = None
+            continue
+        block_match = _BLOCK_RE.match(line)
+        if block_match:
+            raw_kind = block_match.group(1).lower()
+            kind = (
+                "Scenario Outline" if raw_kind.startswith("scenario outline")
+                else "Background" if raw_kind.startswith("background")
+                else "Scenario"
+            )
+            open_scenario(kind, line.split(":", 1)[1].strip() or title)
+            continue
+        if re.match(r"^Examples:", line, re.IGNORECASE):
+            if current is not None:
+                current.extras.append(line)
+            continue
+        if line.startswith(("|", "@", "#", '"""', "```")):
+            if current is not None:
+                current.extras.append(line)
+            continue
+
+        step_match = _CRITERIA_STEP_RE.match(line)
+        star_match = _CRITERIA_STAR_RE.match(line)
+        if step_match or star_match:
+            keyword = step_match.group(1) if step_match else "And"
+            text = (step_match.group(2) if step_match else star_match.group(1)).strip()
+            # A fresh ``Given`` starts a new scenario only when the current one
+            # already has steps; a Scenario block that was just opened (empty) is
+            # reused so its explicit title/kind survive.
+            if current is None or (keyword.lower() == "given" and current.steps):
+                open_scenario("Scenario", title)
+            if keyword.lower() in {"and", "but"} and not any(
+                existing in {"Given", "When", "Then"} for existing, _ in current.steps
+            ):
+                keyword = "Given"
+            keyword = "And" if keyword == "*" else keyword.capitalize()
+            current.steps.append((keyword, text))
+            if len(scenarios) >= _MAX_CRITERIA_SCENARIOS:
+                break
+            continue
+
+        conditional = _CONDITIONAL_RE.match(line)
+        if conditional:
+            if current is None or has_then():
+                open_scenario("Scenario", title)
+            current.steps.append(("When", conditional.group(1).strip()))
+            current.steps.append(("Then", conditional.group(2).strip()))
+            continue
+        condition_only = _CONDITION_ONLY_RE.match(line)
+        if condition_only:
+            if current is None or has_then():
+                open_scenario("Scenario", title)
+            current.steps.append(("When", condition_only.group(1).strip()))
+            continue
+
+        # Plain prose criterion → its own outcome scenario.
+        if current is None or has_then():
+            open_scenario("Scenario", title)
+        current.steps.append(("Then", line))
+        if len(scenarios) >= _MAX_CRITERIA_SCENARIOS:
+            break
+
+    scenarios = [s for s in scenarios if s.steps]
+    if not scenarios:
+        scenarios = [_Scenario(kind="Scenario", title=title,
+                               steps=[("Then", f"{title} is satisfied")])]
+    return feature_title, scenarios
+
+
+def _render_scenarios(feature_title: str, scenarios: List[_Scenario]) -> str:
+    out: List[str] = [f"Feature: {feature_title}"]
+    total = len(scenarios)
+    for index, scenario in enumerate(scenarios):
+        kind = scenario.kind or "Scenario"
+        name = scenario.title or feature_title
+        if total > 1 and name == feature_title:
+            name = f"{feature_title} - criterion {index + 1}"
+        out.append("")
+        out.append(f"{kind}: {name}")
+        if kind != "Background" and not any(keyword == "Given" for keyword, _ in scenario.steps):
+            out.append(f"Given {feature_title} is in scope")
+        out.extend(f"{keyword} {text}" for keyword, text in scenario.steps)
+        out.extend(scenario.extras)
+    return "\n".join(out)
+
+
+def acceptance_to_feature(
+    title: str,
+    acceptance_value: Optional[str] = None,
+    fallback_value: Optional[str] = None,
+) -> str:
+    """Turn acceptance criteria (already-Gherkin, prose bullets, numbered or
+    task lists, or ``If … then …`` sentences) into a valid ``Feature`` document.
+
+    This is the deterministic, no-AI path used when converting a doc to
+    requirements: it repairs/keeps existing Gherkin and otherwise synthesises a
+    scenario per criterion. ``acceptance_value`` wins; ``fallback_value`` (e.g.
+    the section body) is used only when the acceptance is empty."""
+    safe_title = (title or "Requirement").strip() or "Requirement"
+    text = _recover_acceptance_text(acceptance_value) or _recover_acceptance_text(fallback_value)
+    text = _normalize_localized_keywords(_strip_code_fence(text))
+    feature_title, scenarios = _build_scenarios(safe_title, _criteria_lines(text))
+    return format_gherkin(_render_scenarios(feature_title, scenarios))
+
+
+_BLOCK_TAG_RE = re.compile(r"<(?:ul|ol|li|p|div|h[1-6]|table|tbody|thead|tr|td|th|br|pre)\b", re.IGNORECASE)
+
+
+def _recover_acceptance_text(value: Optional[str]) -> str:
+    """Recover plain Gherkin text from an acceptance value, preserving
+    ``<placeholder>`` tokens (e.g. ``<a>``/``<value>``) that look like HTML tags.
+
+    Values from the converter/AI are wrapped in ``<pre><code>``; the inner text
+    is taken as-is. Plain HTML prose (``<ul>``/``<p>`` …) is stripped normally."""
+    if not value:
+        return ""
+    decoded = html.unescape(str(value))
+    match = re.search(r"<pre[^>]*>\s*<code[^>]*>(.*?)</code>", decoded, re.IGNORECASE | re.DOTALL)
+    if match:
+        body = match.group(1)
+    else:
+        body = decoded
+        if _BLOCK_TAG_RE.search(body):
+            body = _strip_markup(body)
+    body = html.unescape(body)
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
+    body = re.sub(r"[ \t]+\n", "\n", body)
+    return body.strip("\n").rstrip()
 
 
 def _description_to_text(value: Optional[str]) -> str:

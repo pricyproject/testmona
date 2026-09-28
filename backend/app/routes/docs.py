@@ -807,181 +807,11 @@ def _parse_convert_enhance(
     return summary, items, suggested
 
 
-_CONVERT_HTML_BLOCK_BREAK_RE = re.compile(r"<\s*br\s*/?>|</\s*(p|div|li|h[1-6]|tr|pre)\s*>", re.IGNORECASE)
-_CONVERT_HTML_TAG_RE = re.compile(rf"</?(?:{_KNOWN_HTML_TAGS})(?:\s[^>]*)?/?>", re.IGNORECASE)
-_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
-_GHERKIN_HINT_RE = re.compile(
-    r"^\s*(feature|rule|background|scenario outline|scenario|given|when|then|and|but)\b",
-    re.IGNORECASE | re.MULTILINE,
-)
-_LOCALIZED_GHERKIN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^\s*(ویژگی|قابلیت)\s*[:：]\s*", re.IGNORECASE), "Feature: "),
-    (re.compile(r"^\s*(خاصية|ميزة|الميزة)\s*[:：]\s*", re.IGNORECASE), "Feature: "),
-    (re.compile(r"^\s*(طرح سناریو|مخطط السيناريو)\s*[:：]\s*", re.IGNORECASE), "Scenario Outline: "),
-    (re.compile(r"^\s*(سناریو|سيناريو)\s*[:：]\s*", re.IGNORECASE), "Scenario: "),
-    (re.compile(r"^\s*(پیش‌زمینه|پیش زمینه|الخلفية|خلفية)\s*[:：]\s*", re.IGNORECASE), "Background: "),
-    (re.compile(r"^\s*(با فرض|فرض|بفرض)\s+", re.IGNORECASE), "Given "),
-    (re.compile(r"^\s*(وقتی|زمانی که|هنگامی که|عندما|متى)\s+", re.IGNORECASE), "When "),
-    (re.compile(r"^\s*(آنگاه|سپس|إذن|اذاً|عندئذ)\s+", re.IGNORECASE), "Then "),
-    (re.compile(r"^\s*(اما|ولی|لكن)\s+", re.IGNORECASE), "But "),
-    (re.compile(r"^\s*(و)\s+", re.IGNORECASE), "And "),
-]
-
-
-def _html_to_lines(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    text = _CONVERT_HTML_BLOCK_BREAK_RE.sub("\n", value)
-    text = _CONVERT_HTML_TAG_RE.sub(" ", text)
-    text = html.unescape(text).replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def _strip_code_fence(value: str) -> str:
-    text = re.sub(r"^```(?:gherkin|feature)?\s*", "", value.strip(), flags=re.IGNORECASE)
-    return re.sub(r"```$", "", text, flags=re.IGNORECASE).strip()
-
-
-def _normalize_localized_gherkin(value: str) -> str:
-    out: list[str] = []
-    for line in value.split("\n"):
-        trimmed = line.lstrip()
-        indent = line[: len(line) - len(trimmed)]
-        replaced = None
-        for pattern, prefix in _LOCALIZED_GHERKIN_PATTERNS:
-            if pattern.search(trimmed):
-                replaced = indent + pattern.sub(prefix, trimmed)
-                break
-        out.append(replaced if replaced is not None else line)
-    return "\n".join(out)
-
-
-def _plain_criteria(value: str) -> list[str]:
-    criteria: list[str] = []
-    for raw in value.split("\n"):
-        line = _LIST_MARKER_RE.sub("", raw).strip()
-        line = re.sub(r"\s+", " ", line)
-        if line and not re.fullmatch(r"acceptance criteria:?", line, flags=re.IGNORECASE):
-            criteria.append(line)
-        if len(criteria) >= 12:
-            break
-    return criteria
-
-
-def _has_feature_style_gherkin(value: str) -> bool:
-    return bool(
-        re.search(r"^\s*Feature:", value, flags=re.IGNORECASE | re.MULTILINE)
-        and re.search(r"^\s*(Scenario|Scenario Outline|Background):", value, flags=re.IGNORECASE | re.MULTILINE)
-        and re.search(r"^\s*Given\b", value, flags=re.IGNORECASE | re.MULTILINE)
-        and re.search(r"^\s*When\b", value, flags=re.IGNORECASE | re.MULTILINE)
-        and re.search(r"^\s*Then\b", value, flags=re.IGNORECASE | re.MULTILINE)
-    )
-
-
-def _repair_gherkin(value: str, title: str, fallback_html: Optional[str]) -> Optional[str]:
-    text = _normalize_localized_gherkin(value).strip()
-    if not _GHERKIN_HINT_RE.search(text):
-        return None
-    out: list[str] = []
-    feature_seen = False
-    block_open = False
-    block_start = -1
-    has_given = has_when = has_then = False
-    outline = False
-    has_examples = False
-
-    def finish_block() -> None:
-        nonlocal block_open, block_start, has_given, has_when, has_then, outline, has_examples
-        if not block_open or block_start < 0:
-            return
-        if outline and not has_examples:
-            out[block_start] = re.sub(r"Scenario Outline:", "Scenario:", out[block_start], flags=re.IGNORECASE)
-            for idx in range(block_start + 1, len(out)):
-                out[idx] = re.sub(r"<([^<>]+)>", r"\1", out[idx])
-        if not has_given:
-            out.insert(block_start + 1, f"Given {title} is in scope")
-        if not has_when:
-            out.append("When the requirement behavior is exercised")
-        if not has_then:
-            criteria = _plain_criteria(_html_to_lines(fallback_html))
-            out.append(f"Then {criteria[0] if criteria else f'{title} is satisfied'}")
-        block_open = False
-
-    for raw in text.split("\n"):
-        line = raw.strip()
-        if not line:
-            out.append("")
-            continue
-        if re.match(r"^Feature:", line, flags=re.IGNORECASE):
-            if feature_seen:
-                continue
-            finish_block()
-            feature_seen = True
-            out.append(line or f"Feature: {title}")
-            continue
-        if re.match(r"^Rule:", line, flags=re.IGNORECASE):
-            finish_block()
-            out.append(line)
-            continue
-        if re.match(r"^(Background|Scenario Outline|Scenario|Example):", line, flags=re.IGNORECASE):
-            finish_block()
-            block_open = True
-            block_start = len(out)
-            has_given = has_when = has_then = False
-            outline = bool(re.match(r"^Scenario Outline:", line, flags=re.IGNORECASE))
-            has_examples = False
-            out.append(line)
-            continue
-        if re.match(r"^Examples:", line, flags=re.IGNORECASE):
-            has_examples = True
-            out.append(line)
-            continue
-        if re.match(r"^(Given|When|Then|And|But|\*)\b", line, flags=re.IGNORECASE):
-            if not block_open:
-                block_open = True
-                block_start = len(out)
-                has_given = has_when = has_then = False
-                outline = has_examples = False
-                out.append(f"Scenario: {title}")
-            if not has_given and re.match(r"^(And|But)\b", line, flags=re.IGNORECASE):
-                line = re.sub(r"^(And|But)\b", "Given", line, flags=re.IGNORECASE)
-            has_given = has_given or bool(re.match(r"^Given\b", line, flags=re.IGNORECASE))
-            has_when = has_when or bool(re.match(r"^When\b", line, flags=re.IGNORECASE))
-            has_then = has_then or bool(re.match(r"^Then\b", line, flags=re.IGNORECASE))
-            out.append(line)
-            continue
-        out.append(line)
-
-    finish_block()
-    if not feature_seen:
-        out.insert(0, "")
-        out.insert(0, f"Feature: {title}")
-    formatted = feature_file_service.format_gherkin("\n".join(out))
-    return formatted if _has_feature_style_gherkin(formatted) else None
-
-
-def _prose_to_feature(title: str, value: str, fallback_html: Optional[str]) -> str:
-    criteria = _plain_criteria(value or _html_to_lines(fallback_html)) or [f"{title} is satisfied"]
-    scenarios: list[str] = []
-    for idx, criterion in enumerate(criteria):
-        scenario_title = f"{title} - criterion {idx + 1}" if len(criteria) > 1 else title
-        scenarios.append(
-            "\n".join([
-                f"Scenario: {scenario_title}",
-                f"Given {title} is in scope",
-                "When the requirement behavior is exercised",
-                f"Then {criterion}",
-            ])
-        )
-    return feature_file_service.format_gherkin(f"Feature: {title}\n\n" + "\n\n".join(scenarios))
-
-
 def _feature_acceptance_html(title: str, acceptance_html: Optional[str], fallback_html: Optional[str]) -> str:
-    safe_title = (title or "Requirement").strip() or "Requirement"
-    text = _strip_code_fence(_html_to_lines(acceptance_html) or _html_to_lines(fallback_html))
-    gherkin = _repair_gherkin(text, safe_title, fallback_html) or _prose_to_feature(safe_title, text, fallback_html)
+    """Render acceptance criteria (prose, lists, or existing Gherkin) into the
+    canonical ``.feature`` document stored on the requirement. Delegates to the
+    shared deterministic engine so manual (no-AI) conversion stays consistent."""
+    gherkin = feature_file_service.acceptance_to_feature(title, acceptance_html, fallback_html)
     return f'<pre><code class="language-gherkin">{html.escape(gherkin)}</code></pre>'
 
 
@@ -2715,18 +2545,27 @@ def register_docs_routes(app) -> None:
         _require_feature_enabled(db, doc.project_id, "doc_hub")
         _require_feature_enabled(db, doc.project_id, "requirements")
         plan = conv.build_plan(doc, payload.mode, payload.heading_level)
-        return schemas.DocConvertPreview(
-            mode=plan.mode,
-            items=[
+        ac_section = next((s for s in plan.sections if s.is_acceptance_criteria), None)
+        preview_items = []
+        for s in plan.sections:
+            if s.is_acceptance_criteria:
+                # Displayed separately (its content is merged into the main
+                # requirement's acceptance_criteria, not a requirement of its own).
+                acceptance_html = ""
+            elif payload.mode == "single":
+                base = ac_section.description_html if ac_section else None
+                acceptance_html = _feature_acceptance_html(s.title, base, s.description_html)
+            else:
+                acceptance_html = _feature_acceptance_html(s.title, s.acceptance_html, s.description_html)
+            preview_items.append(
                 schemas.DocConvertPreviewItem(
                     index=s.index, title=s.title,
                     description_html=s.description_html,
                     is_acceptance_criteria=s.is_acceptance_criteria,
-                    acceptance_html=s.acceptance_html,
+                    acceptance_html=acceptance_html,
                 )
-                for s in plan.sections
-            ],
-        )
+            )
+        return schemas.DocConvertPreview(mode=plan.mode, items=preview_items)
 
     @app.post("/docs/{doc_id}/convert-to-requirements", response_model=schemas.DocConvertResult, tags=["Docs"])
     def convert_to_requirements(
@@ -2924,6 +2763,23 @@ def register_docs_routes(app) -> None:
                 ),
             )
             summary, enhance_items, suggested = _parse_convert_enhance(completion.content)
+            # Render AI-proposed acceptance through the same deterministic engine
+            # the converter persists, so suggestions preview exactly what will be
+            # created (and stay valid Gherkin even if the model returned prose).
+            title_by_index = {s.index: s.title for s in plan.sections}
+            for item in enhance_items:
+                if item.suggested_acceptance_html or item.suggested_description_html:
+                    item.suggested_acceptance_html = _feature_acceptance_html(
+                        item.suggested_title or title_by_index.get(item.index, ""),
+                        item.suggested_acceptance_html or None,
+                        item.suggested_description_html or None,
+                    )
+            for suggestion in suggested:
+                if suggestion.acceptance_html or suggestion.description_html:
+                    suggestion.acceptance_html = _feature_acceptance_html(
+                        suggestion.title, suggestion.acceptance_html or None,
+                        suggestion.description_html or None,
+                    )
             result.summary = summary
             result.items = enhance_items
             result.suggested_requirements = suggested
