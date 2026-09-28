@@ -248,7 +248,7 @@ export function SavedFilters({ projectId, scope, currentDefinition, hasActiveFil
               }}
               disabled={!hasActiveFilters}
             >
-              <BookmarkPlus className="h-4 w-4 mr-2" />
+              <BookmarkPlus className="h-4 w-4 me-2" />
               {t('saveCurrentFilters')}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -291,7 +291,7 @@ export function SavedFilters({ projectId, scope, currentDefinition, hasActiveFil
               {t('cancel')}
             </Button>
             <Button onClick={handleSave} disabled={isSaving || !newName.trim()}>
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : null}
               {t('save')}
             </Button>
           </DialogFooter>

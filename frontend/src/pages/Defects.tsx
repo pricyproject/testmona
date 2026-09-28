@@ -84,6 +84,8 @@ const BOARD_COLUMNS: Array<{ status: string; dot: string }> = [
 ];
 
 const LINKED_ENTITY_PAGE_SIZE = 500;
+// Guard against a runaway loop if the server ever ignores `skip`.
+const LINKED_ENTITY_MAX_PAGES = 100;
 
 // Mirrors the column limits the API enforces, so the form clamps before the
 // request rather than surfacing a 422.
@@ -134,30 +136,36 @@ const normalize = (value: unknown): string => String(value ?? '').trim().toLower
 
 const loadAllProjectTestCases = async (numericProjectId: number) => {
   const allTestCases: any[] = [];
-  for (let skip = 0; ; skip += LINKED_ENTITY_PAGE_SIZE) {
-    const page = await testCasesAPI.getAll(
+  for (let page = 0; page < LINKED_ENTITY_MAX_PAGES; page += 1) {
+    const pageRows = await testCasesAPI.getAll(
       numericProjectId,
       undefined,
       undefined,
       'id',
       'asc',
-      skip,
+      page * LINKED_ENTITY_PAGE_SIZE,
       LINKED_ENTITY_PAGE_SIZE,
     );
-    const rows = Array.isArray(page) ? page : [];
+    const rows = Array.isArray(pageRows) ? pageRows : [];
     allTestCases.push(...rows);
-    if (rows.length < LINKED_ENTITY_PAGE_SIZE) return allTestCases;
+    if (rows.length < LINKED_ENTITY_PAGE_SIZE) break;
   }
+  return allTestCases;
 };
 
 const loadAllProjectRequirements = async (numericProjectId: number) => {
   const allRequirements: any[] = [];
-  for (let skip = 0; ; skip += LINKED_ENTITY_PAGE_SIZE) {
-    const page = await requirementsAPI.getAll(numericProjectId, skip, LINKED_ENTITY_PAGE_SIZE);
-    const rows = Array.isArray(page) ? page : [];
+  for (let page = 0; page < LINKED_ENTITY_MAX_PAGES; page += 1) {
+    const pageRows = await requirementsAPI.getAll(
+      numericProjectId,
+      page * LINKED_ENTITY_PAGE_SIZE,
+      LINKED_ENTITY_PAGE_SIZE,
+    );
+    const rows = Array.isArray(pageRows) ? pageRows : [];
     allRequirements.push(...rows);
-    if (rows.length < LINKED_ENTITY_PAGE_SIZE) return allRequirements;
+    if (rows.length < LINKED_ENTITY_PAGE_SIZE) break;
   }
+  return allRequirements;
 };
 
 const parsePositiveQueryNumber = (value: string | null): number | undefined => {
@@ -364,7 +372,7 @@ export function Defects() {
         const rows = await projectAssignmentsAPI.listMembers(pid);
         members = (rows as Array<any>).map((m) => ({
           id: m.user_id,
-          name: m.full_name || m.username || m.email || `User ${m.user_id}`,
+          name: m.full_name || m.username || m.email || '',
         }));
       } catch (memberError) {
         console.warn('Failed to load project members for bulk edit:', memberError);
@@ -508,7 +516,7 @@ export function Defects() {
   const [isLoadingIntegrations, setIsLoadingIntegrations] = useState(false);
   const [editingIntegration, setEditingIntegration] = useState<IssueTrackerIntegration | null>(null);
   const [integrationToDelete, setIntegrationToDelete] = useState<IssueTrackerIntegration | null>(null);
-  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [testingConnectionIds, setTestingConnectionIds] = useState<Set<number>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   
   // Integration form state
@@ -1459,7 +1467,25 @@ export function Defects() {
       closed: t('closed'),
       rejected: t('rejected'),
     };
-    return labels[status] || String(status || '').replace('_', ' ');
+    return labels[status] || String(status || '').replace(/[-_]/g, ' ');
+  };
+
+  const getResultStatusLabel = (status?: string | null) => {
+    const key = normalize(status).replace(/[-\s]/g, '_');
+    const labels: Record<string, string> = {
+      pass: t('statusPassed'),
+      passed: t('statusPassed'),
+      fail: t('statusFailed'),
+      failed: t('statusFailed'),
+      block: t('statusBlocked'),
+      blocked: t('statusBlocked'),
+      skip: t('statusSkipped'),
+      skipped: t('statusSkipped'),
+      pending: t('statusPending'),
+      not_started: t('statusNotStarted'),
+      in_progress: t('statusInProgress'),
+    };
+    return labels[key] || String(status || '').replace(/[-_]/g, ' ');
   };
 
   const getTriageLabel = (value: string) => {
@@ -1715,9 +1741,9 @@ export function Defects() {
   };
 
   const handleTestConnection = async (integrationId: number) => {
-    if (!projectId) return;
-    
-    setIsTestingConnection(true);
+    if (!projectId || testingConnectionIds.has(integrationId)) return;
+
+    setTestingConnectionIds((prev) => new Set(prev).add(integrationId));
     try {
       const result = await defectManagementAPI.testIssueTrackerConnection(parseInt(projectId), integrationId);
       if (result.success) {
@@ -1740,7 +1766,11 @@ export function Defects() {
         variant: 'destructive',
       });
     } finally {
-      setIsTestingConnection(false);
+      setTestingConnectionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(integrationId);
+        return next;
+      });
     }
   };
 
@@ -1758,13 +1788,13 @@ export function Defects() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => navigate(`/projects/${projectId}/defects/root-cause-analysis`)}>
-            <GitBranch className="h-4 w-4 mr-2" />
+            <GitBranch className="h-4 w-4 me-2" />
             {t('reportsTabRootCause')}
           </Button>
           <Dialog open={isIntegrationDialogOpen} onOpenChange={setIsIntegrationDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
-                <Settings className="h-4 w-4 mr-2" />
+                <Settings className="h-4 w-4 me-2" />
                 {t('integrations')}
               </Button>
             </DialogTrigger>
@@ -1818,7 +1848,7 @@ export function Defects() {
                             )}
                             {integration.sync_error && (
                               <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                <AlertCircle className="h-3 w-3 inline mr-1" />
+                                <AlertCircle className="h-3 w-3 inline me-1" />
                                 {integration.sync_error}
                               </p>
                             )}
@@ -1828,11 +1858,11 @@ export function Defects() {
                               size="sm"
                               variant="outline"
                               onClick={() => handleTestConnection(integration.id)}
-                              disabled={isTestingConnection}
+                              disabled={testingConnectionIds.has(integration.id)}
                               aria-label={t('testConnection')}
                               title={t('testConnection')}
                             >
-                              {isTestingConnection ? (
+                              {testingConnectionIds.has(integration.id) ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
                                 <CheckCircle2 className="h-4 w-4" />
@@ -1883,7 +1913,7 @@ export function Defects() {
             {canWrite && (
               <DialogTrigger asChild>
                 <Button>
-                  <Plus className="h-4 w-4 mr-2" />
+                  <Plus className="h-4 w-4 me-2" />
                   {t('reportDefect')}
                 </Button>
               </DialogTrigger>
@@ -2901,10 +2931,10 @@ export function Defects() {
                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                   <div className="min-w-0 space-y-1">
                                     <div className="flex flex-wrap items-center gap-2">
-                                      <Badge variant="outline">{testResult.status || '-'}</Badge>
+                                      <Badge variant="outline">{getResultStatusLabel(testResult.status) || '-'}</Badge>
                                       <span className="text-xs text-slate-500">
                                         {t('resultSnapshotCaptured', {
-                                          status: testResult.status || '-',
+                                          status: getResultStatusLabel(testResult.status) || '-',
                                           date: formatSnapshotDate(link.snapshot_created_at || resultSnapshot.captured_at),
                                         })}
                                       </span>
@@ -3195,7 +3225,7 @@ export function Defects() {
             {editingIntegration && (
               <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded p-3">
                 <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  <AlertCircle className="h-4 w-4 inline mr-2" />
+                  <AlertCircle className="h-4 w-4 inline me-2" />
                   {t('leaveApiTokenBlank')}
                 </p>
               </div>
@@ -3237,7 +3267,7 @@ export function Defects() {
                       <div className="flex items-center gap-2">
                         <span className="capitalize">{integration.tracker_type}</span>
                         <span className="text-gray-500">- {integration.name}</span>
-                        {!integration.is_active && <Badge variant="outline" className="text-xs ml-2">{t('inactive')}</Badge>}
+                        {!integration.is_active && <Badge variant="outline" className="text-xs ms-2">{t('inactive')}</Badge>}
                       </div>
                     </SelectItem>
                   ))}
@@ -3253,7 +3283,7 @@ export function Defects() {
 
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded p-3">
               <p className="text-sm text-blue-800 dark:text-blue-200">
-                <AlertCircle className="h-4 w-4 inline mr-2" />
+                <AlertCircle className="h-4 w-4 inline me-2" />
                 {t('defectWillBeSynced')}
               </p>
             </div>
@@ -3632,7 +3662,7 @@ export function Defects() {
           { value: 'medium', label: t('medium') },
           { value: 'low', label: t('low') },
         ]}
-        userOptions={projectMembers.map((m) => ({ value: String(m.id), label: m.name }))}
+        userOptions={projectMembers.map((m) => ({ value: String(m.id), label: m.name || `${t('user')} #${m.id}` }))}
         onApplied={() => {
           loadDefects();
           clearDefectSelection();

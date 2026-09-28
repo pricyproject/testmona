@@ -115,10 +115,12 @@ export function BulkEditDefectsDialog({
     }
   };
 
+  // Ctrl/Cmd+Enter submits; a bare Enter would fire while picking a value in a
+  // Select and apply the edit before the user is done choosing.
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      handleApply();
+      if (!isSubmitting) void handleApply();
     }
   };
 
@@ -188,7 +190,7 @@ export function BulkEditDefectsDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>{t('cancel')}</Button>
           <Button onClick={handleApply} disabled={isSubmitting}>
-            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin me-2" /> : null}
             {t('applyToSelected', { count: String(ids.length) })}
           </Button>
         </DialogFooter>

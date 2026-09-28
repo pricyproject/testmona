@@ -8,11 +8,17 @@ import { useTranslation } from '@/hooks/useTranslation';
 
 type TestCaseOption = {
   id: number;
+  project_seq?: number | null;
   title?: string | null;
   reference?: string | null;
   status?: string | null;
   priority?: string | null;
 };
+
+// The per-project sequence (not the global id) is what the rest of the app
+// shows and what the project-first URLs are keyed on.
+const testCaseCode = (testCase: TestCaseOption): string =>
+  `TC-${testCase.project_seq ?? testCase.id}`;
 
 type SearchableTestCaseSelectProps = {
   id: string;
@@ -51,6 +57,8 @@ export function SearchableTestCaseSelect({
       ? testCases.filter((testCase) => {
           const searchableText = [
             testCase.id,
+            testCase.project_seq,
+            testCaseCode(testCase),
             testCase.title,
             testCase.reference,
             testCase.status,
@@ -88,7 +96,7 @@ export function SearchableTestCaseSelect({
   };
 
   const displayValue = selectedTestCase
-    ? selectedTestCase.title || `TC-${selectedTestCase.id}`
+    ? `${testCaseCode(selectedTestCase)}${selectedTestCase.title ? ` — ${selectedTestCase.title}` : ''}`
     : t('noTestCase');
 
   return (
@@ -172,10 +180,10 @@ export function SearchableTestCaseSelect({
                   >
                     <span className="min-w-0 space-y-1">
                       <span className="block truncate text-sm font-medium">
-                        {testCase.title || `TC-${testCase.id}`}
+                        {testCase.title || testCaseCode(testCase)}
                       </span>
                       <span className="flex flex-wrap items-center gap-1">
-                        <Badge variant="outline" className="text-[11px]">TC-{testCase.id}</Badge>
+                        <Badge variant="outline" className="text-[11px]">{testCaseCode(testCase)}</Badge>
                         {testCase.reference && <Badge variant="outline" className="max-w-32 truncate text-[11px]">{testCase.reference}</Badge>}
                         {testCase.status && <Badge variant="secondary" className="text-[11px]">{testCase.status}</Badge>}
                       </span>
