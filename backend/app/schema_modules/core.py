@@ -723,7 +723,7 @@ class UserBase(BaseModel):
         """Sanitize HTML in string fields to prevent XSS attacks"""
         if isinstance(data, dict):
             for key, value in data.items():
-                if isinstance(value, str) and key not in ['role', 'email', 'website']:
+                if isinstance(value, str) and key not in ['role', 'email', 'website', 'password']:
                     data[key] = html.escape(value)
         return data
 
