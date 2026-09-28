@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Activity, AlertCircle, BarChart3, Loader2, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react';
 import { ReportsData } from '@/hooks/useReportsData';
 import { TraceabilityMatrixPanel } from '@/components/reports/TraceabilityMatrixPanel';
+import { CollapsibleSection } from '@/components/reports/CollapsibleSection';
 
 export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
   const { t } = useTranslation();
@@ -22,6 +23,8 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
 
   const matrixRef = useRef<HTMLDivElement>(null);
   const latestCoverage = coverageReports[coverageReports.length - 1];
+  // The traceability panel starts collapsed; drilling into a priority opens it.
+  const [matrixOpen, setMatrixOpen] = useState(false);
 
   // Animate the coverage ring from 0 on mount instead of snapping to value.
   const [ringReady, setRingReady] = useState(false);
@@ -35,30 +38,27 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
     setTraceabilityFilters({ priority, coverage_status: 'all', test_status: 'all', search: '' });
     setTraceabilityPage(0);
     setSearchQuery('');
-    matrixRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setMatrixOpen(true);
+    requestAnimationFrame(() => matrixRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
   const insights: any[] = granularInsights?.insights || [];
+  const priorityCoverage = Object.entries(latestCoverage?.report_data?.by_priority || {});
 
   return (
     <div className="space-y-8">
-      {/* Coverage report (requirement coverage) */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">{t('reportsTabCoverage')}</h2>
-            {coverageReports.length > 0 && latestCoverage?.generated_at && (
-              <p className="text-sm text-gray-600 mt-1">
-                {t('reports_coverageLastUpdated', { time: formatDateTime(latestCoverage.generated_at) })}
-              </p>
-            )}
-          </div>
+      <CollapsibleSection
+        title={t('reportsTabCoverage')}
+        subtitle={coverageReports.length > 0 && latestCoverage?.generated_at
+          ? t('reports_coverageLastUpdated', { time: formatDateTime(latestCoverage.generated_at) })
+          : undefined}
+        actions={(
           <Button onClick={handleGenerateCoverageReport} disabled={coverageLoading}>
-            <RefreshCw className="h-4 w-4 mr-2" />
+            <RefreshCw className="h-4 w-4 me-2" />
             {t('reports_generateReport')}
           </Button>
-        </div>
-
+        )}
+      >
         {coverageLoading && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-blue-600 me-2" />
@@ -148,8 +148,8 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
                         {Object.entries(testExecutionStatus.status_percentages || {}).map(([status, value]) => (
                           <div key={status} className="space-y-1">
                             <div className="flex justify-between text-sm">
-                              <span className="capitalize">{status.replace('_', ' ')}</span>
-                              <span className="font-bold">{Math.round(Number(value))}% ({Math.round((Number(value) / 100) * testExecutionStatus.summary.executed_test_cases)} tests)</span>
+                              <span className="capitalize">{status.replace(/_/g, ' ')}</span>
+                              <span className="font-bold">{Math.round(Number(value))}% ({t('reports_testsCount', { count: Math.round((Number(value) / 100) * testExecutionStatus.summary.executed_test_cases) })})</span>
                             </div>
                             <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
                               <div
@@ -171,8 +171,8 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
                           {Object.entries(testExecutionStatus.overall_percentages || {}).map(([status, value]) => (
                             <div key={status} className="space-y-1">
                               <div className="flex justify-between text-sm">
-                                <span className="capitalize">{status.replace('_', ' ')}</span>
-                                <span className="font-bold">{Math.round(Number(value))}% ({Math.round((Number(value) / 100) * testExecutionStatus.summary.total_test_cases)} tests)</span>
+                                <span className="capitalize">{status.replace(/_/g, ' ')}</span>
+                                <span className="font-bold">{Math.round(Number(value))}% ({t('reports_testsCount', { count: Math.round((Number(value) / 100) * testExecutionStatus.summary.total_test_cases) })})</span>
                               </div>
                               <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
                                 <div
@@ -218,8 +218,11 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
                 <CardTitle className="text-lg">{t('reports_priorityWiseCoverage')}</CardTitle>
               </CardHeader>
               <CardContent>
+                {priorityCoverage.length === 0 ? (
+                  <p className="py-8 text-center text-gray-500">{t('reports_noReqsAtPriority')}</p>
+                ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {Object.entries(latestCoverage?.report_data?.by_priority || {}).map(([priority, value]) => {
+                  {priorityCoverage.map(([priority, value]) => {
                     const detail = (value && typeof value === 'object'
                       ? value
                       : { coverage: Number(value) || 0, covered: 0, total: 0 }) as { coverage: number; covered: number; total: number };
@@ -257,26 +260,32 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
                     );
                   })}
                 </div>
+                )}
               </CardContent>
             </Card>
           </div>
         ) : (
           !coverageLoading && <div className="text-center py-8 text-gray-500">{t('reports_noCoverageReports')}</div>
         )}
-      </div>
+      </CollapsibleSection>
 
       {/* Requirement → Test Case traceability matrix (with open defects) */}
       <div ref={matrixRef}>
-        <TraceabilityMatrixPanel ctx={ctx} />
+        <CollapsibleSection
+          title={t('reportsTabTraceability')}
+          subtitle={t('traceabilityMatrixSubtitle')}
+          open={matrixOpen}
+          onOpenChange={setMatrixOpen}
+        >
+          <TraceabilityMatrixPanel ctx={ctx} />
+        </CollapsibleSection>
       </div>
 
       {/* Granular quality / risk insights */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h2 className="text-xl font-semibold">{t('reportsTabGranular')}</h2>
-            <p className="text-sm text-gray-600">{t('reports_granularSubtitle')}</p>
-          </div>
+      <CollapsibleSection
+        title={t('reportsTabGranular')}
+        subtitle={t('reports_granularSubtitle')}
+        actions={(
           <div className="flex items-center gap-2">
             <Select value={granularFilter} onValueChange={(v) => setGranularFilter(v as 'all' | 'failed' | 'slow')}>
               <SelectTrigger className="w-40">
@@ -289,15 +298,15 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
               </SelectContent>
             </Select>
             <Button variant="outline" onClick={() => loadGranularInsights()}>
-            <RefreshCw className="h-4 w-4 me-2" />
+              <RefreshCw className="h-4 w-4 me-2" />
               {t('reports_refresh')}
             </Button>
           </div>
-        </div>
-
+        )}
+      >
         {granularLoading && (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mr-2" />
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600 me-2" />
             <span className="text-gray-600">{t('reports_loadingGranular')}</span>
           </div>
         )}
@@ -344,7 +353,7 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
             ))}
           </div>
         )}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

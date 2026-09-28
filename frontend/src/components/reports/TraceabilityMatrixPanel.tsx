@@ -13,7 +13,7 @@ import { ReportsData } from '@/hooks/useReportsData';
 import { normalizeStatus, getStatusIcon } from '@/components/reports/reportsUtils';
 
 export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
   const { formatDate } = useDateFormat();
   const {
     traceabilityData, traceabilityFilters, setTraceabilityFilters, traceabilityPage,
@@ -113,8 +113,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">{t('reports_blockedTests')}</p>
                 <p className="text-2xl font-bold mt-1 text-yellow-600">
-                  {traceabilityData?.requirements?.reduce((total: number, req: any) =>
-                    total + (req.test_cases || []).filter((tc: any) => normalizeStatus(tc.status) === 'blocked').length, 0) || 0}
+                  {traceabilityData?.blocked_test_cases || 0}
                 </p>
               </div>
               <AlertCircle className="h-8 w-8 text-yellow-600" />
@@ -128,8 +127,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
               <div>
                 <p className="text-sm text-gray-600 dark:text-gray-400">{t('reports_openDefectsLabel')}</p>
                 <p className="text-2xl font-bold mt-1 text-red-600">
-                  {traceabilityData?.requirements?.reduce((total: number, req: any) =>
-                    total + Number(req.open_defects_count || 0), 0) || 0}
+                  {traceabilityData?.open_defects_count || 0}
                 </p>
               </div>
               <Bug className="h-8 w-8 text-red-600" />
@@ -142,12 +140,12 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
       <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-xs border dark:border-gray-700">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="md:col-span-4 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Search className={`absolute top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 ${isRTL ? 'right-3' : 'left-3'}`} />
             <Input
               placeholder={t('searchRequirementsOrTestCases')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className={isRTL ? 'pr-10' : 'pl-10'}
             />
           </div>
           <div className="md:col-span-3">
@@ -231,7 +229,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
 
       {isLoading && (
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600 mr-2" />
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600 me-2" />
           <span className="text-gray-600 dark:text-gray-400">{t('reports_loadingTraceability')}</span>
         </div>
       )}
@@ -305,12 +303,12 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-xs font-medium">
                           <tr>
-                            <th className="px-6 py-3 text-left">{t('reports_colTestCase')}</th>
-                            <th className="px-6 py-3 text-left">{t('reports_colTitle')}</th>
+                            <th className="px-6 py-3 text-start">{t('reports_colTestCase')}</th>
+                            <th className="px-6 py-3 text-start">{t('reports_colTitle')}</th>
                             <th className="px-6 py-3 text-center">{t('reports_colCoverageType')}</th>
                             <th className="px-6 py-3 text-center">{t('reports_colStatus')}</th>
                             <th className="px-6 py-3 text-center">{t('reports_colOpenDefects')}</th>
-                            <th className="px-6 py-3 text-right">{t('reports_colLastExecuted')}</th>
+                            <th className="px-6 py-3 text-end">{t('reports_colLastExecuted')}</th>
                             <th className="px-6 py-3 text-center">{t('reports_colActions')}</th>
                           </tr>
                         </thead>
@@ -353,7 +351,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                                   </Link>
                                 </td>
                                 <td className="px-6 py-4 text-center">{renderDefects(tc)}</td>
-                                <td className="px-6 py-4 text-right text-sm text-gray-600 dark:text-gray-400">
+                                <td className="px-6 py-4 text-end text-sm text-gray-600 dark:text-gray-400">
                                   {tc.last_executed ? formatDate(tc.last_executed) : t('reports_never')}
                                 </td>
                                 <td className="px-6 py-4 text-center">
@@ -363,7 +361,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                                     onClick={() => window.open(executionPath, '_blank')}
                                     className="text-xs"
                                   >
-                                    <Play className="h-3 w-3 mr-1" />
+                                    <Play className="h-3 w-3 me-1" />
                                     {tc.test_run_id ? t('reports_openExecution') : t('reports_execute')}
                                   </Button>
                                 </td>
@@ -403,7 +401,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                             <div className="flex items-center justify-between gap-2 text-sm">
                               <Link
                                 to={executionPath}
-                                className="flex items-center gap-1.5 rounded-md px-2 py-1 -ml-2 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                                className="flex items-center gap-1.5 rounded-md px-2 py-1 -ms-2 hover:bg-blue-50 dark:hover:bg-blue-950/30"
                               >
                                 {getStatusIcon(tc.status)}
                                 <span className="capitalize">{normalizedStatus.replace('_', ' ')}</span>
@@ -435,7 +433,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                               onClick={() => window.open(executionPath, '_blank')}
                               className="text-xs w-full"
                             >
-                              <Play className="h-3 w-3 mr-1" />
+                              <Play className="h-3 w-3 me-1" />
                               {tc.test_run_id ? t('reports_openExecution') : t('reports_execute')}
                             </Button>
                           </div>
@@ -472,7 +470,7 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                     to={`/projects/${selectedProject}/requirements`}
                     className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
                   >
-                    <Plus className="h-4 w-4 mr-1" />
+                    <Plus className="h-4 w-4 me-1" />
                     {t('reports_manageRequirements')}
                   </Link>
                 </div>
@@ -498,7 +496,9 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                   disabled={traceabilityPage === 0}
                   onClick={() => setTraceabilityPage((p) => Math.max(0, p - 1))}
                 >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  {isRTL
+                    ? <ChevronRight className="h-4 w-4 me-1" />
+                    : <ChevronLeft className="h-4 w-4 me-1" />}
                   {t('reports_paginationPrevious')}
                 </Button>
                 <Button
@@ -508,7 +508,9 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                   onClick={() => setTraceabilityPage((p) => p + 1)}
                 >
                   {t('reports_paginationNext')}
-                  <ChevronRight className="h-4 w-4 ml-1" />
+                  {isRTL
+                    ? <ChevronLeft className="h-4 w-4 ms-1" />
+                    : <ChevronRight className="h-4 w-4 ms-1" />}
                 </Button>
               </div>
             </div>

@@ -313,12 +313,44 @@ def register_traceability_coverage_routes(app):
                 "test_cases": test_cases,
             })
 
+        # Full-project headline risk numbers. Like the coverage figures above,
+        # these are computed across the whole project so pagination/filters on
+        # the requirements list can't distort the summary cards.
+        project_test_case_ids = [
+            row.id for row in db.query(TestCase.id).join(
+                TestSuite, TestCase.test_suite_id == TestSuite.id,
+            ).filter(
+                TestSuite.project_id == project_id,
+                TestCase.is_deleted.is_(False),
+            ).all()
+        ]
+        project_blocked_test_cases = 0
+        if project_test_case_ids:
+            ranked_project_results = select(
+                TestResult.test_case_id.label("test_case_id"),
+                func.lower(func.trim(TestResult.status)).label("status"),
+                func.row_number().over(
+                    partition_by=TestResult.test_case_id,
+                    order_by=(TestResult.executed_at.desc(), TestResult.created_at.desc(), TestResult.id.desc()),
+                ).label("result_rank"),
+            ).where(TestResult.test_case_id.in_(project_test_case_ids)).subquery()
+            project_blocked_test_cases = db.query(func.count()).select_from(ranked_project_results).filter(
+                ranked_project_results.c.result_rank == 1,
+                ranked_project_results.c.status.in_(("block", "blocked")),
+            ).scalar() or 0
+        project_open_defects = db.query(func.count(Defect.id)).filter(
+            Defect.project_id == project_id,
+            Defect.status.in_(open_defect_statuses),
+        ).scalar() or 0
+
         return {
             "project_id": project_id,
             "total_requirements": total_requirements,
             "covered_requirements": covered_requirements,
             "uncovered_requirements": max(total_requirements - covered_requirements, 0),
             "coverage_percentage": round((covered_requirements / total_requirements * 100) if total_requirements else 0, 2),
+            "blocked_test_cases": project_blocked_test_cases,
+            "open_defects_count": project_open_defects,
             "matched_requirements": matched_requirements,
             "skip": skip,
             "limit": limit,

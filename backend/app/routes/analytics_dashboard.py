@@ -957,17 +957,33 @@ def register_analytics_dashboard_routes(app):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         from ..models import TestCase, TestResult, TestSuite
+        from sqlalchemy import func, select
 
         test_cases = db.query(TestCase).join(TestSuite).filter(
             TestSuite.project_id == project_id,
             TestCase.is_deleted == False,
         ).all()
-        latest_statuses = []
-        for test_case in test_cases:
-            latest_result = db.query(TestResult).filter(
-                TestResult.test_case_id == test_case.id
-            ).order_by(TestResult.executed_at.desc()).first()
-            latest_statuses.append(normalize_result_status(latest_result.status) if latest_result else "not_started")
+        test_case_ids = [test_case.id for test_case in test_cases]
+        # One window query for the latest result per case instead of a query per
+        # case (N+1), with the same deterministic tie-break the rest of reports use.
+        latest_status_by_case: dict[int, str] = {}
+        if test_case_ids:
+            ranked_results = select(
+                TestResult.test_case_id.label("test_case_id"),
+                func.lower(func.trim(TestResult.status)).label("status"),
+                func.row_number().over(
+                    partition_by=TestResult.test_case_id,
+                    order_by=(TestResult.executed_at.desc(), TestResult.created_at.desc(), TestResult.id.desc()),
+                ).label("result_rank"),
+            ).where(TestResult.test_case_id.in_(test_case_ids)).subquery()
+            latest_status_by_case = {
+                row.test_case_id: row.status
+                for row in db.query(ranked_results).filter(ranked_results.c.result_rank == 1).all()
+            }
+        latest_statuses = [
+            normalize_result_status(latest_status_by_case.get(test_case.id)) if test_case.id in latest_status_by_case else "not_started"
+            for test_case in test_cases
+        ]
 
         total_tests = len(test_cases)
         passed = latest_statuses.count("passed")
