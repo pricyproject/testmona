@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -69,7 +69,7 @@ import {
 } from '@/hooks/queries/docDetail';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { parsePositiveIntegerParam } from '@/utils/validation';
-import { formatServerDateTime } from '@/utils/datetime';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import type { Doc, DocRequirementLink, DocSpace, DocStats } from '@/types';
 
 const statusTone: Record<string, string> = {
@@ -84,6 +84,7 @@ const DOC_TABS: DocTab[] = ['document', 'revisions', 'links', 'stats'];
 
 export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) {
   const { t, isRTL } = useTranslation();
+  const { formatDateTime } = useDateFormat();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -95,6 +96,14 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   const parsedDocId = projectId ? resolvedDocId : rawDocId;
   const parsedProjectId = parsePositiveIntegerParam(projectId);
   const basePath = parsedProjectId ? `/projects/${parsedProjectId}/docs` : '/docs';
+  // Project docs are addressed by their per-project sequence in the URL; using the
+  // global id there can resolve to the wrong doc when it collides with another
+  // doc's project_seq (mirrors DocHub/DocEditor).
+  const docHref = useCallback(
+    (d: { id: number; project_seq?: number | null }) =>
+      `${basePath}/${parsedProjectId ? d.project_seq ?? d.id : d.id}`,
+    [basePath, parsedProjectId],
+  );
 
   // `/…/revisions` deep-links the revisions tab; other tabs ride a `?tab=` param
   // so navigating between them (which remounts this route) keeps the selection.
@@ -212,9 +221,9 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     // Canonical URL per tab: revisions has its own path; everything else lives on
     // the doc URL (document = bare, others via ?tab=) so deep-links and refreshes
     // land on the right tab.
-    if (next === 'revisions') navigate(`${basePath}/${doc.id}/revisions`, { replace: true });
-    else if (next === 'document') navigate(`${basePath}/${doc.id}`, { replace: true });
-    else navigate(`${basePath}/${doc.id}?tab=${next}`, { replace: true });
+    if (next === 'revisions') navigate(`${docHref(doc)}/revisions`, { replace: true });
+    else if (next === 'document') navigate(docHref(doc), { replace: true });
+    else navigate(`${docHref(doc)}?tab=${next}`, { replace: true });
   };
 
   const handleDelete = async () => {
@@ -259,7 +268,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             <span className="flex-1" />
             <WatchButton entityType="doc" entityId={doc.id} />
             {doc.can_edit && (
-              <Button size="sm" onClick={() => navigate(`${basePath}/${doc.id}/edit`)}>
+              <Button size="sm" onClick={() => navigate(`${docHref(doc)}/edit`)}>
                 <Pencil className={iconCls} />
                 {t('edit')}
               </Button>
@@ -441,7 +450,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border p-4"><p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Eye className="h-3.5 w-3.5" />{t('views')}</p><p className="text-2xl font-semibold">{stats?.view_count ?? 0}</p></div>
               <div className="rounded-lg border p-4"><p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Users className="h-3.5 w-3.5" />{t('uniqueVisitors')}</p><p className="text-2xl font-semibold">{stats?.unique_visitors ?? 0}</p></div>
-              <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">{t('lastViewed')}</p><p className="text-sm">{stats?.last_viewed_at ? formatServerDateTime(stats.last_viewed_at) : '-'}</p></div>
+              <div className="rounded-lg border p-4"><p className="text-xs text-muted-foreground">{t('lastViewed')}</p><p className="text-sm">{stats?.last_viewed_at ? formatDateTime(stats.last_viewed_at) : '-'}</p></div>
             </div>
             <div className="rounded-lg border">
               <div className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-semibold">
@@ -457,7 +466,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
                       <span className="min-w-0 flex-1 truncate text-sm font-medium" dir="auto">{v.name}</span>
                       <Badge variant="secondary" className="shrink-0">{t('docVisitCount', { n: v.visit_count })}</Badge>
                       <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                        {v.last_visited_at ? formatServerDateTime(v.last_visited_at) : '-'}
+                        {v.last_visited_at ? formatDateTime(v.last_visited_at) : '-'}
                       </span>
                     </li>
                   ))}

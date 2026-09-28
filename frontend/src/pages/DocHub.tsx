@@ -76,7 +76,8 @@ import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAuthStore } from '@/stores/authStore';
 import { docsAPI, type DocListParams } from '@/lib/api';
 import { parsePositiveIntegerParam } from '@/utils/validation';
-import { formatRelativeTime, formatServerDateTime } from '@/utils/datetime';
+import { formatNumber } from '@/utils/datetime';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { TestCaseSearchBar, type SearchSuggestionGroup } from '@/components/TestCases/TestCaseSearchBar';
 import type { DocFacets, DocFolder, DocListItem, DocSpace, DocStatsOverview, DocStatus } from '@/types';
 
@@ -231,7 +232,8 @@ function DocCardSkeleton() {
 }
 
 export function DocHub() {
-  const { t, isRTL } = useTranslation();
+  const { t: translate, isRTL } = useTranslation();
+  const { formatDateTime, formatRelative, language } = useDateFormat();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -241,6 +243,27 @@ export function DocHub() {
   // write role in this project should still see create/edit affordances here.
   const { canWrite } = useProjectPermissions(projectId);
   const basePath = projectId ? `/projects/${projectId}/docs` : '/docs';
+
+  // Localize numerals (Persian/Arabic-Indic digits) for the active language.
+  const n = useCallback(
+    (value: number, options?: Intl.NumberFormatOptions) => formatNumber(value, language, options),
+    [language],
+  );
+
+  // Wrap the translator so every numeric interpolation is digit-localized too.
+  const t = useCallback(
+    (key: Parameters<typeof translate>[0], params?: Record<string, string | number>) => {
+      if (!params) return translate(key);
+      const localized = Object.fromEntries(
+        Object.entries(params).map(([paramKey, value]) => [
+          paramKey,
+          typeof value === 'number' ? n(value) : value,
+        ]),
+      );
+      return translate(key, localized);
+    },
+    [translate, n],
+  );
 
   const [spaces, setSpaces] = useState<DocSpace[]>([]);
   const [folders, setFolders] = useState<DocFolder[]>([]);
@@ -254,8 +277,13 @@ export function DocHub() {
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('q') || '');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(() => searchParams.get('q') || '');
+  // Deep-links from a doc's tag badge arrive as ?tag=; fold them into the smart
+  // query so the tag filter actually applies.
+  const initialQuery =
+    searchParams.get('q') ||
+    (searchParams.get('tag') ? `tag:"${searchParams.get('tag')}"` : '');
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(initialQuery);
   const [sort, setSort] = useState<'latest_edited' | 'latest_visited' | 'created' | 'title'>('latest_edited');
   const [searchScope, setSearchScope] = useState<'space' | 'all'>(() => (searchParams.get('scope') === 'all' ? 'all' : 'space'));
   const [facets, setFacets] = useState<DocFacets>({ tags: [], classifications: [] });
@@ -454,7 +482,7 @@ export function DocHub() {
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [hasMore]);
+  }, [hasMore, loadingDocs]);
 
   // Server-side facets for search suggestions (no full-doc download).
   useEffect(() => {
@@ -501,6 +529,10 @@ export function DocHub() {
   // UX gating only — the backend enforces permissions. Global spaces are
   // writable only by admins; project spaces follow the project write role.
   const canManageSpace = (space: DocSpace) => (space.project_id == null ? isAdmin : canWrite);
+  // Creating a space follows the space's scope: project spaces need project write,
+  // global spaces are admin-only. Doc creation follows the active space's rule.
+  const canCreateSpace = projectId ? canWrite : isAdmin;
+  const canWriteActiveSpace = activeSpace ? canManageSpace(activeSpace) : canCreateSpace;
 
   const openCreateSpace = () => {
     setEditingSpace(null);
@@ -614,13 +646,13 @@ export function DocHub() {
     if (!newFolderName.trim() || activeSpaceId == null) return;
     try {
       setCreatingFolder(true);
-      const folder = await docsAPI.createFolder({
+      await docsAPI.createFolder({
         space_id: activeSpaceId,
         name: newFolderName.trim(),
       });
       setFolderDialogOpen(false);
       setNewFolderName('');
-      await loadSpaces();
+      await Promise.all([loadSpaces(), loadFolders()]);
       toast({ title: t('success'), description: t('docFolderCreated') });
     } catch (e: any) {
       toast({ title: t('error'), description: e?.response?.data?.detail || t('docFolderCreateFailed'), variant: 'destructive' });
@@ -729,7 +761,7 @@ export function DocHub() {
             onClick={() => navigate(`${basePath}/${doc.project_seq ?? doc.id}`)}
             className="block w-full truncate text-start text-xs text-muted-foreground hover:text-primary"
           >
-            {doc.my_last_visited_at ? t('docVisitedTime', { time: formatRelativeTime(doc.my_last_visited_at) }) : t(`docStatus_${doc.status}` as any)}
+            {doc.my_last_visited_at ? t('docVisitedTime', { time: formatRelative(doc.my_last_visited_at) }) : t(`docStatus_${doc.status}` as any)}
           </button>
         </div>
       ))}
@@ -825,15 +857,15 @@ export function DocHub() {
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-xl border border-border bg-muted/50 p-3">
                     <p className="text-[11px] text-muted-foreground">{t('docStatTotalDocs')}</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{overview.total_docs}</p>
+                    <p className="mt-1 text-2xl font-semibold tabular-nums">{n(overview.total_docs)}</p>
                   </div>
                   <div className="rounded-xl border border-border bg-muted/50 p-3">
                     <p className="text-[11px] text-muted-foreground">{t('docStatTotalViews')}</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{overview.total_views}</p>
+                    <p className="mt-1 text-2xl font-semibold tabular-nums">{n(overview.total_views)}</p>
                   </div>
                   <div className="rounded-xl border border-border bg-muted/50 p-3">
                     <p className="text-[11px] text-muted-foreground">{t('uniqueVisitors')}</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{overview.unique_visitors}</p>
+                    <p className="mt-1 text-2xl font-semibold tabular-nums">{n(overview.unique_visitors)}</p>
                   </div>
                 </div>
 
@@ -847,7 +879,7 @@ export function DocHub() {
                           <div key={status} className="space-y-1">
                             <div className="flex items-center justify-between gap-2 text-xs">
                               <span>{t(`docStatus_${status}` as any)}</span>
-                              <span className="tabular-nums text-muted-foreground">{count}</span>
+                              <span className="tabular-nums text-muted-foreground">{n(count)}</span>
                             </div>
                             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                               <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
@@ -909,7 +941,7 @@ export function DocHub() {
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('docSpaces')}</h2>
             <div className="flex items-center gap-0.5">
-              {canWrite && (
+              {canCreateSpace && (
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={openCreateSpace} title={t('docNewSpace')}>
                   <FolderPlus className="h-4 w-4" />
                 </Button>
@@ -971,7 +1003,7 @@ export function DocHub() {
                           )}
                         </span>
                       </button>
-                      <Badge variant="secondary" className="shrink-0">{space.doc_count}</Badge>
+                      <Badge variant="secondary" className="shrink-0">{n(space.doc_count)}</Badge>
                       {(manageable || canMoveUp || canMoveDown) && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -1085,23 +1117,23 @@ export function DocHub() {
                     </Badge>
                     {activeSpace.published_count > 0 && (
                       <Badge variant="outline" className="hidden gap-1 sm:inline-flex">
-                        {activeSpace.published_count} {t('docStatus_published')}
+                        {n(activeSpace.published_count)} {t('docStatus_published')}
                       </Badge>
                     )}
                     {activeSpace.draft_count > 0 && (
                       <Badge variant="outline" className="hidden gap-1 sm:inline-flex">
-                        {activeSpace.draft_count} {t('docStatus_draft')}
+                        {n(activeSpace.draft_count)} {t('docStatus_draft')}
                       </Badge>
                     )}
                     {activeSpace.archived_count > 0 && (
                       <Badge variant="outline" className="hidden gap-1 sm:inline-flex">
-                        {activeSpace.archived_count} {t('docStatus_archived')}
+                        {n(activeSpace.archived_count)} {t('docStatus_archived')}
                       </Badge>
                     )}
                     {activeSpace.last_doc_updated_at && (
-                      <Badge variant="outline" className="gap-1" title={formatServerDateTime(activeSpace.last_doc_updated_at)}>
+                      <Badge variant="outline" className="gap-1" title={formatDateTime(activeSpace.last_doc_updated_at)}>
                         <Clock className="h-3.5 w-3.5" />
-                        {t('docSpaceLastUpdated', { time: formatRelativeTime(activeSpace.last_doc_updated_at) })}
+                        {t('docSpaceLastUpdated', { time: formatRelative(activeSpace.last_doc_updated_at) })}
                       </Badge>
                     )}
                   </div>
@@ -1257,7 +1289,7 @@ export function DocHub() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              {canWrite && (
+              {canWriteActiveSpace && (
                 <Button className="h-10 shrink-0" disabled={activeSpaceId == null} onClick={() => setDocDialogOpen(true)}>
                   <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   {t('docNewDoc')}
@@ -1348,7 +1380,7 @@ export function DocHub() {
               <p className="text-sm text-muted-foreground">
                 {t(spaces.length === 0 ? 'docNoSpacesYet' : 'docSelectSpace')}
               </p>
-              {spaces.length === 0 && (projectId != null ? canWrite : isAdmin) && (
+              {spaces.length === 0 && canCreateSpace && (
                 <Button className="mt-4" size="sm" onClick={openCreateSpace}>
                   <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   {t('docNewSpace')}
@@ -1359,7 +1391,7 @@ export function DocHub() {
             <div className="rounded-lg border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
               <FileText className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">{t('docNoneInSpace')}</p>
-              {canWrite && (
+              {canWriteActiveSpace && (
                 <Button className="mt-4" size="sm" disabled={activeSpaceId == null} onClick={() => setDocDialogOpen(true)}>
                   <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
                   {t('docNewDoc')}
@@ -1415,9 +1447,9 @@ export function DocHub() {
                           })()}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-center text-muted-foreground">{d.current_version}</td>
-                      <td className="hidden px-3 py-2 text-end text-xs text-muted-foreground sm:table-cell">{d.updated_at ? formatServerDateTime(d.updated_at) : '-'}</td>
-                      {isAdmin && <td className="px-3 py-2 text-center text-muted-foreground"><span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{d.view_count ?? 0}</span></td>}
+                      <td className="px-3 py-2 text-center text-muted-foreground">{n(d.current_version)}</td>
+                      <td className="hidden px-3 py-2 text-end text-xs text-muted-foreground sm:table-cell">{d.updated_at ? formatDateTime(d.updated_at) : '-'}</td>
+                      {isAdmin && <td className="px-3 py-2 text-center text-muted-foreground"><span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{n(d.view_count ?? 0)}</span></td>}
                       <td className="px-3 py-2 text-center" onClick={(event) => event.stopPropagation()}>{renderDocPinButton(d)}</td>
                     </tr>
                   ))}
@@ -1440,9 +1472,9 @@ export function DocHub() {
                     )}
                     {d.classification && <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">{d.classification}</Badge>}
                     <Badge className={`hidden shrink-0 border-0 sm:inline-flex ${statusTone[d.status] || statusTone.draft}`}>{t(`docStatus_${d.status}` as any)}</Badge>
-                    {isAdmin && <span className="hidden shrink-0 items-center gap-1 text-xs text-muted-foreground sm:inline-flex"><Eye className="h-3 w-3" />{d.view_count ?? 0}</span>}
-                    {d.updated_at && <span className="hidden shrink-0 text-xs text-muted-foreground md:inline" title={formatServerDateTime(d.updated_at)}>{formatRelativeTime(d.updated_at)}</span>}
-                    <span className="shrink-0 text-xs text-muted-foreground">v{d.current_version}</span>
+                    {isAdmin && <span className="hidden shrink-0 items-center gap-1 text-xs text-muted-foreground sm:inline-flex"><Eye className="h-3 w-3" />{n(d.view_count ?? 0)}</span>}
+                    {d.updated_at && <span className="hidden shrink-0 text-xs text-muted-foreground md:inline" title={formatDateTime(d.updated_at)}>{formatRelative(d.updated_at)}</span>}
+                    <span className="shrink-0 text-xs text-muted-foreground">v{n(d.current_version)}</span>
                   </button>
                   {renderDocPinButton(d)}
                 </li>
@@ -1495,15 +1527,15 @@ export function DocHub() {
                       <span className="flex-1" />
                       {isAdmin && (
                         <span className="inline-flex items-center gap-1" title={t('views')}>
-                          <Eye className="h-3 w-3" />{d.view_count ?? 0}
+                          <Eye className="h-3 w-3" />{n(d.view_count ?? 0)}
                         </span>
                       )}
                       {d.updated_at && (
-                        <span className="inline-flex items-center gap-1" title={formatServerDateTime(d.updated_at)}>
-                          <Clock className="h-3 w-3" />{formatRelativeTime(d.updated_at)}
+                        <span className="inline-flex items-center gap-1" title={formatDateTime(d.updated_at)}>
+                          <Clock className="h-3 w-3" />{formatRelative(d.updated_at)}
                         </span>
                       )}
-                      <span>v{d.current_version}</span>
+                      <span>v{n(d.current_version)}</span>
                     </div>
                   </div>
                 </li>

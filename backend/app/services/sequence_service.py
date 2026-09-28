@@ -209,7 +209,11 @@ def _doc_before_update(_mapper, connection, target):
     new_project_id = connection.execute(
         select(spaces.c.project_id).where(spaces.c.id == space_id)
     ).scalar()
-    old_project_id = getattr(target, "project_id", None)
+    # The CRUD layer may have already written ``project_id`` before the flush, so
+    # read the pre-update value from the attribute history rather than the
+    # (possibly already-updated) current value.
+    project_history = attributes.get_history(target, "project_id")
+    old_project_id = project_history.deleted[0] if project_history.deleted else new_project_id
     target.project_id = new_project_id
     if new_project_id is not None and new_project_id != old_project_id:
         target.project_seq = _allocate_seq(connection, target, new_project_id)

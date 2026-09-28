@@ -45,13 +45,13 @@ import { ContentEditor } from '@/components/ui/content-editor';
 import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { docsAPI, projectAssignmentsAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime } from '@/utils/datetime';
 import type { Doc, DocDir, DocFolder, DocListItem, DocSpace, DocStatus } from '@/types';
 
 const STATUSES: DocStatus[] = ['draft', 'published', 'archived'];
@@ -72,6 +72,7 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
 export function DocEditor() {
   const { t, isRTL } = useTranslation();
+  const { formatRelative } = useDateFormat();
   const { toast } = useToast();
   const navigate = useNavigate();
   const { docId, projectId } = useParams<{ docId: string; projectId?: string }>();
@@ -321,7 +322,7 @@ export function DocEditor() {
     return <div className="p-8 text-center text-muted-foreground">{t('docNotFound')}</div>;
   }
 
-  const savedAgo = lastSavedAt == null ? '' : formatRelativeTime(lastSavedAt);
+  const savedAgo = lastSavedAt == null ? '' : formatRelative(lastSavedAt);
   const saveIndicator = () => {
     switch (saveState) {
       case 'saving': return <span className="flex items-center gap-1 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />{t('docSaving')}</span>;
