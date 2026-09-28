@@ -56,7 +56,10 @@ def register_section_step_routes(app):
         if section_ids:
             tc_counts = (
                 db.query(models.TestCase.section_id, func.count(models.TestCase.id))
-                .filter(models.TestCase.section_id.in_(section_ids))
+                .filter(
+                    models.TestCase.section_id.in_(section_ids),
+                    ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
+                )
                 .group_by(models.TestCase.section_id)
                 .all()
             )

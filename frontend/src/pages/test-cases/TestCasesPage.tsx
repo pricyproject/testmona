@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { aiManagerAPI, AIManagerStatus, api, getApiErrorMessage, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI, environmentsAPI } from '@/lib/api';
+import { aiManagerAPI, AIManagerStatus, api, getApiErrorMessage, testCasesAPI, testSuitesAPI, sectionsAPI, importExportAPI, userPreferencesAPI, requirementsAPI, testRunsAPI, testResultsAPI, sharedStepsAPI } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -94,7 +94,6 @@ import {
   Loader2,
   Tag,
   Link2,
-  Server,
   SlidersHorizontal,
   Sparkles,
   ListChecks,
@@ -187,7 +186,6 @@ export function TestCases() {
     preconditions: string;
     steps: string;
     expected_result: string;
-    environment: string;
     is_multistep: boolean;
   }>({
     title: '',
@@ -199,7 +197,6 @@ export function TestCases() {
     preconditions: '',
     steps: '',
     expected_result: '',
-    environment: '',
     is_multistep: false
   });
 
@@ -223,7 +220,6 @@ export function TestCases() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const testTypeRef = useRef<HTMLButtonElement>(null);
   const priorityRef = useRef<HTMLButtonElement>(null);
-  const environmentRef = useRef<HTMLButtonElement>(null);
   const customFieldRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   // Requirements linking state
@@ -237,13 +233,6 @@ export function TestCases() {
   const [isSharedStepsDialogOpen, setIsSharedStepsDialogOpen] = useState(false);
   const [sharedStepSearchQuery, setSharedStepSearchQuery] = useState('');
   const [loadingSharedSteps, setLoadingSharedSteps] = useState(false);
-
-  // Environment options - fetched from API
-  const [environments, setEnvironments] = useState<Array<{id: string, name: string, description: string}>>([]);
-  const [isEnvironmentsLoading, setIsEnvironmentsLoading] = useState(false);
-  const [isCreatingEnvironment, setIsCreatingEnvironment] = useState(false);
-  const [newEnvironmentName, setNewEnvironmentName] = useState('');
-  const [newEnvironmentDescription, setNewEnvironmentDescription] = useState('');
 
   // Enum options - fetched from API
   const [priorityOptions, setPriorityOptions] = useState<Array<{value: string, label: string}>>([]);
@@ -315,6 +304,9 @@ export function TestCases() {
   // loads so we don't bake any project's actual ids into source.
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['all']));
   const [sectionsPanelCollapsed, setSectionsPanelCollapsed] = useState(true);
+  // Tracks the last `?section=` deep link already applied, so switching projects
+  // can re-apply the same section id instead of being treated as a no-op.
+  const appliedUrlSectionRef = useRef<string | null>(null);
 
   // Move test case dialog state
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
@@ -610,89 +602,6 @@ export function TestCases() {
     }
   };
 
-  // Function to create a new environment inline
-  const handleCreateEnvironment = async () => {
-    if (!currentProjectId) {
-      toast({
-        title: t('error'),
-        description: t('noProjectSelected'),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      setIsCreatingEnvironment(true);
-      await environmentsAPI.create({
-        name: newEnvironmentName,
-        description: newEnvironmentDescription || `${newEnvironmentName} environment`,
-        environment_type: 'testing',
-        project_id: currentProjectId
-      });
-
-      const data = await environmentsAPI.getAll(currentProjectId);
-
-      const transformedEnvironments = data.map((env: any) => ({
-        id: env.id.toString(),
-        name: env.name,
-        description: env.description || `${env.name} environment`
-      }));
-
-      setEnvironments(transformedEnvironments);
-
-      // Select the newly created environment
-      const newEnv = transformedEnvironments.find((e: any) => e.name === newEnvironmentName);
-      if (newEnv) {
-        handleFieldChange('environment', newEnv.id);
-      }
-      setNewEnvironmentName('');
-      setNewEnvironmentDescription('');
-
-      toast({
-        title: t('success'),
-        description: t('environmentCreatedSuccessfully', {name: newEnvironmentName}),
-      });
-    } catch (error) {
-      console.error('Failed to create environment:', error);
-      toast({
-        title: t('error'),
-        description: t('failedToCreateEnvironment'),
-        variant: "destructive",
-      });
-    } finally {
-      setIsCreatingEnvironment(false);
-    }
-  };
-
-  // Load environments from API
-  useEffect(() => {
-    const loadEnvironments = async () => {
-      if (!currentProjectId) {
-        setEnvironments([]);
-        setIsEnvironmentsLoading(false);
-        return;
-      }
-
-      try {
-        setIsEnvironmentsLoading(true);
-        const data = await environmentsAPI.getAll(currentProjectId);
-        const transformedEnvironments = data.map((env: any) => ({
-          id: env.id.toString(),
-          name: env.name,
-          description: env.description || `${env.name} environment`
-        }));
-        setEnvironments(transformedEnvironments);
-      } catch (error) {
-        console.error('Failed to load environments:', error);
-        setEnvironments([]);
-      } finally {
-        setIsEnvironmentsLoading(false);
-      }
-    };
-
-    loadEnvironments();
-  }, [currentProjectId]);
-
   // Optimized modal opening with performance tracking
   const handleOpenModal = () => {
     const startTime = performance.now();
@@ -911,6 +820,7 @@ export function TestCases() {
       // aren't in the new project and would silently land in skipped_ids.
       setSelectedTestCases([]);
       setSelectAll(false);
+      appliedUrlSectionRef.current = null;
 
       // The test-case list is keyed on the project in react-query and refetches
       // itself when the key changes, so only the suites need loading here.
@@ -934,7 +844,6 @@ export function TestCases() {
   // Honour `?section=<id>` deep links once the tree is in: the parameter already
   // drives the import dialog, so a link that names a section should scope the
   // list to it too rather than silently landing on "all".
-  const appliedUrlSectionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!urlSectionId || mockSections.length === 0) return;
     if (appliedUrlSectionRef.current === urlSectionId) return;
@@ -1077,7 +986,7 @@ export function TestCases() {
 
         {showDropIndicator && (
           <div className="absolute top-1 right-1 pointer-events-none z-10 bg-blue-500 text-white text-xs px-2 py-0.5 rounded shadow-lg animate-pulse">
-            📥 Drop to move
+            📥 {t('dropToMove')}
           </div>
         )}
       </div>
@@ -1183,7 +1092,7 @@ export function TestCases() {
               {hasSubsections && (
                 <span
                   className="text-[11px] text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-full cursor-help"
-                  title={`Total including subsections: ${cumulativeCount}`}
+                  title={t('sectionTotalTooltip', { count: cumulativeCount })}
                 >
                   {cumulativeCount}
                 </span>
@@ -1194,7 +1103,7 @@ export function TestCases() {
                     ? 'bg-blue-600 text-white font-medium'
                     : 'text-gray-400 bg-gray-100 group-hover:bg-gray-200 dark:bg-gray-800'
                 }`}
-                title={`Direct test cases in this section: ${directCount}`}
+                title={t('sectionDirectTooltip', { count: directCount })}
               >
                 {directCount}
               </span>
@@ -1839,29 +1748,10 @@ export function TestCases() {
     req.reference.toLowerCase().includes(requirementSearchQuery.toLowerCase())
   );
 
-  // Proper state cleanup when modal closes
-  const handleCloseModal = () => {
-    // Check for unsaved changes
-    const hasChanges =
-      testCaseForm.title.trim() !== '' ||
-      testCaseForm.description.trim() !== '' ||
-      testCaseForm.reference.trim() !== '' ||
-      testCaseForm.tags.length > 0 ||
-      testCaseForm.test_type !== '' ||
-      testCaseForm.preconditions.trim() !== '' ||
-      testCaseForm.steps.trim() !== '' ||
-      testCaseForm.expected_result.trim() !== '' ||
-      testCaseForm.environment.trim() !== '' ||
-      testSteps.length > 0 ||
-      linkedRequirements.length > 0 ||
-      Object.keys(customFieldValues).length > 0;
-
-    if (hasChanges) {
-      setShowUnsavedDialog(true);
-      return;
-    }
-
-    // Reset all form state with default priority from database
+  // Reset the create form (and multistep steps) to pristine defaults. Reused by
+  // close/discard and after a successful create so no stale steps or field
+  // values leak into the next case.
+  const resetTestCaseForm = () => {
     const defaultPriority = dbPriorities.find((p: any) => p.is_default);
     const defaultPriorityValue = defaultPriority
       ? defaultPriority.name.toLowerCase()
@@ -1877,47 +1767,46 @@ export function TestCases() {
       preconditions: '',
       steps: '',
       expected_result: '',
-      environment: '',
       is_multistep: false
     });
+    setTestSteps([]);
     setCustomFieldValues({});
     setLinkedRequirements([]);
     setValidationErrors({});
-    setIsDialogOpen(false);
     setHasUnsavedChanges(false);
-
-    // Clear any pending timeouts or async operations
     setIsModalOpening(false);
+  };
+
+  // Proper state cleanup when modal closes
+  const handleCloseModal = () => {
+    // Check for unsaved changes
+    const hasChanges =
+      testCaseForm.title.trim() !== '' ||
+      testCaseForm.description.trim() !== '' ||
+      testCaseForm.reference.trim() !== '' ||
+      testCaseForm.tags.length > 0 ||
+      testCaseForm.test_type !== '' ||
+      testCaseForm.preconditions.trim() !== '' ||
+      testCaseForm.steps.trim() !== '' ||
+      testCaseForm.expected_result.trim() !== '' ||
+      testSteps.length > 0 ||
+      linkedRequirements.length > 0 ||
+      Object.keys(customFieldValues).length > 0;
+
+    if (hasChanges) {
+      setShowUnsavedDialog(true);
+      return;
+    }
+
+    resetTestCaseForm();
+    setIsDialogOpen(false);
   };
 
   const handleUnsavedConfirm = (discard: boolean) => {
     setShowUnsavedDialog(false);
     if (discard) {
-      // Reset all form state with default priority from database
-      const defaultPriority = dbPriorities.find((p: any) => p.is_default);
-      const defaultPriorityValue = defaultPriority
-        ? defaultPriority.name.toLowerCase()
-        : (priorityOptions.length > 0 ? priorityOptions[0].value : 'medium');
-
-      setTestCaseForm({
-        title: '',
-        description: '',
-        reference: '',
-        tags: [],
-        test_type: '',
-        priority: defaultPriorityValue,
-        preconditions: '',
-        steps: '',
-        expected_result: '',
-        environment: '',
-        is_multistep: false
-      });
-      setCustomFieldValues({});
-      setLinkedRequirements([]);
-      setValidationErrors({});
+      resetTestCaseForm();
       setIsDialogOpen(false);
-      setHasUnsavedChanges(false);
-      setIsModalOpening(false);
     }
   };
 
@@ -1974,11 +1863,9 @@ export function TestCases() {
       expected_result: testCaseForm.expected_result,
       test_type: testCaseForm.test_type,
       priority: testCaseForm.priority as 'low' | 'medium' | 'high' | 'critical',
-      environment: testCaseForm.environment, // Add environment field
       status: 'active' as const,
       test_suite_id: currentTestSuiteId,
       section_id: sectionId, // Add the selected section
-      requirements: linkedRequirements, // Add linked requirements
       is_multistep: testCaseForm.is_multistep, // Add multistep flag
       test_steps: testCaseForm.is_multistep ? testSteps : undefined // Add steps if multistep
     };
@@ -1999,27 +1886,34 @@ export function TestCases() {
         await Promise.all(customFieldValueRequests);
       }
 
-      // Reset form fields
-      setTestCaseForm({
-        title: '',
-        description: '',
-        reference: '',
-        tags: [],
-        test_type: '',
-        priority: 'medium',
-        preconditions: '',
-        steps: '',
-        expected_result: '',
-        environment: '',
-        is_multistep: false
-      });
-      setTestSteps([]);
-      setCustomFieldValues({});
-      setLinkedRequirements([]);
-      setValidationErrors({});
+      // The create schema doesn't carry requirement links; persist them against
+      // the freshly-created case so the dialog's selections aren't silently lost.
+      // Best-effort: a link failure must not discard the case that was created.
+      const linkedRequirementIds = linkedRequirements
+        .map((requirement) => Number(requirement.id))
+        .filter((id) => Number.isInteger(id) && id > 0);
+      if (linkedRequirementIds.length > 0) {
+        try {
+          await Promise.all(
+            linkedRequirementIds.map((requirementId) =>
+              requirementsAPI.bulkUpdateTestCases(requirementId, {
+                test_case_ids: [createdTestCase.id],
+                action: 'link',
+              })
+            )
+          );
+        } catch (linkError) {
+          console.error('Failed to link requirements to the new test case:', linkError);
+          toast({
+            title: t('warning'),
+            description: t('failedToLinkRequirements'),
+            variant: 'destructive',
+          });
+        }
+      }
+
+      resetTestCaseForm();
       setIsDialogOpen(false);
-      setHasUnsavedChanges(false);
-      setIsModalOpening(false);
 
       toast({
         title: t('success'),
@@ -2303,6 +2197,18 @@ export function TestCases() {
     }
   };
 
+  // Toggle direction when re-clicking the active column, otherwise start the
+  // newly chosen column ascending (instead of inheriting the previous column's
+  // direction, which made a fresh column sort backwards half the time).
+  const toggleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
   const confirmBulkDelete = async () => {
     if (selectedTestCases.length === 0) return;
 
@@ -2413,7 +2319,6 @@ export function TestCases() {
       preconditions: testCase.preconditions || '',
       steps: testCase.steps || '',
       expected_result: testCase.expected_result || '',
-      environment: '', // Environment not available in TestCase type yet
       is_multistep: testCase.is_multistep || false
     });
 
@@ -2663,20 +2568,7 @@ export function TestCases() {
 
       setEditDialogOpen(false);
       setEditingTestCase(null);
-      setTestCaseForm({
-        title: '',
-        description: '',
-        reference: '',
-        tags: [],
-        test_type: '',
-        priority: 'medium',
-        preconditions: '',
-        steps: '',
-        expected_result: '',
-        environment: '',
-        is_multistep: false
-      });
-      setTestSteps([]);
+      resetTestCaseForm();
 
       toast({
         title: t('success'),
@@ -2943,7 +2835,7 @@ export function TestCases() {
             </div>
           </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={loadTestCases} title="Refresh test cases">
+          <Button variant="outline" size="sm" onClick={loadTestCases} title={t('refreshTestCases')}>
             <RefreshCw className="h-4 w-4" />
           </Button>
           {currentTestSuiteId && (
@@ -3043,30 +2935,10 @@ export function TestCases() {
             </Dialog>
           ) : (
             <Dialog open={isDialogOpen} onOpenChange={(open) => {
-            if (!open) {
-              // Check for unsaved changes before closing
-              const hasChanges =
-                testCaseForm.title.trim() !== '' ||
-                testCaseForm.description.trim() !== '' ||
-                testCaseForm.reference.trim() !== '' ||
-                testCaseForm.tags.length > 0 ||
-                testCaseForm.test_type !== '' ||
-                testCaseForm.preconditions.trim() !== '' ||
-                testCaseForm.steps.trim() !== '' ||
-                testCaseForm.expected_result.trim() !== '' ||
-                testCaseForm.environment.trim() !== '' ||
-                testSteps.length > 0 ||
-                linkedRequirements.length > 0 ||
-                Object.keys(customFieldValues).length > 0;
-
-              if (hasChanges) {
-                setShowUnsavedDialog(true);
-                return; // Prevent dialog from closing
-              }
-
-              handleCloseModal();
-            } else {
+            if (open) {
               handleOpenModal();
+            } else {
+              handleCloseModal();
             }
           }}>
             {canWrite && (
@@ -3266,77 +3138,6 @@ export function TestCases() {
                         </Select>
                         {validationErrors.priority && (
                           <p className="text-red-500 text-xs">{validationErrors.priority}</p>
-                        )}
-                      </div>
-
-                      {/* Environment lives alongside the compact selects */}
-                      <div className="space-y-1.5">
-                        <Label htmlFor="environment" className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                          <Server className="h-3.5 w-3.5" /> {t('environmentLabel')}
-                        </Label>
-                        {isEnvironmentsLoading ? (
-                          <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded-md animate-pulse"></div>
-                        ) : (
-                          <Select value={testCaseForm.environment} onValueChange={(value) => handleFieldChange('environment', value)}>
-                            <SelectTrigger>
-                              <SelectValue placeholder={t('selectTestEnvironment')} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {environments.length === 0 && !isEnvironmentsLoading ? (
-                                <div className="p-2">
-                                  <div className="text-sm text-gray-500 mb-2">{t('noEnvironmentsAvailable')}</div>
-                                  {!isCreatingEnvironment ? (
-                                    <div>
-                                      <Input
-                                        placeholder={t('enterNewEnvironmentName')}
-                                        value={newEnvironmentName}
-                                        onChange={(e) => setNewEnvironmentName(e.target.value)}
-                                        className="mb-2"
-                                      />
-                                      <Input
-                                        placeholder={t('enterDescriptionOptional')}
-                                        value={newEnvironmentDescription}
-                                        onChange={(e) => setNewEnvironmentDescription(e.target.value)}
-                                        className="mb-2"
-                                      />
-                                      <Button
-                                        onClick={handleCreateEnvironment}
-                                        disabled={!newEnvironmentName.trim()}
-                                        size="sm"
-                                        className="w-full"
-                                      >
-                                        <Plus className="h-4 w-4 me-2" />
-                                        {t('createNewEnvironment')}
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center justify-center py-2">
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 me-2"></div>
-                                      {t('creating')}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                environments.map((env) => (
-                                  <SelectItem key={env.id} value={env.id}>
-                                    <div className="flex items-center gap-2">
-                                      <div className={`w-2 h-2 rounded-full ${
-                                        env.name.toLowerCase() === 'production' ? 'bg-red-500' :
-                                        env.name.toLowerCase() === 'staging' ? 'bg-yellow-500' :
-                                        env.name.toLowerCase() === 'qa' ? 'bg-purple-500' :
-                                        env.name.toLowerCase() === 'development' ? 'bg-blue-500' :
-                                        'bg-gray-500'
-                                      }`} />
-                                      <div>
-                                        <div className="font-medium">{env.name}</div>
-                                        <div className="text-xs text-gray-500">{env.description}</div>
-                                      </div>
-                                    </div>
-                                  </SelectItem>
-                                ))
-                              )}
-                            </SelectContent>
-                          </Select>
                         )}
                       </div>
                     </div>
@@ -3996,7 +3797,7 @@ export function TestCases() {
                     if (section.test_suite_id) {
                       if (!sectionsBySuite.has(section.test_suite_id)) {
                         sectionsBySuite.set(section.test_suite_id, {
-                          name: section.test_suite_name || 'Unknown Suite',
+                          name: section.test_suite_name || t('unknownSuite'),
                           sections: [],
                           matchesSuite: false,
                         });
@@ -4324,12 +4125,12 @@ export function TestCases() {
                           />
                         </TableHead>
                         <TableHead>
-                          <Button variant="ghost" size="sm" onClick={() => { setSortField('id'); setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); }}>
+                          <Button variant="ghost" size="sm" onClick={() => toggleSort('id')}>
                             ID {sortField === 'id' && (sortDirection === 'asc' ? <ArrowUp className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" /> : <ArrowDown className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" />)}
                           </Button>
                         </TableHead>
                         <TableHead>
-                          <Button variant="ghost" size="sm" onClick={() => { setSortField('title'); setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); }}>
+                          <Button variant="ghost" size="sm" onClick={() => toggleSort('title')}>
                             {t('title')} {sortField === 'title' && (sortDirection === 'asc' ? <ArrowUp className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" /> : <ArrowDown className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" />)}
                           </Button>
                         </TableHead>
@@ -4337,7 +4138,7 @@ export function TestCases() {
                         <TableHead>{t('priority')}</TableHead>
                         <TableHead>{t('tags')}</TableHead>
                         <TableHead>
-                          <Button variant="ghost" size="sm" onClick={() => { setSortField('created_at'); setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc'); }}>
+                          <Button variant="ghost" size="sm" onClick={() => toggleSort('created_at')}>
                             {t('created')} {sortField === 'created_at' && (sortDirection === 'asc' ? <ArrowUp className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" /> : <ArrowDown className="ml-1 rtl:ml-0 rtl:mr-1 h-3 w-3" />)}
                           </Button>
                         </TableHead>
@@ -4568,7 +4369,7 @@ export function TestCases() {
               </Select>
             </div>
             <div className="text-sm text-gray-500">
-              <p>{t('currentSection')}: <span className="font-medium">{selectedTestCaseToMove?.section}</span></p>
+              <p>{t('currentSection')}: <span className="font-medium">{selectedTestCaseToMove?.section?.name || t('unsectioned')}</span></p>
               <p>{t('availableSections')}: <span className="font-medium">{t('mainSectionsCount', { count: mockSections.length })}</span></p>
             </div>
           </div>

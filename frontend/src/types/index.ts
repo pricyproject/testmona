@@ -64,7 +64,7 @@ export interface TestCase {
   status: 'active' | 'inactive' | 'archived';
   test_suite_id: number;
   section_id?: number;
-  section?: string;
+  section?: { id: number; name: string } | null;
   tags?: Tag[];
   reference?: string;
   order_index?: number;

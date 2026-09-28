@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/hooks/useTranslation';
 
 export interface TagLike {
   name: string;
@@ -27,6 +28,7 @@ export function TagBadge({
   className?: string;
   title?: string;
 }) {
+  const { t } = useTranslation();
   const color = tag.color || DEFAULT_COLOR;
   return (
     <span
@@ -59,7 +61,7 @@ export function TagBadge({
             e.stopPropagation();
             onRemove();
           }}
-          aria-label={`Remove ${tag.name}`}
+          aria-label={`${t('remove')} ${tag.name}`}
           className="-mr-0.5 ml-0.5 rounded-full p-0.5 hover:bg-black/10 rtl:-ml-0.5 rtl:mr-0.5"
         >
           <X className="h-3 w-3" />
