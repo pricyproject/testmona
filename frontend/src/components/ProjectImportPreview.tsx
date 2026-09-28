@@ -11,9 +11,10 @@ import {
   ChevronDown, 
   ChevronUp,
   FileText,
-  Download,
   Upload
 } from 'lucide-react';
+import { useTranslation } from '@/hooks/useTranslation';
+import { formatNumber } from '@/utils/datetime';
 
 interface ProjectImportPreviewProps {
   file: File;
@@ -23,6 +24,8 @@ interface ProjectImportPreviewProps {
 }
 
 export function ProjectImportPreview({ file, validationResult, onConfirm, onCancel }: ProjectImportPreviewProps) {
+  const { t, isRTL, language } = useTranslation();
+  const n = (value: number) => formatNumber(value, language);
   const [mergeStrategy, setMergeStrategy] = useState<'skip' | 'update' | 'merge'>('skip');
   const [partialImport, setPartialImport] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -31,7 +34,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [isImporting, setIsImporting] = useState(false);
 
-  const { preview_data, conflicts, total_rows, valid_rows, invalid_rows, errors, warnings } = validationResult;
+  const { preview_data, conflicts, total_rows, valid_rows, invalid_rows } = validationResult;
 
   // Auto-select all valid rows by default
   useEffect(() => {
@@ -87,23 +90,28 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
   };
 
   const mergeStrategyDescriptions = {
-    skip: 'Skip existing projects and only import new ones',
-    update: 'Update existing projects with data from import file',
-    merge: 'Create new projects with suffix (e.g., "Project (imported)")'
+    skip: t('importStrategySkipDesc'),
+    update: t('importStrategyUpdateDesc'),
+    merge: t('importStrategyMergeDesc'),
+  };
+  const mergeStrategyLabels = {
+    skip: t('importStrategySkip'),
+    update: t('importStrategyUpdate'),
+    merge: t('importStrategyMerge'),
   };
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
+    <div className="space-y-6 max-w-6xl mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="text-center space-y-2">
         <div className="flex items-center justify-center gap-3 mb-4">
           <div className="p-3 bg-blue-100 rounded-full">
             <FileText className="h-6 w-6 text-blue-600" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Project Import Preview</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t('projectImportPreviewTitle')}</h2>
         </div>
         <p className="text-gray-600 max-w-2xl mx-auto">
-          Review the project data before importing. Configure conflict resolution and select which rows to import.
+          {t('projectImportPreviewDesc')}
         </p>
       </div>
 
@@ -111,29 +119,29 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
       <div className="grid grid-cols-4 gap-4">
         <Card className="border-0 shadow-md bg-linear-to-br from-blue-50 to-blue-100">
           <CardContent className="p-4 text-center">
-            <div className="text-3xl font-bold text-blue-700 mb-1">{total_rows}</div>
-            <div className="text-sm font-medium text-blue-600">Total Rows</div>
+            <div className="text-3xl font-bold text-blue-700 mb-1">{n(total_rows)}</div>
+            <div className="text-sm font-medium text-blue-600">{t('totalRowsLabel')}</div>
           </CardContent>
         </Card>
         
         <Card className="border-0 shadow-md bg-linear-to-br from-green-50 to-green-100">
           <CardContent className="p-4 text-center">
-            <div className="text-3xl font-bold text-green-700 mb-1">{valid_rows}</div>
-            <div className="text-sm font-medium text-green-600">Valid Rows</div>
+            <div className="text-3xl font-bold text-green-700 mb-1">{n(valid_rows)}</div>
+            <div className="text-sm font-medium text-green-600">{t('validRows')}</div>
           </CardContent>
         </Card>
         
         <Card className="border-0 shadow-md bg-linear-to-br from-red-50 to-red-100">
           <CardContent className="p-4 text-center">
-            <div className="text-3xl font-bold text-red-700 mb-1">{invalid_rows}</div>
-            <div className="text-sm font-medium text-red-600">Invalid Rows</div>
+            <div className="text-3xl font-bold text-red-700 mb-1">{n(invalid_rows)}</div>
+            <div className="text-sm font-medium text-red-600">{t('invalidRows')}</div>
           </CardContent>
         </Card>
         
         <Card className="border-0 shadow-md bg-linear-to-br from-yellow-50 to-yellow-100">
           <CardContent className="p-4 text-center">
-            <div className="text-3xl font-bold text-yellow-700 mb-1">{conflicts.length}</div>
-            <div className="text-sm font-medium text-yellow-600">Conflicts</div>
+            <div className="text-3xl font-bold text-yellow-700 mb-1">{n(conflicts.length)}</div>
+            <div className="text-sm font-medium text-yellow-600">{t('conflictsLabel')}</div>
           </CardContent>
         </Card>
       </div>
@@ -143,9 +151,9 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
         <Alert className="border-yellow-200 bg-yellow-50">
           <AlertTriangle className="h-4 w-4 text-yellow-600" />
           <AlertDescription className="text-yellow-800">
-            <div className="font-semibold mb-2">Conflicts Detected</div>
+            <div className="font-semibold mb-2">{t('conflictsDetectedTitle')}</div>
             <p className="text-sm mb-3">
-              {conflicts.length} project(s) already exist. Choose how to handle these conflicts:
+              {t('conflictsAlreadyExist', { count: n(conflicts.length) })}
             </p>
             <div className="space-y-2">
               {['skip', 'update', 'merge'].map((strategy) => (
@@ -155,7 +163,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
                     className="mt-0.5"
                   />
                   <div className="flex-1">
-                    <div className="font-medium capitalize">{strategy}</div>
+                    <div className="font-medium">{mergeStrategyLabels[strategy as keyof typeof mergeStrategyLabels]}</div>
                     <div className="text-xs text-gray-600">{mergeStrategyDescriptions[strategy as keyof typeof mergeStrategyDescriptions]}</div>
                   </div>
                 </div>
@@ -172,14 +180,14 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
             checked={showOnlyConflicts}
             onCheckedChange={(checked) => checked !== "indeterminate" && setShowOnlyConflicts(checked)}
           />
-          Show only conflicts
+          {t('showOnlyConflicts')}
         </label>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
             checked={showOnlyInvalid}
             onCheckedChange={(checked) => checked !== "indeterminate" && setShowOnlyInvalid(checked)}
           />
-          Show only invalid
+          {t('showOnlyInvalid')}
         </label>
       </div>
 
@@ -188,9 +196,9 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
         <CardHeader className="bg-linear-to-r from-gray-50 to-gray-100 border-b">
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-lg">Data Preview</CardTitle>
+              <CardTitle className="text-lg">{t('dataPreview')}</CardTitle>
               <p className="text-sm text-gray-600">
-                Showing {filteredData.length} of {total_rows} rows
+                {t('importPreviewShowingRows', { shown: n(filteredData.length), total: n(total_rows) })}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -199,7 +207,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
                 size="sm"
                 onClick={toggleSelectAll}
               >
-                {selectedRows.size === filteredData.filter((r: any) => r.valid).length ? 'Deselect All' : 'Select All Valid'}
+                {selectedRows.size === filteredData.filter((r: any) => r.valid).length ? t('deselectAll') : t('selectAllValid')}
               </Button>
             </div>
           </div>
@@ -254,15 +262,15 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-900">Row {row.row}</span>
+                        <span className="font-semibold text-gray-900">{t('row')} {n(row.row)}</span>
                         {row.has_conflict && (
                           <Badge variant="outline" className="bg-yellow-100 text-yellow-800 border-yellow-300">
-                            Conflict
+                            {t('conflictLabel')}
                           </Badge>
                         )}
                         {!row.valid && (
                           <Badge variant="destructive">
-                            Invalid
+                            {t('invalidLabel')}
                           </Badge>
                         )}
                       </div>
@@ -281,7 +289,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
 
                     {/* Summary */}
                     <div className="text-sm text-gray-700 mb-2">
-                      <span className="font-medium">Project:</span> {row.data.name || 'N/A'}
+                      <span className="font-medium">{t('project')}:</span> {row.data.name || t('notAvailable')}
                     </div>
 
                     {/* Errors/Warnings */}
@@ -329,9 +337,9 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
           <AlertDescription className="text-blue-800">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-semibold mb-1">Partial Import Available</div>
+                <div className="font-semibold mb-1">{t('partialImportAvailable')}</div>
                 <p className="text-sm">
-                  Enable partial import to skip invalid rows and import only valid data.
+                  {t('partialImportAvailableDesc')}
                 </p>
               </div>
               <label className="flex items-center gap-2 cursor-pointer">
@@ -339,7 +347,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
                   checked={partialImport}
                   onCheckedChange={(checked) => checked !== "indeterminate" && setPartialImport(checked)}
                 />
-                <span className="text-sm font-medium">Enable Partial Import</span>
+                <span className="text-sm font-medium">{t('enablePartialImport')}</span>
               </label>
             </div>
           </AlertDescription>
@@ -349,7 +357,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
       {/* Action Buttons */}
       <div className="flex justify-between items-center pt-4">
         <div className="text-sm text-gray-600">
-          {selectedRows.size} row(s) selected for import
+          {t('rowsSelectedForImport', { count: n(selectedRows.size) })}
         </div>
         <div className="flex gap-3">
           <Button
@@ -357,7 +365,7 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
             onClick={onCancel}
             disabled={isImporting}
           >
-            Cancel
+            {t('cancel')}
           </Button>
           <Button
             onClick={handleConfirm}
@@ -366,13 +374,13 @@ export function ProjectImportPreview({ file, validationResult, onConfirm, onCanc
           >
             {isImporting ? (
               <>
-                <Upload className="h-4 w-4 mr-2 animate-spin" />
-                Importing...
+                <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} animate-spin`} />
+                {t('importing')}
               </>
             ) : (
               <>
-                <Upload className="h-4 w-4 mr-2" />
-                Import {selectedRows.size} Project(s)
+                <Upload className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('importCountProjects', { count: n(selectedRows.size) })}
               </>
             )}
           </Button>

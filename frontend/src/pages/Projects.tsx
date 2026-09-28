@@ -34,6 +34,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { projectsAPI, getApiErrorMessage } from '@/lib/api';
 import { sanitizeInput } from '@/utils/validation';
+import { formatNumber, formatServerDate, toLatinDigits } from '@/utils/datetime';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 import { useEnhancedApiCall } from '@/hooks/useEnhancedApiCall';
 import { useAppName } from '@/hooks/useAppName';
@@ -48,7 +49,28 @@ import { ProjectImportPreview } from '@/components/ProjectImportPreview';
 export function Projects() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { t, isRTL, language } = useTranslation();
+  const { t: translate, isRTL, language } = useTranslation();
+
+  // Localize numerals (Persian/Arabic-Indic digits) for the active language.
+  const n = useCallback(
+    (value: number, options?: Intl.NumberFormatOptions) => formatNumber(value, language, options),
+    [language],
+  );
+
+  // Wrap the translator so every numeric interpolation is digit-localized too.
+  const t = useCallback(
+    (key: Parameters<typeof translate>[0], params?: Record<string, string | number>) => {
+      if (!params) return translate(key);
+      const localized = Object.fromEntries(
+        Object.entries(params).map(([paramKey, value]) => [
+          paramKey,
+          typeof value === 'number' ? n(value) : value,
+        ]),
+      );
+      return translate(key, localized);
+    },
+    [translate, n],
+  );
   const { appName } = useAppName(false);
   const { selectedProject, setSelectedProject, projects: storeProjects, setProjects: setStoreProjects, removeProjects } = useProjectStore();
   const { user } = useAuthStore();
@@ -513,6 +535,11 @@ export function Projects() {
     }
   };
 
+  // Type-to-confirm token, digit-localized but tolerant of Latin digits in the input.
+  const bulkDeleteExpected = `DELETE ${n(selectedProjects.size)}`;
+  const isBulkDeleteConfirmed = () =>
+    toLatinDigits(bulkConfirmationText.trim()) === toLatinDigits(bulkDeleteExpected);
+
   const handleBulkDelete = async () => {
     if (selectedProjects.size === 0) return;
 
@@ -525,7 +552,7 @@ export function Projects() {
       return;
     }
 
-    if (bulkConfirmationText !== `DELETE ${selectedProjects.size}`) {
+    if (!isBulkDeleteConfirmed()) {
       toast({
         title: t('error'),
         description: t('bulkDeleteConfirmMismatch'),
@@ -834,7 +861,7 @@ export function Projects() {
     // Validate file size (10MB limit)
     const MAX_FILE_SIZE = 10 * 1024 * 1024;
     if (file.size > MAX_FILE_SIZE) {
-      validationErrors.push(t('fileTooLargeDesc', { size: (file.size / 1024 / 1024).toFixed(2) }));
+      validationErrors.push(t('fileTooLargeDesc', { size: n(file.size / 1024 / 1024, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }));
     }
 
     // Validate file type
@@ -1083,7 +1110,7 @@ export function Projects() {
                 {isRetrying && (
                   <div className="mt-2 flex items-center text-sm text-blue-600 dark:text-blue-400">
                     <RefreshCw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'} animate-spin`} />
-                    {t('retrying')} ({t('attempt')} {retryCount}/3)
+                    {t('retrying')} ({t('attempt')} {n(retryCount)}/{n(3)})
                   </div>
                 )}
                 <div className="mt-3 flex space-x-2 rtl:space-x-reverse">
@@ -1105,7 +1132,7 @@ export function Projects() {
                       className="text-yellow-700 border-yellow-300 hover:bg-yellow-100 dark:text-yellow-300 dark:border-yellow-700 dark:hover:bg-yellow-900/30"
                     >
                       <Clock className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                      {t('processQueue')} ({queueSize})
+                      {t('processQueue')} ({n(queueSize)})
                     </Button>
                   )}
                   {queueSize > 0 && (
@@ -1240,27 +1267,27 @@ export function Projects() {
           <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('allProjects')}</div>
-              <div className="mt-2 text-3xl font-black">{projects.length}</div>
+              <div className="mt-2 text-3xl font-black">{n(projects.length)}</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('activeProjects')}</div>
-              <div className="mt-2 text-3xl font-black text-primary">{projectSummary.active}</div>
+              <div className="mt-2 text-3xl font-black text-primary">{n(projectSummary.active)}</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('inactiveProjects')}</div>
-              <div className="mt-2 text-3xl font-black text-muted-foreground">{projectSummary.inactive}</div>
+              <div className="mt-2 text-3xl font-black text-muted-foreground">{n(projectSummary.inactive)}</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalSuites')}</div>
-              <div className="mt-2 text-3xl font-black text-primary">{projectSummary.suites}</div>
+              <div className="mt-2 text-3xl font-black text-primary">{n(projectSummary.suites)}</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalCases')}</div>
-              <div className="mt-2 text-3xl font-black text-primary">{projectSummary.cases}</div>
+              <div className="mt-2 text-3xl font-black text-primary">{n(projectSummary.cases)}</div>
             </div>
             <div className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">{t('totalRuns')}</div>
-              <div className="mt-2 text-3xl font-black text-primary">{projectSummary.runs}</div>
+              <div className="mt-2 text-3xl font-black text-primary">{n(projectSummary.runs)}</div>
             </div>
           </div>
         </div>
@@ -1277,7 +1304,7 @@ export function Projects() {
                   onCheckedChange={toggleAllProjects}
                 />
                 <span className="text-sm font-semibold text-foreground">
-                  {selectedProjects.size} {t('selectedOf')} {projects.length}
+                  {n(selectedProjects.size)} {t('selectedOf')} {n(projects.length)}
                 </span>
               </div>
               {selectedProjects.size > 0 && (
@@ -1289,7 +1316,7 @@ export function Projects() {
                     disabled={isBackendDown}
                   >
                     <Archive className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                    {t('archive')} ({selectedProjects.size})
+                    {t('archive')} ({n(selectedProjects.size)})
                   </Button>
                   {(isAdminUser(user) || userRole === USER_ROLES.MANAGER) && (
                   <Button
@@ -1299,7 +1326,7 @@ export function Projects() {
                     disabled={isBackendDown}
                   >
                     <Trash2 className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
-                    {t('delete')} ({selectedProjects.size})
+                    {t('delete')} ({n(selectedProjects.size)})
                   </Button>
                   )}
                 </div>
@@ -1494,7 +1521,7 @@ export function Projects() {
                     className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <TestTube className={`h-3.5 w-3.5 ${isInactiveProject ? 'text-muted-foreground' : 'text-primary'}`} />
-                    <span className="text-lg font-bold leading-none text-foreground">{project.test_suites_count ?? 0}</span>
+                    <span className="text-lg font-bold leading-none text-foreground">{n(project.test_suites_count ?? 0)}</span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('suites')}</span>
                   </button>
                   <button
@@ -1504,7 +1531,7 @@ export function Projects() {
                     className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <FileText className={`h-3.5 w-3.5 ${isInactiveProject ? 'text-muted-foreground' : 'text-primary'}`} />
-                    <span className="text-lg font-bold leading-none text-foreground">{project.test_cases_count ?? 0}</span>
+                    <span className="text-lg font-bold leading-none text-foreground">{n(project.test_cases_count ?? 0)}</span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('cases')}</span>
                   </button>
                   <button
@@ -1514,7 +1541,7 @@ export function Projects() {
                     className="flex flex-col items-center gap-0.5 rounded-lg bg-muted/70 py-2 transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     <PlayCircle className={`h-3.5 w-3.5 ${isInactiveProject ? 'text-muted-foreground' : 'text-primary'}`} />
-                    <span className="text-lg font-bold leading-none text-foreground">{project.test_runs_count ?? 0}</span>
+                    <span className="text-lg font-bold leading-none text-foreground">{n(project.test_runs_count ?? 0)}</span>
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('runs')}</span>
                   </button>
                 </div>
@@ -1522,7 +1549,7 @@ export function Projects() {
                 {/* Footer: created date + management actions */}
                 <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
                   <span className="truncate text-[11px] text-muted-foreground">
-                    {t('created')}: {new Date(project.created_at).toLocaleDateString(language)}
+                    {t('created')}: {formatServerDate(project.created_at, language)}
                   </span>
                   <div className="flex shrink-0 items-center gap-1">
                     <Button
@@ -1569,7 +1596,7 @@ export function Projects() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setCloneProject(project);
-                        setCloneName(`${project.name} (Copy)`);
+                        setCloneName(t('nameCopySuffix', { name: project.name }));
                         setCloneDescription(project.description || '');
                         setIsCloneDialogOpen(true);
                       }}
@@ -1790,22 +1817,22 @@ export function Projects() {
                             {getProjectStatusLabel(project.status)}
                           </Badge>
                           <Badge variant="outline" className="border-border bg-background/60 px-2 py-0 text-[11px] text-muted-foreground">
-                            {t('created')}: {new Date(project.created_at).toLocaleDateString(language)}
+                            {t('created')}: {formatServerDate(project.created_at, language)}
                           </Badge>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-3 p-4 pt-0">
                         <div className="grid grid-cols-3 gap-2 text-center">
                           <div className="rounded-lg bg-background/70 py-2">
-                            <div className="text-sm font-bold text-foreground">{project.test_suites_count ?? 0}</div>
+                            <div className="text-sm font-bold text-foreground">{n(project.test_suites_count ?? 0)}</div>
                             <div className="text-[10px] uppercase text-muted-foreground">{t('suites')}</div>
                           </div>
                           <div className="rounded-lg bg-background/70 py-2">
-                            <div className="text-sm font-bold text-foreground">{project.test_cases_count ?? 0}</div>
+                            <div className="text-sm font-bold text-foreground">{n(project.test_cases_count ?? 0)}</div>
                             <div className="text-[10px] uppercase text-muted-foreground">{t('cases')}</div>
                           </div>
                           <div className="rounded-lg bg-background/70 py-2">
-                            <div className="text-sm font-bold text-foreground">{project.test_runs_count ?? 0}</div>
+                            <div className="text-sm font-bold text-foreground">{n(project.test_runs_count ?? 0)}</div>
                             <div className="text-[10px] uppercase text-muted-foreground">{t('runs')}</div>
                           </div>
                         </div>
@@ -1880,7 +1907,7 @@ export function Projects() {
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{t('enterProjectName')}</span>
-                  <span>{projectName.length}/100</span>
+                  <span>{n(projectName.length, { useGrouping: false })}/{n(100, { useGrouping: false })}</span>
                 </div>
               </div>
             </div>
@@ -1899,7 +1926,7 @@ export function Projects() {
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{t('enterProjectDescription')}</span>
-                  <span>{projectDescription.length}/1000</span>
+                  <span>{n(projectDescription.length, { useGrouping: false })}/{n(1000, { useGrouping: false })}</span>
                 </div>
               </div>
             </div>
@@ -2128,7 +2155,7 @@ export function Projects() {
       <AlertDialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
         <AlertDialogContent
           isRTL={isRTL}
-          onKeyDown={(e) => handleSubmitOnEnter(e, handleBulkDelete, bulkConfirmationText === `DELETE ${selectedProjects.size}`)}
+          onKeyDown={(e) => handleSubmitOnEnter(e, handleBulkDelete, isBulkDeleteConfirmed())}
         >
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-red-600 dark:text-red-400">
@@ -2162,7 +2189,7 @@ export function Projects() {
                 </p>
                 <div className="mt-4">
                   <Label htmlFor="bulk-confirm-text" className="text-sm font-medium">
-                    {t('toConfirmType')} <span className="font-bold">DELETE {selectedProjects.size}</span>
+                    {t('toConfirmType')} <span className="font-bold">{bulkDeleteExpected}</span>
                   </Label>
                   <Input
                     id="bulk-confirm-text"
@@ -2185,7 +2212,7 @@ export function Projects() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleBulkDelete}
-              disabled={bulkConfirmationText !== `DELETE ${selectedProjects.size}`}
+              disabled={!isBulkDeleteConfirmed()}
               className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
             >
               {t('deleteCountProjects', { count: selectedProjects.size })}
@@ -2458,7 +2485,7 @@ export function Projects() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-blue-800 dark:text-blue-200 truncate">{importFile.name}</p>
                     <p className="text-xs text-blue-600 dark:text-blue-300">
-                      {(importFile.size / 1024).toFixed(2)} KB • {importFile.type || t('unknownType')}
+                      {t('fileSizeKB', { size: n(importFile.size / 1024, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })} • {importFile.type || t('unknownType')}
                     </p>
                   </div>
                   <Button
@@ -2492,11 +2519,11 @@ export function Projects() {
                       {validationResult.valid ? t('validationSuccessful') : t('validationCompletedWithIssues')}
                     </p>
                     <p className="text-xs text-gray-600 mt-1 dark:text-gray-400">
-                      {validationResult.total_rows} {t('totalRows')} • {validationResult.valid_rows} {t('valid')} • {validationResult.invalid_rows} {t('invalid')}
+                      {n(validationResult.total_rows)} {t('totalRows')} • {n(validationResult.valid_rows)} {t('valid')} • {n(validationResult.invalid_rows)} {t('invalid')}
                     </p>
                     {validationResult.conflicts && validationResult.conflicts.length > 0 && (
                       <p className="text-xs text-yellow-600 mt-1 dark:text-yellow-400">
-                        {validationResult.conflicts.length} {t('conflictsDetected')}
+                        {n(validationResult.conflicts.length)} {t('conflictsDetected')}
                       </p>
                     )}
                   </div>

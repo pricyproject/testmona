@@ -79,6 +79,31 @@ export function formatServerDate(
   return formatServerDateTime(value, lang, options);
 }
 
+/**
+ * Localize a number's digits for the current language:
+ * `fa` → Persian-Indic digits, `ar` → Arabic-Indic digits, others → Latin.
+ */
+export function formatNumber(
+  value: number,
+  lang?: Language | string | null,
+  options?: Intl.NumberFormatOptions,
+): string {
+  const locale = localeForLanguage(lang);
+  if (!locale) return String(value);
+  try {
+    return new Intl.NumberFormat(locale, options).format(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** Map Persian/Arabic-Indic digits in a string back to ASCII (for value comparison). */
+export function toLatinDigits(value: string): string {
+  return value
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+}
+
 /** Localized relative time (e.g. "3 hours ago" / "۳ ساعت پیش"), or '' when unparseable. */
 export function formatRelativeTime(
   value: string | number | Date | null | undefined,
