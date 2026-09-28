@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +22,14 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
 
   const matrixRef = useRef<HTMLDivElement>(null);
   const latestCoverage = coverageReports[coverageReports.length - 1];
+
+  // Animate the coverage ring from 0 on mount instead of snapping to value.
+  const [ringReady, setRingReady] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setRingReady(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const coveragePct = Math.max(0, Math.min(100, Number(latestCoverage?.coverage_percentage) || 0));
 
   const drillIntoPriority = (priority: string) => {
     setTraceabilityFilters({ priority, coverage_status: 'all', test_status: 'all', search: '' });
@@ -75,16 +83,16 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
                         d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                       />
                       <path
-                        className="text-blue-600 stroke-current"
+                        className="text-blue-600 stroke-current transition-[stroke-dasharray] duration-700 ease-out"
                         strokeWidth="3"
-                        strokeDasharray={`${latestCoverage?.coverage_percentage || 0}, 100`}
+                        strokeDasharray={`${ringReady ? coveragePct : 0}, 100`}
                         strokeLinecap="round"
                         fill="none"
                         d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                       />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-4xl font-bold">{latestCoverage?.coverage_percentage || 0}%</span>
+                      <span className="text-4xl font-bold">{Math.round(coveragePct)}%</span>
                       <span className="text-xs text-gray-500">{t('reports_totalCoverage')}</span>
                     </div>
                   </div>
@@ -314,15 +322,21 @@ export function CoverageRiskSection({ ctx }: { ctx: ReportsData }) {
                 <CardContent>
                   <div className="flex items-center gap-2">
                     <span className="text-2xl font-bold">{insight.value}</span>
-                    <span className="flex items-center text-gray-400" title={`Trend: ${insight.trend}`}>
-                      {insight.trend === 'up' ? (
-                        <TrendingUp className="h-4 w-4" />
-                      ) : insight.trend === 'down' ? (
-                        <TrendingDown className="h-4 w-4" />
-                      ) : (
-                        <Activity className="h-4 w-4" />
-                      )}
-                    </span>
+                    {(() => {
+                      const known = ['up', 'down', 'stable'].includes(insight.trend);
+                      const trendLabel = known ? t(`reports_trend_${insight.trend}` as any) : String(insight.trend || '');
+                      const TrendIcon = insight.trend === 'up' ? TrendingUp : insight.trend === 'down' ? TrendingDown : Activity;
+                      return (
+                        <span
+                          className="flex items-center text-gray-400"
+                          title={trendLabel}
+                          aria-label={trendLabel}
+                          role="img"
+                        >
+                          <TrendIcon className="h-4 w-4" aria-hidden />
+                        </span>
+                      );
+                    })()}
                   </div>
                   {insight.details && <p className="text-xs text-gray-500 mt-2">{insight.details}</p>}
                 </CardContent>

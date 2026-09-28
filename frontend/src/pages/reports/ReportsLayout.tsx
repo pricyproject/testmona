@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useNavigate, useOutletContext, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, ArrowUpRight, BarChart3, Share2 } from 'lucide-react';
+import { AlertCircle, ArrowUpRight, BarChart3, Loader2, Share2 } from 'lucide-react';
 import { ReportsData, useReportsData } from '@/hooks/useReportsData';
 import { SectionNav } from '@/components/reports/SectionNav';
 import { ShareExportFlow } from '@/components/reports/ShareExportFlow';
@@ -91,18 +91,18 @@ export function ReportsLayout() {
 
   return (
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold">{t('reportsPageTitle')}</h1>
-          <p className="text-gray-600">{t('reportsPageSubtitle')}</p>
+          <p className="text-gray-600 dark:text-gray-400">{t('reportsPageSubtitle')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setShareOpen(true)}>
             <Share2 className="h-4 w-4 me-2" />
             {t('reports_shareExportTitle')}
           </Button>
-          <Button onClick={handleGenerateAnalytics}>
-            <BarChart3 className="h-4 w-4 me-2" />
+          <Button onClick={handleGenerateAnalytics} disabled={isLoading}>
+            {isLoading ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <BarChart3 className="h-4 w-4 me-2" />}
             {t('reportsGenerateAnalytics')}
           </Button>
         </div>

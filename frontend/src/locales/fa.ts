@@ -3167,6 +3167,11 @@ export const fa = {
   reports_trendDefectsLabel: 'نقص‌ها',
   reports_trendPassRate: 'نرخ موفقیت',
   reports_trendFailureRate: 'نرخ خرابی',
+  reports_trendAvg: 'میانگین',
+  reports_trendAvgPass: 'میانگین {value}٪ موفقیت',
+  reports_trendInsightImproved: 'نرخ موفقیت {points} واحد نسبت به ابتدای دوره افزایش یافته',
+  reports_trendInsightDeclined: 'نرخ موفقیت {points} واحد نسبت به ابتدای دوره کاهش یافته',
+  reports_trendInsightSteady: 'نرخ موفقیت در طول دوره ثابت مانده',
 
   // Reports - Activity Statistics tab
   reports_activityStatsSubtitle: 'تمام تغییرات و اجراها در پروژه را دنبال کنید',

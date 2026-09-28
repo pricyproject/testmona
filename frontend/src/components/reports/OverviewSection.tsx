@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
@@ -6,13 +7,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Activity, AlertCircle, Bug, Calendar, CheckCircle, Clock,
-  Download, Info, Loader2, RefreshCw, Settings, Target, TrendingDown, TrendingUp, Users,
+  Activity, AlertCircle, ArrowDownRight, ArrowUpRight, Bug, Calendar, CheckCircle, Clock,
+  Download, Info, Loader2, Minus, RefreshCw, Settings, Target, TrendingDown, TrendingUp, Users,
   XCircle, Zap, GripVertical,
 } from 'lucide-react';
 import {
-  Area, Bar, CartesianGrid, ComposedChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
+import { cn } from '@/lib/utils';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent,
 } from '@dnd-kit/core';
@@ -29,8 +31,18 @@ interface WidgetMeta {
   drill: { section?: SectionKey; href?: string };
 }
 
+// Series shown on the quality-trend chart. Kept in one place so the legend,
+// tooltip and <Bar>/<Area>/<Line> elements never drift apart.
+const TREND_SERIES = [
+  { key: 'passRate', labelKey: 'reports_trendPassRate', color: '#10b981' },
+  { key: 'failureRate', labelKey: 'reports_trendFailureRate', color: '#f43f5e' },
+  { key: 'executed', labelKey: 'reports_trendExecutedLabel', color: '#94a3b8' },
+  { key: 'testCasesAdded', labelKey: 'reports_trendAddedLabel', color: '#3b82f6' },
+  { key: 'defects', labelKey: 'reports_trendDefectsLabel', color: '#ef4444' },
+] as const;
+
 export function OverviewSection({ ctx }: { ctx: ReportsData }) {
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
   const { formatDate, formatDateTime } = useDateFormat();
   const navigate = useNavigate();
   const {
@@ -39,6 +51,58 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
     setDashboardWidgets, error, selectedProject,
   } = ctx;
   const isLoading = ctx.sectionLoading('overview');
+
+  // Series the user has switched off from the legend.
+  const [hiddenSeries, setHiddenSeries] = useState<Record<string, boolean>>({});
+  const toggleSeries = (key: string) =>
+    setHiddenSeries((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // Normalise the raw time-series into chart-ready points. The backend ships a
+  // date-keyed daily bucket; labels are locale-aware and the raw date is kept so
+  // the tooltip can render a full, timezone-safe date.
+  const trendPoints = useMemo(() => {
+    const points = Array.isArray(analyticsTimeSeries?.points) ? analyticsTimeSeries.points : [];
+    return points.map((point: any) => ({
+      date: point.date,
+      label: formatDate(point.date, { month: 'short', day: 'numeric' }),
+      passRate: Number(point.pass_rate || 0),
+      failureRate: Number(point.failure_rate || 0),
+      executed: Number(point.executed || 0),
+      passed: Number(point.passed || 0),
+      defects: Number(point.defects_found || 0),
+      testCasesAdded: Number(point.test_cases_added || 0),
+    }));
+  }, [analyticsTimeSeries, formatDate]);
+
+  // Period aggregates. `delta` compares the pass rate of the second half of the
+  // *active* days against the first half, giving an honest "is it getting better
+  // or worse" read instead of a noisy first-vs-last-day comparison.
+  const trendStats = useMemo(() => {
+    const executed = trendPoints.reduce((sum, p) => sum + p.executed, 0);
+    const passed = trendPoints.reduce((sum, p) => sum + p.passed, 0);
+    const defects = trendPoints.reduce((sum, p) => sum + p.defects, 0);
+    const added = trendPoints.reduce((sum, p) => sum + p.testCasesAdded, 0);
+    const active = trendPoints.filter((p) => p.executed > 0);
+    const rateOf = (rows: typeof trendPoints) => {
+      const e = rows.reduce((s, p) => s + p.executed, 0);
+      const pa = rows.reduce((s, p) => s + p.passed, 0);
+      return e > 0 ? (pa / e) * 100 : 0;
+    };
+    let delta = 0;
+    if (active.length >= 2) {
+      const mid = Math.ceil(active.length / 2);
+      delta = rateOf(active.slice(mid)) - rateOf(active.slice(0, mid));
+    }
+    return {
+      executed,
+      defects,
+      added,
+      activeDays: active.length,
+      avgPassRate: executed > 0 ? (passed / executed) * 100 : 0,
+      delta,
+      hasSignal: executed > 0 || defects > 0 || added > 0,
+    };
+  }, [trendPoints]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -140,7 +204,7 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
       >
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-1">
-            <CardTitle className="text-sm font-medium text-gray-600">{t(widget.title as any)}</CardTitle>
+            <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">{t(widget.title as any)}</CardTitle>
             {m && (
               <span title={m.def} aria-label={m.def} className="text-gray-400">
                 <Info className="h-3.5 w-3.5" />
@@ -211,105 +275,184 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
   };
 
   const renderQualityTrendChart = () => {
-    const points = Array.isArray(analyticsTimeSeries?.points) ? analyticsTimeSeries.points : [];
-    const compactPoints = points.map((point: any) => ({
-      ...point,
-      label: formatDate(point.date, { month: 'short', day: 'numeric' }),
-      passRate: Number(point.pass_rate || 0),
-      failureRate: Number(point.failure_rate || 0),
-      executed: Number(point.executed || 0),
-      defects: Number(point.defects_found || 0),
-      testCasesAdded: Number(point.test_cases_added || 0),
-    }));
-    const hasSignal = compactPoints.some((point: any) => point.executed > 0 || point.defects > 0 || point.testCasesAdded > 0);
+    const seriesLabel = (key: string) =>
+      t(TREND_SERIES.find((s) => s.key === key)!.labelKey as any);
+
+    // A short, honest read of the period: which way is the pass rate moving?
+    const delta = Math.round(trendStats.delta * 10) / 10;
+    const improving = delta >= 1;
+    const declining = delta <= -1;
+    const InsightIcon = improving ? ArrowUpRight : declining ? ArrowDownRight : Minus;
+    const insightTone = improving
+      ? 'text-emerald-600 dark:text-emerald-400'
+      : declining
+        ? 'text-rose-600 dark:text-rose-400'
+        : 'text-gray-500 dark:text-gray-400';
+    const insightText = improving
+      ? t('reports_trendInsightImproved', { points: Math.abs(delta).toFixed(1) })
+      : declining
+        ? t('reports_trendInsightDeclined', { points: Math.abs(delta).toFixed(1) })
+        : t('reports_trendInsightSteady');
 
     return (
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <CardTitle className="text-base">{t('reports_qualityTrendTitle')}</CardTitle>
               <p className="text-sm text-gray-600 dark:text-gray-400">{t('reports_qualityTrendSubtitle')}</p>
             </div>
-            {analyticsTimeSeries?.summary && (
-              <div className="flex flex-wrap gap-2 text-xs">
-                <Badge variant="secondary">
-                  {t('reports_trendExecuted', { count: analyticsTimeSeries.summary.total_executed || 0 })}
-                </Badge>
-                <Badge variant="outline">
-                  {t('reports_trendDefects', { count: analyticsTimeSeries.summary.total_defects || 0 })}
+            {trendStats.hasSignal && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="secondary">{t('reports_trendExecuted', { count: trendStats.executed })}</Badge>
+                <Badge variant="outline">{t('reports_trendDefects', { count: trendStats.defects })}</Badge>
+                <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  {t('reports_trendAvgPass', { value: Math.round(trendStats.avgPassRate) })}
                 </Badge>
               </div>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isLoading && !trendPoints.length ? (
             <div className="flex h-72 items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
             </div>
-          ) : !compactPoints.length || !hasSignal ? (
-            <div className="flex h-72 flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          ) : !trendPoints.length || !trendStats.hasSignal ? (
+            <div className="flex h-72 flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 px-4 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
               <Activity className="mb-2 h-8 w-8 text-gray-400" />
               {t('reports_noTrendData')}
             </div>
           ) : (
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={compactPoints} margin={{ top: 12, right: 8, left: -18, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="#e5e7eb" />
-                  <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
-                  <YAxis
-                    yAxisId="rate"
-                    domain={[0, 100]}
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 11, fill: '#6b7280' }}
-                    tickFormatter={(value) => `${value}%`}
-                  />
-                  <YAxis
-                    yAxisId="count"
-                    orientation="right"
-                    allowDecimals={false}
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 11, fill: '#6b7280' }}
-                  />
-                  <Tooltip
-                    formatter={(value: any, name: any) => {
-                      if (name === t('reports_trendPassRate') || name === t('reports_trendFailureRate')) {
-                        return [`${value}%`, name];
-                      }
-                      return [value, name];
-                    }}
-                  />
-                  <Legend />
-                  <Bar yAxisId="count" dataKey="executed" name={t('reports_trendExecutedLabel')} fill="#64748b" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="count" dataKey="testCasesAdded" name={t('reports_trendAddedLabel')} fill="#2563eb" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="count" dataKey="defects" name={t('reports_trendDefectsLabel')} fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  <Area
-                    yAxisId="rate"
-                    type="monotone"
-                    dataKey="passRate"
-                    name={t('reports_trendPassRate')}
-                    stroke="#16a34a"
-                    strokeWidth={2}
-                    fill="#16a34a"
-                    fillOpacity={0.12}
-                  />
-                  <Area
-                    yAxisId="rate"
-                    type="monotone"
-                    dataKey="failureRate"
-                    name={t('reports_trendFailureRate')}
-                    stroke="#dc2626"
-                    strokeWidth={2}
-                    fill="#dc2626"
-                    fillOpacity={0.08}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+            <>
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <span className={insightTone} aria-hidden>
+                  <InsightIcon className="h-4 w-4" />
+                </span>
+                <span>{insightText}</span>
+              </div>
+              {/* Charts stay LTR internally; RTL users instead get a reversed time
+                  axis so the direction of time reads correctly in every locale. */}
+              <div className="mt-1 h-72" dir="ltr">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={trendPoints} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="trendExecFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.28} />
+                        <stop offset="100%" stopColor="#94a3b8" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="trendPassFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#10b981" stopOpacity={0.28} />
+                        <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="currentColor" className="text-gray-200 dark:text-gray-700" />
+                    <XAxis
+                      dataKey="label"
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 11, fill: 'currentColor' }}
+                      className="text-gray-400"
+                      dy={6}
+                      minTickGap={28}
+                      interval="preserveStartEnd"
+                      reversed={isRTL}
+                    />
+                    <YAxis
+                      yAxisId="rate"
+                      domain={[0, 100]}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 11, fill: 'currentColor' }}
+                      className="text-gray-400"
+                      width={34}
+                      tickFormatter={(value) => `${value}%`}
+                    />
+                    <YAxis
+                      yAxisId="count"
+                      orientation="right"
+                      allowDecimals={false}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 11, fill: 'currentColor' }}
+                      className="text-gray-400"
+                      width={34}
+                    />
+                    <Tooltip
+                      content={(props) => <TrendTooltip {...props} hidden={hiddenSeries} />}
+                      cursor={{ stroke: '#94a3b8', strokeOpacity: 0.4, strokeDasharray: '4 4' }}
+                    />
+                    <ReferenceLine
+                      yAxisId="rate"
+                      y={trendStats.avgPassRate}
+                      stroke="#10b981"
+                      strokeDasharray="3 5"
+                      strokeOpacity={0.45}
+                      label={{
+                        value: `${t('reports_trendAvg')} ${Math.round(trendStats.avgPassRate)}%`,
+                        position: 'insideTopLeft',
+                        fill: '#10b981',
+                        fontSize: 10,
+                      }}
+                    />
+                    <Area
+                      yAxisId="count"
+                      type="monotone"
+                      dataKey="executed"
+                      name={seriesLabel('executed')}
+                      hide={!!hiddenSeries.executed}
+                      stroke="#94a3b8"
+                      strokeWidth={1.5}
+                      fill="url(#trendExecFill)"
+                    />
+                    <Bar yAxisId="count" dataKey="testCasesAdded" name={seriesLabel('testCasesAdded')} hide={!!hiddenSeries.testCasesAdded} fill="#3b82f6" radius={[3, 3, 0, 0]} maxBarSize={20} />
+                    <Bar yAxisId="count" dataKey="defects" name={seriesLabel('defects')} hide={!!hiddenSeries.defects} fill="#ef4444" radius={[3, 3, 0, 0]} maxBarSize={20} />
+                    <Area
+                      yAxisId="rate"
+                      type="monotone"
+                      dataKey="passRate"
+                      name={seriesLabel('passRate')}
+                      hide={!!hiddenSeries.passRate}
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      fill="url(#trendPassFill)"
+                      activeDot={{ r: 4 }}
+                    />
+                    <Line
+                      yAxisId="rate"
+                      type="monotone"
+                      dataKey="failureRate"
+                      name={seriesLabel('failureRate')}
+                      hide={!!hiddenSeries.failureRate}
+                      stroke="#f43f5e"
+                      strokeWidth={2}
+                      strokeDasharray="5 4"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+              {/* Interactive legend doubles as a series filter, keeping five series
+                  readable without a wall of static legend text. */}
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+                {TREND_SERIES.map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => toggleSeries(s.key)}
+                    aria-pressed={!hiddenSeries[s.key]}
+                    className={cn(
+                      'flex items-center gap-1.5 text-xs transition-opacity hover:opacity-100',
+                      hiddenSeries[s.key] ? 'opacity-40' : 'opacity-90',
+                    )}
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+                    <span className="text-gray-600 dark:text-gray-300">{seriesLabel(s.key)}</span>
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -459,6 +602,44 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
             </div>
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+// Custom tooltip: theme-aware, locale-aware, and shows one row per *visible*
+// series with the correct unit. Recharts injects `active`/`payload`.
+function TrendTooltip({ active, payload, hidden }: any) {
+  const { t } = useTranslation();
+  const { formatDate } = useDateFormat();
+  if (!active || !payload?.length) return null;
+  const point = payload[0]?.payload || {};
+  const rows = [
+    { key: 'passRate', label: t('reports_trendPassRate'), value: `${point.passRate ?? 0}%` },
+    { key: 'failureRate', label: t('reports_trendFailureRate'), value: `${point.failureRate ?? 0}%` },
+    { key: 'executed', label: t('reports_trendExecutedLabel'), value: point.executed ?? 0 },
+    { key: 'testCasesAdded', label: t('reports_trendAddedLabel'), value: point.testCasesAdded ?? 0 },
+    { key: 'defects', label: t('reports_trendDefectsLabel'), value: point.defects ?? 0 },
+  ].filter((row) => !hidden?.[row.key]);
+
+  return (
+    <div className="min-w-[11rem] rounded-xl border border-gray-200 bg-white/95 px-3 py-2 text-xs shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+      <p className="mb-1.5 font-semibold text-gray-700 dark:text-gray-200">
+        {point.date ? formatDate(point.date, { dateStyle: 'medium', timeZone: 'UTC' }) : ''}
+      </p>
+      <div className="space-y-1">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: TREND_SERIES.find((s) => s.key === row.key)?.color }}
+              />
+              {row.label}
+            </span>
+            <span className="font-semibold tabular-nums text-gray-800 dark:text-gray-100">{row.value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

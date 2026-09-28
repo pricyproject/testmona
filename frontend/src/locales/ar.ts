@@ -3193,6 +3193,11 @@ export const ar = {
   reports_trendDefectsLabel: 'عيوب',
   reports_trendPassRate: 'نسبة النجاح',
   reports_trendFailureRate: 'نسبة الفشل',
+  reports_trendAvg: 'المتوسط',
+  reports_trendAvgPass: 'متوسط نجاح {value}٪',
+  reports_trendInsightImproved: 'ارتفعت نسبة النجاح {points} نقطة مقارنة ببداية الفترة',
+  reports_trendInsightDeclined: 'انخفضت نسبة النجاح {points} نقطة مقارنة ببداية الفترة',
+  reports_trendInsightSteady: 'نسبة النجاح مستقرة خلال الفترة',
 
   // Reports - Activity Statistics tab
   reports_activityStatsSubtitle: 'تتبع جميع التغييرات والتنفيذات في مشروعك',

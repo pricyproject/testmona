@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/use-toast';
 import { useAuthStore } from '@/stores/authStore';
@@ -51,7 +51,14 @@ export function useReportsData(projectId: string | undefined) {
   const [loadingByTab, setLoadingByTab] = useState<Partial<Record<LoadKey, boolean>>>({});
   const setTabLoading = (tab: LoadKey, value: boolean) =>
     setLoadingByTab((prev) => ({ ...prev, [tab]: value }));
-  const [error, setError] = useState<string | null>(null);
+  // Errors are tracked per panel. Many sections load several panels sequentially;
+  // a single shared error slot would let a later success wipe an earlier failure
+  // (e.g. traceability fails, coverage then succeeds → failure vanishes). `error`
+  // exposes the first active message so the banner and empty states are unchanged.
+  const [errorByTab, setErrorByTab] = useState<Partial<Record<LoadKey, string | null>>>({});
+  const setError = (tab: LoadKey, value: string | null) =>
+    setErrorByTab((prev) => ({ ...prev, [tab]: value }));
+  const error = useMemo(() => Object.values(errorByTab).find(Boolean) ?? null, [errorByTab]);
   const [selectedProject, setSelectedProject] = useState<number | null>(() => parseReportProjectId(projectId));
 
   const requestSeq = useRef(0);
@@ -152,7 +159,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadDashboardAnalytics = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('dashboard');
-    setError(null);
+    setError('dashboard', null);
     try {
       const [data, timeSeries] = await Promise.all([
         analyticsAPI.getDashboardAnalytics(selectedProject, timeRange),
@@ -167,7 +174,7 @@ export function useReportsData(projectId: string | undefined) {
       if (!isLatestRequest('dashboard', seq)) return false;
       setDashboardAnalytics(null);
       setAnalyticsTimeSeries(null);
-      setError(t('reports_errorDashboardAnalytics'));
+      setError('dashboard', t('reports_errorDashboardAnalytics'));
       return false;
     } finally {
       endRequest('dashboard', seq);
@@ -177,7 +184,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadGranularInsights = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('granular');
-    setError(null);
+    setError('granular', null);
     try {
       const data = await analyticsAPI.getGranularInsights({
         project_id: selectedProject,
@@ -191,7 +198,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load granular insights:', err);
       if (!isLatestRequest('granular', seq)) return false;
       setGranularInsights(null);
-      setError(t('reports_errorGranularInsights'));
+      setError('granular', t('reports_errorGranularInsights'));
       return false;
     } finally {
       endRequest('granular', seq);
@@ -201,7 +208,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadShareableReports = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('shareable');
-    setError(null);
+    setError('shareable', null);
     try {
       const data = await analyticsAPI.getShareableReports(selectedProject);
       if (!isLatestRequest('shareable', seq)) return true;
@@ -211,7 +218,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load shareable reports:', err);
       if (!isLatestRequest('shareable', seq)) return false;
       setShareableReports([]);
-      setError(t('reports_errorShareableReports'));
+      setError('shareable', t('reports_errorShareableReports'));
       return false;
     } finally {
       endRequest('shareable', seq);
@@ -221,7 +228,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadTraceabilityData = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('traceability');
-    setError(null);
+    setError('traceability', null);
     try {
       const data = await analyticsAPI.getTraceabilityMatrix(selectedProject, {
         priority: traceabilityFilters.priority === 'all' ? undefined : traceabilityFilters.priority,
@@ -238,7 +245,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load traceability data:', err);
       if (!isLatestRequest('traceability', seq)) return false;
       setTraceabilityData(null);
-      setError(t('reports_errorTraceabilityData'));
+      setError('traceability', t('reports_errorTraceabilityData'));
       return false;
     } finally {
       endRequest('traceability', seq);
@@ -249,7 +256,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadCoverageData = async (generate = false): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('coverage');
-    setError(null);
+    setError('coverage', null);
     try {
       const [coverage, executionStatus] = await Promise.all([
         generate
@@ -266,7 +273,7 @@ export function useReportsData(projectId: string | undefined) {
       if (!isLatestRequest('coverage', seq)) return false;
       setCoverageReports([]);
       setTestExecutionStatus(null);
-      setError(t('reports_errorCoverageData'));
+      setError('coverage', t('reports_errorCoverageData'));
       return false;
     } finally {
       endRequest('coverage', seq);
@@ -276,7 +283,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadActivityStatistics = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('activity');
-    setError(null);
+    setError('activity', null);
     try {
       const days = timeRangeToDays(timeRange);
       const data = await auditAPI.getProjectActivitySummary(selectedProject, days);
@@ -287,7 +294,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load activity statistics:', err);
       if (!isLatestRequest('activity', seq)) return false;
       setActivityStats(null);
-      setError(t('reports_errorActivityStatistics'));
+      setError('activity', t('reports_errorActivityStatistics'));
       return false;
     } finally {
       endRequest('activity', seq);
@@ -297,7 +304,7 @@ export function useReportsData(projectId: string | undefined) {
   const loadTestActivity = async (): Promise<boolean> => {
     if (!selectedProject) return false;
     const seq = beginRequest('test-activity');
-    setError(null);
+    setError('test-activity', null);
     try {
       const days = timeRangeToDays(timeRange);
       const endDate = new Date().toISOString();
@@ -310,7 +317,7 @@ export function useReportsData(projectId: string | undefined) {
       console.error('Failed to load test activity:', err);
       if (!isLatestRequest('test-activity', seq)) return false;
       setTestActivity(null);
-      setError(t('reports_errorTestActivity'));
+      setError('test-activity', t('reports_errorTestActivity'));
       return false;
     } finally {
       endRequest('test-activity', seq);
@@ -322,6 +329,9 @@ export function useReportsData(projectId: string | undefined) {
   // Load all data backing a section. Loaders run sequentially so the requestSeq
   // staleness guard still protects against a mid-load section switch.
   const loadSection = async (section: SectionKey, generateCoverage = false): Promise<boolean> => {
+    // Drop stale errors from a previously-viewed section before reloading, so an
+    // old failure can't linger on a section that now loads cleanly.
+    setErrorByTab({});
     switch (section) {
       case 'overview':
         return loadDashboardAnalytics();
@@ -461,10 +471,24 @@ export function useReportsData(projectId: string | undefined) {
     });
   };
 
-  // Load data when section, project, time range, or section-specific filters change.
+  // Reload a whole section only when the section, project, or time range changes.
+  // Section-scoped filters are handled by their own effects below so that, say,
+  // changing the traceability pagination doesn't refetch the coverage report and
+  // granular insights (three parallel spinners and wasted round-trips).
   useEffect(() => {
     loadSection(activeSection);
-  }, [activeSection, selectedProject, timeRange, granularFilter, traceabilityFilters, traceabilityPage]);
+  }, [activeSection, selectedProject, timeRange]);
+
+  // Fine-grained filter changes refresh only the panel they belong to.
+  useEffect(() => {
+    if (activeSection !== 'coverage-risk') return;
+    void loadGranularInsights();
+  }, [granularFilter]);
+
+  useEffect(() => {
+    if (activeSection !== 'coverage-risk') return;
+    void loadTraceabilityData();
+  }, [traceabilityFilters, traceabilityPage]);
 
   // Debounce free-text traceability search → applied filter (server-side).
   useEffect(() => {

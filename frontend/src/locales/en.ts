@@ -3348,6 +3348,11 @@ export const en = {
   reports_trendDefectsLabel: 'Defects',
   reports_trendPassRate: 'Pass rate',
   reports_trendFailureRate: 'Failure rate',
+  reports_trendAvg: 'Avg',
+  reports_trendAvgPass: 'Avg {value}% pass',
+  reports_trendInsightImproved: 'Pass rate up {points} pts vs. the start of the period',
+  reports_trendInsightDeclined: 'Pass rate down {points} pts vs. the start of the period',
+  reports_trendInsightSteady: 'Pass rate holding steady across the period',
 
   // Reports - Activity Statistics tab
   reports_activityStatsSubtitle: 'Track all changes and executions in your project',
