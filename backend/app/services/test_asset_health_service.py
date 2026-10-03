@@ -2,7 +2,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy import and_, case, distinct, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -38,6 +38,16 @@ REFERENCE_TOKEN_PATTERN = re.compile(r"^[a-z][a-z0-9]*-\d+$", flags=re.IGNORECAS
 # handful of low ones, which keeps the headline number honest.
 SEVERITY_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1}
 _MAX_SEVERITY_WEIGHT = max(SEVERITY_WEIGHTS.values())
+
+# SQLite caps bound parameters per statement (999 on builds older than 3.32,
+# 65535 on Postgres), so detection walks its id lists in slices instead of
+# handing the driver one list per project.
+_ID_CHUNK_SIZE = 500
+
+
+def _id_chunks(values: List[int], size: int = _ID_CHUNK_SIZE) -> Iterable[List[int]]:
+    for start in range(0, len(values), size):
+        yield values[start:start + size]
 
 
 def _compute_health_score(total_cases: int, by_severity: Dict[str, int]) -> int:
@@ -145,7 +155,10 @@ def list_test_debt_items(
     needle = (search or "").strip()
     if needle:
         query = query.join(TestCase, TestDebtItem.test_case_id == TestCase.id)
-        clauses = [TestCase.title.ilike(f"%{needle}%")]
+        # Treat % and _ as literal characters: the user is typing a title, not a
+        # wildcard pattern.
+        literal = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses = [TestCase.title.ilike(f"%{literal}%", escape="\\")]
         if needle.isdigit():
             case_id = int(needle.lstrip("0") or "0")
             clauses.append(TestDebtItem.test_case_id == case_id)
@@ -298,6 +311,10 @@ def mark_test_debt_false_positive(db: Session, item: TestDebtItem, reason: Optio
 
 
 def unmark_test_debt_false_positive(db: Session, item: TestDebtItem) -> TestDebtItem:
+    if not item.is_false_positive:
+        # Clearing resolved_at here would silently resurrect a genuinely
+        # resolved item as active debt, so refuse instead.
+        raise ValueError("Test debt item is not marked as a false positive")
     item.is_false_positive = False
     item.false_positive_reason = None
     item.resolved_at = None
@@ -306,11 +323,44 @@ def unmark_test_debt_false_positive(db: Session, item: TestDebtItem) -> TestDebt
     return item
 
 
-def bulk_resolve_test_debt_items(db: Session, project_id: int, item_ids: Iterable[int]) -> int:
-    """Resolve many active debt items in a single statement and return the count touched."""
+def _owned_debt_item_ids(db: Session, project_id: int, ids: set[int]) -> set[int]:
+    """Ids from ``ids`` that actually exist in this project (chunked)."""
+    owned: set[int] = set()
+    for chunk in _id_chunks(sorted(ids)):
+        owned.update(
+            row[0]
+            for row in db.query(TestDebtItem.id)
+            .filter(TestDebtItem.project_id == project_id, TestDebtItem.id.in_(chunk))
+            .all()
+        )
+    return owned
+
+
+def bulk_resolve_test_debt_items(db: Session, project_id: int, item_ids: Iterable[int]) -> tuple[int, list[int]]:
+    """Resolve many active debt items in a single statement.
+
+    Returns ``(resolved_count, skipped_ids)``. ``skipped_ids`` covers every id
+    this call did not touch — unknown, owned by another project, or already
+    resolved/a false positive — so a partly bogus selection is never reported
+    as a full success.
+    """
     ids = {int(item_id) for item_id in item_ids}
     if not ids:
-        return 0
+        return 0, []
+    # Snapshot the resolvable set *before* the UPDATE: afterwards every touched
+    # row carries resolved_at, so a post-write probe could not tell an
+    # already-resolved id apart from one this call actually resolved.
+    eligible = {
+        row[0]
+        for row in db.query(TestDebtItem.id)
+        .filter(
+            TestDebtItem.project_id == project_id,
+            TestDebtItem.id.in_(ids),
+            TestDebtItem.resolved_at.is_(None),
+            TestDebtItem.is_false_positive.is_(False),
+        )
+        .all()
+    }
     resolved = (
         db.query(TestDebtItem)
         .filter(
@@ -325,15 +375,30 @@ def bulk_resolve_test_debt_items(db: Session, project_id: int, item_ids: Iterabl
         )
     )
     db.commit()
-    return int(resolved or 0)
+    return int(resolved or 0), sorted(ids - eligible)
 
 
 def bulk_mark_test_debt_false_positive(
     db: Session, project_id: int, item_ids: Iterable[int], reason: Optional[str] = None
-) -> int:
+) -> tuple[int, list[int]]:
+    """Flag many debt items as false positives.
+
+    Returns ``(marked_count, skipped_ids)`` with the same "not touched" contract
+    as :func:`bulk_resolve_test_debt_items`.
+    """
     ids = {int(item_id) for item_id in item_ids}
     if not ids:
-        return 0
+        return 0, []
+    already_fp = {
+        row[0]
+        for row in db.query(TestDebtItem.id)
+        .filter(
+            TestDebtItem.project_id == project_id,
+            TestDebtItem.id.in_(ids),
+            TestDebtItem.is_false_positive.is_(True),
+        )
+        .all()
+    }
     marked = (
         db.query(TestDebtItem)
         .filter(
@@ -351,7 +416,7 @@ def bulk_mark_test_debt_false_positive(
         )
     )
     db.commit()
-    return int(marked or 0)
+    return int(marked or 0), sorted(ids - (_owned_debt_item_ids(db, project_id, ids) - already_fp))
 
 
 def _detect_duplicate_cases(cases: Iterable[TestCase], now: datetime) -> list[DebtCandidate]:
@@ -380,22 +445,24 @@ def _detect_requirement_links(db: Session, project_id: int, cases: list[TestCase
     if not case_ids:
         return []
 
-    linked_case_ids = {
-        row[0]
-        for row in db.query(requirement_test_case_links.c.test_case_id)
-        .join(Requirement, requirement_test_case_links.c.requirement_id == Requirement.id)
-        .filter(requirement_test_case_links.c.test_case_id.in_(case_ids))
-        .filter(Requirement.project_id == project_id)
-        .all()
-    }
-    linked_case_ids.update(
-        row[0]
-        for row in db.query(TraceabilityMatrix.test_case_id)
-        .join(Requirement, TraceabilityMatrix.requirement_id == Requirement.id)
-        .filter(TraceabilityMatrix.test_case_id.in_(case_ids))
-        .filter(Requirement.project_id == project_id)
-        .all()
-    )
+    linked_case_ids: set[int] = set()
+    for chunk in _id_chunks(case_ids):
+        linked_case_ids.update(
+            row[0]
+            for row in db.query(requirement_test_case_links.c.test_case_id)
+            .join(Requirement, requirement_test_case_links.c.requirement_id == Requirement.id)
+            .filter(requirement_test_case_links.c.test_case_id.in_(chunk))
+            .filter(Requirement.project_id == project_id)
+            .all()
+        )
+        linked_case_ids.update(
+            row[0]
+            for row in db.query(TraceabilityMatrix.test_case_id)
+            .join(Requirement, TraceabilityMatrix.requirement_id == Requirement.id)
+            .filter(TraceabilityMatrix.test_case_id.in_(chunk))
+            .filter(Requirement.project_id == project_id)
+            .all()
+        )
 
     requirement_tokens = {
         row[0]
@@ -419,12 +486,16 @@ def _detect_execution_debt(db: Session, case_ids: list[int]) -> tuple[list[DebtC
     if not case_ids:
         return [], {}
 
-    rows = db.query(
-        TestResult.test_case_id,
-        TestResult.status,
-        func.count(TestResult.id),
-        func.max(TestResult.executed_at),
-    ).filter(TestResult.test_case_id.in_(case_ids)).group_by(TestResult.test_case_id, TestResult.status).all()
+    rows = []
+    for chunk in _id_chunks(case_ids):
+        rows.extend(
+            db.query(
+                TestResult.test_case_id,
+                TestResult.status,
+                func.count(TestResult.id),
+                func.max(TestResult.executed_at),
+            ).filter(TestResult.test_case_id.in_(chunk)).group_by(TestResult.test_case_id, TestResult.status).all()
+        )
 
     stats: dict[int, dict[str, int]] = {case_id: {} for case_id in case_ids}
     last_executed_at: dict[int, datetime] = {}
@@ -444,7 +515,7 @@ def _detect_execution_debt(db: Session, case_ids: list[int]) -> tuple[list[DebtC
             continue
         pass_count = status_counts.get("pass", 0)
         if completed_total >= min_results and pass_count == completed_total:
-            candidates.append(_candidate(test_case_id, "always_pass", f"The last {completed_total} completed results all passed."))
+            candidates.append(_candidate(test_case_id, "always_pass", f"All {completed_total} completed results for this test case passed."))
 
     return candidates, last_executed_at
 
@@ -469,7 +540,14 @@ def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: boo
 
 
     suite_ids = {case.test_suite_id for case in cases if case.test_suite_id is not None}
-    existing_suite_ids = {row[0] for row in db.query(TestSuite.id).filter(TestSuite.id.in_(suite_ids)).all()} if suite_ids else set()
+    existing_suite_ids: set[int] = set()
+    for chunk in _id_chunks(sorted(suite_ids)):
+        existing_suite_ids.update(
+            row[0]
+            for row in db.query(TestSuite.id)
+            .filter(TestSuite.id.in_(chunk), TestSuite.project_id == project_id)
+            .all()
+        )
     for test_case in cases:
         if test_case.test_suite_id not in existing_suite_ids:
             candidate = _candidate(test_case.id, "orphan", "The linked test suite is missing or inaccessible.")
@@ -505,9 +583,8 @@ def detect_test_asset_debt(db: Session, project_id: int, retry_on_integrity: boo
         if item.is_false_positive:
             continue
         if not item.auto_detected:
-            if item.resolved_at is not None:
-                item.resolved_at = None
-                updated += 1
+            # Manually raised debt is the user's to triage: detection must never
+            # re-open a resolve they performed by hand.
             continue
         if (
             item.severity != candidate.severity

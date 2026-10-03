@@ -1,4 +1,4 @@
-from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
@@ -81,10 +81,16 @@ class TestDebtItemCreate(TestDebtItemBase):
 
 
 class TestDebtItemUpdate(BaseModel):
+    # ``resolved_at`` is deliberately absent: the resolve/reopen endpoints own
+    # that transition, so a plain PATCH cannot sidestep the
+    # is_false_positive/resolved_at invariant or write a naive datetime.
+    # extra="forbid" so a client still sending resolved_at gets a clear 422
+    # rather than a silent no-op.
+    model_config = ConfigDict(extra="forbid")
+
     severity: Optional[str] = Field(None, min_length=1, max_length=20)
     suggested_action: Optional[str] = Field(None, min_length=1, max_length=40)
     details: Optional[str] = Field(None, max_length=2000)
-    resolved_at: Optional[datetime] = None
 
     @field_validator("severity")
     @classmethod
@@ -195,6 +201,10 @@ class TestDebtBulkFalsePositive(BaseModel):
 
 class TestDebtBulkResolveResult(BaseModel):
     resolved: int
+    # Ids that were not touched (wrong project, already resolved, already a
+    # false positive, or nonexistent) so a partial bulk action is never
+    # reported as a full success.
+    skipped_ids: List[int] = Field(default_factory=list)
     summary: TestAssetHealthSummary
 
 class SharedStepBase(BaseModel):

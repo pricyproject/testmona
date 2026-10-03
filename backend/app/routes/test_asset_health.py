@@ -137,8 +137,12 @@ def register_test_asset_health_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         _ensure_project_access(db, current_user, project_id, "write")
-        resolved = health_service.bulk_resolve_test_debt_items(db, project_id, payload.item_ids)
-        return {"resolved": resolved, "summary": health_service.get_health_summary(db, project_id)}
+        resolved, skipped = health_service.bulk_resolve_test_debt_items(db, project_id, payload.item_ids)
+        return {
+            "resolved": resolved,
+            "skipped_ids": skipped,
+            "summary": health_service.get_health_summary(db, project_id),
+        }
 
     @app.post(
         "/projects/{project_id}/test-asset-health/debt-items/{item_id}/false-positive",
@@ -173,7 +177,12 @@ def register_test_asset_health_routes(app):
         item = health_service.get_test_debt_item(db, project_id, item_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Test debt item not found")
-        return health_service.unmark_test_debt_false_positive(db, item)
+        try:
+            return health_service.unmark_test_debt_false_positive(db, item)
+        except ValueError as exc:
+            # The item is not (or no longer) a false positive, so there is
+            # nothing to unmark — the caller's state does not match this URL.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post(
         "/projects/{project_id}/test-asset-health/debt-items/{item_id}/reopen",
@@ -204,8 +213,14 @@ def register_test_asset_health_routes(app):
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         _ensure_project_access(db, current_user, project_id, "write")
-        marked = health_service.bulk_mark_test_debt_false_positive(db, project_id, payload.item_ids, payload.reason)
-        return {"resolved": marked, "summary": health_service.get_health_summary(db, project_id)}
+        marked, skipped = health_service.bulk_mark_test_debt_false_positive(
+            db, project_id, payload.item_ids, payload.reason
+        )
+        return {
+            "resolved": marked,
+            "skipped_ids": skipped,
+            "summary": health_service.get_health_summary(db, project_id),
+        }
 
     @app.post(
         "/projects/{project_id}/test-asset-health/detect",

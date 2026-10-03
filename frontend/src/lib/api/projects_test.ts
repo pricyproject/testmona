@@ -210,7 +210,7 @@ export const testAssetHealthAPI = {
   update: async (
     projectId: number,
     itemId: number,
-    payload: Partial<{ severity: TestDebtSeverity; suggested_action: TestDebtAction; details: string | null; resolved_at: string | null }>,
+    payload: Partial<{ severity: TestDebtSeverity; suggested_action: TestDebtAction; details: string | null }>,
   ): Promise<TestDebtItem> => {
     const response = await api.patch(`/projects/${projectId}/test-asset-health/debt-items/${itemId}`, payload);
     return response.data;

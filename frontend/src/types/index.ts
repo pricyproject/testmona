@@ -368,6 +368,8 @@ export interface TestAssetHealthSummary {
 
 export interface TestDebtBulkResolveResult {
   resolved: number;
+  /** Ids the backend did not touch (wrong project / already in that state). */
+  skipped_ids: number[];
   summary: TestAssetHealthSummary;
 }
 
