@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { getApiErrorMessage } from '@/lib/api/client';
 import { useTranslation } from '@/hooks/useTranslation';
 import { formatRelativeTime } from '@/utils/datetime';
 import {
@@ -93,8 +94,8 @@ export function DocReaderFeedback({ docId, canEdit }: DocReaderFeedbackProps) {
     try {
       if (myType === type) await clearMutation.mutateAsync();
       else await submitMutation.mutateAsync({ feedback_type: type, comment: null, section_text: null });
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docFeedbackFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docFeedbackFailed')), variant: 'destructive' });
     }
   };
 
@@ -120,8 +121,8 @@ export function DocReaderFeedback({ docId, canEdit }: DocReaderFeedbackProps) {
       });
       toast({ title: t('success'), description: t('docFeedbackSaved') });
       setDialogType(null);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docFeedbackFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docFeedbackFailed')), variant: 'destructive' });
     }
   };
 

@@ -14,6 +14,8 @@ type SearchableRequirementSelectProps = {
   requirements: Requirement[];
   disabled?: boolean;
   className?: string;
+  /** Overrides the search-field hint, e.g. to say why the list is empty. */
+  placeholder?: string;
 };
 
 const NONE_VALUE = 'none';
@@ -26,6 +28,7 @@ export function SearchableRequirementSelect({
   requirements,
   disabled = false,
   className = '',
+  placeholder,
 }: SearchableRequirementSelectProps) {
   const { t, isRTL } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -110,7 +113,7 @@ export function SearchableRequirementSelect({
                 ref={searchInputRef}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('searchRequirements')}
+                placeholder={placeholder ?? t('searchRequirements')}
                 className={cn('h-9', isRTL ? 'pr-9 pl-8' : 'pl-9 pr-8')}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {

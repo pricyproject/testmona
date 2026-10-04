@@ -53,7 +53,7 @@ function decisionIcon(decision: DocReviewDecision) {
  * withdraw the round, and lists resolved rounds as history.
  */
 export function DocReviewPanel({ docId, refreshKey, onChanged }: DocReviewPanelProps) {
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
   const [review, setReview] = useState<DocReviewView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -160,7 +160,7 @@ export function DocReviewPanel({ docId, refreshKey, onChanged }: DocReviewPanelP
             <span>
               {t('docReviewRequestedBy', { name: current.requested_by_name || `#${current.requested_by}` })}
             </span>
-            {current.created_at && <span>· {formatServerDateTime(current.created_at)}</span>}
+            {current.created_at && <span>· {formatServerDateTime(current.created_at, language)}</span>}
             <span>
               · {t('docReviewProgress', {
                 approved: current.approved_count,
@@ -221,7 +221,7 @@ export function DocReviewPanel({ docId, refreshKey, onChanged }: DocReviewPanelP
                       {t(`docReviewRoundStatus_${round.status}` as any)}
                     </Badge>
                     <span>{t('docReviewRequestedBy', { name: round.requested_by_name || `#${round.requested_by}` })}</span>
-                    {round.resolved_at && <span>· {formatServerDateTime(round.resolved_at)}</span>}
+                    {round.resolved_at && <span>· {formatServerDateTime(round.resolved_at, language)}</span>}
                   </div>
                   {renderReviewers(round)}
                 </div>
