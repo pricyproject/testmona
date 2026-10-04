@@ -512,9 +512,8 @@ def register_user_routes(app):
         require_manage_users(current_user)
         
         users = crud.get_users(db, skip=skip, limit=limit)
-        # Convert role to lowercase for consistent API responses without changing persisted data here.
-        for user in users:
-            user.role = rbac.role_value(user.role)
+        # ``schemas.User`` normalizes ``role`` on the way out, so no manual fixup
+        # (and no dirtying of these tracked ORM instances) is needed here.
         return users
 
     @app.get("/users/{user_id}", response_model=schemas.User)
