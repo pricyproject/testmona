@@ -205,6 +205,10 @@ def _get_space_or_404(db: Session, space_id: int) -> models.DocSpace:
     space = crud_docs.get_space(db, space_id)
     if space is None:
         raise HTTPException(status_code=404, detail="Doc space not found")
+    # Enforced here rather than via `require_project_feature`, which can only find a
+    # project from a path/query param or a body `project_id` — a create payload carries
+    # only `space_id`, so the dependency silently no-ops on the write paths.
+    _require_feature_enabled(db, space.project_id, "doc_hub")
     return space
 
 
@@ -212,6 +216,7 @@ def _get_doc_or_404(db: Session, doc_id: int) -> models.Doc:
     doc = crud_docs.get_doc(db, doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Doc not found")
+    _require_feature_enabled(db, doc.project_id, "doc_hub")
     return doc
 
 
@@ -894,6 +899,7 @@ def register_docs_routes(app) -> None:
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         if project_id is not None:
+            _require_feature_enabled(db, project_id, "doc_hub")
             _require(current_user, project_id, "read", db)
         spaces = crud_docs.list_spaces(db, project_id=project_id, include_global=include_global)
         stats = crud_docs.space_stats(db)
@@ -909,6 +915,7 @@ def register_docs_routes(app) -> None:
             project = crud.get_project(db, payload.project_id)
             if project is None:
                 raise HTTPException(status_code=404, detail="Project not found")
+        _require_feature_enabled(db, payload.project_id, "doc_hub")
         _require(current_user, payload.project_id, "write", db)
         space = crud_docs.create_space(db, payload, actor_id=current_user.id)
         return _space_view(space)
@@ -1091,6 +1098,7 @@ def register_docs_routes(app) -> None:
             space = _get_space_or_404(db, space_id)
             _require(current_user, space.project_id, "read", db)
         elif project_id is not None:
+            _require_feature_enabled(db, project_id, "doc_hub")
             _require(current_user, project_id, "read", db)
         return crud_docs.doc_facets(
             db, space_id=space_id, project_id=project_id,
@@ -1113,6 +1121,7 @@ def register_docs_routes(app) -> None:
             space = _get_space_or_404(db, space_id)
             _require(current_user, space.project_id, "read", db)
         elif project_id is not None:
+            _require_feature_enabled(db, project_id, "doc_hub")
             _require(current_user, project_id, "read", db)
         if not _is_admin(current_user):
             raise HTTPException(status_code=403, detail="Only admins can view document statistics")
@@ -1157,6 +1166,7 @@ def register_docs_routes(app) -> None:
             space = _get_space_or_404(db, space_id)
             _require(current_user, space.project_id, "read", db)
         elif project_id is not None:
+            _require_feature_enabled(db, project_id, "doc_hub")
             _require(current_user, project_id, "read", db)
         else:
             project_id = None
