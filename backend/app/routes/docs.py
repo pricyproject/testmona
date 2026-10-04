@@ -2556,6 +2556,8 @@ def register_docs_routes(app) -> None:
                 id=l.id, doc_id=l.doc_id, requirement_id=l.requirement_id,
                 requirement_key=(l.requirement.requirement_id if l.requirement else None),
                 requirement_title=(l.requirement.title if l.requirement else None),
+                requirement_seq=(l.requirement.project_seq if l.requirement else None),
+                requirement_project_id=(l.requirement.project_id if l.requirement else None),
                 created_at=l.created_at,
             )
             for l in links
@@ -2604,6 +2606,7 @@ def register_docs_routes(app) -> None:
         return schemas.DocRequirementLinkView(
             id=link.id, doc_id=link.doc_id, requirement_id=link.requirement_id,
             requirement_key=requirement.requirement_id, requirement_title=requirement.title,
+            requirement_seq=requirement.project_seq, requirement_project_id=requirement.project_id,
             created_at=link.created_at,
         )
 
@@ -2768,6 +2771,7 @@ def register_docs_routes(app) -> None:
             schemas.DocRequirementLinkView(
                 id=l.id, doc_id=l.doc_id, requirement_id=l.requirement_id,
                 requirement_key=created[i].requirement_id, requirement_title=created[i].title,
+                requirement_seq=created[i].project_seq, requirement_project_id=created[i].project_id,
                 created_at=l.created_at,
             )
             for i, l in enumerate(links)

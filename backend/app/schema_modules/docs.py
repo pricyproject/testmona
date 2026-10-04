@@ -729,6 +729,10 @@ class DocRequirementLinkView(BaseModel):
     requirement_id: int
     requirement_key: Optional[str] = None
     requirement_title: Optional[str] = None
+    # The per-project sequence is what `/projects/{id}/requirements/{n}` expects;
+    # sending the global pk there resolves to a different requirement on collision.
+    requirement_seq: Optional[int] = None
+    requirement_project_id: Optional[int] = None
     created_at: datetime
 
     class Config:

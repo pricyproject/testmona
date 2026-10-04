@@ -1091,10 +1091,18 @@ def update_doc(db: Session, doc: models.Doc, payload: schemas.DocUpdate, actor_i
     if "space_id" in data and data["space_id"] != doc.space_id:
         new_space = get_space(db, data["space_id"])
         if new_space is not None:
+            previous_project_id = doc.project_id
             doc.project_id = new_space.project_id
             doc.slug = _unique_doc_slug(db, new_space.id, slugify(doc.title), exclude_id=doc.id)
             if "folder_id" not in data:
                 data["folder_id"] = None
+            # Requirement links are validated to be same-project on creation, so a
+            # cross-project move invalidates them — otherwise readers in the new
+            # project see the old project's requirement keys and titles.
+            if previous_project_id != doc.project_id:
+                db.query(models.DocRequirementLink).filter(
+                    models.DocRequirementLink.doc_id == doc.id,
+                ).delete(synchronize_session=False)
 
     if "title" in data and data["title"] and data["title"] != doc.title:
         doc.slug = _unique_doc_slug(db, data.get("space_id", doc.space_id), slugify(data["title"]), exclude_id=doc.id)

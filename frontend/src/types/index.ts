@@ -1263,6 +1263,9 @@ export interface DocRequirementLink {
   requirement_id: number;
   requirement_key?: string | null;
   requirement_title?: string | null;
+  /** Per-project sequence — the id form the `/projects/…/requirements/:id` route expects. */
+  requirement_seq?: number | null;
+  requirement_project_id?: number | null;
   created_at: string;
 }
 
