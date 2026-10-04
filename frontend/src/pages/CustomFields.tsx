@@ -55,7 +55,7 @@ import { Plus, Edit, Trash2, MoreHorizontal, Settings } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { customFieldsAPI } from '@/lib/api';
-import { CustomFieldDefinition } from '@/types';
+import { CustomFieldDefinition, CustomFieldType } from '@/types';
 
 export function CustomFields() {
   const { projectId: urlProjectId } = useParams();
@@ -78,7 +78,7 @@ export function CustomFields() {
 
   // Form state
   const [fieldName, setFieldName] = useState('');
-  const [fieldType, setFieldType] = useState('');
+  const [fieldType, setFieldType] = useState<CustomFieldType | ''>('');
   const [fieldDescription, setFieldDescription] = useState('');
   const [fieldSlug, setFieldSlug] = useState('');
   const [defaultValue, setDefaultValue] = useState('');
@@ -205,7 +205,7 @@ export function CustomFields() {
         fieldName !== initialFieldState.name ||
         fieldType !== initialFieldState.field_type ||
         fieldDescription !== (initialFieldState.description || '') ||
-        fieldSlug !== ((initialFieldState as any).slug || generateSlug(initialFieldState.name)) ||
+        fieldSlug !== (initialFieldState.slug || generateSlug(initialFieldState.name)) ||
         isRequired !== initialFieldState.is_required;
       setHasUnsavedChanges(hasChanges);
     } else {
@@ -213,7 +213,7 @@ export function CustomFields() {
       setHasUnsavedChanges(
         fieldName.trim() !== '' || 
         fieldDescription.trim() !== '' ||
-        fieldType.trim() !== ''
+        fieldType !== ''
       );
     }
     
@@ -272,7 +272,7 @@ export function CustomFields() {
       setIsCreating(true);
       const newField = await customFieldsAPI.createDefinition({
         name: fieldName,
-        field_type: fieldType as any,
+        field_type: fieldType,
         description: fieldDescription,
         project_id: currentProjectId,
         is_required: isRequired,
@@ -372,9 +372,9 @@ export function CustomFields() {
     setFieldType(field.field_type);
     setDefaultValue(field.default_value || '');
     setFieldDescription(field.description || '');
-    setFieldSlug((field as any).slug || generateSlug(field.name));
+    setFieldSlug(field.slug || generateSlug(field.name));
     setIsRequired(field.is_required);
-    const existingTargets = Array.isArray((field as any).entity_types) ? (field as any).entity_types : null;
+    const existingTargets = Array.isArray(field.entity_types) ? field.entity_types : null;
     setEntityTypes(existingTargets && existingTargets.length > 0 ? existingTargets : ['test_case']);
     // Load existing options if available
     if (field.options && (field.field_type === 'select' || field.field_type === 'multiselect')) {
@@ -386,7 +386,7 @@ export function CustomFields() {
       setOptionsInput('');
     }
     // Load existing validation rules
-    const rules = (field as any).validation_rules || {};
+    const rules = field.validation_rules || {};
     setMinLength(rules.min_length?.toString() || '');
     setMaxLength(rules.max_length?.toString() || '');
     setRegexPattern(rules.regex_pattern || '');
@@ -424,7 +424,7 @@ export function CustomFields() {
       setIsUpdating(true);
       const updatedField = await customFieldsAPI.updateDefinition(editingField.id, {
         name: fieldName,
-        field_type: fieldType as any,
+        field_type: fieldType,
         description: fieldDescription,
         is_required: isRequired,
         slug: fieldSlug,
@@ -639,7 +639,7 @@ export function CustomFields() {
                     {/* Field Type */}
                     <div className="space-y-2">
                       <Label htmlFor="field-type" className="text-sm font-medium">{t('customFieldType')} <span className="text-red-500">*</span></Label>
-                      <Select value={fieldType} onValueChange={setFieldType}>
+                      <Select value={fieldType} onValueChange={(value) => setFieldType(value as CustomFieldType)}>
                         <SelectTrigger className="w-full" aria-required="true">
                           <SelectValue placeholder={t('selectFieldType')} />
                         </SelectTrigger>
@@ -1040,8 +1040,8 @@ export function CustomFields() {
                         </TableCell>
                         <TableCell>
                           {(() => {
-                            const targets: string[] = Array.isArray((field as any).entity_types) && (field as any).entity_types.length > 0
-                              ? (field as any).entity_types
+                            const targets: string[] = Array.isArray(field.entity_types) && field.entity_types.length > 0
+                              ? field.entity_types
                               : ['test_case'];
                             const labelFor: Record<string, string> = {
                               test_case: t('testCase'),

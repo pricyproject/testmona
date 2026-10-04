@@ -19,7 +19,7 @@ import {
 
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { customFieldsAPI, getApiErrorMessage, type CustomFieldEntityType } from '@/lib/api';
+import { customFieldsAPI, getApiErrorMessage, parseCustomFieldOptions, type CustomFieldEntityType } from '@/lib/api';
 import { CustomFieldDefinition } from '@/types';
 
 interface ValueRow {
@@ -39,15 +39,6 @@ interface Props {
 }
 
 const NO_SELECT_VALUE = '__none__';
-
-const parseOptions = (raw: CustomFieldDefinition['options']): string[] => {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw.map(String);
-  if (typeof raw === 'object' && Array.isArray((raw as any).values)) {
-    return (raw as any).values.map(String);
-  }
-  return [];
-};
 
 const splitMultiselect = (value: string | null | undefined): string[] => {
   if (!value) return [];
@@ -83,7 +74,11 @@ export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = 
         const valuesList = Array.isArray(vals) ? vals : [];
         setDefinitions(definitionsList);
         setValues(valuesList);
+        // Seed from the definition default, then let stored values win, so a
+        // field that has never been filled in still shows its configured default
+        // (and saving it persists the value).
         const seed: Record<number, string> = {};
+        for (const def of definitionsList) seed[def.id] = def.default_value ?? '';
         for (const v of valuesList) {
           seed[v.field_definition_id] = v.value ?? '';
         }
@@ -167,7 +162,7 @@ export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = 
       );
     }
     if (fieldType === 'select') {
-      const options = parseOptions(field.options);
+      const options = parseCustomFieldOptions(field.options);
       return (
         <Select
           value={draft || NO_SELECT_VALUE}
@@ -187,7 +182,7 @@ export function CustomFieldsPanel({ projectId, entityType, entityId, readOnly = 
       );
     }
     if (fieldType === 'multiselect') {
-      const options = parseOptions(field.options);
+      const options = parseCustomFieldOptions(field.options);
       const selected = new Set(splitMultiselect(draft));
       return (
         <div className="flex flex-wrap gap-1.5 rounded-md border p-2">

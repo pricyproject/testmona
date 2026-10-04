@@ -291,6 +291,9 @@ export interface TestRunStatistics {
 
 export type CustomFieldType = 'text' | 'number' | 'date' | 'boolean' | 'select' | 'multiselect';
 
+/** Entity kinds the unified custom field engine can target. */
+export type CustomFieldEntityType = 'test_case' | 'test_run' | 'defect' | 'requirement';
+
 export interface CustomFieldDefinition {
   id: number;
   project_seq?: number | null;
@@ -300,9 +303,12 @@ export interface CustomFieldDefinition {
   description?: string;
   project_id: number;
   is_required: boolean;
-  default_value?: string;
-  options?: Record<string, any>;
+  default_value?: string | null;
+  /** Plain list; a legacy `{ values: [...] }` object is still accepted by the API. */
+  options?: string[] | Record<string, unknown>;
   validation_rules?: Record<string, any>;
+  /** Absent/empty means the legacy default: test cases only. */
+  entity_types?: CustomFieldEntityType[] | null;
   created_at: string;
   updated_at?: string;
 }
@@ -310,8 +316,15 @@ export interface CustomFieldDefinition {
 export interface CustomFieldValue {
   id: number;
   field_definition_id: number;
-  test_case_id: number;
-  value?: string;
+  /** Exactly one owner FK is set; the rest stay null. */
+  test_case_id?: number | null;
+  test_run_id?: number | null;
+  defect_id?: number | null;
+  requirement_id?: number | null;
+  /** Read-only echo of the owner, so callers need not inspect the four FKs. */
+  entity_type?: CustomFieldEntityType | null;
+  entity_id?: number | null;
+  value?: string | null;
   created_at: string;
   updated_at?: string;
 }

@@ -104,7 +104,7 @@ import { useDateFormat } from '@/hooks/useDateFormat';
 import { usePermissions } from '@/hooks/usePermissions';
 import { ContentEditor } from '@/components/ui/content-editor';
 import { ReferenceField } from '@/components/ui/reference-field';
-import { customFieldsAPI } from '@/lib/api';
+import { customFieldsAPI, parseCustomFieldOptions } from '@/lib/api';
 import { useProjectTestCases } from '@/hooks/queries/testCasesPage';
 import { CustomFieldDefinition, SharedStep, TestCase } from '@/types';
 import { Section } from '@/types/testCases';
@@ -1198,25 +1198,6 @@ export function TestCases() {
     }
   }, [customFieldFilterId, customFields]);
 
-  const getCustomFieldOptions = (field?: CustomFieldDefinition): string[] => {
-    const options = field?.options;
-    if (!options) {
-      return [];
-    }
-
-    if (Array.isArray(options)) {
-      return options.map(String);
-    }
-
-    const optionValues = Array.isArray(options.values)
-      ? options.values
-      : Array.isArray(options.options)
-        ? options.options
-        : [];
-
-    return optionValues.map(String);
-  };
-
   const getTestCaseCustomFieldValue = (testCase: TestCase, fieldId: number): unknown => {
     return (testCase.custom_field_values || []).find(
       (fieldValue) => fieldValue.field_definition_id === fieldId
@@ -1439,7 +1420,7 @@ export function TestCases() {
     }
 
     if (field.field_type === 'select' && value && field.options) {
-      const options = Array.isArray(field.options) ? (field.options as string[]) : [];
+      const options = parseCustomFieldOptions(field.options);
       if (options.length > 0 && !options.includes(value)) {
         return t('fieldMustBeOneOf', { field: field.name, options: options.join(', ') });
       }
@@ -3477,7 +3458,7 @@ export function TestCases() {
                                       <SelectValue placeholder={field.description} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                      {field.options.map((option: string) => (
+                                      {parseCustomFieldOptions(field.options).map((option) => (
                                         <SelectItem key={option} value={option}>
                                           {option}
                                         </SelectItem>
@@ -4063,7 +4044,7 @@ export function TestCases() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={CUSTOM_FIELD_FILTER_ANY_VALUE}>{t('anyCustomFieldValue')}</SelectItem>
-                        {getCustomFieldOptions(selectedCustomFieldFilter).map((option) => (
+                        {parseCustomFieldOptions(selectedCustomFieldFilter?.options).map((option) => (
                           <SelectItem key={option} value={option}>
                             {option}
                           </SelectItem>

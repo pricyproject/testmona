@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { CustomFieldDefinition } from '@/types';
-import { ImportDuplicateMode, ImportMappedTestCaseRow, ImportProgressPhase, ImportTestCasesResult } from '@/lib/api';
+import { ImportDuplicateMode, ImportMappedTestCaseRow, ImportProgressPhase, ImportTestCasesResult, parseCustomFieldOptions } from '@/lib/api';
 
 interface ImportPreviewProps {
   file: File;
@@ -157,19 +157,6 @@ const isValidDateTime = (value: string) => {
     return true;
   }
   return !Number.isNaN(Date.parse(value));
-};
-
-const getCustomFieldOptions = (field: CustomFieldDefinition): string[] => {
-  if (Array.isArray(field.options)) {
-    return field.options.map(String);
-  }
-
-  if (field.options && typeof field.options === 'object') {
-    const rawOptions = (field.options as Record<string, unknown>).options;
-    return Array.isArray(rawOptions) ? rawOptions.map(String) : Object.values(field.options).map(String);
-  }
-
-  return [];
 };
 
 const flattenSections = (sections: ImportPreviewProps['sections'] = []) => {
@@ -592,14 +579,14 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
       }
 
       if (field.field_type === 'select') {
-        const options = getCustomFieldOptions(field);
+        const options = parseCustomFieldOptions(field.options);
         if (options.length > 0 && !options.includes(value)) {
           errors.push(t('fieldMustBeOneOf', { field: field.name, options: options.join(', ') }));
         }
       }
 
       if (field.field_type === 'multiselect') {
-        const options = getCustomFieldOptions(field);
+        const options = parseCustomFieldOptions(field.options);
         const values = value.split(',').map((item) => item.trim()).filter(Boolean);
         const invalidValues = values.filter((item) => !options.includes(item));
         if (options.length > 0 && invalidValues.length > 0) {
@@ -1083,7 +1070,7 @@ export function ImportPreview({ file, testSuiteId, sectionId, customFields, onCo
     if (type === 'select' || type === 'multiselect') {
       const standardField = STANDARD_FIELDS.find((field) => field.key === mapping.targetField);
       const customField = mapping.targetField === 'custom_field' ? customFields.find((field) => field.id === mapping.customFieldId) : undefined;
-      const options = (standardField && 'options' in standardField ? standardField.options : undefined) || (customField ? getCustomFieldOptions(customField) : []);
+      const options = (standardField && 'options' in standardField ? standardField.options : undefined) || (customField ? parseCustomFieldOptions(customField.options) : []);
 
       if (type === 'select' && options.length > 0) {
         return (

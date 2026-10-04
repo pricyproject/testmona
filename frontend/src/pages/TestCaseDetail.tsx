@@ -27,7 +27,7 @@ import { WatchButton } from '@/components/WatchButton';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { useToast } from '@/hooks/use-toast';
-import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
+import { api, customFieldsAPI, datasetsAPI, sectionsAPI, testCasesAPI, testSuitesAPI, parseCustomFieldOptions, type TestDataset, type GlobalParameter } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { entityKey, entitySeq } from '@/lib/utils';
@@ -48,19 +48,6 @@ const formatStatusLabel = (status: string | null | undefined, unknownLabel = 'â€
   return status.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
-
-const getCustomFieldOptions = (field: CustomFieldDefinition): string[] => {
-  if (!field.options) return [];
-  if (Array.isArray(field.options)) return field.options.map(String);
-
-  const optionValues = Array.isArray(field.options.values)
-    ? field.options.values
-    : Array.isArray(field.options.options)
-      ? field.options.options
-      : [];
-
-  return optionValues.map(String);
-};
 
 export function TestCaseDetail() {
   const { t, isRTL } = useTranslation();
@@ -1208,7 +1195,7 @@ function CustomFieldValueDisplay({
   }
 
   if (field?.field_type === 'select') {
-    const knownOption = getCustomFieldOptions(field).find((option) => option === value) || value;
+    const knownOption = parseCustomFieldOptions(field.options).find((option) => option === value) || value;
     return <Badge variant="secondary">{knownOption}</Badge>;
   }
 

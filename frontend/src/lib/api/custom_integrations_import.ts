@@ -1,7 +1,7 @@
-import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
+import { Project, TestSuite, TestCase, TestRun, TestResult, User, TestRunStatistics, CustomFieldDefinition, CustomFieldValue, TestCaseWithCustomFields, JiraIntegration, JiraIssue, Notification, AuditTrail, AuditTrailList, AuditTrailFilters, ActivitySummary, EntityHistory, Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageList, RequirementVersion, RequirementComment, RequirementFolder, Milestone, MilestoneCreate, MilestoneUpdate, MilestoneStats, CustomFieldEntityType, SharedStep, SharedStepCreate, SharedStepUpdate, DocSpace, DocSpaceCreate, DocFolder, Doc, DocListItem, DocCreate, DocUpdate, DocVersion, DocRequirementLink, DocConvertRequest, DocConvertPreview, DocConvertResult, DocConvertEnhanceRequest, DocConvertEnhanceResult, DocShareInfo, DocShareScope, DocShareGrantCreate, DocShareAuditEntry, DocPublicView, DocStats, DocStatsOverview, DocRelatedLink, DocSuggestion, DocFacets, DocListPage, DocFeedback, DocFeedbackSummary, DocFeedbackType, DocDuplicateCandidate, DocMergeResult, DocImpactRequest, DocImpactAnalysis, ReleaseNotesGenerateRequest, ReleaseNotesPreview, ReleaseNote, ReleaseNoteListItem, ReleaseNoteCreate, ReleaseNoteUpdate, ReleaseNoteStatus } from "@/types";
 import { api, resolveProjectSeq, seqAPI, getApiErrorMessage } from "./client";
 
-export type CustomFieldEntityType = 'test_case' | 'test_run' | 'defect' | 'requirement';
+export type { CustomFieldEntityType } from "@/types";
 
 export const CUSTOM_FIELD_ENTITY_TYPES: CustomFieldEntityType[] = [
   'test_case',
@@ -10,29 +10,25 @@ export const CUSTOM_FIELD_ENTITY_TYPES: CustomFieldEntityType[] = [
   'requirement',
 ];
 
+/**
+ * Read a select/multiselect definition's option list.
+ *
+ * The API returns a plain array, but rows written before the options column was
+ * normalised still hold the legacy `{ values: [...] }` / `{ options: [...] }`
+ * shapes, so both are accepted here instead of at each call site.
+ */
+export const parseCustomFieldOptions = (
+  options: CustomFieldDefinition['options'],
+): string[] => {
+  if (!options) return [];
+  if (Array.isArray(options)) return options.map(String);
+  if (typeof options !== 'object') return [];
+  const values = (options as Record<string, unknown>).values ?? (options as Record<string, unknown>).options;
+  if (Array.isArray(values)) return values.map(String);
+  return [];
+};
+
 export const customFieldsAPI = {
-  getAll: async (projectId?: number, skip = 0, limit = 100) => {
-    const params = new URLSearchParams({ skip: skip.toString(), limit: limit.toString() });
-    if (projectId) params.append('project_id', projectId.toString());
-    const response = await api.get(`/custom-fields?${params}`);
-    return response.data;
-  },
-  getById: async (id: number) => {
-    const response = await api.get(`/custom-fields/${id}`);
-    return response.data;
-  },
-  create: async (customField: any) => {
-    const response = await api.post('/custom-fields', customField);
-    return response.data;
-  },
-  update: async (id: number, customField: any) => {
-    const response = await api.put(`/custom-fields/${id}`, customField);
-    return response.data;
-  },
-  delete: async (id: number) => {
-    const response = await api.delete(`/custom-fields/${id}`);
-    return response.data;
-  },
   getDefinitions: async (projectId?: number, entityType?: CustomFieldEntityType) => {
     const params = new URLSearchParams();
     if (projectId) params.append('project_id', String(projectId));

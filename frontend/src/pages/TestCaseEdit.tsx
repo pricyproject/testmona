@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ArrowLeft, Save, Trash2, Plus, AlertTriangle, RefreshCw, Loader2, Sparkles, ListChecks, Target, FileCode2, Split, ShieldAlert, Check, CopyPlus, ExternalLink, type LucideIcon } from 'lucide-react';
 import { ToastAction } from '@/components/ui/toast';
-import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, type TestDataset, type GlobalParameter } from '@/lib/api';
+import { aiManagerAPI, AIManagerStatus, testCasesAPI, testSuitesAPI, projectsAPI, sectionsAPI, customFieldsAPI, enumsAPI, datasetsAPI, parseCustomFieldOptions, type TestDataset, type GlobalParameter } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { loadProjectParameters } from '@/utils/parameters';
@@ -839,24 +839,6 @@ export function TestCaseEdit() {
     }
   };
 
-  const getCustomFieldOptions = (field: CustomFieldDefinition): string[] => {
-    if (!field.options) {
-      return [];
-    }
-
-    if (Array.isArray(field.options)) {
-      return field.options.map(String);
-    }
-
-    const optionValues = Array.isArray(field.options.values)
-      ? field.options.values
-      : Array.isArray(field.options.options)
-        ? field.options.options
-        : [];
-
-    return optionValues.map(String);
-  };
-
   const parseMultiSelectValues = (value: string | undefined): string[] =>
     (value || '')
       .split(',')
@@ -904,7 +886,7 @@ export function TestCaseEdit() {
       return t('fieldMustBeValidNumber', { field: field.name });
     }
 
-    const options = getCustomFieldOptions(field);
+    const options = parseCustomFieldOptions(field.options);
 
     if (field.field_type === 'select' && value && options.length > 0 && !options.includes(value)) {
       return t('fieldRequired', { field: field.name });
@@ -939,7 +921,7 @@ export function TestCaseEdit() {
         ? (rawValue === 'true' || rawValue === 'false' ? rawValue : '')
         : (rawValue === undefined || rawValue === null ? '' : String(rawValue));
       if (field.field_type === 'multiselect') {
-        const allowedOptions = new Set(getCustomFieldOptions(field));
+        const allowedOptions = new Set(parseCustomFieldOptions(field.options));
         const sanitizedValues = parseMultiSelectValues(value).filter((selectedOption) => allowedOptions.has(selectedOption));
         value = formatMultiSelectValues(sanitizedValues);
       }
@@ -1454,7 +1436,7 @@ export function TestCaseEdit() {
               <CardContent className="space-y-4">
                 {!customFieldsLoading && customFields.map((field) => {
                   const fieldError = customFieldValidationErrors[field.id];
-                  const fieldOptions = getCustomFieldOptions(field);
+                  const fieldOptions = parseCustomFieldOptions(field.options);
                   const selectedValues = parseMultiSelectValues(customFieldValues[field.id]);
 
                   return (
