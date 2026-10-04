@@ -3169,14 +3169,35 @@ def register_docs_routes(app) -> None:
                 folder_id = f.parent_folder_id
             return "/".join(reversed(parts))
 
-        docs = crud_docs.list_docs(db, space_id=space.id, limit=500)
-        manifest = {"space": space.name, "slug": space.slug, "docs": []}
+        # Page through the whole space rather than capping at a fixed limit: a silent
+        # cap made an export -> import round-trip quietly drop every doc past it.
+        docs: List[models.Doc] = []
+        while True:
+            page = crud_docs.list_docs(
+                db, space_id=space.id, sort="title", skip=len(docs), limit=DOC_EXPORT_PAGE_SIZE,
+            )
+            docs.extend(page)
+            if len(page) < DOC_EXPORT_PAGE_SIZE:
+                break
+        manifest = {
+            "space": space.name,
+            "slug": space.slug,
+            "total": len(docs),
+            "truncated": False,
+            "docs": [],
+        }
         out = io.BytesIO()
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+            seen_arcs: set[str] = set()
             for d in docs:
                 rel = folder_path(d.folder_id)
-                fname = _safe_filename(d.title)
-                arc = f"{rel}/{fname}" if rel else fname
+                arc = f"{rel}/{_safe_filename(d.title)}" if rel else _safe_filename(d.title)
+                # Zip entries must be unique; two same-titled docs in one folder would
+                # otherwise collapse into one file on re-import.
+                if arc in seen_arcs:
+                    stem, ext = os.path.splitext(arc)
+                    arc = f"{stem}-{d.id}{ext}"
+                seen_arcs.add(arc)
                 zf.writestr(arc, _build_markdown_export(d))
                 manifest["docs"].append({"title": d.title, "path": arc, "status": getattr(d.status, "value", d.status)})
             import json
