@@ -82,6 +82,21 @@ const isInvitationExpired = (expiresAt: string) => {
   return Number.isFinite(expirationTime) && expirationTime < Date.now();
 };
 
+/**
+ * Prefer the backend's `detail` so users see "Email already taken" instead of
+ * axios's "Request failed with status code 400". Pydantic validation errors
+ * arrive as a list of {msg}, so unwrap those too.
+ */
+const apiErrorDetail = (error: unknown): string | undefined => {
+  const detail = (error as any)?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((d: any) => d?.msg).filter(Boolean);
+    if (messages.length > 0) return messages.join('; ');
+  }
+  return undefined;
+};
+
 export function UserManagement() {
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
@@ -130,6 +145,14 @@ export function UserManagement() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [reset2FATarget, setReset2FATarget] = useState<User | null>(null);
+
+  // The backend refuses self-role and self-deactivation changes, so the edit
+  // dialog must not offer them on your own row.
+  const isEditingSelf = editingUser != null && editingUser.id === currentUser?.id;
+  // Active toggling counts as a change too — omitting it made Save stay disabled.
+  const hasEditChanges =
+    editFullName.trim() !== originalFullName ||
+    (!isEditingSelf && (editRole !== originalRole || editIsActive !== (editingUser?.is_active ?? true)));
 
   const getRoleLabel = (role: string) => {
     const normalizedRole = normalizeRole(role);
@@ -187,7 +210,7 @@ export function UserManagement() {
       console.error('Failed to create user:', error);
       toast({
         title: t('error'),
-        description: error.message || t('failedToCreateUser'),
+        description: apiErrorDetail(error) || t('failedToCreateUser'),
         variant: "destructive",
       });
     }
@@ -249,7 +272,7 @@ export function UserManagement() {
       setUserToDelete(null);
     } catch (error: any) {
       console.error('Failed to delete user:', error);
-      const errorMessage = error.response?.data?.detail || t('failedToDeleteUser');
+      const errorMessage = apiErrorDetail(error) || t('failedToDeleteUser');
       toast({
         title: t('error'),
         description: errorMessage,
@@ -272,13 +295,15 @@ export function UserManagement() {
   const handleUpdateUser = async () => {
     if (!editingUser) return;
 
+    const isSelf = editingUser.id === currentUser?.id;
+
     try {
       await updateUser.mutateAsync({
         id: editingUser.id,
         payload: {
           full_name: editFullName.trim(),
-          role: normalizeRole(editRole),
-          is_active: editIsActive,
+          // The backend rejects self-role and self-deactivation, so don't send them.
+          ...(isSelf ? {} : { role: normalizeRole(editRole), is_active: editIsActive }),
         },
       });
 
@@ -291,7 +316,7 @@ export function UserManagement() {
       setEditingUser(null);
     } catch (error: any) {
       console.error('Failed to update user:', error);
-      const errorMessage = error.response?.data?.detail || t('failedToUpdateUser');
+      const errorMessage = apiErrorDetail(error) || t('failedToUpdateUser');
       toast({
         title: t('error'),
         description: errorMessage,
@@ -315,7 +340,7 @@ export function UserManagement() {
       console.error('Failed to reset two-factor authentication:', error);
       toast({
         title: t('error'),
-        description: error.response?.data?.detail || t('reset2FAFailed'),
+        description: apiErrorDetail(error) || t('reset2FAFailed'),
         variant: 'destructive',
       });
     }
@@ -331,7 +356,7 @@ export function UserManagement() {
       });
     } catch (error: any) {
       console.error('Failed to delete invitation:', error);
-      const errorMessage = error.response?.data?.detail || t('failedToDeleteInvitation');
+      const errorMessage = apiErrorDetail(error) || t('failedToDeleteInvitation');
       toast({
         title: t('error'),
         description: errorMessage,
@@ -389,7 +414,19 @@ export function UserManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.length === 0 ? (
+              {usersQuery.isPending ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-gray-500 py-8">
+                    {t('loading')}
+                  </TableCell>
+                </TableRow>
+              ) : usersQuery.isError ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-red-600 py-8 dark:text-red-400">
+                    {t('failedToLoadUsers')}
+                  </TableCell>
+                </TableRow>
+              ) : users.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-gray-500 py-8">
                     {t('noUsersFound')}
@@ -473,7 +510,19 @@ export function UserManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {invitations.filter(i => !i.is_used).length === 0 ? (
+              {invitationsQuery.isPending ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-gray-500 py-8">
+                    {t('loading')}
+                  </TableCell>
+                </TableRow>
+              ) : invitationsQuery.isError ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-red-600 py-8 dark:text-red-400">
+                    {t('failedToLoadInvitations')}
+                  </TableCell>
+                </TableRow>
+              ) : invitations.filter(i => !i.is_used).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-gray-500 py-8">
                     {t('noPendingInvitations')}
@@ -695,7 +744,7 @@ export function UserManagement() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-role">{t('role')}</Label>
-              <Select value={editRole} onValueChange={setEditRole}>
+              <Select value={editRole} onValueChange={setEditRole} disabled={isEditingSelf}>
                 <SelectTrigger id="edit-role">
                   <SelectValue />
                 </SelectTrigger>
@@ -711,10 +760,11 @@ export function UserManagement() {
               <Checkbox
                 id="edit-active"
                 checked={editIsActive}
+                disabled={isEditingSelf}
                 onCheckedChange={(checked) => setEditIsActive(checked as boolean)}
               />
               <Label htmlFor="edit-active" className="cursor-pointer">
-                {t('active')}
+                {isEditingSelf ? t('activeCannotChangeSelf') : t('active')}
               </Label>
             </div>
           </div>
@@ -722,7 +772,7 @@ export function UserManagement() {
             <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
               {t('cancel')}
             </Button>
-            <Button onClick={handleUpdateUser} disabled={editRole === originalRole && editFullName.trim() === originalFullName}>
+            <Button onClick={handleUpdateUser} disabled={!hasEditChanges}>
               {t('saveChanges')}
             </Button>
           </DialogFooter>
