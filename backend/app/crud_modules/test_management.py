@@ -63,11 +63,20 @@ def get_test_suite(db: Session, test_suite_id: int):
     return db.query(TestSuite).filter(TestSuite.id == test_suite_id).first()
 
 
-def get_test_suites(db: Session, project_id: Optional[int] = None, skip: int = 0, limit: int = 100):
+def get_test_suites(
+    db: Session,
+    project_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    project_ids: Optional[List[int]] = None,
+):
     query = db.query(TestSuite)
     # Explicit None check so callers can scope to project_id=0 without it being silently ignored
     if project_id is not None:
         query = query.filter(TestSuite.project_id == project_id)
+    # Access scoping for project-less listings: filter in SQL so pagination stays honest.
+    if project_ids is not None:
+        query = query.filter(TestSuite.project_id.in_(project_ids))
     return query.order_by(TestSuite.created_at.desc(), TestSuite.id.desc()).offset(skip).limit(limit).all()
 
 

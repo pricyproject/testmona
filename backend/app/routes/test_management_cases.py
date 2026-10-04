@@ -7,7 +7,7 @@ import logging
 import re
 
 from .. import crud, schemas, auth, rbac, models
-from ..feature_guard import require_project_feature
+from ..feature_guard import require_any_project_feature, require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 def register_case_routes(app):
-    @app.post("/test-case-sections", response_model=schemas.TestCaseSection)
+    @app.post("/test-case-sections", response_model=schemas.TestCaseSection,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def create_test_case_section_endpoint(
         section: schemas.TestCaseSectionCreate,
         db: Session = Depends(get_db),
@@ -68,7 +69,8 @@ def register_case_routes(app):
         
         return db_section
 
-    @app.get("/test-case-sections")
+    @app.get("/test-case-sections",
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def read_test_case_sections(
         test_suite_id: Optional[int] = Query(None, ge=1),
         parent_section_id: Optional[int] = Query(None, ge=1),
@@ -84,9 +86,15 @@ def register_case_routes(app):
                 raise HTTPException(status_code=404, detail="Test suite not found")
             if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
+            section_project_ids = None
         else:
-            if not rbac.has_permission(current_user, "read"):
-                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            # Unscoped: fall back to the projects this user can read. Returning every
+            # section on the instance would leak names across project boundaries.
+            section_project_ids = [
+                project.id for project in rbac.get_accessible_projects(current_user, db)
+            ]
+            if not section_project_ids:
+                return []
 
         sections = crud.get_test_case_sections(
             db,
@@ -94,6 +102,7 @@ def register_case_routes(app):
             parent_section_id=parent_section_id,
             skip=skip,
             limit=limit,
+            project_ids=section_project_ids,
         )
         return [
             {
@@ -110,7 +119,8 @@ def register_case_routes(app):
             for s in sections
         ]
 
-    @app.get("/test-case-sections/{section_id}", response_model=schemas.TestCaseSection)
+    @app.get("/test-case-sections/{section_id}", response_model=schemas.TestCaseSection,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def read_test_case_section(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -121,12 +131,17 @@ def register_case_routes(app):
             raise HTTPException(status_code=404, detail="Test case section not found")
 
         test_suite = crud.get_test_suite(db, test_suite_id=db_section.test_suite_id) if db_section.test_suite_id else None
-        if test_suite and not rbac.has_permission(current_user, "read", test_suite.project_id, db):
+        # A section without a resolvable suite can't be authorised against a project;
+        # treat it as gone rather than handing it out unchecked.
+        if test_suite is None:
+            raise HTTPException(status_code=404, detail="Test suite not found")
+        if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
         return db_section
 
-    @app.put("/test-case-sections/{section_id}", response_model=schemas.TestCaseSection)
+    @app.put("/test-case-sections/{section_id}", response_model=schemas.TestCaseSection,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def update_test_case_section_endpoint(
         section: schemas.TestCaseSectionUpdate,
         section_id: int = Path(..., ge=1),
@@ -190,7 +205,8 @@ def register_case_routes(app):
         
         return db_section
 
-    @app.delete("/test-case-sections/{section_id}", response_model=schemas.MessageResponse)
+    @app.delete("/test-case-sections/{section_id}", response_model=schemas.MessageResponse,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def delete_test_case_section(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -402,7 +418,8 @@ def register_case_routes(app):
 
         return test_cases
 
-    @app.get("/test-cases/count", response_model=schemas.CountResponse)
+    @app.get("/test-cases/count", response_model=schemas.CountResponse,
+             dependencies=[Depends(require_project_feature("test_cases"))])
     def get_test_cases_count(
         project_id: int = None,
         test_suite_id: int = None, 
@@ -441,7 +458,8 @@ def register_case_routes(app):
             count = query.count()
         return {"count": count}
 
-    @app.get("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations)
+    @app.get("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations,
+             dependencies=[Depends(require_project_feature("test_cases"))])
     def read_test_case(
         test_case_id: int,
         include_linked_requirements: bool = Query(False),
@@ -466,7 +484,8 @@ def register_case_routes(app):
         db_test_case.can_delete = rbac.can(current_user, "delete", test_suite.project_id, db)
         return db_test_case
 
-    @app.put("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations)
+    @app.put("/test-cases/{test_case_id}", response_model=schemas.TestCaseWithRelations,
+             dependencies=[Depends(require_project_feature("test_cases"))])
     def update_test_case(
         test_case_id: int,
         test_case: schemas.TestCaseUpdate,
@@ -621,7 +640,8 @@ def register_case_routes(app):
 
         return db_test_case
 
-    @app.delete("/test-cases/{test_case_id}", response_model=schemas.MessageResponse)
+    @app.delete("/test-cases/{test_case_id}", response_model=schemas.MessageResponse,
+             dependencies=[Depends(require_project_feature("test_cases"))])
     def delete_test_case(
         test_case_id: int,
         db: Session = Depends(get_db),

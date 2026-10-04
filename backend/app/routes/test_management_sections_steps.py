@@ -7,7 +7,7 @@ import logging
 import re
 
 from .. import crud, schemas, auth, rbac, models
-from ..feature_guard import require_project_feature
+from ..feature_guard import require_any_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user, get_current_user
 from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 def register_section_step_routes(app):
-    @app.get("/projects/{project_id}/sections/hierarchy")
+    @app.get("/projects/{project_id}/sections/hierarchy",
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def get_project_section_hierarchy(
         project_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -228,7 +229,8 @@ def register_section_step_routes(app):
         crud.delete_test_case_step(db, step_id=step_id)
         return {"message": "Test case step deleted successfully"}
 
-    @app.get("/sections/", response_model=List[schemas.TestCaseSection])
+    @app.get("/sections/", response_model=List[schemas.TestCaseSection],
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def get_sections(
         test_suite_id: Optional[int] = Query(None, ge=1),
         parent_section_id: Optional[int] = Query(None, ge=1),
@@ -246,12 +248,16 @@ def register_section_step_routes(app):
                 raise HTTPException(status_code=404, detail="Test suite not found")
             scoped_project_id = test_suite.project_id
 
+        accessible_project_ids = None
         if scoped_project_id is not None:
             if not rbac.has_permission(current_user, "read", scoped_project_id, db):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
         else:
-            if not rbac.has_permission(current_user, "read"):
-                raise HTTPException(status_code=403, detail="Insufficient permissions")
+            accessible_project_ids = [
+                accessible.id for accessible in rbac.get_accessible_projects(current_user, db)
+            ]
+            if not accessible_project_ids:
+                return []
 
         query = db.query(models.TestCaseSection)
 
@@ -261,10 +267,15 @@ def register_section_step_routes(app):
             query = query.filter(models.TestCaseSection.parent_section_id == parent_section_id)
         if project_id is not None:
             query = query.join(models.TestSuite).filter(models.TestSuite.project_id == project_id)
+        if accessible_project_ids is not None:
+            query = query.join(models.TestSuite, models.TestCaseSection.test_suite_id == models.TestSuite.id).filter(
+                models.TestSuite.project_id.in_(accessible_project_ids)
+            )
 
         return query.offset(skip).limit(limit).all()
 
-    @app.get("/sections/{section_id}", response_model=schemas.TestCaseSection)
+    @app.get("/sections/{section_id}", response_model=schemas.TestCaseSection,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def get_section(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -278,11 +289,14 @@ def register_section_step_routes(app):
             if section.test_suite_id
             else None
         )
-        if test_suite and not rbac.has_permission(current_user, "read", test_suite.project_id, db):
+        if test_suite is None:
+            raise HTTPException(status_code=404, detail="Test suite not found")
+        if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return section
 
-    @app.get("/sections/{section_id}/tree")
+    @app.get("/sections/{section_id}/tree",
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def get_section_tree(
         section_id: int = Path(..., ge=1),
         include_test_cases: bool = True,
@@ -344,7 +358,8 @@ def register_section_step_routes(app):
         
         return build_section_tree(root_section)
 
-    @app.get("/sections/{section_id}/details")
+    @app.get("/sections/{section_id}/details",
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def get_section_details(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -508,7 +523,8 @@ def register_section_step_routes(app):
             },
         }
 
-    @app.post("/sections/", response_model=schemas.TestCaseSection)
+    @app.post("/sections/", response_model=schemas.TestCaseSection,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def create_section(
         section: schemas.TestCaseSectionCreate,
         db: Session = Depends(get_db),
@@ -536,7 +552,8 @@ def register_section_step_routes(app):
 
         return crud.create_test_case_section(db=db, section=section)
 
-    @app.put("/sections/{section_id}", response_model=schemas.TestCaseSection)
+    @app.put("/sections/{section_id}", response_model=schemas.TestCaseSection,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def update_section(
         section: schemas.TestCaseSectionUpdate,
         section_id: int = Path(..., ge=1),
@@ -575,7 +592,8 @@ def register_section_step_routes(app):
 
         return crud.update_test_case_section(db, section_id=section_id, section=section)
 
-    @app.delete("/sections/{section_id}", response_model=schemas.MessageResponse)
+    @app.delete("/sections/{section_id}", response_model=schemas.MessageResponse,
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def delete_section(
         section_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),

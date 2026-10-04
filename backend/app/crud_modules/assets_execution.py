@@ -68,12 +68,17 @@ def create_test_case_section(db: Session, section: TestCaseSectionCreate):
     return db_section
 
 
-def get_test_case_sections(db: Session, test_suite_id: int = None, parent_section_id: int = None, skip: int = 0, limit: int = 100):
+def get_test_case_sections(db: Session, test_suite_id: int = None, parent_section_id: int = None, skip: int = 0, limit: int = 100, project_ids: Optional[List[int]] = None):
     query = db.query(TestCaseSection)
     if test_suite_id:
         query = query.filter(TestCaseSection.test_suite_id == test_suite_id)
     if parent_section_id is not None:
         query = query.filter(TestCaseSection.parent_section_id == parent_section_id)
+    # Access scoping for unscoped listings: filter in SQL so pagination stays honest.
+    if project_ids is not None:
+        query = query.join(TestSuite, TestCaseSection.test_suite_id == TestSuite.id).filter(
+            TestSuite.project_id.in_(project_ids)
+        )
     return query.offset(skip).limit(limit).all()
 
 
