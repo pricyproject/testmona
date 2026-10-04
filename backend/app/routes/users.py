@@ -23,6 +23,26 @@ _DELETE_BLOCKED_DETAIL = (
     "Deactivate the user instead."
 )
 
+# Used to cap the per-project role granted at invitation time.
+_ROLE_RANK = {"viewer": 1, "tester": 2, "manager": 3, "admin": 4}
+
+
+def _unknown_project_ids(db: Session, project_ids) -> list:
+    """Return the requested project ids that do not exist (deduped, order-preserved)."""
+    requested = []
+    for pid in project_ids or []:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            requested.append(pid)
+            continue
+        if pid not in requested:
+            requested.append(pid)
+    if not requested:
+        return []
+    existing = {row[0] for row in db.query(models.Project.id).filter(models.Project.id.in_(requested)).all()}
+    return [pid for pid in requested if pid not in existing]
+
 
 def _revoke_user_sessions(db: Session, user: models.User) -> None:
     user.session_version = int(user.session_version or 0) + 1
@@ -331,7 +351,7 @@ def register_user_routes(app):
         # Store data for audit trail before deletion
         user_id_val = current_user.id
         user_identifier = current_user.username or current_user.email
-        
+
         # Delete the account. Rows the user still owns block the delete; report
         # that instead of tearing down their history.
         try:
@@ -565,20 +585,20 @@ def register_user_routes(app):
                 current_role = current_user.role.lower()
             else:
                 current_role = current_user.role.value.lower()
-            
+
             # Get new role
             if isinstance(user.role, str):
                 new_role = user.role.lower()
             else:
                 new_role = user.role.value.lower()
-            
+
             # Prevent no-change updates
             if current_role == new_role:
                 raise HTTPException(
                     status_code=400,
                     detail="Role is already set to this value. No change needed."
                 )
-            
+
             # Define role hierarchy
             role_hierarchy = {
                 Role.ADMIN.value: 4,
@@ -586,17 +606,17 @@ def register_user_routes(app):
                 Role.TESTER.value: 2,
                 Role.VIEWER.value: 1
             }
-            
+
             current_level = role_hierarchy.get(current_role, 0)
             new_level = role_hierarchy.get(new_role, 0)
-            
+
             # Prevent both upgrade and downgrade
             if new_level != current_level:
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot change your own role. Ask another admin to make this change."
                 )
-        
+
         update_data = user.model_dump(exclude_unset=True)
 
         # Uniqueness is enforced by the DB, so surface it as a 400 rather than a 500.
@@ -631,7 +651,7 @@ def register_user_routes(app):
 
         if invalidates_sessions:
             _revoke_user_sessions(db, db_user)
-
+        
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
@@ -743,7 +763,7 @@ def register_user_routes(app):
         return {"message": "User deleted successfully"}
 
     # User Invitation Endpoints
-    @app.post("/invitations", response_model=schemas.UserInvitationPublic)
+    @app.post("/invitations", response_model=schemas.UserInvitationCreated)
     def create_invitation(
         invitation: schemas.UserInvitationCreate,
         db: Session = Depends(get_db),
@@ -755,7 +775,14 @@ def register_user_routes(app):
         existing_user = crud.get_user_by_email(db, email=invitation.email)
         if existing_user:
             raise HTTPException(status_code=400, detail="User with this email already exists")
-        
+
+        unknown = _unknown_project_ids(db, invitation.project_ids)
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown project id(s): {', '.join(map(str, unknown))}",
+            )
+
         # Create invitation
         invitation_data = invitation.model_dump()
         db_invitation = crud.create_user_invitation(db, invitation_data, current_user.id)
@@ -777,8 +804,13 @@ def register_user_routes(app):
             audit_service.create_audit_trail(audit_data)
         except Exception as e:
             logger.warning(f"Failed to create audit trail for invitation creation: {e}")
-        
-        return db_invitation
+
+        # Nothing emails the token (SMTP is optional), so hand it back to the admin
+        # who can pass it on. Without this the invitation could never be accepted.
+        return {
+            **schemas.UserInvitationPublic.model_validate(db_invitation).model_dump(),
+            "token": db_invitation.token,
+        }
 
     @app.get("/invitations", response_model=List[schemas.UserInvitationPublic])
     def read_invitations(
@@ -831,7 +863,26 @@ def register_user_routes(app):
         existing_user = crud.get_user_by_email(db, email=invitation.email)
         if existing_user:
             raise HTTPException(status_code=400, detail="User already exists")
-        
+
+        if crud.get_user_by_username(db, username=accept_data.username) is not None:
+            raise HTTPException(status_code=400, detail="Username already registered")
+
+        # Same policy as self-registration — an invite is not a weak-password bypass.
+        try:
+            auth.validate_password_strength(accept_data.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        # Validate project ids up front: a bad one used to fail *after* the user row
+        # was committed, leaving a half-created account behind.
+        project_ids = [int(pid) for pid in (invitation.project_ids or "").split(",") if pid.strip()]
+        unknown = _unknown_project_ids(db, project_ids)
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invitation references unknown project id(s): {', '.join(map(str, unknown))}",
+            )
+
         # Create user
         user_data = schemas.UserCreate(
             username=accept_data.username,
@@ -843,18 +894,25 @@ def register_user_routes(app):
         )
         new_user = crud.create_user(db, user=user_data)
         
-        # Assign to projects
-        if invitation.project_ids:
-            project_ids = [int(pid) for pid in invitation.project_ids.split(',') if pid]
-            for project_id in project_ids:
-                assignment = crud_rbac.create_project_assignment(
-                    db,
-                    crud_rbac.ProjectAssignmentCreate(
-                        user_id=new_user.id,
-                        project_id=project_id,
-                        role=rbac.role_value(invitation.role),
-                )
+        # Assign to projects (ids already validated above)
+        for project_id in project_ids:
+            crud_rbac.create_project_assignment(
+                db,
+                crud_rbac.ProjectAssignmentCreate(
+                    user_id=new_user.id,
+                    project_id=project_id,
+                    # Project role only — never inherit a global ``admin`` invitee
+                    # as project admin on every project they were merely added to.
+                    role=min(
+                        (rbac.role_value(invitation.role), models.Role.MANAGER.value),
+                        key=lambda value: _ROLE_RANK.get(value, 0),
+                    ),
+                    assigned_by=invitation.invited_by,
             )
+            )
+
+        # Same onboarding checklist a directly-created user gets.
+        crud.initialize_onboarding_checklist(db, new_user.id)
         
         # Create audit trail
         try:

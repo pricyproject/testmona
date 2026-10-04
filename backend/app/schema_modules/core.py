@@ -966,6 +966,18 @@ class UserInvitationPublic(UserInvitationBase):
         from_attributes = True
 
 
+class UserInvitationCreated(UserInvitationPublic):
+    """Create-invitation response.
+
+    Carries the single-use ``token`` so the inviting admin can actually deliver
+    it — nothing emails it (SMTP is optional). ``UserInvitationPublic`` omits the
+    token on purpose, because it is also the payload of ``GET /invitations`` where
+    listing every live token would hand out access to every pending invite.
+    """
+
+    token: str
+
+
 class UserInvitationAccept(BaseModel):
     token: str
     username: str
