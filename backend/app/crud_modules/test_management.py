@@ -114,6 +114,99 @@ def create_test_suite(db: Session, test_suite: TestSuiteCreate):
     return db_test_suite
 
 
+def clone_test_suite(db: Session, source: TestSuite, new_name: str, created_by: int) -> TestSuite:
+    """Deep-copy a suite into the same project: section tree, cases, steps and tags.
+
+    A copy, not a move: the source suite and everything in it is left untouched.
+    """
+    from .tags import split_tag_names
+
+    def _enum_value(value, default):
+        if value is None:
+            return default
+        return value.value if hasattr(value, "value") else value
+
+    new_suite = TestSuite(
+        name=new_name,
+        description=source.description,
+        project_id=source.project_id,
+        status=source.status,
+    )
+    db.add(new_suite)
+    safe_commit(db)
+    db.refresh(new_suite)
+
+    # Parents first (lower order_index wins) so a child's mapped parent always exists.
+    section_id_map: dict = {}
+    source_sections = (
+        db.query(TestCaseSection)
+        .filter(TestCaseSection.test_suite_id == source.id)
+        .order_by(TestCaseSection.order_index, TestCaseSection.id)
+        .all()
+    )
+    for section in source_sections:
+        # An unmapped parent means it lives in another suite (data drift) — clone as root.
+        parent_clone_id = section_id_map.get(section.parent_section_id) if section.parent_section_id else None
+        new_section = TestCaseSection(
+            name=section.name,
+            description=section.description,
+            test_suite_id=new_suite.id,
+            parent_section_id=parent_clone_id,
+            order_index=section.order_index or 0,
+            is_active=section.is_active if section.is_active is not None else True,
+        )
+        db.add(new_section)
+        safe_commit(db)
+        db.refresh(new_section)
+        section_id_map[section.id] = new_section.id
+
+    source_cases = (
+        db.query(TestCase)
+        .filter(
+            TestCase.test_suite_id == source.id,
+            ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
+        )
+        .order_by(TestCase.order_index, TestCase.id)
+        .all()
+    )
+    for case in source_cases:
+        # A section that wasn't copied (drifted to another suite) leaves the case at root.
+        cloned_section_id = section_id_map.get(case.section_id) if case.section_id else None
+        create_test_case(
+            db,
+            test_case=TestCaseCreate(
+                title=case.title,
+                description=case.description,
+                test_type=_enum_value(case.test_type, "manual"),
+                preconditions=case.preconditions or "",
+                steps=case.steps or "",
+                expected_result=case.expected_result or "",
+                priority=_enum_value(case.priority, "medium"),
+                status=_enum_value(case.status, "active"),
+                reference=case.reference,
+                tags=split_tag_names(case.tags_cache),
+                test_suite_id=new_suite.id,
+                section_id=cloned_section_id,
+                order_index=case.order_index or 0,
+                is_multistep=bool(case.is_multistep),
+                dataset_id=case.dataset_id,
+                test_steps=[
+                    TestCaseStepCreate(
+                        step_number=step.step_number,
+                        action=step.action or "",
+                        expected_result=step.expected_result or "",
+                        step_type=_enum_value(step.step_type, "manual"),
+                    )
+                    for step in get_test_case_steps(db, case.id)
+                ] or None,
+            ),
+            created_by=created_by,
+        )
+
+    db.refresh(new_suite)
+    return new_suite
+
+
 def get_test_case_counts_by_suite(db: Session, suite_ids: List[int]) -> dict:
     """Return {suite_id: count_of_non_deleted_test_cases} for a list of suite ids."""
     if not suite_ids:

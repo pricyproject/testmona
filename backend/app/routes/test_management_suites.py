@@ -253,6 +253,47 @@ def register_suite_routes(app):
 
         return db_test_suite
 
+    @app.post("/test-suites/{test_suite_id}/clone", response_model=schemas.TestSuite,
+              dependencies=[Depends(require_project_feature("test_suites"))])
+    def clone_test_suite_endpoint(
+        clone_data: schemas.TestSuiteClone,
+        test_suite_id: int = Path(..., ge=1),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        db_test_suite = crud.get_test_suite(db, test_suite_id=test_suite_id)
+        if db_test_suite is None:
+            raise HTTPException(status_code=404, detail="Test suite not found")
+
+        if not rbac.has_permission(current_user, "write", db_test_suite.project_id, db):
+            raise HTTPException(status_code=403, detail="Not authorized to clone this test suite")
+
+        new_name = (clone_data.name or f"{db_test_suite.name} (Copy)").strip()[:MAX_SUITE_NAME_LENGTH]
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Test suite name must not be blank")
+
+        try:
+            db_new_suite = crud.clone_test_suite(
+                db, db_test_suite, new_name, created_by=current_user.id
+            )
+        except Exception:
+            db.rollback()
+            raise
+
+        counts = crud.get_test_case_counts_by_suite(db, [db_new_suite.id])
+        db_new_suite.test_case_count = counts.get(db_new_suite.id, 0)
+
+        _record_suite_audit(
+            db,
+            current_user,
+            AuditAction.CREATE.value,
+            db_new_suite.id,
+            db_new_suite.project_id,
+            f"Test suite cloned: {db_test_suite.name or 'Untitled'} -> {db_new_suite.name}",
+        )
+
+        return db_new_suite
+
     @app.delete("/test-suites/{test_suite_id}", response_model=schemas.MessageResponse,
              dependencies=[Depends(require_project_feature("test_suites"))])
     def delete_test_suite(

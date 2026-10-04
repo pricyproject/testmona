@@ -161,6 +161,11 @@ class TestSuiteCreate(TestSuiteBase):
     test_case_ids: Optional[List[int]] = None
 
 
+class TestSuiteClone(BaseModel):
+    # Omit to let the API name the copy "<source> (Copy)".
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
 class TestSuiteUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
