@@ -3,7 +3,6 @@ from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
 import re
-import html
 
 from .versioning import (
     DateValidationRules,
@@ -57,19 +56,6 @@ class CustomFieldDefinitionBase(BaseModel):
                 "entity_types must contain at least one of: test_case, test_run, defect, requirement"
             )
         return cleaned
-
-    @model_validator(mode='before')
-    @classmethod
-    def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str) and key not in ['field_type']:
-                    data[key] = html.escape(value)
-                elif isinstance(value, list) and key == 'options':
-                    # Sanitize strings in options array
-                    data[key] = [html.escape(item) if isinstance(item, str) else item for item in value]
-        return data
 
     @model_validator(mode='after')
     def validate_options(self):
@@ -250,19 +236,6 @@ class CustomFieldDefinitionUpdate(BaseModel):
             )
         return cleaned
 
-    @model_validator(mode='before')
-    @classmethod
-    def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if isinstance(value, str) and key not in ['field_type']:
-                    data[key] = html.escape(value)
-                elif isinstance(value, list) and key == 'options':
-                    # Sanitize strings in options array
-                    data[key] = [html.escape(item) if isinstance(item, str) else item for item in value]
-        return data
-
     @model_validator(mode='after')
     def validate_options(self):
         if self.options and self.field_type in [CustomFieldType.SELECT, CustomFieldType.MULTISELECT]:
@@ -429,17 +402,6 @@ class CustomFieldValueBase(BaseModel):
     requirement_id: Optional[int] = None
     value: Optional[str] = None
 
-    @model_validator(mode='before')
-    @classmethod
-    def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
-        if isinstance(data, dict):
-            for key, val in data.items():
-                if isinstance(val, str):
-                    data[key] = html.escape(val)
-        return data
-
-
 class CustomFieldValueCreate(CustomFieldValueBase):
     @model_validator(mode='after')
     def _require_exactly_one_owner(self):
@@ -454,15 +416,6 @@ class CustomFieldValueCreate(CustomFieldValueBase):
 
 class CustomFieldValueUpdate(BaseModel):
     value: Optional[str] = None
-
-    @model_validator(mode='before')
-    @classmethod
-    def sanitize_html(cls, data):
-        if isinstance(data, dict):
-            for key, val in data.items():
-                if isinstance(val, str):
-                    data[key] = html.escape(val)
-        return data
 
 
 class CustomFieldValue(CustomFieldValueBase):
