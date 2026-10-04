@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Check,
   Clock,
@@ -8,6 +8,7 @@ import {
   Loader2,
   Lock,
   Plus,
+  RotateCcw,
   Share2,
   Shield,
   User as UserIcon,
@@ -27,8 +28,9 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { docsAPI, projectAssignmentsAPI, projectsAPI } from '@/lib/api';
+import { docsAPI, getApiErrorMessage, projectAssignmentsAPI, projectsAPI } from '@/lib/api';
 import { formatServerDateTime } from '@/utils/datetime';
+import { copyToClipboard } from '@/utils/clipboard';
 import type {
   DocShareAuditEntry,
   DocShareGrant,
@@ -63,13 +65,17 @@ interface DocShareDialogProps {
 }
 
 export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeChange }: DocShareDialogProps) {
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
 
   const [info, setInfo] = useState<DocShareInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingScope, setSavingScope] = useState<DocShareScope | null>(null);
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+  }, []);
 
   // Subject pickers (only relevant for project-scoped docs).
   const [members, setMembers] = useState<ProjectMemberLite[]>([]);
@@ -87,15 +93,15 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
   const [audit, setAudit] = useState<DocShareAuditEntry[] | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
 
-  const scope: DocShareScope = info?.share_scope ?? 'private';
+  const scope: DocShareScope | null = info?.share_scope ?? null;
 
   const loadInfo = useCallback(async () => {
     setLoading(true);
     try {
       const data = await docsAPI.getShare(docId);
       setInfo(data);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docShareFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docShareFailed')), variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -123,8 +129,8 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
     try {
       const data = await docsAPI.updateShare(docId, { share_scope: next });
       applyInfo(data);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docShareFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docShareFailed')), variant: 'destructive' });
     } finally {
       setSavingScope(null);
     }
@@ -132,11 +138,12 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
 
   const copyLink = async () => {
     if (!info?.share_url) return;
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}${info.share_url}`);
+    if (await copyToClipboard(`${window.location.origin}${info.share_url}`)) {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
+      // Cleared on unmount too, so the timer can't fire against a dead component.
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1800);
+    } else {
       toast({ title: t('error'), description: t('docCopyFailed'), variant: 'destructive' });
     }
   };
@@ -161,8 +168,8 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
       setSubjectProjectId('');
       setGrantExpiry('');
       if (audit) setAudit(null); // invalidate so it reloads fresh on next open
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docShareGrantFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docShareGrantFailed')), variant: 'destructive' });
     } finally {
       setAdding(false);
     }
@@ -174,8 +181,8 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
       const data = await docsAPI.removeShareGrant(docId, grant.id);
       applyInfo(data);
       if (audit) setAudit(null);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docShareGrantFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docShareGrantFailed')), variant: 'destructive' });
     } finally {
       setRemovingId(null);
     }
@@ -216,7 +223,18 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
         </DialogHeader>
 
         {loading && !info ? (
-          <div className="flex items-center justify-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          <div className="flex items-center justify-center py-10 text-muted-foreground" role="status">
+            <Loader2 className="h-5 w-5 animate-spin" />
+          </div>
+        ) : !info ? (
+          // Nothing is known about the current scope, so every control is disabled —
+          // falling back to a default here would let the first click un-share the doc.
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <p className="text-sm text-muted-foreground">{t('docShareFailed')}</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void loadInfo()}>
+              <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {t('retry')}
+            </Button>
+          </div>
         ) : (
           <div className="space-y-4">
             {/* Scope selector */}
@@ -232,6 +250,7 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
                     key={opt.value}
                     type="button"
                     onClick={() => changeScope(opt.value)}
+                    aria-pressed={active}
                     disabled={!!savingScope || blocked}
                     title={blocked ? t('docShareGlobalRestricted') : opt.desc}
                     className={`flex flex-col items-center gap-1 rounded-lg border p-3 text-center text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -265,7 +284,7 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
                 </div>
                 {info.share_expires_at && (
                   <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                    {t('docShareExpiresAt', { date: formatServerDateTime(info.share_expires_at) })}
+                    {t('docShareExpiresAt', { date: formatServerDateTime(info.share_expires_at, language) })}
                   </p>
                 )}
               </div>
@@ -410,7 +429,7 @@ export function DocShareDialog({ docId, projectId, open, onOpenChange, onScopeCh
                           <p className="text-foreground">{row.detail || '—'}</p>
                           <p className="text-muted-foreground">
                             {row.actor_name || t('docShareAnonymous')}
-                            {row.created_at ? ` · ${formatServerDateTime(row.created_at)}` : ''}
+                            {row.created_at ? ` · ${formatServerDateTime(row.created_at, language)}` : ''}
                           </p>
                         </div>
                       </div>
