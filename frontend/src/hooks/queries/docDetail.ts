@@ -11,19 +11,36 @@ export const docDetailKeys = {
     ['docDetail', docId, 'feedback', canEdit, includeResolved] as const,
 };
 
+// Settles to `null` instead of throwing so one failing side panel can't take the
+// whole document down — but the caller can still tell "it failed" from "it's empty",
+// which a bare `.catch(() => null)` erased.
+const settle = async <T,>(p: Promise<T>): Promise<{ data: T | null; failed: boolean }> =>
+  p.then((data) => ({ data, failed: false })).catch(() => ({ data: null, failed: true }));
+
 // Primary document bundle: the doc plus the side panels (space, requirement
 // links, stats) loaded alongside it.
 export function useDocDetail(docId: number | null, enabled: boolean) {
   return useQuery({
     queryKey: docDetailKeys.detail(docId),
     queryFn: async () => {
+      // Throws on failure, so a 500 surfaces as an error rather than "not found".
       const data = await docsAPI.get(docId as number);
       const [space, links, stats] = await Promise.all([
-        docsAPI.getSpace(data.space_id).catch(() => null),
-        docsAPI.listRequirementLinks(data.id).catch(() => []),
-        data.can_view_stats ? docsAPI.getStats(data.id).catch(() => null) : Promise.resolve(null),
+        settle(docsAPI.getSpace(data.space_id)),
+        settle(docsAPI.listRequirementLinks(data.id)),
+        data.can_view_stats
+          ? settle(docsAPI.getStats(data.id))
+          : Promise.resolve({ data: null, failed: false }),
       ]);
-      return { doc: data, space, links, stats };
+      return {
+        doc: data,
+        space: space.data,
+        links: (links.data ?? []) as Awaited<ReturnType<typeof docsAPI.listRequirementLinks>>,
+        stats: stats.data,
+        panelsFailed: space.failed || links.failed || stats.failed,
+        linksFailed: links.failed,
+        statsFailed: stats.failed,
+      };
     },
     enabled,
   });
@@ -60,12 +77,20 @@ export function useUpdateDoc(docId: number | null) {
         prev ? { ...prev, doc: updated } : prev,
       );
     },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: docDetailKeys.detail(docId) }),
   });
 }
 
 export function useDeleteDoc(docId: number | null) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => docsAPI.remove(docId as number),
+    // Either way the cached bundle is stale: gone on success, possibly still listed
+    // on failure. Back-navigation must not render a deleted doc's cached body.
+    onSettled: () => {
+      queryClient.removeQueries({ queryKey: docDetailKeys.detail(docId) });
+      queryClient.invalidateQueries({ queryKey: docDetailKeys.detail(docId) });
+    },
   });
 }
 

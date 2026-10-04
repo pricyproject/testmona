@@ -1,29 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import {
-  ArrowLeft,
-  ArrowRightLeft,
-  BarChart3,
-  ClipboardCheck,
-  Check,
-  CheckCircle2,
-  Copy,
-  Download,
-  Eye,
-  FileText,
-  Globe,
-  History,
-  Link2,
-  Loader2,
-  Lock,
-  MoreHorizontal,
-  Pencil,
-  Share2,
-  Sparkles,
-  Trash2,
-  Users,
-  X,
-} from 'lucide-react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRightLeft, BarChart3, Check, CheckCircle2, ClipboardCheck, Download, Eye, FileText, History, Link2, Loader2, MoreHorizontal, Pencil, RotateCcw, Share2, Sparkles, Trash2, Users, X } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -60,7 +37,7 @@ import { DocReaderFeedback } from '@/components/docs/DocReaderFeedback';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useQueryClient } from '@tanstack/react-query';
-import { docsAPI } from '@/lib/api';
+import { docsAPI, getApiErrorMessage } from '@/lib/api';
 import {
   docDetailKeys,
   useDocDetail,
@@ -78,6 +55,9 @@ const statusTone: Record<string, string> = {
   published: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
   archived: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
 };
+
+/** Mirrors backend/app/schema_modules/docs.py (DOC_TITLE_MAX). */
+const DOC_TITLE_MAX = 255;
 
 type DocTab = 'document' | 'revisions' | 'links' | 'stats';
 const DOC_TABS: DocTab[] = ['document', 'revisions', 'links', 'stats'];
@@ -150,8 +130,11 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
   useEffect(() => {
     let next: DocTab = DOC_TABS.includes(queryTab as DocTab) ? (queryTab as DocTab) : initialTab;
     if (next === 'stats' && !canViewStats) next = 'document';
+    // Same for revisions: with history disabled the tab renders neither a trigger
+    // nor content, so a `/…/revisions` deep-link would land on a blank page.
+    if (next === 'revisions' && doc?.revisions_enabled === false) next = 'document';
     setTab(next);
-  }, [queryTab, initialTab, canViewStats]);
+  }, [queryTab, initialTab, canViewStats, doc?.revisions_enabled]);
 
   // Full refresh of the document bundle, used by child sections after they
   // mutate version history / links / related docs.
@@ -192,8 +175,8 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     try {
       await updateDoc.mutateAsync({ title: next });
       setEditingTitle(false);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docSaveFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docSaveFailed')), variant: 'destructive' });
     }
   };
 
@@ -204,11 +187,11 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
       await updateDoc.mutateAsync({ status: 'published' });
       toast({ title: t('success'), description: t('docPublishedToast') });
       setReviewRefresh((n) => n + 1);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // The backend 409s when an open review must be resolved first.
       toast({
         title: t('error'),
-        description: e?.response?.data?.detail || t('docSaveFailed'),
+        description: getApiErrorMessage(e, t('docSaveFailed')),
         variant: 'destructive',
       });
     }
@@ -241,6 +224,19 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+  if (docQuery.isError) {
+    // A 500 or a dropped connection is not "the document does not exist" — say so,
+    // otherwise every outage is reported to the user as a missing doc.
+    return (
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 p-8 text-center">
+        <p className="text-muted-foreground">{t('docLoadFailed')}</p>
+        <Button variant="outline" size="sm" onClick={() => void docQuery.refetch()}>
+          <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+          {t('retry')}
+        </Button>
       </div>
     );
   }
@@ -341,8 +337,12 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
           <div className="flex items-center gap-2">
             <Input
               autoFocus
+              id="docInlineTitle"
+              aria-label={t('title')}
               value={titleDraft}
               disabled={savingTitle}
+              // Mirrors backend DOC_TITLE_MAX so an over-long title can't 422.
+              maxLength={DOC_TITLE_MAX}
               dir="auto"
               onChange={(e) => setTitleDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -375,13 +375,20 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             </Button>
           </div>
         ) : (
-          <h1
-            className={`text-3xl font-bold tracking-tight ${doc.can_edit ? 'cursor-text rounded hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}`}
-            dir="auto"
-            onDoubleClick={startTitleEdit}
-            title={doc.can_edit ? t('docTitleEditHint') : undefined}
-          >
-            {doc.title}
+          <h1 className="text-3xl font-bold tracking-tight" dir="auto">
+            {doc.can_edit ? (
+              <button
+                type="button"
+                onClick={startTitleEdit}
+                onDoubleClick={startTitleEdit}
+                title={t('docTitleEditHint')}
+                className="rounded text-start hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              >
+                {doc.title}
+              </button>
+            ) : (
+              doc.title
+            )}
           </h1>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -415,7 +422,7 @@ export function DocDetail({ initialTab = 'document' }: { initialTab?: DocTab }) 
             <div data-rich-text-editor className="rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
               <article
                 className="rich-text-preview max-w-none"
-                dir="auto"
+                dir={doc.dir ?? 'auto'}
                 style={{ unicodeBidi: 'plaintext', textAlign: 'start' }}
                 dangerouslySetInnerHTML={{ __html: html }}
               />
