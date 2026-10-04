@@ -630,11 +630,11 @@ export function TestSuiteDetail() {
     }
     setIsCreatingRun(true);
     try {
-      // TestSuiteRunCreate accepts only: name, description, priority, assigned_to, estimated_duration
+      // TestSuiteRunCreate accepts only: name, description, priority, assigned_to,
+      // estimated_duration — priority defaults server-side, so it isn't sent.
       const newTestRun = await testSuitesAPI.createRun(testSuite.id, {
-        name: t('testRunName', { name: testSuite.name, date: new Date().toLocaleDateString() }),
+        name: t('testRunName', { name: testSuite.name, date: formatDate(new Date()) }),
         description: t('automatedTestRunDescription', { name: testSuite.name }),
-        priority: 'medium',
       });
       navigate(`/projects/${numericProjectId}/test-runs/${newTestRun.id}`);
     } catch (err: any) {
@@ -655,7 +655,7 @@ export function TestSuiteDetail() {
     setIsExporting(true);
     try {
       const cases = await testCasesAPI
-        .getAll(numericProjectId, testSuite.id, undefined, 'id', 'asc', 0, 500)
+        .getAllPages(numericProjectId, { testSuiteId: testSuite.id })
         .then((data) => normalizeTestCasesResponse(data));
 
       if (cases.length === 0) {

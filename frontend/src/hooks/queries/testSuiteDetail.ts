@@ -7,17 +7,16 @@ export const testSuiteDetailKeys = {
     ['testSuiteDetail', 'sections', projectId, suiteId] as const,
 };
 
-// Suite + its test cases. The cases fetch fails soft (the suite is the critical
-// part); the page normalises the raw case payload itself.
+// Suite + its test cases. The case list pages through the whole suite (a single
+// getAll call would silently stop at the API's 500-row page) and a failure here
+// surfaces as a query error instead of an empty suite.
 export function useTestSuiteDetail(projectId: number | null, suiteId: number | null, enabled: boolean) {
   return useQuery({
     queryKey: testSuiteDetailKeys.detail(suiteId),
     queryFn: async () => {
       const [suite, testCasesRaw] = await Promise.all([
         testSuitesAPI.getById(suiteId as number),
-        testCasesAPI
-          .getAll(projectId as number, suiteId as number, undefined, 'id', 'asc', 0, 500)
-          .catch(() => []),
+        testCasesAPI.getAllPages(projectId as number, { testSuiteId: suiteId as number }),
       ]);
       return { suite, testCasesRaw };
     },

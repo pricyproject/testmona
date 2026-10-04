@@ -7,12 +7,27 @@ export const testSuiteKeys = {
   selection: (projectId: number | null) => ['testSuites', 'selection', projectId] as const,
 };
 
+// The API caps a single page at 500 suites and returns no total, so page through
+// until a short page comes back — otherwise a large project silently loses suites.
+const SUITE_PAGE_SIZE = 500;
+const MAX_SUITE_PAGES = 20;
+
 export function useTestSuites(projectId: number | null) {
   return useQuery({
     queryKey: testSuiteKeys.list(projectId),
     queryFn: async () => {
-      const data = await testSuitesAPI.getAll(projectId as number, 0, 500);
-      return (Array.isArray(data) ? data : []) as TestSuite[];
+      const all: TestSuite[] = [];
+      for (let page = 0; page < MAX_SUITE_PAGES; page += 1) {
+        const data = await testSuitesAPI.getAll(
+          projectId as number,
+          page * SUITE_PAGE_SIZE,
+          SUITE_PAGE_SIZE,
+        );
+        if (!Array.isArray(data) || data.length === 0) break;
+        all.push(...(data as TestSuite[]));
+        if (data.length < SUITE_PAGE_SIZE) break;
+      }
+      return all;
     },
     enabled: projectId != null,
   });
