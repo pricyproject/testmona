@@ -469,6 +469,14 @@ def register_user_routes(app):
         db_user = crud.get_user_by_email(db, email=user.email)
         if db_user:
             raise HTTPException(status_code=400, detail="Email already registered")
+
+        # Admin-created accounts are held to the same password policy as
+        # self-registration, otherwise this is the weak-password back door.
+        try:
+            auth.validate_password_strength(user.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
         new_user = crud.create_user(db=db, user=user)
         
         # Create audit trail
@@ -531,12 +539,25 @@ def register_user_routes(app):
         if current_user.id != user_id and not can_manage_users:
             raise HTTPException(status_code=403, detail="Not authorized to update this user")
 
+        db_user = crud.get_user(db, user_id=user_id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
         if current_user.id == user_id and not can_manage_users:
             update_data = user.model_dump(exclude_unset=True)
             for restricted_field in ("role", "is_active", "force_password_change"):
                 update_data.pop(restricted_field, None)
             user = schemas.UserUpdate(**update_data)
-        
+
+        # An admin cannot switch themselves off: the account would be locked out
+        # of every route (``get_current_active_user`` rejects inactive users before
+        # any handler runs), leaving nobody able to undo it. Another admin must do it.
+        if current_user.id == user_id and user.is_active is False:
+            raise HTTPException(
+                status_code=400,
+                detail="You cannot deactivate your own account. Ask another admin to do it.",
+            )
+
         # Prevent users from changing their own role (both upgrade and downgrade)
         if current_user.id == user_id and user.role is not None:
             from ..models import Role
@@ -577,10 +598,41 @@ def register_user_routes(app):
                     detail="Cannot change your own role. Ask another admin to make this change."
                 )
         
+        update_data = user.model_dump(exclude_unset=True)
+
+        # Uniqueness is enforced by the DB, so surface it as a 400 rather than a 500.
+        if update_data.get("username") and update_data["username"] != (db_user.username or ""):
+            if crud.get_user_by_username(db, username=update_data["username"]) is not None:
+                raise HTTPException(status_code=400, detail="Username already taken")
+        if update_data.get("email") and update_data["email"].lower() != (db_user.email or "").lower():
+            if crud.get_user_by_email(db, email=update_data["email"]) is not None:
+                raise HTTPException(status_code=400, detail="Email already taken")
+
+        if update_data.get("password"):
+            try:
+                auth.validate_password_strength(update_data["password"])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            # The admin never chose this password, so the new owner must change it.
+            update_data["force_password_change"] = True
+
+        # Deactivating, re-roling, or re-setting the password must not leave the
+        # target's existing sessions usable: bump the session version and revoke
+        # every refresh token so their current JWT dies at the next request.
+        invalidates_sessions = (
+            update_data.get("is_active") is False
+            or "role" in update_data
+            or bool(update_data.get("password"))
+        )
+
+        user = schemas.UserUpdate(**update_data)
         db_user = crud.update_user(db=db, user_id=user_id, user=user)
         if db_user is None:
             raise HTTPException(status_code=404, detail="User not found")
-        
+
+        if invalidates_sessions:
+            _revoke_user_sessions(db, db_user)
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
