@@ -547,6 +547,10 @@ DOC_SHARE_ROLES = {"viewer", "tester", "manager", "admin"}
 class DocShareUpdate(BaseModel):
     share_scope: str = "private"  # private | restricted | public
     share_expires_at: Optional[datetime] = None
+    # Required to publish a classified document: `classification` marks a doc as
+    # internal/confidential, so exposing it to an unauthenticated URL has to be
+    # acknowledged rather than a side effect of picking "public".
+    confirm_classified_publish: bool = False
 
     @field_validator("share_scope", mode="before")
     @classmethod

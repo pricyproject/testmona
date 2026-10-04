@@ -434,8 +434,6 @@ def _effective_project_role(user: models.User, project_id: int, db: Session) -> 
         .first()
     )
     role = rbac.normalize_role(assignment.role) if assignment is not None else None
-    if role is None:
-        role = rbac.normalize_role(getattr(user, "role", None))
     return role.value if role else None
 
 
@@ -2049,10 +2047,25 @@ def register_docs_routes(app) -> None:
         previous_scope = doc.share_scope or "private"
         doc.share_scope = payload.share_scope
         if payload.share_scope == "public":
-            if not doc.public_id:
-                doc.public_id = uuid.uuid4().hex
+            # A doc marked confidential/internal is flagged as not-for-public-eyes, so
+            # publishing it to an unauthenticated URL has to be an explicit override
+            # rather than a one-field PUT.
+            if doc.classification and payload.confirm_classified_publish is not True:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "This document is classified "
+                        f"'{doc.classification}'. Re-send with "
+                        "confirm_classified_publish=true to publish it publicly."
+                    ),
+                )
+            # Always mint a fresh token when (re-)enabling public: reusing the old one
+            # would revive every URL that ever leaked when the link is turned back on.
+            doc.public_id = uuid.uuid4().hex
             doc.share_expires_at = payload.share_expires_at
         else:
+            # Burn the token on the way out, otherwise the old link keeps resolving.
+            doc.public_id = None
             # Per-grant expiry governs restricted access; the doc-level expiry is
             # a public-link concept only.
             doc.share_expires_at = None
@@ -2085,8 +2098,14 @@ def register_docs_routes(app) -> None:
         if payload.expires_at is not None and _as_aware(payload.expires_at) <= _utcnow():
             raise HTTPException(status_code=400, detail="Grant expiry must be in the future")
         if payload.grant_type == "user":
-            if db.query(models.User.id).filter(models.User.id == payload.subject_user_id).first() is None:
+            # A `user` grant exists precisely to reach someone outside the project, so
+            # project membership is not required — but a deactivated account makes the
+            # grant dead config that still reads as working access in the share panel.
+            subject = db.query(models.User).filter(models.User.id == payload.subject_user_id).first()
+            if subject is None:
                 raise HTTPException(status_code=404, detail="User not found")
+            if subject.is_active is not True:
+                raise HTTPException(status_code=400, detail="Cannot share with an inactive user")
         elif payload.grant_type == "project":
             if db.query(models.Project.id).filter(models.Project.id == payload.subject_project_id).first() is None:
                 raise HTTPException(status_code=404, detail="Project not found")

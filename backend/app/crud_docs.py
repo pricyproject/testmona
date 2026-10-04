@@ -1445,7 +1445,11 @@ def add_share_grant(
         .first()
     )
     if existing is not None:
-        existing.expires_at = payload.expires_at
+        # Only refresh the expiry when the caller actually sent one: overwriting with
+        # the field's None default would silently turn every time-boxed grant into
+        # permanent access whenever a client re-saves the grant list.
+        if payload.expires_at is not None:
+            existing.expires_at = payload.expires_at
         safe_commit(db)
         db.refresh(existing)
         return existing
