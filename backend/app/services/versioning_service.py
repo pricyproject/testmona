@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 from datetime import datetime, timedelta, UTC
 import difflib
+import logging
+
+logger = logging.getLogger(__name__)
 
 from ..models import TestCase
 from ..models_versioning import (
@@ -455,21 +458,36 @@ class VersioningService:
     
     def _update_custom_fields_from_version(self, test_case_id: int, custom_fields_data: Dict[str, Any]):
         """Update custom fields from version snapshot"""
-        from ..models import CustomFieldValue
-        
+        from ..models import CustomFieldValue, CustomFieldDefinition
+        from ..crud_modules.custom_fields import validate_custom_field_value
+
         # Clear existing custom field values
         self.db.query(CustomFieldValue).filter(
             CustomFieldValue.test_case_id == test_case_id
-        ).delete()
-        
-        # Create new values from snapshot
-        for field_name, field_data in custom_fields_data.items():
-            value = CustomFieldValue(
+        ).delete(synchronize_session=False)
+
+        # Re-create from the snapshot. A field deleted since the snapshot was
+        # taken, or a value the current rules reject, is skipped with a warning
+        # instead of failing the whole rollback on an FK/integrity error.
+        for field_name, field_data in (custom_fields_data or {}).items():
+            field_def = self.db.query(CustomFieldDefinition).filter(
+                CustomFieldDefinition.id == field_data.get("field_id")
+            ).first()
+            if field_def is None:
+                logger.warning(
+                    "Skipped restoring custom field %r: definition %s no longer exists",
+                    field_name, field_data.get("field_id"),
+                )
+                continue
+            validation_error = validate_custom_field_value(field_data.get("value"), field_def)
+            if validation_error:
+                logger.warning("Skipped restoring custom field %r: %s", field_name, validation_error)
+                continue
+            self.db.add(CustomFieldValue(
                 test_case_id=test_case_id,
-                field_definition_id=field_data["field_id"],
-                value=field_data["value"]
-            )
-            self.db.add(value)
+                field_definition_id=field_def.id,
+                value=field_data.get("value"),
+            ))
     
     def _perform_detailed_comparison(
         self, 

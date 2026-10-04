@@ -259,7 +259,11 @@ class CustomFieldDefinition(Base):
 
     # Relationships
     project = relationship("Project")
-    values = relationship("CustomFieldValue", back_populates="field_definition")
+    # delete-orphan: field_definition_id is NOT NULL, so removing a definition
+    # has to take its values with it instead of orphaning them.
+    values = relationship(
+        "CustomFieldValue", back_populates="field_definition", cascade="all, delete-orphan"
+    )
 
 
 # Allowed entity types for the unified custom-field engine. Kept here as a

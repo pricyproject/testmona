@@ -131,7 +131,13 @@ def delete_test_run_dependents(db: Session, test_run_ids: Iterable[int]) -> None
             synchronize_session=False
         )
 
-    for model in (Defect, CoverageReport, CustomFieldValue):
+    for model in (Defect, CoverageReport):
         db.query(model).filter(model.test_run_id.in_(run_ids)).update(
             {model.test_run_id: None}, synchronize_session=False
         )
+
+    # Custom field values belong to the run: nulling the FK would leave an
+    # ownerless row that no endpoint can list or resolve.
+    db.query(CustomFieldValue).filter(CustomFieldValue.test_run_id.in_(run_ids)).delete(
+        synchronize_session=False
+    )

@@ -223,6 +223,11 @@ def delete_custom_field_definition(db: Session, field_id: int, user_id: Optional
     if db_field:
         field_name = db_field.name
         project_id = db_field.project_id
+        # Values first: field_definition_id is NOT NULL, so deleting the parent
+        # through the ORM would null it and fail the flush.
+        db.query(CustomFieldValue).filter(
+            CustomFieldValue.field_definition_id == field_id
+        ).delete(synchronize_session=False)
         db.delete(db_field)
         safe_commit(db)
         
