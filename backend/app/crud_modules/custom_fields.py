@@ -210,40 +210,6 @@ _CUSTOM_FIELD_ENTITY_COLUMNS = {
     "requirement": "requirement_id",
 }
 
-
-def get_custom_field_values(
-    db: Session,
-    test_case_id: Optional[int] = None,
-    field_definition_id: Optional[int] = None,
-    entity_type: Optional[str] = None,
-    entity_id: Optional[int] = None,
-    test_run_id: Optional[int] = None,
-    defect_id: Optional[int] = None,
-    requirement_id: Optional[int] = None,
-):
-    """Fetch custom field values, filterable by any of the four entity owners.
-
-    Callers can use either the legacy keyword (``test_case_id``) or the
-    polymorphic pair (``entity_type``, ``entity_id``).
-    """
-    query = db.query(CustomFieldValue)
-    if test_case_id is not None:
-        query = query.filter(CustomFieldValue.test_case_id == test_case_id)
-    if test_run_id is not None:
-        query = query.filter(CustomFieldValue.test_run_id == test_run_id)
-    if defect_id is not None:
-        query = query.filter(CustomFieldValue.defect_id == defect_id)
-    if requirement_id is not None:
-        query = query.filter(CustomFieldValue.requirement_id == requirement_id)
-    if entity_type and entity_id is not None:
-        column_name = _CUSTOM_FIELD_ENTITY_COLUMNS.get(entity_type)
-        if column_name:
-            query = query.filter(getattr(CustomFieldValue, column_name) == entity_id)
-    if field_definition_id:
-        query = query.filter(CustomFieldValue.field_definition_id == field_definition_id)
-    return query.all()
-
-
 def _resolve_custom_field_owner(db: Session, value):
     """Return ``(entity_type, project_id)`` for whichever entity owns the
     value. Raises ``ValueError`` if no owner or the owner can't be
@@ -275,6 +241,15 @@ def _resolve_custom_field_owner(db: Session, value):
     raise ValueError("Custom field value has no entity owner")
 
 
+def _value_owner_audit_target(value: CustomFieldValue):
+    """Audit target for a value change: the owning entity, so the edit appears in
+    that entity's history instead of pointing at an unreachable value row id."""
+    try:
+        return EntityType(value.entity_type), value.entity_id
+    except ValueError:
+        return EntityType.CUSTOM_FIELD, value.id
+
+
 def _format_custom_field_value_owner(value: CustomFieldValue) -> str:
     if value.test_case_id is not None:
         return f"test_case={value.test_case_id}"
@@ -299,6 +274,16 @@ def field_definition_applies_to(field_definition: CustomFieldDefinition, entity_
     return entity_type in field_definition.entity_types
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalise a parsed date for comparison.
+
+    ``datetime.fromisoformat`` returns both naive and offset-aware datetimes
+    depending on the payload; comparing the two directly raises TypeError, so
+    everything is normalised to UTC (a naive value is read as UTC).
+    """
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 def validate_custom_field_value(value: Optional[str], field_definition: CustomFieldDefinition) -> Optional[str]:
     """
     Validate a custom field value against its definition's validation rules.
@@ -317,12 +302,29 @@ def validate_custom_field_value(value: Optional[str], field_definition: CustomFi
 
     if normalized_value == "":
         return None if not field_definition.is_required else f"Field '{field_definition.name}' is required"
-    
+
+    field_type = field_definition.field_type
+
+    # Option membership is a property of the options list, not of the rule set,
+    # so it is checked even for fields that define no validation rules.
+    if field_type in (CustomFieldType.SELECT, CustomFieldType.MULTISELECT) and field_definition.options:
+        selected_values = (
+            [v.strip() for v in value_str.split(',') if v.strip()]
+            if field_type == CustomFieldType.MULTISELECT
+            else [value_str]
+        )
+        invalid_values = [v for v in selected_values if v not in field_definition.options]
+        if invalid_values:
+            return (
+                f"Invalid option{'s' if len(invalid_values) > 1 else ''} for field "
+                f"'{field_definition.name}': {', '.join(invalid_values)}. "
+                f"Valid options: {field_definition.options}"
+            )
+
     # Apply validation rules
     if field_definition.validation_rules:
         rules = field_definition.validation_rules
-        field_type = field_definition.field_type
-        
+
         if field_type == CustomFieldType.TEXT:
             min_length = rules.get('min_length')
             max_length = rules.get('max_length')
@@ -347,10 +349,11 @@ def validate_custom_field_value(value: Optional[str], field_definition: CustomFi
                 min_value = rules.get('min_value')
                 max_value = rules.get('max_value')
                 integer_only = rules.get('integer_only', False)
-                
-                if integer_only and not value_str.isdigit() and not (value_str.startswith('-') and value_str[1:].isdigit()):
+
+                # float(...).is_integer() so 1.0, " 5", "+3" and 1e3 are accepted.
+                if integer_only and not num_value.is_integer():
                     return f"Field '{field_definition.name}' must be an integer"
-                
+
                 if min_value is not None and num_value < min_value:
                     return f"Field '{field_definition.name}' too small. Minimum value: {min_value}"
                 
@@ -361,52 +364,45 @@ def validate_custom_field_value(value: Optional[str], field_definition: CustomFi
         
         elif field_type == CustomFieldType.DATE:
             try:
-                from datetime import datetime
-                date_value = datetime.fromisoformat(value_str)
+                date_value = _as_utc(datetime.fromisoformat(value_str))
                 min_date = rules.get('min_date')
                 max_date = rules.get('max_date')
                 future_only = rules.get('future_only', False)
                 past_only = rules.get('past_only', False)
-                
+                now = datetime.now(timezone.utc)
+
                 if min_date:
-                    min_dt = datetime.fromisoformat(min_date)
-                    if date_value < min_dt:
+                    if date_value < _as_utc(datetime.fromisoformat(min_date)):
                         return f"Field '{field_definition.name}' must be after {min_date}"
-                
+
                 if max_date:
-                    max_dt = datetime.fromisoformat(max_date)
-                    if date_value > max_dt:
+                    if date_value > _as_utc(datetime.fromisoformat(max_date)):
                         return f"Field '{field_definition.name}' must be before {max_date}"
-                
-                if future_only and date_value <= datetime.now():
+
+                if future_only and date_value <= now:
                     return f"Field '{field_definition.name}' must be a future date"
-                
-                if past_only and date_value >= datetime.now():
+
+                if past_only and date_value >= now:
                     return f"Field '{field_definition.name}' must be a past date"
             except ValueError:
                 return f"Field '{field_definition.name}' must be a valid date in ISO format (YYYY-MM-DD)"
         
         elif field_type in [CustomFieldType.SELECT, CustomFieldType.MULTISELECT]:
+            # min_length/max_length mean "number of selected options", not string
+            # length — a single select always holds exactly one option.
             min_length = rules.get('min_length')
             max_length = rules.get('max_length')
-            
-            if min_length and len(value_str) < min_length:
-                return f"Field '{field_definition.name}' too short. Minimum length: {min_length}"
-            
-            if max_length and len(value_str) > max_length:
-                return f"Field '{field_definition.name}' too long. Maximum length: {max_length}"
-            
-            # Validate against field options
-            if field_definition.options:
-                if field_type == CustomFieldType.SELECT:
-                    if value_str not in field_definition.options:
-                        return f"Invalid option for field '{field_definition.name}': {value_str}. Valid options: {field_definition.options}"
-                elif field_type == CustomFieldType.MULTISELECT:
-                    # Parse comma-separated values
-                    selected_values = [v.strip() for v in value_str.split(',') if v.strip()]
-                    invalid_values = [v for v in selected_values if v not in field_definition.options]
-                    if invalid_values:
-                        return f"Invalid options for field '{field_definition.name}': {invalid_values}. Valid options: {field_definition.options}"
+            selected_count = (
+                len([v for v in value_str.split(',') if v.strip()])
+                if field_type == CustomFieldType.MULTISELECT
+                else 1
+            )
+
+            if field_type == CustomFieldType.MULTISELECT:
+                if min_length and selected_count < min_length:
+                    return f"Field '{field_definition.name}' needs at least {min_length} option(s)"
+                if max_length and selected_count > max_length:
+                    return f"Field '{field_definition.name}' allows at most {max_length} option(s)"
     
     return None
 
@@ -435,6 +431,19 @@ def create_custom_field_value(db: Session, value: CustomFieldValueCreate, user_i
             "Update the definition's entity_types to include it."
         )
 
+    # One value per (field, entity): the UI keys off that, so a second row would
+    # be invisible in the editor and ambiguous in exports.
+    owner_column = getattr(CustomFieldValue, _CUSTOM_FIELD_ENTITY_COLUMNS[entity_type])
+    duplicate = db.query(CustomFieldValue.id).filter(
+        CustomFieldValue.field_definition_id == field_definition.id,
+        owner_column == getattr(value, _CUSTOM_FIELD_ENTITY_COLUMNS[entity_type]),
+    ).first()
+    if duplicate:
+        raise ValueError(
+            f"Custom field '{field_definition.name}' already has a value for this {entity_type}. "
+            "Update the existing value instead of adding another."
+        )
+
     # Validate value against field definition rules
     validation_error = validate_custom_field_value(value.value, field_definition)
     if validation_error:
@@ -451,11 +460,12 @@ def create_custom_field_value(db: Session, value: CustomFieldValueCreate, user_i
         from ..schemas_audit import AuditTrailCreate
         audit_service = get_audit_service(db)
         owner_summary = _format_custom_field_value_owner(db_value)
+        owner_entity_type, owner_entity_id = _value_owner_audit_target(db_value)
         audit_data = AuditTrailCreate(
             user_id=user_id,
             action="create",
-            entity_type=EntityType.CUSTOM_FIELD,
-            entity_id=db_value.id,
+            entity_type=owner_entity_type,
+            entity_id=owner_entity_id,
             project_id=field_definition.project_id,
             description=f"Created custom field value for field '{field_definition.name}' on {owner_summary} in project {field_definition.project_id}",
             ip_address=None,
@@ -501,11 +511,12 @@ def update_custom_field_value(db: Session, value_id: int, value: CustomFieldValu
         audit_service = get_audit_service(db)
         changes = ', '.join([f"{k}={v}" for k, v in value_data.items()])
         owner_summary = _format_custom_field_value_owner(db_value)
+        owner_entity_type, owner_entity_id = _value_owner_audit_target(db_value)
         audit_data = AuditTrailCreate(
             user_id=user_id,
             action="update",
-            entity_type=EntityType.CUSTOM_FIELD,
-            entity_id=value_id,
+            entity_type=owner_entity_type,
+            entity_id=owner_entity_id,
             project_id=field_definition.project_id,
             description=f"Updated custom field value for '{field_definition.name}' on {owner_summary}. Changes: {changes}",
             ip_address=None,
@@ -529,7 +540,15 @@ def delete_custom_field_value(db: Session, value_id: int, user_id: Optional[int]
         field_name = field_definition.name if field_definition else "unknown"
         project_id = field_definition.project_id if field_definition else None
         owner_summary = _format_custom_field_value_owner(db_value)
-        
+
+        # Deleting the row is how the UI clears a field, so it has to obey
+        # "required" exactly like writing an empty value does.
+        if field_definition and field_definition.is_required:
+            raise ValueError(
+                f"Custom field '{field_name}' is required and cannot be cleared"
+            )
+
+        owner_entity_type, owner_entity_id = _value_owner_audit_target(db_value)
         db.delete(db_value)
         safe_commit(db)
         
@@ -541,8 +560,8 @@ def delete_custom_field_value(db: Session, value_id: int, user_id: Optional[int]
             audit_data = AuditTrailCreate(
                 user_id=user_id,
                 action="delete",
-                entity_type=EntityType.CUSTOM_FIELD,
-                entity_id=value_id,
+                entity_type=owner_entity_type,
+                entity_id=owner_entity_id,
                 project_id=project_id,
                 description=f"Deleted custom field value for field '{field_name}' on {owner_summary}",
                 ip_address=None,
