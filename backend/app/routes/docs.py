@@ -309,11 +309,28 @@ def _feedback_summary(db: Session, doc_id: int, user_id: int) -> schemas.DocFeed
     )
 
 
-def _apply_feedback_payload(feedback: models.DocFeedback, payload: schemas.DocFeedbackCreate) -> None:
+def _feedback_differs(feedback: Optional[models.DocFeedback], payload: schemas.DocFeedbackCreate) -> bool:
+    """True when *payload* says something the stored feedback doesn't already say."""
+    if feedback is None:
+        return True
+    return (
+        feedback.feedback_type != payload.feedback_type
+        or (feedback.comment or "") != (payload.comment or "")
+        or (feedback.section_text or "") != (payload.section_text or "")
+    )
+
+
+def _apply_feedback_payload(
+    feedback: models.DocFeedback, payload: schemas.DocFeedbackCreate, *, reopen: bool = True,
+) -> None:
     feedback.feedback_type = payload.feedback_type
     feedback.comment = payload.comment
     feedback.section_text = payload.section_text
-    feedback.resolved = False
+    # Only an actual change reopens a resolved item — re-submitting byte-identical
+    # feedback used to silently un-resolve it *and* re-notify the editors, so a
+    # reader/editor toggle loop could spam the doc owners indefinitely.
+    if reopen:
+        feedback.resolved = False
 
 
 def _record_visit(db: Session, doc: models.Doc, user: models.User) -> None:
@@ -2260,26 +2277,22 @@ def register_docs_routes(app) -> None:
             .filter(models.DocFeedback.doc_id == doc.id, models.DocFeedback.user_id == current_user.id)
             .first()
         )
-        should_notify = payload.feedback_type != "helpful"
+        changed = _feedback_differs(feedback, payload)
+        should_notify = changed and payload.feedback_type != "helpful"
         if feedback is None:
             feedback = models.DocFeedback(
                 doc_id=doc.id,
                 user_id=current_user.id,
             )
-            _apply_feedback_payload(feedback, payload)
+            _apply_feedback_payload(feedback, payload, reopen=changed)
             db.add(feedback)
         else:
-            should_notify = should_notify and (
-                feedback.feedback_type != payload.feedback_type
-                or (feedback.comment or "") != (payload.comment or "")
-                or (feedback.section_text or "") != (payload.section_text or "")
-                or bool(feedback.resolved)
-            )
-            _apply_feedback_payload(feedback, payload)
+            _apply_feedback_payload(feedback, payload, reopen=changed)
         try:
             crud.safe_commit(db)
             db.refresh(feedback)
         except IntegrityError as exc:
+            # A concurrent submit from the same reader won the unique key; adopt its row.
             db.rollback()
             feedback = (
                 db.query(models.DocFeedback)
@@ -2289,13 +2302,11 @@ def register_docs_routes(app) -> None:
             if feedback is None:
                 logger.exception("Could not resolve duplicate doc feedback for doc %s/user %s", doc.id, current_user.id)
                 raise HTTPException(status_code=500, detail="Could not save document feedback") from exc
-            should_notify = should_notify and (
-                feedback.feedback_type != payload.feedback_type
-                or (feedback.comment or "") != (payload.comment or "")
-                or (feedback.section_text or "") != (payload.section_text or "")
-                or bool(feedback.resolved)
-            )
-            _apply_feedback_payload(feedback, payload)
+            # Recomputed against the row we actually hold, since the rolled-back write
+            # may not have been the one that landed.
+            changed = _feedback_differs(feedback, payload)
+            should_notify = changed and payload.feedback_type != "helpful"
+            _apply_feedback_payload(feedback, payload, reopen=changed)
             try:
                 crud.safe_commit(db)
                 db.refresh(feedback)
