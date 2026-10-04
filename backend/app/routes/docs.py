@@ -928,11 +928,11 @@ def register_docs_routes(app) -> None:
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         spaces = [_get_space_or_404(db, space_id) for space_id in payload.space_ids]
-        # Only spaces whose position actually changes need write access, so a
-        # project member can reorder project spaces around read-only globals.
-        for index, space in enumerate(spaces):
-            if (space.order_index or 0) != index:
-                _require(current_user, space.project_id, "write", db)
+        # Every space in the payload is written and echoed back, so each one is
+        # authorised — gating only on "did this space move" would hand a caller
+        # the full view of any foreign space whose index happened to match.
+        for space in spaces:
+            _require(current_user, space.project_id, "write", db)
         crud_docs.reorder_spaces(db, spaces)
         stats = crud_docs.space_stats(db)
         return [_space_view(s, stats.get(s.id)) for s in spaces]
