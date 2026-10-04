@@ -25,7 +25,8 @@ interface TestCaseSearchBarProps {
   placeholder?: string;
   groups: SearchSuggestionGroup[];
   isRTL?: boolean;
-  resultCount?: number;
+  /** Accepts a pre-localized string so callers can use the active script's digits. */
+  resultCount?: number | string;
   resultLabel?: string;
 }
 
@@ -264,7 +265,7 @@ export function TestCaseSearchBar({
             <span>
               <kbd className="font-mono">↑↓</kbd> {t('searchPaletteNavigate')} · <kbd className="font-mono">↵</kbd> {t('searchPaletteSelect')} · <kbd className="font-mono">esc</kbd> {t('searchPaletteClose')}
             </span>
-            {typeof resultCount === 'number' && (
+            {resultCount != null && (
               <span className="font-medium text-gray-500 dark:text-gray-400">
                 {resultCount} {resultLabel}
               </span>

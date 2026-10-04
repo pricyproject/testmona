@@ -6,8 +6,8 @@ import {
   BarChart3,
   BookOpen,
   ChevronDown,
-  ChevronsUpDown,
   ChevronUp,
+  ChevronsUpDown,
   Clock,
   Download,
   Eye,
@@ -26,10 +26,11 @@ import {
   Pencil,
   Pin,
   Plus,
+  Rocket,
+  RotateCcw,
   Table as TableIcon,
   Trash2,
   Upload,
-  Rocket,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -44,13 +45,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+
 import { Textarea } from '@/components/ui/textarea';
 import {
   DropdownMenu,
@@ -74,7 +69,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { useAuthStore } from '@/stores/authStore';
-import { docsAPI, type DocListParams } from '@/lib/api';
+import { docsAPI, getApiErrorMessage, type DocListParams } from '@/lib/api';
 import { parsePositiveIntegerParam } from '@/utils/validation';
 import { formatNumber } from '@/utils/datetime';
 import { useDateFormat } from '@/hooks/useDateFormat';
@@ -276,9 +271,15 @@ export function DocHub() {
   const [loadingSpaces, setLoadingSpaces] = useState(true);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // A failed list/folder fetch has to be distinguishable from a genuinely empty
+  // scope, otherwise the user is shown "no documents here" for an outage.
+  const [docsError, setDocsError] = useState(false);
+  const [foldersError, setFoldersError] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState(false);
 
   // Deep-links from a doc's tag badge arrive as ?tag=; fold them into the smart
-  // query so the tag filter actually applies.
+  // query so the tag filter actually applies. `?folder=` comes from the editor's
+  // folder @mentions, so the URL sync below has to round-trip it.
   const initialQuery =
     searchParams.get('q') ||
     (searchParams.get('tag') ? `tag:"${searchParams.get('tag')}"` : '');
@@ -349,10 +350,15 @@ export function DocHub() {
     setActiveFolderId(null);
   };
 
+  const spacesTokenRef = useRef(0);
   const loadSpaces = useCallback(async () => {
+    const token = ++spacesTokenRef.current;
     try {
       setLoadingSpaces(true);
       const data = await docsAPI.listSpaces({ projectId, includeGlobal: true });
+      // Switching projects while the previous request is in flight must not let the
+      // old project's spaces overwrite the new one's.
+      if (token !== spacesTokenRef.current) return;
       setSpaces(data);
       setActiveSpaceId((current) => (
         current != null && data.some((space) => space.id === current)
@@ -362,13 +368,11 @@ export function DocHub() {
     } catch {
       toast({ title: t('error'), description: t('docSpacesLoadFailed'), variant: 'destructive' });
     } finally {
-      setLoadingSpaces(false);
+      if (token === spacesTokenRef.current) setLoadingSpaces(false);
     }
   }, [projectId, t, toast]);
 
   useEffect(() => { loadSpaces(); }, [loadSpaces]);
-
-  useEffect(() => { setActiveFolderId(null); }, [activeSpaceId]);
 
   useEffect(() => {
     const id = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
@@ -379,26 +383,41 @@ export function DocHub() {
     const next = new URLSearchParams();
     if (searchQuery.trim()) next.set('q', searchQuery.trim());
     if (searchScope === 'all') next.set('scope', 'all');
+    // Preserved so an editor folder mention (?folder=N) survives a filter change.
+    const folderParam = searchParams.get('folder');
+    if (folderParam) next.set('folder', folderParam);
     setSearchParams(next, { replace: true });
-  }, [searchQuery, searchScope, setSearchParams]);
+  }, [searchQuery, searchScope, searchParams, setSearchParams]);
 
+  const foldersTokenRef = useRef(0);
   const loadFolders = useCallback(async () => {
+    const token = ++foldersTokenRef.current;
     if (activeSpaceId == null) {
       setFolders([]);
       setActiveFolderId(null);
+      setFoldersError(false);
       return;
     }
     try {
       const data = await docsAPI.listFolders(activeSpaceId);
+      if (token !== foldersTokenRef.current) return;
       setFolders(data);
-      setActiveFolderId((current) => (
-        current != null && data.some((folder) => folder.id === current) ? current : null
-      ));
+      setFoldersError(false);
+      // A `?folder=N` deep-link wins on first load; afterwards the user's own
+      // selection sticks until it points at a folder that no longer exists.
+      const deepLink = parsePositiveIntegerParam(searchParams.get('folder'));
+      setActiveFolderId((current) => {
+        if (deepLink != null && data.some((folder) => folder.id === deepLink)) return deepLink;
+        return current != null && data.some((folder) => folder.id === current) ? current : null;
+      });
     } catch {
+      if (token !== foldersTokenRef.current) return;
       setFolders([]);
       setActiveFolderId(null);
+      setFoldersError(true);
+      toast({ title: t('error'), description: t('docFoldersLoadFailed'), variant: 'destructive' });
     }
-  }, [activeSpaceId]);
+  }, [activeSpaceId, searchParams]);
 
   useEffect(() => { loadFolders(); }, [loadFolders]);
 
@@ -418,18 +437,28 @@ export function DocHub() {
       : { ...base, spaceId: activeSpaceId ?? undefined, folderId: activeFolderId ?? undefined };
   }, [activeFolderId, activeSpaceId, parsedSearchQuery.classification, parsedSearchQuery.status, parsedSearchQuery.tag, parsedSearchQuery.terms, projectId, scopeAll, sort]);
 
-  // First page (replaces the list) whenever scope/filters change.
+  // First page (replaces the list) whenever scope/filters change. Guarded by a
+  // request token: without it a slow response for filter A lands after filter B and
+  // renders A's documents under B's search box.
+  const listTokenRef = useRef(0);
   const reloadDocs = useCallback(async () => {
-    if (!scopeAll && activeSpaceId == null) { setDocs([]); setTotal(0); return; }
+    const token = ++listTokenRef.current;
+    if (!scopeAll && activeSpaceId == null) { setDocs([]); setTotal(0); setDocsError(false); return; }
     try {
       setLoadingDocs(true);
+      setDocsError(false);
       const page = await docsAPI.listPaged(queryParams(0));
+      if (token !== listTokenRef.current) return;
       setDocs(page.items);
       setTotal(page.total);
     } catch {
+      if (token !== listTokenRef.current) return;
+      // Distinguish "the request failed" from "this space is empty", otherwise the
+      // user is told the space has no documents when it actually failed to load.
+      setDocsError(true);
       toast({ title: t('error'), description: t('docsLoadFailed'), variant: 'destructive' });
     } finally {
-      setLoadingDocs(false);
+      if (token === listTokenRef.current) setLoadingDocs(false);
     }
   }, [scopeAll, activeSpaceId, queryParams, t, toast]);
 
@@ -451,27 +480,35 @@ export function DocHub() {
 
   useEffect(() => { loadDocHighlights(); }, [loadDocHighlights]);
 
-  // Append the next page (infinite scroll / "Load more").
+  // Append the next page (infinite scroll / "Load more"). Shares the token with
+  // reloadDocs so a page fetched for a since-changed query is discarded rather than
+  // appended to the new one, and reports failure instead of silently stalling.
   const loadMore = useCallback(async () => {
     if (loadingMore || loadingDocs) return;
+    const token = listTokenRef.current;
+    const skip = docs.length;
     try {
       setLoadingMore(true);
-      const page = await docsAPI.listPaged(queryParams(docs.length));
+      setLoadMoreError(false);
+      const page = await docsAPI.listPaged(queryParams(skip));
+      if (token !== listTokenRef.current) return;
       setDocs((prev) => {
         const seen = new Set(prev.map((d) => d.id));
         return [...prev, ...page.items.filter((d) => !seen.has(d.id))];
       });
       setTotal(page.total);
     } catch {
-      /* keep what we have */
+      if (token !== listTokenRef.current) return;
+      setLoadMoreError(true);
+      toast({ title: t('error'), description: t('docsLoadFailed'), variant: 'destructive' });
     } finally {
-      setLoadingMore(false);
+      if (token === listTokenRef.current) setLoadingMore(false);
     }
-  }, [loadingMore, loadingDocs, queryParams, docs.length]);
+  }, [loadingMore, loadingDocs, queryParams, docs.length, t, toast]);
 
   // Stable ref so the IntersectionObserver always calls the latest loadMore.
   const loadMoreRef = useRef(loadMore);
-  loadMoreRef.current = loadMore;
+  useEffect(() => { loadMoreRef.current = loadMore; }, [loadMore]);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = sentinelRef.current;
@@ -573,10 +610,10 @@ export function DocHub() {
       }
       setSpaceDialogOpen(false);
       await loadSpaces();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         title: t('error'),
-        description: e?.response?.data?.detail || t(editingSpace ? 'docSpaceUpdateFailed' : 'docSpaceCreateFailed'),
+        description: getApiErrorMessage(e, t(editingSpace ? 'docSpaceUpdateFailed' : 'docSpaceCreateFailed')),
         variant: 'destructive',
       });
     } finally {
@@ -620,8 +657,8 @@ export function DocHub() {
       setDeletingSpace(null);
       await loadSpaces();
       await loadDocHighlights();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docSpaceDeleteFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docSpaceDeleteFailed')), variant: 'destructive' });
     } finally {
       setDeleteSpaceBusy(false);
     }
@@ -635,8 +672,8 @@ export function DocHub() {
       setDocDialogOpen(false);
       setNewDocTitle('');
       navigate(`${basePath}/${doc.project_seq ?? doc.id}/edit`);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docCreateFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docCreateFailed')), variant: 'destructive' });
     } finally {
       setCreatingDoc(false);
     }
@@ -654,8 +691,8 @@ export function DocHub() {
       setNewFolderName('');
       await Promise.all([loadSpaces(), loadFolders()]);
       toast({ title: t('success'), description: t('docFolderCreated') });
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docFolderCreateFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docFolderCreateFailed')), variant: 'destructive' });
     } finally {
       setCreatingFolder(false);
     }
@@ -680,8 +717,8 @@ export function DocHub() {
       await reloadDocs();
       await loadSpaces();
       await loadFolders();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docImportFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docImportFailed')), variant: 'destructive' });
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1067,7 +1104,18 @@ export function DocHub() {
                     {t('docAllFolders')}
                   </button>
                 </li>
-                {folders.map((folder) => (
+                {foldersError ? (
+                  <li className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-muted-foreground">
+                    <span>{t('docFoldersLoadFailed')}</span>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs underline underline-offset-2"
+                      onClick={() => void loadFolders()}
+                    >
+                      {t('retry')}
+                    </button>
+                  </li>
+                ) : folders.map((folder) => (
                   <li key={folder.id}>
                     <button type="button" onClick={() => setActiveFolderId(folder.id)} className={`w-full rounded-lg px-3 py-2 text-start text-sm ${activeFolderId === folder.id ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-muted'}`} dir="auto">
                       {folder.name}
@@ -1164,7 +1212,8 @@ export function DocHub() {
                   placeholder={t('docSearchSmartPlaceholder')}
                   groups={searchSuggestionGroups}
                   isRTL={isRTL}
-                  resultCount={total}
+                  // Localized so the counter reads in the active script's digits.
+                  resultCount={n(total)}
                   resultLabel={t('docHub')}
                 />
               </div>
@@ -1387,6 +1436,15 @@ export function DocHub() {
                 </Button>
               )}
             </div>
+          ) : docsError ? (
+            <div className="rounded-lg border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
+              <FileText className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">{t('docsLoadFailed')}</p>
+              <Button className="mt-4" size="sm" variant="outline" onClick={() => void reloadDocs()}>
+                <RotateCcw className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+                {t('retry')}
+              </Button>
+            </div>
           ) : docs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
               <FileText className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
@@ -1544,11 +1602,11 @@ export function DocHub() {
           )}
 
           {/* Infinite-scroll sentinel + explicit "Load more" fallback */}
-          {!loadingDocs && hasMore && (
+          {!loadingDocs && (hasMore || loadMoreError) && (
             <div ref={sentinelRef} className="mt-4 flex justify-center">
-              <Button variant="outline" size="sm" onClick={() => loadMore()} disabled={loadingMore}>
+              <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
                 {loadingMore && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
-                {t('docLoadMore', { n: total - docs.length })}
+                {loadMoreError ? t('retry') : t('docLoadMore', { n: total - docs.length })}
               </Button>
             </div>
           )}
