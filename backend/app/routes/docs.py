@@ -1918,17 +1918,26 @@ def register_docs_routes(app) -> None:
     # ── Version history ─────────────────────────────────────────────────────
     @app.get("/docs/{doc_id}/versions", response_model=List[schemas.DocVersionView], tags=["Docs"])
     def list_doc_versions(
+        response: Response,
         doc_id: int = Path(..., ge=1),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(50, ge=1, le=200),
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user),
     ):
         doc = _get_doc_or_404(db, doc_id)
         _require(current_user, doc.project_id, "read", db)
+        # The `doc_revisions` toggle stops *recording*; it deliberately does not erase
+        # history that already exists, so listing stays available. Revisions are dense,
+        # so this is paged — a doc with hundreds of autosaves would otherwise return
+        # every revision's full body in one response.
+        base = db.query(models.DocVersion).filter(models.DocVersion.doc_id == doc_id)
+        response.headers["X-Total-Count"] = str(base.count())
         versions = (
-            db.query(models.DocVersion)
-            .options(joinedload(models.DocVersion.author))
-            .filter(models.DocVersion.doc_id == doc_id)
+            base.options(joinedload(models.DocVersion.author))
             .order_by(models.DocVersion.version_number.desc())
+            .offset(skip)
+            .limit(limit)
             .all()
         )
         return [
