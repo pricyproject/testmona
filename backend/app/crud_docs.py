@@ -359,7 +359,19 @@ def record_doc_version(
         )
 
     if commit:
-        safe_commit(db)
+        try:
+            safe_commit(db)
+        except IntegrityError:
+            # `version_number` is computed in Python against a unique index, so two
+            # concurrent saves of the same doc (e.g. the editor autosaving while a
+            # collaborator saves) collide. Re-derive the number from the database and
+            # retry once rather than surfacing a 500 and losing the writer's content.
+            db.rollback()
+            latest = _latest_version(db, doc)
+            version.version_number = (latest.version_number if latest is not None else 0) + 1
+            doc.current_version = version.version_number
+            db.add(version)
+            safe_commit(db)
         db.refresh(version)
         db.refresh(doc)
     return version
