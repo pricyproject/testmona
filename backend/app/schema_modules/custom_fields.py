@@ -1,7 +1,7 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, field_validator, HttpUrl, model_validator, Field
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
+from ..models import Priority, Status, TestStatus, ResultStatus, Role, Permission, CustomFieldType, CUSTOM_FIELD_ENTITY_TYPES, TestType, RecycleBinType, RequirementStatus, DefectStatus, DefectSeverity, DefectPriority, DefectLinkType, MilestoneStatus, NotificationType, StepCategory, StepComplexity, DocStatus
 import re
 
 from .versioning import (
@@ -23,7 +23,157 @@ from ..services.webhook_security import normalize_webhook_url
 
 from .core import *
 
-class CustomFieldDefinitionBase(BaseModel):
+def normalize_entity_types(value: Optional[List[str]]) -> Optional[List[str]]:
+    """Lower-case, de-duplicate and filter to the supported entity keys."""
+    if value is None:
+        return value
+    allowed = set(CUSTOM_FIELD_ENTITY_TYPES)
+    cleaned: List[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        key = raw.strip().lower()
+        if key in allowed and key not in cleaned:
+            cleaned.append(key)
+    if not cleaned:
+        raise ValueError(
+            "entity_types must contain at least one of: "
+            + ", ".join(CUSTOM_FIELD_ENTITY_TYPES)
+        )
+    return cleaned
+
+
+def normalize_options(field_type, options):
+    """Coerce legacy ``{"values": [...]}`` option payloads to a plain list.
+
+    Ponytail: select/multiselect option length limits are interpreted as a
+    *selection count* by :func:`app.crud.validate_custom_field_value`, so the
+    rule keys stay named ``min_length``/``max_length`` for backwards compat.
+    """
+    if not options or field_type not in (CustomFieldType.SELECT, CustomFieldType.MULTISELECT):
+        return options
+    if isinstance(options, dict):
+        if isinstance(options.get('values'), list):
+            return options['values']
+        raise ValueError("Options for select/multiselect must be an array or a dict with 'values' key")
+    if not isinstance(options, list):
+        raise ValueError("Options for select/multiselect must be an array")
+    return options
+
+
+def _validate_length_rules(rules: Dict[str, Any]) -> None:
+    for key in ('min_length', 'max_length'):
+        if key in rules and (not isinstance(rules[key], int) or isinstance(rules[key], bool) or rules[key] < 0):
+            raise ValueError(f"{key} must be a non-negative integer")
+    if 'min_length' in rules and 'max_length' in rules and rules['min_length'] > rules['max_length']:
+        raise ValueError("min_length cannot be greater than max_length")
+
+
+def _reject_unknown_rules(rules: Dict[str, Any], valid_keys: set, label: str) -> None:
+    invalid_keys = set(rules.keys()) - valid_keys
+    if invalid_keys:
+        raise ValueError(
+            f"Invalid validation rules for {label} field: {invalid_keys}. Valid keys: {valid_keys}"
+        )
+
+
+def _validate_text_rules(rules: Dict[str, Any]) -> None:
+    _reject_unknown_rules(rules, {'min_length', 'max_length', 'regex_pattern'}, 'text')
+    _validate_length_rules(rules)
+    if 'regex_pattern' in rules:
+        if not isinstance(rules['regex_pattern'], str):
+            raise ValueError("regex_pattern must be a string")
+        try:
+            re.compile(rules['regex_pattern'])
+        except re.error as exc:
+            raise ValueError(f"Invalid regex pattern: {exc}")
+
+
+def _validate_number_rules(rules: Dict[str, Any]) -> None:
+    _reject_unknown_rules(rules, {'min_value', 'max_value', 'integer_only'}, 'number')
+    for key in ('min_value', 'max_value'):
+        if key in rules and (
+            not isinstance(rules[key], (int, float)) or isinstance(rules[key], bool)
+        ):
+            raise ValueError(f"{key} must be a number")
+    if 'min_value' in rules and 'max_value' in rules and rules['min_value'] > rules['max_value']:
+        raise ValueError("min_value cannot be greater than max_value")
+    if 'integer_only' in rules and not isinstance(rules['integer_only'], bool):
+        raise ValueError("integer_only must be a boolean")
+
+
+def _validate_date_rules(rules: Dict[str, Any]) -> None:
+    _reject_unknown_rules(rules, {'min_date', 'max_date', 'future_only', 'past_only'}, 'date')
+    parsed = {}
+    for key in ('min_date', 'max_date'):
+        if key not in rules:
+            continue
+        if not isinstance(rules[key], str):
+            raise ValueError(f"{key} must be a string in ISO format")
+        try:
+            parsed[key] = datetime.fromisoformat(rules[key])
+        except ValueError:
+            raise ValueError(f"{key} must be in ISO format (YYYY-MM-DD)")
+    if 'min_date' in parsed and 'max_date' in parsed and parsed['min_date'] > parsed['max_date']:
+        raise ValueError("min_date cannot be greater than max_date")
+    if rules.get('future_only') and rules.get('past_only'):
+        raise ValueError("Cannot specify both future_only and past_only")
+    for key in ('future_only', 'past_only'):
+        if key in rules and not isinstance(rules[key], bool):
+            raise ValueError(f"{key} must be a boolean")
+
+
+def _validate_select_rules(rules: Dict[str, Any]) -> None:
+    _reject_unknown_rules(rules, {'min_length', 'max_length'}, 'select')
+    _validate_length_rules(rules)
+
+
+def validate_rules_for_field_type(field_type, rules: Optional[Dict[str, Any]]) -> None:
+    """Validate a rule set against a field type.
+
+    Exposed at module level so the CRUD layer can validate the *merged* state of
+    a partial update (where the payload may carry rules without a ``field_type``).
+    """
+    if not rules or not field_type:
+        return
+    if field_type == CustomFieldType.TEXT:
+        _validate_text_rules(rules)
+    elif field_type == CustomFieldType.NUMBER:
+        _validate_number_rules(rules)
+    elif field_type == CustomFieldType.DATE:
+        _validate_date_rules(rules)
+    elif field_type in (CustomFieldType.SELECT, CustomFieldType.MULTISELECT):
+        _validate_select_rules(rules)
+    elif field_type == CustomFieldType.BOOLEAN and rules:
+        raise ValueError("Boolean fields do not support validation rules")
+
+
+class CustomFieldDefinitionValidationMixin:
+    """Shared validators for the create and update definition payloads.
+
+    Both payloads carry the same constrained fields, so the rules live here
+    once instead of being copy-pasted between the two models.
+    """
+
+    @field_validator("entity_types")
+    @classmethod
+    def _validate_entity_types(cls, value):
+        return normalize_entity_types(value)
+
+    @model_validator(mode='after')
+    def validate_options(self):
+        # On a partial update ``field_type`` is None; the merged state is
+        # re-validated by the CRUD layer before it is written.
+        self.options = normalize_options(self.field_type, self.options)
+        return self
+
+    @model_validator(mode='after')
+    def validate_validation_rules(self):
+        validate_rules_for_field_type(self.field_type, self.validation_rules)
+        return self
+
+
+class CustomFieldDefinitionBase(CustomFieldDefinitionValidationMixin, BaseModel):
     name: str
     slug: Optional[str] = None
     field_type: CustomFieldType
@@ -36,175 +186,15 @@ class CustomFieldDefinitionBase(BaseModel):
     # only). Valid keys: "test_case", "test_run", "defect", "requirement".
     entity_types: Optional[List[str]] = None
 
-    @field_validator("entity_types")
-    @classmethod
-    def _validate_entity_types(cls, value):
-        if value is None:
-            return value
-        allowed = {"test_case", "test_run", "defect", "requirement"}
-        cleaned: List[str] = []
-        seen: set = set()
-        for raw in value:
-            if not isinstance(raw, str):
-                continue
-            key = raw.strip().lower()
-            if key in allowed and key not in seen:
-                seen.add(key)
-                cleaned.append(key)
-        if not cleaned:
-            raise ValueError(
-                "entity_types must contain at least one of: test_case, test_run, defect, requirement"
-            )
-        return cleaned
-
-    @model_validator(mode='after')
-    def validate_options(self):
-        if self.options and self.field_type in [CustomFieldType.SELECT, CustomFieldType.MULTISELECT]:
-            # If options is a dict with 'values' key, extract the array (legacy support)
-            if isinstance(self.options, dict):
-                if 'values' in self.options and isinstance(self.options['values'], list):
-                    self.options = self.options['values']
-                else:
-                    raise ValueError("Options for select/multiselect must be an array or a dict with 'values' key")
-            elif not isinstance(self.options, list):
-                raise ValueError("Options for select/multiselect must be an array")
-        return self
-
-    @model_validator(mode='after')
-    def validate_validation_rules(self):
-        if self.validation_rules and self.field_type:
-            field_type = self.field_type
-            rules = self.validation_rules
-            
-            # Validate rules based on field type
-            if field_type == CustomFieldType.TEXT:
-                self._validate_text_rules(rules)
-            elif field_type == CustomFieldType.NUMBER:
-                self._validate_number_rules(rules)
-            elif field_type == CustomFieldType.DATE:
-                self._validate_date_rules(rules)
-            elif field_type in [CustomFieldType.SELECT, CustomFieldType.MULTISELECT]:
-                self._validate_select_rules(rules)
-            elif field_type == CustomFieldType.BOOLEAN:
-                if rules:
-                    raise ValueError("Boolean fields do not support validation rules")
-        
-        return self
-    
-    def _validate_text_rules(self, rules: Dict[str, Any]):
-        """Validate text field validation rules"""
-        valid_keys = {'min_length', 'max_length', 'regex_pattern'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for text field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_length' in rules:
-            if not isinstance(rules['min_length'], int) or rules['min_length'] < 0:
-                raise ValueError("min_length must be a non-negative integer")
-        
-        if 'max_length' in rules:
-            if not isinstance(rules['max_length'], int) or rules['max_length'] < 0:
-                raise ValueError("max_length must be a non-negative integer")
-        
-        if 'min_length' in rules and 'max_length' in rules:
-            if rules['min_length'] > rules['max_length']:
-                raise ValueError("min_length cannot be greater than max_length")
-        
-        if 'regex_pattern' in rules:
-            if not isinstance(rules['regex_pattern'], str):
-                raise ValueError("regex_pattern must be a string")
-            try:
-                re.compile(rules['regex_pattern'])
-            except re.error as e:
-                raise ValueError(f"Invalid regex pattern: {str(e)}")
-    
-    def _validate_number_rules(self, rules: Dict[str, Any]):
-        """Validate number field validation rules"""
-        valid_keys = {'min_value', 'max_value', 'integer_only'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for number field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_value' in rules:
-            if not isinstance(rules['min_value'], (int, float)):
-                raise ValueError("min_value must be a number")
-        
-        if 'max_value' in rules:
-            if not isinstance(rules['max_value'], (int, float)):
-                raise ValueError("max_value must be a number")
-        
-        if 'min_value' in rules and 'max_value' in rules:
-            if rules['min_value'] > rules['max_value']:
-                raise ValueError("min_value cannot be greater than max_value")
-        
-        if 'integer_only' in rules:
-            if not isinstance(rules['integer_only'], bool):
-                raise ValueError("integer_only must be a boolean")
-    
-    def _validate_date_rules(self, rules: Dict[str, Any]):
-        """Validate date field validation rules"""
-        valid_keys = {'min_date', 'max_date', 'future_only', 'past_only'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for date field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_date' in rules:
-            if not isinstance(rules['min_date'], str):
-                raise ValueError("min_date must be a string in ISO format")
-            try:
-                datetime.fromisoformat(rules['min_date'])
-            except ValueError:
-                raise ValueError("min_date must be in ISO format (YYYY-MM-DD)")
-        
-        if 'max_date' in rules:
-            if not isinstance(rules['max_date'], str):
-                raise ValueError("max_date must be a string in ISO format")
-            try:
-                datetime.fromisoformat(rules['max_date'])
-            except ValueError:
-                raise ValueError("max_date must be in ISO format (YYYY-MM-DD)")
-        
-        if 'min_date' in rules and 'max_date' in rules:
-            if datetime.fromisoformat(rules['min_date']) > datetime.fromisoformat(rules['max_date']):
-                raise ValueError("min_date cannot be greater than max_date")
-        
-        if 'future_only' in rules and 'past_only' in rules:
-            if rules['future_only'] and rules['past_only']:
-                raise ValueError("Cannot specify both future_only and past_only")
-        
-        if 'future_only' in rules:
-            if not isinstance(rules['future_only'], bool):
-                raise ValueError("future_only must be a boolean")
-        
-        if 'past_only' in rules:
-            if not isinstance(rules['past_only'], bool):
-                raise ValueError("past_only must be a boolean")
-    
-    def _validate_select_rules(self, rules: Dict[str, Any]):
-        """Validate select/multiselect field validation rules"""
-        valid_keys = {'min_length', 'max_length'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for select field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_length' in rules:
-            if not isinstance(rules['min_length'], int) or rules['min_length'] < 0:
-                raise ValueError("min_length must be a non-negative integer")
-        
-        if 'max_length' in rules:
-            if not isinstance(rules['max_length'], int) or rules['max_length'] < 0:
-                raise ValueError("max_length must be a non-negative integer")
-        
-        if 'min_length' in rules and 'max_length' in rules:
-            if rules['min_length'] > rules['max_length']:
-                raise ValueError("min_length cannot be greater than max_length")
-
 
 class CustomFieldDefinitionCreate(CustomFieldDefinitionBase):
     project_id: int
 
 
-class CustomFieldDefinitionUpdate(BaseModel):
+class CustomFieldDefinitionUpdate(CustomFieldDefinitionValidationMixin, BaseModel):
+    """Partial update. Every field is optional; the CRUD layer re-validates the
+    merged definition (field_type + rules + options) before persisting."""
+
     name: Optional[str] = None
     slug: Optional[str] = None
     field_type: Optional[CustomFieldType] = None
@@ -214,169 +204,6 @@ class CustomFieldDefinitionUpdate(BaseModel):
     options: Optional[Union[List[str], Dict[str, Any]]] = None
     validation_rules: Optional[Dict[str, Any]] = None
     entity_types: Optional[List[str]] = None
-
-    @field_validator("entity_types")
-    @classmethod
-    def _validate_entity_types(cls, value):
-        if value is None:
-            return value
-        allowed = {"test_case", "test_run", "defect", "requirement"}
-        cleaned: List[str] = []
-        seen: set = set()
-        for raw in value:
-            if not isinstance(raw, str):
-                continue
-            key = raw.strip().lower()
-            if key in allowed and key not in seen:
-                seen.add(key)
-                cleaned.append(key)
-        if not cleaned:
-            raise ValueError(
-                "entity_types must contain at least one of: test_case, test_run, defect, requirement"
-            )
-        return cleaned
-
-    @model_validator(mode='after')
-    def validate_options(self):
-        if self.options and self.field_type in [CustomFieldType.SELECT, CustomFieldType.MULTISELECT]:
-            # If options is a dict with 'values' key, extract the array (legacy support)
-            if isinstance(self.options, dict):
-                if 'values' in self.options and isinstance(self.options['values'], list):
-                    self.options = self.options['values']
-                else:
-                    raise ValueError("Options for select/multiselect must be an array or a dict with 'values' key")
-            elif not isinstance(self.options, list):
-                raise ValueError("Options for select/multiselect must be an array")
-        return self
-
-    @model_validator(mode='after')
-    def validate_validation_rules(self):
-        if self.validation_rules and self.field_type:
-            field_type = self.field_type
-            rules = self.validation_rules
-            
-            # Validate rules based on field type
-            if field_type == CustomFieldType.TEXT:
-                self._validate_text_rules(rules)
-            elif field_type == CustomFieldType.NUMBER:
-                self._validate_number_rules(rules)
-            elif field_type == CustomFieldType.DATE:
-                self._validate_date_rules(rules)
-            elif field_type in [CustomFieldType.SELECT, CustomFieldType.MULTISELECT]:
-                self._validate_select_rules(rules)
-            elif field_type == CustomFieldType.BOOLEAN:
-                if rules:
-                    raise ValueError("Boolean fields do not support validation rules")
-        
-        return self
-    
-    def _validate_text_rules(self, rules: Dict[str, Any]):
-        """Validate text field validation rules"""
-        valid_keys = {'min_length', 'max_length', 'regex_pattern'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for text field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_length' in rules:
-            if not isinstance(rules['min_length'], int) or rules['min_length'] < 0:
-                raise ValueError("min_length must be a non-negative integer")
-        
-        if 'max_length' in rules:
-            if not isinstance(rules['max_length'], int) or rules['max_length'] < 0:
-                raise ValueError("max_length must be a non-negative integer")
-        
-        if 'min_length' in rules and 'max_length' in rules:
-            if rules['min_length'] > rules['max_length']:
-                raise ValueError("min_length cannot be greater than max_length")
-        
-        if 'regex_pattern' in rules:
-            if not isinstance(rules['regex_pattern'], str):
-                raise ValueError("regex_pattern must be a string")
-            try:
-                re.compile(rules['regex_pattern'])
-            except re.error as e:
-                raise ValueError(f"Invalid regex pattern: {str(e)}")
-    
-    def _validate_number_rules(self, rules: Dict[str, Any]):
-        """Validate number field validation rules"""
-        valid_keys = {'min_value', 'max_value', 'integer_only'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for number field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_value' in rules:
-            if not isinstance(rules['min_value'], (int, float)):
-                raise ValueError("min_value must be a number")
-        
-        if 'max_value' in rules:
-            if not isinstance(rules['max_value'], (int, float)):
-                raise ValueError("max_value must be a number")
-        
-        if 'min_value' in rules and 'max_value' in rules:
-            if rules['min_value'] > rules['max_value']:
-                raise ValueError("min_value cannot be greater than max_value")
-        
-        if 'integer_only' in rules:
-            if not isinstance(rules['integer_only'], bool):
-                raise ValueError("integer_only must be a boolean")
-    
-    def _validate_date_rules(self, rules: Dict[str, Any]):
-        """Validate date field validation rules"""
-        valid_keys = {'min_date', 'max_date', 'future_only', 'past_only'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for date field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_date' in rules:
-            if not isinstance(rules['min_date'], str):
-                raise ValueError("min_date must be a string in ISO format")
-            try:
-                datetime.fromisoformat(rules['min_date'])
-            except ValueError:
-                raise ValueError("min_date must be in ISO format (YYYY-MM-DD)")
-        
-        if 'max_date' in rules:
-            if not isinstance(rules['max_date'], str):
-                raise ValueError("max_date must be a string in ISO format")
-            try:
-                datetime.fromisoformat(rules['max_date'])
-            except ValueError:
-                raise ValueError("max_date must be in ISO format (YYYY-MM-DD)")
-        
-        if 'min_date' in rules and 'max_date' in rules:
-            if datetime.fromisoformat(rules['min_date']) > datetime.fromisoformat(rules['max_date']):
-                raise ValueError("min_date cannot be greater than max_date")
-        
-        if 'future_only' in rules and 'past_only' in rules:
-            if rules['future_only'] and rules['past_only']:
-                raise ValueError("Cannot specify both future_only and past_only")
-        
-        if 'future_only' in rules:
-            if not isinstance(rules['future_only'], bool):
-                raise ValueError("future_only must be a boolean")
-        
-        if 'past_only' in rules:
-            if not isinstance(rules['past_only'], bool):
-                raise ValueError("past_only must be a boolean")
-    
-    def _validate_select_rules(self, rules: Dict[str, Any]):
-        """Validate select/multiselect field validation rules"""
-        valid_keys = {'min_length', 'max_length'}
-        invalid_keys = set(rules.keys()) - valid_keys
-        if invalid_keys:
-            raise ValueError(f"Invalid validation rules for select field: {invalid_keys}. Valid keys: {valid_keys}")
-        
-        if 'min_length' in rules:
-            if not isinstance(rules['min_length'], int) or rules['min_length'] < 0:
-                raise ValueError("min_length must be a non-negative integer")
-        
-        if 'max_length' in rules:
-            if not isinstance(rules['max_length'], int) or rules['max_length'] < 0:
-                raise ValueError("max_length must be a non-negative integer")
-        
-        if 'min_length' in rules and 'max_length' in rules:
-            if rules['min_length'] > rules['max_length']:
-                raise ValueError("min_length cannot be greater than max_length")
 
 
 class CustomFieldDefinition(CustomFieldDefinitionBase):
@@ -401,6 +228,7 @@ class CustomFieldValueBase(BaseModel):
     defect_id: Optional[int] = None
     requirement_id: Optional[int] = None
     value: Optional[str] = None
+
 
 class CustomFieldValueCreate(CustomFieldValueBase):
     @model_validator(mode='after')
