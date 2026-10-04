@@ -37,6 +37,9 @@ from .execution_assets import *
 
 DOC_TITLE_MAX = 255
 DOC_TAGS_MAX = 500
+# Matches the per-field `classification` bounds below; named so importers can clamp
+# untrusted front-matter to the same limit instead of guessing the literal.
+DOC_CLASSIFICATION_MAX = 100
 
 
 def _clean_plain_text(value: Optional[str], *, max_len: Optional[int] = None) -> Optional[str]:

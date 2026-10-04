@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .. import crud, crud_docs, models, rbac, schemas
 from ..feature_guard import require_project_feature
+from ..schema_modules.docs import DOC_CLASSIFICATION_MAX, DOC_TAGS_MAX, DOC_TITLE_MAX
 from ..features import is_feature_enabled
 from ..auth import get_current_active_user
 from ..database import get_db
@@ -66,6 +67,11 @@ def _positive_int_env(name: str, default: int) -> int:
 
 DOC_IMPORT_MAX_BYTES = _positive_int_env("DOC_IMPORT_MAX_BYTES", 10 * 1024 * 1024)
 DOC_IMPORT_MAX_FILES = _positive_int_env("DOC_IMPORT_MAX_FILES", 200)
+# Each path segment creates a folder row, so an archive of N files at depth D would
+# otherwise fan out to ~N*D rows in a single request.
+DOC_IMPORT_MAX_FOLDER_DEPTH = _positive_int_env("DOC_IMPORT_MAX_FOLDER_DEPTH", 10)
+# Export pages through the space in chunks rather than capping the whole export.
+DOC_EXPORT_PAGE_SIZE = 200
 _MARKDOWN_EXTENSIONS = (".md", ".markdown")
 
 
@@ -3057,14 +3063,20 @@ def register_docs_routes(app) -> None:
         tags = meta.get("tags")
         if isinstance(tags, list):
             tags = ",".join(str(t) for t in tags)
+        # Front-matter is untrusted input, so every bounded field is clamped to the
+        # same limit the schema enforces — otherwise an over-long `tags` raises a
+        # pydantic ValidationError that surfaces as an opaque 500.
         payload = schemas.DocCreate(
-            title=str(title)[:255],
+            title=str(title)[:DOC_TITLE_MAX] or "Untitled",
             content_markdown=body,
             space_id=space.id,
             folder_id=folder_id,
-            classification=(str(meta["classification"]) if meta.get("classification") else None),
+            classification=(
+                str(meta["classification"])[:DOC_CLASSIFICATION_MAX]
+                if meta.get("classification") else None
+            ),
             status=status_enum,
-            tags=(str(tags) if tags else None),
+            tags=(str(tags)[:DOC_TAGS_MAX] if tags else None),
             dir=(str(meta.get("dir")) if meta.get("dir") in {"ltr", "rtl", "auto"} else "auto"),
         )
         return crud_docs.create_doc(db, payload, actor_id=actor_id, commit=commit)
@@ -3080,6 +3092,14 @@ def register_docs_routes(app) -> None:
             if rel_dir in folder_cache:
                 return folder_cache[rel_dir]
             parts = rel_dir.split("/")
+            if len(parts) > DOC_IMPORT_MAX_FOLDER_DEPTH:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Zip folder nesting exceeds {DOC_IMPORT_MAX_FOLDER_DEPTH} levels: "
+                        f"{rel_dir}"
+                    ),
+                )
             parent_id: Optional[int] = None
             path_so_far = ""
             for part in parts:
