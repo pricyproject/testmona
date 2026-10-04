@@ -390,11 +390,36 @@ def _grant_active(grant: models.DocShareGrant) -> bool:
     expires = _as_aware(grant.expires_at)
     return expires is None or expires > _utcnow()
 
+def _guard_publish_review(db: Session, doc: models.Doc, target_status) -> None:
+    """409 when *target_status* would publish a doc that has an open review round.
+
+    Every write path that can move a doc into ``published`` — an explicit status
+    change, a version restore — must go through this, or reviewers are bypassable.
+    """
+    if target_status != models.DocStatus.PUBLISHED or doc.status == models.DocStatus.PUBLISHED:
+        return
+    # A stray duplicate OPEN round (two racing request-review calls) would otherwise
+    # wedge the doc: the gate 409s forever and cancel only clears the newest one.
+    rounds = crud_docs.get_open_review_rounds(db, doc.id)
+    if len(rounds) > 1:
+        for extra in sorted(rounds, key=lambda r: r.id)[:-1]:
+            crud_docs.cancel_review_round(db, extra, note="Duplicate open round closed")
+    if crud_docs.get_current_review_round(db, doc.id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Resolve or cancel the open review before publishing this document",
+        )
+
 
 def _effective_project_role(user: models.User, project_id: int, db: Session) -> Optional[str]:
-    """The user's effective role within a project, used to match ``role`` grants.
-    Superusers and project owners resolve to ``admin``; otherwise the assignment
-    role, falling back to the user's global directory role."""
+    """The user's role *within a project*, used to match ``role`` grants.
+
+    Superusers and project owners resolve to ``admin``; everyone else resolves to
+    their assignment role, or ``None`` when they are not a member. The instance-wide
+    directory role is deliberately not a fallback: a "Manager" grant reads as
+    project-scoped in the share UI, so borrowing the global role would hand the doc to
+    managers who were never in the owning project.
+    """
     if getattr(user, "is_superuser", False):
         return "admin"
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
@@ -1483,19 +1508,7 @@ def register_docs_routes(app) -> None:
     ):
         doc = _get_doc_or_404(db, doc_id)
         _require(current_user, doc.project_id, "write", db)
-        # Publishing is gated on review: a doc with an OPEN review round must have it
-        # resolved (approved, changes-requested, or cancelled) before it can be
-        # published — so reviewers are never bypassed mid-review.
-        if (
-            payload.status == models.DocStatus.PUBLISHED
-            and doc.status != models.DocStatus.PUBLISHED
-        ):
-            open_round = crud_docs.get_current_review_round(db, doc.id)
-            if open_round is not None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Resolve or cancel the open review before publishing this document",
-                )
+        _guard_publish_review(db, doc, payload.status)
         # Snapshot before the update so mention notifications only fire for users
         # newly added since the last save (the editor autosaves frequently).
         previous_markdown = doc.content_markdown
@@ -1561,6 +1574,13 @@ def register_docs_routes(app) -> None:
         if missing:
             raise HTTPException(
                 status_code=400, detail=f"Reviewer(s) not found or inactive: {missing}"
+            )
+        # Requesting review on an archived or already-published doc would silently
+        # un-archive it with no version snapshot and no obvious way back.
+        if doc.status == models.DocStatus.ARCHIVED:
+            raise HTTPException(
+                status_code=409,
+                detail="An archived document must be restored before it can go into review",
             )
         no_access = [
             uid
@@ -1689,16 +1709,27 @@ def register_docs_routes(app) -> None:
             raise HTTPException(status_code=409, detail="This document has no open review")
         if not any(a.reviewer_id == current_user.id for a in round_.assignments):
             raise HTTPException(status_code=403, detail="You are not a reviewer on this document")
+        # The requester may appear in the reviewer list (they are simply never
+        # notified of their own request), but they must not cast the verdict: letting
+        # them approve their own doc would defeat the gate entirely.
+        if round_.requested_by == current_user.id:
+            raise HTTPException(
+                status_code=403, detail="You cannot decide on a review you requested"
+            )
 
         decision = models.DocReviewDecision(decision_input.decision.value)
+        # One transaction for the verdict *and* the doc's status change — committing
+        # twice left a durable "changes requested" verdict on a doc still stuck in
+        # review when the process died between them.
         crud_docs.record_review_decision(
             db,
             round_,
             reviewer_id=current_user.id,
             decision=decision,
             comment=decision_input.comment,
+            commit=False,
         )
-        db.refresh(round_)
+        db.flush()
 
         # React to a resolved round: kick a changes-requested doc back to draft so it
         # is editable again; an approved round leaves the doc in_review, publishable.
@@ -1707,6 +1738,10 @@ def register_docs_routes(app) -> None:
             doc.updated_by = current_user.id
             db.commit()
             db.refresh(doc)
+            db.refresh(round_)
+        else:
+            crud.safe_commit(db)
+            db.refresh(round_)
 
         actor_name = notification_engine.actor_display_name(current_user)
         label = doc.title or f"#{doc.id}"
@@ -1763,12 +1798,16 @@ def register_docs_routes(app) -> None:
             for a in round_.assignments
             if a.decision == models.DocReviewDecision.PENDING
         ]
-        crud_docs.cancel_review_round(db, round_, note=cancel_input.note)
+        crud_docs.cancel_review_round(db, round_, note=cancel_input.note, commit=False)
         if doc.status == models.DocStatus.IN_REVIEW:
             doc.status = models.DocStatus.DRAFT
             doc.updated_by = current_user.id
             db.commit()
             db.refresh(doc)
+            db.refresh(round_)
+        else:
+            crud.safe_commit(db)
+            db.refresh(round_)
 
         actor_name = notification_engine.actor_display_name(current_user)
         label = doc.title or f"#{doc.id}"
@@ -1945,6 +1984,10 @@ def register_docs_routes(app) -> None:
         )
         if version is None:
             raise HTTPException(status_code=404, detail="Version not found")
+        # A snapshot carries the status it was taken at, so restoring it can publish
+        # just like an explicit status change — same gate, or the review workflow is
+        # bypassable by restoring an older "published" revision.
+        _guard_publish_review(db, doc, models.DocStatus(version.status) if version.status else None)
         doc = crud_docs.restore_doc_version(
             db, doc, version, actor_id=current_user.id, change_note=payload.change_note
         )

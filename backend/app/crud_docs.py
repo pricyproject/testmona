@@ -1109,6 +1109,25 @@ def delete_doc(db: Session, doc: models.Doc) -> None:
 # Review rounds                                                                #
 # --------------------------------------------------------------------------- #
 
+def get_open_review_rounds(db: Session, doc_id: int) -> List[models.DocReviewRound]:
+    """Every OPEN review round on a doc, oldest first.
+
+    Invariant is one live round per doc, but nothing at the schema level enforces it,
+    so two racing request-review calls can leave two behind — callers that need to
+    detect (and heal) that state read it from here rather than trusting
+    :func:`get_current_review_round`, which only sees the newest.
+    """
+    return (
+        db.query(models.DocReviewRound)
+        .filter(
+            models.DocReviewRound.doc_id == doc_id,
+            models.DocReviewRound.status == models.DocReviewRoundStatus.OPEN,
+        )
+        .order_by(models.DocReviewRound.id)
+        .all()
+    )
+
+
 def get_current_review_round(db: Session, doc_id: int) -> Optional[models.DocReviewRound]:
     """The doc's single OPEN review round, if one is in flight."""
     return (
