@@ -246,6 +246,8 @@ export const ar = {
     failedToCreateTestSuiteError: 'فشل إنشاء مجموعة الاختبار',
     failedToCreateTestSuiteRetryError: 'فشل إنشاء مجموعة الاختبار. يرجى المحاولة مرة أخرى.',
     areYouSureToDeleteSuite: 'هل أنت متأكد أنك تريد حذف "{name}"؟',
+    deleteSuiteNotEmptyWarning: 'هذه المجموعة تحتوي {count} حالة اختبار. انقلها أو احذفها أولاً — لا يمكن حذف مجموعة إلا وهي فارغة.',
+    selectedCasesWillMove: 'ستنقل الحالات المحددة إلى المجموعات: {suites} وستُزال من أقسامها.',
     deletedTestSuite: 'تم حذف مجموعة الاختبار "{name}"',
     failedToDeleteTestSuiteError: 'فشل حذف مجموعة الاختبار',
     suiteCopy: '{name} (نسخة)',

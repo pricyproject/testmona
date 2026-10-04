@@ -283,11 +283,8 @@ export function TestSuites() {
   const suiteStats = useMemo(() => {
     const activeSuites = testSuites.filter((suite) => suite.status === 'active').length;
     const archivedSuites = testSuites.filter((suite) => suite.status === 'archived').length;
-    // Prefer the server-supplied count; fall back to the legacy local field if present
-    const totalCases = testSuites.reduce(
-      (sum, suite) => sum + (suite.test_case_count ?? suite.test_case_ids?.length ?? 0),
-      0,
-    );
+    // Server-supplied count of non-deleted cases per suite.
+    const totalCases = testSuites.reduce((sum, suite) => sum + (suite.test_case_count ?? 0), 0);
 
     return {
       activeSuites,
@@ -1008,7 +1005,7 @@ export function TestSuites() {
           ) : (
             <div className="grid gap-4 p-5 sm:p-6 xl:grid-cols-2">
               {filteredTestSuites.map((suite) => {
-                const suiteCaseCount = suite.test_case_count ?? suite.test_case_ids?.length ?? 0;
+                const suiteCaseCount = suite.test_case_count ?? 0;
 
                 return (
                   <Card
@@ -1121,7 +1118,9 @@ export function TestSuites() {
                 {t('delete')}
               </DialogTitle>
               <DialogDescription className="pt-1">
-                {t('areYouSureToDeleteSuite', { name: deleteTarget?.name || '' })}
+                {(deleteTarget?.test_case_count ?? 0) > 0
+                  ? t('deleteSuiteNotEmptyWarning', { count: deleteTarget?.test_case_count ?? 0 })
+                  : t('areYouSureToDeleteSuite', { name: deleteTarget?.name || '' })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -1131,7 +1130,7 @@ export function TestSuites() {
               <Button
                 variant="destructive"
                 onClick={confirmDelete}
-                disabled={isDeleting}
+                disabled={isDeleting || (deleteTarget?.test_case_count ?? 0) > 0}
               >
                 {isDeleting ? (
                   <>

@@ -991,6 +991,11 @@ export function TestSuiteDetail() {
   const hasActiveFilters =
     !!searchInput || searchQuery !== '' || statusFilter !== 'all' || priorityFilter !== 'all';
 
+  // The API refuses to delete a suite that still holds cases or sections (409), so
+  // don't offer the action at all instead of letting it fail after confirmation.
+  const hasCasesOrSections =
+    (testSuite.test_case_count ?? testCases.length) > 0 || sections.length > 0;
+
   return (
     <div className={`space-y-6 ${isRTL ? 'rtl' : 'ltr'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1573,14 +1578,22 @@ export function TestSuiteDetail() {
               {t('deleteTestSuite')}
             </DialogTitle>
             <DialogDescription className="pt-1">
-              {t('areYouSureToDeleteSuiteWithCases', { name: testSuite.name })}
+              {hasCasesOrSections
+                ? t('deleteSuiteNotEmptyWarning', {
+                    count: testSuite.test_case_count ?? testCases.length,
+                  })
+                : t('areYouSureToDeleteSuite', { name: testSuite.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteSuiteDialog(false)} disabled={isDeleting}>
               {t('cancel')}
             </Button>
-            <Button variant="destructive" onClick={handleConfirmDeleteSuite} disabled={isDeleting}>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDeleteSuite}
+              disabled={isDeleting || hasCasesOrSections}
+            >
               {isDeleting ? (
                 <>
                   <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />

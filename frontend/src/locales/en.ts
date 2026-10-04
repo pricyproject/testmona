@@ -277,6 +277,8 @@ export const en = {
   failedToCreateTestSuiteError: 'Failed to create test suite',
   failedToCreateTestSuiteRetryError: 'Failed to create test suite. Please try again.',
   areYouSureToDeleteSuite: 'Are you sure you want to delete "{name}"?',
+  deleteSuiteNotEmptyWarning: 'This suite still holds {count} test cases. Move or delete them first — a suite can only be deleted while it is empty.',
+  selectedCasesWillMove: 'Selected cases will be MOVED out of: {suites}. They are removed from those sections.',
   deletedTestSuite: 'Deleted test suite "{name}"',
   failedToDeleteTestSuiteError: 'Failed to delete test suite',
   suiteCopy: '{name} (Copy)',

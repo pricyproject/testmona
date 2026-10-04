@@ -246,6 +246,8 @@ export const fa = {
     failedToCreateTestSuiteError: 'ایجاد مجموعه تست شکست خورد',
     failedToCreateTestSuiteRetryError: 'ایجاد مجموعه تست شکست خورد. لطفاً دوباره تلاش کنید.',
     areYouSureToDeleteSuite: 'آیا مطمئن هستید که می‌خواهید "{name}" را حذف کنید؟',
+    deleteSuiteNotEmptyWarning: 'این مجموعه هنوز {count} مورد تست دارد. ابتدا آن‌ها را منتقل یا حذف کنید. مجموعه تنها در صورت خالی بودن قابل حذف است.',
+    selectedCasesWillMove: 'موارد تست انتخاب‌شده از این مجموعه‌ها جاب‌جا می‌شوند: {suites} و از بخش‌های مربوط نیست می‌شوند.',
     deletedTestSuite: 'مجموعه تست "{name}" حذف شد',
     failedToDeleteTestSuiteError: 'حذف مجموعه تست شکست خورد',
     suiteCopy: '{name} (کپی)',
