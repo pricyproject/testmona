@@ -105,6 +105,11 @@ export const testSuitesAPI = {
     const response = await api.delete(`/test-suites/${id}`);
     return response.data;
   },
+  // Deep copy (sections, cases, steps, tags) inside the same project.
+  clone: async (id: number, name?: string) => {
+    const response = await api.post(`/test-suites/${id}/clone`, name ? { name } : {});
+    return response.data;
+  },
   createRun: async (id: number, testRun: any) => {
     const response = await api.post(`/test-suites/${id}/test-runs`, testRun);
     return response.data;

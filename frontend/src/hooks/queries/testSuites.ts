@@ -85,3 +85,12 @@ export function useDeleteTestSuite(projectId: number | null) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: testSuiteKeys.list(projectId) }),
   });
 }
+
+// Server-side deep copy (section tree, cases, steps, tags) inside the same project.
+export function useCloneTestSuite(projectId: number | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name?: string }) => testSuitesAPI.clone(id, name),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: testSuiteKeys.list(projectId) }),
+  });
+}

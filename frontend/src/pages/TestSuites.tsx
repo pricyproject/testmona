@@ -50,6 +50,7 @@ import {
   useTestSuiteSelectionData,
   useCreateTestSuite,
   useDeleteTestSuite,
+  useCloneTestSuite,
 } from '@/hooks/queries/testSuites';
 import { TestSuite, TestCase } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -130,8 +131,10 @@ export function TestSuites() {
 
   const createTestSuite = useCreateTestSuite(currentProjectId);
   const deleteTestSuite = useDeleteTestSuite(currentProjectId);
+  const cloneTestSuite = useCloneTestSuite(currentProjectId);
   const isCreating = createTestSuite.isPending;
   const isDeleting = deleteTestSuite.isPending;
+  const isDuplicating = cloneTestSuite.isPending;
 
   // Surface list-load failures (status-specific) in the error banner + a toast,
   // and the no-project state, mirroring the previous imperative loader.
@@ -280,11 +283,26 @@ export function TestSuites() {
     return filtered;
   }, [testSuites, suiteSearchQuery, statusFilter]);
 
+  // Creating a suite with selected cases *moves* them out of their current suite, so
+  // name the suites they'd be pulled out of instead of doing it silently.
+  const selectedCasesSourceSuites = useMemo(() => {
+    const selected = new Set(selectedTestCases);
+    const names = new Map<number, string>();
+    testCases.forEach((tc) => {
+      if (!selected.has(tc.id) || !tc.test_suite) return;
+      names.set(tc.test_suite.id, tc.test_suite.name);
+    });
+    return Array.from(names.values());
+  }, [selectedTestCases, testCases]);
+
   const suiteStats = useMemo(() => {
     const activeSuites = testSuites.filter((suite) => suite.status === 'active').length;
     const archivedSuites = testSuites.filter((suite) => suite.status === 'archived').length;
-    // Server-supplied count of non-deleted cases per suite.
-    const totalCases = testSuites.reduce((sum, suite) => sum + (suite.test_case_count ?? 0), 0);
+    // Prefer the server-supplied count; fall back to the legacy local field if present
+    const totalCases = testSuites.reduce(
+      (sum, suite) => sum + (suite.test_case_count ?? suite.test_case_ids?.length ?? 0),
+      0,
+    );
 
     return {
       activeSuites,
@@ -382,15 +400,16 @@ export function TestSuites() {
 
   const handleDuplicateSuite = async (suite: TestSuite) => {
     try {
-      await createTestSuite.mutateAsync({
+      // Server-side deep copy: section tree, cases, steps and tags come along.
+      const copy = await cloneTestSuite.mutateAsync({
+        id: suite.id,
         name: t('suiteCopy', { name: suite.name }),
-        description: suite.description,
-        project_id: suite.project_id,
       });
       toast({
         title: t('success'),
         description: t('testSuiteDuplicatedSuccessfully'),
       });
+      navigate(`/projects/${currentProjectId}/test-suites/${copy.project_seq ?? copy.id}`);
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
       const apiMessage = typeof detail === 'string' ? detail : null;
@@ -551,6 +570,11 @@ export function TestSuites() {
                             {filteredTestCases.length < testCases.length && (
                               <p className="mt-1 text-xs text-blue-700 dark:text-blue-200">
                                 {testCases.length} {t('total')}
+                              </p>
+                            )}
+                            {selectedCasesSourceSuites.length > 0 && (
+                              <p className="mt-2 text-xs leading-5 text-amber-700 dark:text-amber-300">
+                                {t('selectedCasesWillMove', { suites: selectedCasesSourceSuites.join(', ') })}
                               </p>
                             )}
                           </div>
@@ -1005,7 +1029,7 @@ export function TestSuites() {
           ) : (
             <div className="grid gap-4 p-5 sm:p-6 xl:grid-cols-2">
               {filteredTestSuites.map((suite) => {
-                const suiteCaseCount = suite.test_case_count ?? 0;
+                const suiteCaseCount = suite.test_case_count ?? suite.test_case_ids?.length ?? 0;
 
                 return (
                   <Card
@@ -1052,9 +1076,12 @@ export function TestSuites() {
                               </DropdownMenuItem>
                               {canWrite && (
                                 <>
-                                  <DropdownMenuItem onClick={() => handleDuplicateSuite(suite)}>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDuplicateSuite(suite)}
+                                    disabled={isDuplicating}
+                                  >
                                     <Copy className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
-                                    {t('duplicateSuite')}
+                                    {isDuplicating ? t('creating') : t('duplicateSuite')}
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
