@@ -10,6 +10,9 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { docsAPI, getApiErrorMessage, requirementsAPI } from '@/lib/api';
 import type { DocRequirementLink, Requirement } from '@/types';
 
+/** Requirements fetched into the link picker; the API pages beyond this. */
+const REQUIREMENT_PICKER_LIMIT = 500;
+
 interface Props {
   docId: number;
   projectId?: number | null;
@@ -19,7 +22,7 @@ interface Props {
 }
 
 export function DocRequirementLinksSection({ docId, projectId, canEdit, links, onChanged }: Props) {
-  const { t } = useTranslation();
+  const { t, isRTL } = useTranslation();
   const { toast } = useToast();
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [selected, setSelected] = useState('none');
@@ -28,12 +31,39 @@ export function DocRequirementLinksSection({ docId, projectId, canEdit, links, o
 
   const canManage = canEdit && !!projectId;
 
+  // `/projects/:id/requirements/:n` resolves `n` as the per-project sequence first,
+  // so the global pk would open a different requirement whenever it collides with
+  // another requirement's seq. No seq and no project → not linkable.
+  const requirementHref = (link: DocRequirementLink): string | null => {
+    if (!projectId) return null;
+    const seq = link.requirement_seq ?? null;
+    if (seq == null) return `/projects/${projectId}/requirements/${link.requirement_key ?? link.requirement_id}`;
+    return `/projects/${link.requirement_project_id ?? projectId}/requirements/${seq}`;
+  };
+
+  // The picker needs its own loading and error state: silently defaulting to `[]`
+  // made a fetch failure (and the in-flight period) read as "this project has no
+  // requirements".
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState(false);
+
   useEffect(() => {
     if (!canManage || !projectId) return;
     let active = true;
-    requirementsAPI.getAll(projectId, 0, 500)
-      .then((items) => { if (active) setRequirements(Array.isArray(items) ? items : []); })
-      .catch(() => { if (active) setRequirements([]); });
+    setPickerLoading(true);
+    setPickerError(false);
+    requirementsAPI.getAll(projectId, 0, REQUIREMENT_PICKER_LIMIT)
+      .then((items) => {
+        if (!active) return;
+        setRequirements(Array.isArray(items) ? items : []);
+        setPickerLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setRequirements([]);
+        setPickerError(true);
+        setPickerLoading(false);
+      });
     return () => { active = false; };
   }, [canManage, projectId]);
 
@@ -76,7 +106,7 @@ export function DocRequirementLinksSection({ docId, projectId, canEdit, links, o
     <div className="space-y-4">
       {canManage && (
         <div className="space-y-2 rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-700">
-          <Label className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <Label htmlFor="docRequirementLink" className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('docLinkRequirement')}
           </Label>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -86,9 +116,15 @@ export function DocRequirementLinksSection({ docId, projectId, canEdit, links, o
               onChange={setSelected}
               requirements={available}
               className="flex-1"
+              disabled={pickerLoading || pickerError}
+              placeholder={pickerLoading ? t('loading') : pickerError ? t('failedToLinkRequirement') : undefined}
             />
-            <Button onClick={handleAdd} disabled={selected === 'none' || !selected || adding} className="sm:w-auto">
-              {adding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+            <Button
+              onClick={handleAdd}
+              disabled={selected === 'none' || !selected || adding || pickerLoading || pickerError}
+              className="sm:w-auto"
+            >
+              {adding ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <Plus className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
               {t('docLinkRequirementAction')}
             </Button>
           </div>
@@ -106,9 +142,9 @@ export function DocRequirementLinksSection({ docId, projectId, canEdit, links, o
               key={link.id}
               className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 transition-colors hover:border-primary/40 dark:border-slate-800"
             >
-              {projectId ? (
+              {requirementHref(link) ? (
                 <Link
-                  to={`/projects/${projectId}/requirements/${link.requirement_id}`}
+                  to={requirementHref(link) as string}
                   className="flex min-w-0 flex-1 items-center gap-3"
                 >
                   <Badge variant="outline" className="shrink-0 font-mono">{link.requirement_key || `#${link.requirement_id}`}</Badge>

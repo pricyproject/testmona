@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRightLeft, FileText, Link2, Loader2, Plus, Sparkles, X } from 'lucide-react';
+import { ArrowRightLeft, FileText, Link2, Loader2, Plus, RotateCcw, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { docsAPI } from '@/lib/api';
+import { docsAPI, getApiErrorMessage } from '@/lib/api';
 import type { DocDuplicateCandidate, DocRelatedLink, DocSuggestion } from '@/types';
 
 interface Props {
@@ -16,8 +16,9 @@ interface Props {
   onMerged?: () => void | Promise<void>;
 }
 
-const docHref = (projectId: number | null | undefined, id: number) =>
-  projectId ? `/projects/${projectId}/docs/${id}` : `/docs/${id}`;
+// Always the global route: `/projects/:id/docs/:n` resolves `n` as the per-project
+// sequence first, so passing the global pk opens a different doc on a collision.
+const docHref = (_projectId: number | null | undefined, id: number) => `/docs/${id}`;
 
 const duplicateReasonKey = (reason: string) => {
   switch (reason) {
@@ -52,21 +53,37 @@ export function DocRelatedSection({ docId, canEdit, onMerged }: Props) {
   const [mergeTarget, setMergeTarget] = useState<DocDuplicateCandidate | null>(null);
   const [mergeNote, setMergeNote] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const [rel, sug, dup] = await Promise.all([
-      docsAPI.listRelated(docId).catch(() => []),
-      docsAPI.suggestions(docId, 6).catch(() => []),
-      docsAPI.duplicates(docId, 5).catch(() => []),
-    ]);
-    setDuplicates(dup);
+  // Settles to `null` on failure so "empty" and "failed" stay distinguishable.
+  const settle = async <T,>(p: Promise<T>) =>
+    p.then((data) => ({ data, failed: false })).catch(() => ({ data: null as T | null, failed: true }));
+
+  const applyLists = useCallback((rel: DocRelatedLink[], sug: DocSuggestion[], dup: DocDuplicateCandidate[]) => {
     const duplicateIds = new Set(dup.map((item) => item.id));
     setRelated(rel);
+    setDuplicates(dup);
     setSuggestions(sug.filter((item) => !duplicateIds.has(item.id)));
-    setLoading(false);
-  }, [docId]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadTokenRef = useRef(0);
+  const [error, setError] = useState(false);
+
+  const load = useCallback(async () => {
+    // Fast doc-to-doc navigation must not land the previous doc's related list here.
+    const token = ++loadTokenRef.current;
+    setLoading(true);
+    const [rel, sug, dup] = await Promise.all([
+      settle(docsAPI.listRelated(docId)),
+      settle(docsAPI.suggestions(docId, 6)),
+      settle(docsAPI.duplicates(docId, 5)),
+    ]);
+    if (token !== loadTokenRef.current) return;
+    const failed = rel.failed || sug.failed || dup.failed;
+    setError(failed);
+    applyLists(rel.data ?? [], sug.data ?? [], dup.data ?? []);
+    setLoading(false);
+  }, [docId, applyLists]);
+
+  useEffect(() => { void load(); }, [load]);
 
   const addRelated = async (relatedDocId: number) => {
     try {
@@ -74,13 +91,9 @@ export function DocRelatedSection({ docId, canEdit, onMerged }: Props) {
       await docsAPI.addRelated(docId, relatedDocId);
       // Drop it from suggestions immediately, then refresh both lists.
       setSuggestions((items) => items.filter((s) => s.id !== relatedDocId));
-      const [rel, sug, dup] = await Promise.all([docsAPI.listRelated(docId), docsAPI.suggestions(docId, 6), docsAPI.duplicates(docId, 5)]);
-      setDuplicates(dup);
-      const duplicateIds = new Set(dup.map((item) => item.id));
-      setRelated(rel);
-      setSuggestions(sug.filter((item) => !duplicateIds.has(item.id)));
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docRelatedFailed'), variant: 'destructive' });
+      await load();
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docRelatedFailed')), variant: 'destructive' });
     } finally {
       setBusyId(null);
     }
@@ -90,10 +103,9 @@ export function DocRelatedSection({ docId, canEdit, onMerged }: Props) {
     try {
       setBusyId(relatedDocId);
       await docsAPI.removeRelated(docId, relatedDocId);
-      setRelated((items) => items.filter((r) => r.related_doc_id !== relatedDocId));
       await load();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docRelatedFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docRelatedFailed')), variant: 'destructive' });
     } finally {
       setBusyId(null);
     }
@@ -115,8 +127,8 @@ export function DocRelatedSection({ docId, canEdit, onMerged }: Props) {
       });
       await load();
       await onMerged?.();
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docDuplicateMergeFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docDuplicateMergeFailed')), variant: 'destructive' });
     } finally {
       setBusyId(null);
     }
@@ -213,7 +225,7 @@ export function DocRelatedSection({ docId, canEdit, onMerged }: Props) {
                     onClick={() => void removeRelated(link.related_doc_id)}
                     disabled={busyId === link.related_doc_id}
                     title={t('remove')}
-                    className={`absolute top-2 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100 dark:hover:bg-rose-950 ${isRTL ? 'left-2' : 'right-2'}`}
+                    className={`absolute top-2 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-600 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-rose-950 ${isRTL ? 'left-2' : 'right-2'}`}
                   >
                     {busyId === link.related_doc_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                   </button>
@@ -277,6 +289,8 @@ export function DocRelatedSection({ docId, canEdit, onMerged }: Props) {
             </DialogDescription>
           </DialogHeader>
           <Textarea
+            id="docMergeNote"
+            aria-label={t('docMergeNotePlaceholder')}
             value={mergeNote}
             onChange={(e) => setMergeNote(e.target.value)}
             maxLength={500}
