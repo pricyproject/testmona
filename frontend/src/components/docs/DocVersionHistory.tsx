@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { diffWords } from 'diff';
 import { History, RotateCcw, GitCompare, ChevronDown, Plus, Pencil, Clock, Loader2, CheckCircle2, Trash2, Bookmark, ArrowRight } from 'lucide-react';
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   AlertDialog,
@@ -42,6 +43,9 @@ interface Props {
 
 const PLAINTEXT_DIR: CSSProperties = { unicodeBidi: 'plaintext', textAlign: 'start' };
 
+/** Revisions fetched per page — the server caps a single response. */
+const PAGE_SIZE = 25;
+
 // Flatten Markdown/HTML to readable plain text so version diffs and previews
 // don't show raw `<table>` markup or `| --- |` table scaffolding.
 const toPlainText = (value?: string | null): string =>
@@ -62,9 +66,11 @@ const actionMeta: Record<string, { icon: typeof Plus; tone: string }> = {
 };
 
 export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored, defaultCompare = false }: Props) {
-  const { t, isRTL } = useTranslation();
+  const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
   const [versions, setVersions] = useState<DocVersion[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [compareMode, setCompareMode] = useState(defaultCompare);
@@ -80,20 +86,29 @@ export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newNote, setNewNote] = useState('');
+  // Guards against a slow page for one doc landing after the user moved on.
+  const loadTokenRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { append?: boolean } = {}) => {
+    const token = ++loadTokenRef.current;
+    const skip = opts.append ? versions.length : 0;
     try {
       setLoading(true);
-      const data = await docsAPI.listVersions(docId);
-      setVersions(data);
+      if (!opts.append) setLoadError(false);
+      const { items, total: count } = await docsAPI.listVersions(docId, { skip, limit: PAGE_SIZE });
+      if (token !== loadTokenRef.current) return;
+      setVersions((prev) => (opts.append ? [...prev, ...items] : items));
+      setTotal(count);
     } catch {
+      if (token !== loadTokenRef.current) return;
+      if (!opts.append) setLoadError(true);
       toast({ title: t('error'), description: t('versionsLoadFailed'), variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (token === loadTokenRef.current) setLoading(false);
     }
-  }, [docId, t, toast]);
+  }, [docId, versions.length, t, toast]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   // Default the compare endpoints to "previous → latest" whenever compare opens
   // or the chosen versions disappear (e.g. after a restore reloads the list).
@@ -155,8 +170,14 @@ export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored
   const fromVersion = useMemo(() => versions.find((v) => v.id === compareFrom) ?? null, [versions, compareFrom]);
   const toVersion = useMemo(() => versions.find((v) => v.id === compareTo) ?? null, [versions, compareTo]);
 
-  const renderDiff = (from: string, to: string) => {
-    const parts = diffWords(toPlainText(from), toPlainText(to));
+  // diffWords walks both full revision bodies, so it is memoised on the compared
+  // pair instead of re-running on every keystroke elsewhere in the panel.
+  const diffParts = useMemo(
+    () => diffWords(toPlainText(fromVersion?.content_markdown), toPlainText(toVersion?.content_markdown)),
+    [fromVersion, toVersion],
+  );
+
+  const renderDiff = (parts: ReturnType<typeof diffWords>) => {
     if (parts.every((p) => !p.added && !p.removed)) {
       return <p className="text-xs italic text-muted-foreground">{t('noTextChanges')}</p>;
     }
@@ -253,29 +274,31 @@ export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored
         <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/40">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1">
-              <Label className="text-xs text-muted-foreground">{t('compareBase')}</Label>
-              <select
-                className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-                value={compareFrom ?? ''}
-                onChange={(e) => setCompareFrom(Number(e.target.value))}
-              >
-                {versions.map((v) => (
-                  <option key={v.id} value={v.id}>{versionLabel(v)}</option>
-                ))}
-              </select>
+              <Label htmlFor="docCompareFrom" className="text-xs text-muted-foreground">{t('compareBase')}</Label>
+              <Select value={String(compareFrom ?? '')} onValueChange={(v) => setCompareFrom(Number(v))}>
+                <SelectTrigger id="docCompareFrom" className="h-9 w-40 text-sm">
+                  <SelectValue placeholder={t('compareBase')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {versions.map((v) => (
+                    <SelectItem key={v.id} value={String(v.id)}>{versionLabel(v)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <ArrowRight className="mb-2 h-4 w-4 text-muted-foreground" />
             <div className="flex flex-col gap-1">
-              <Label className="text-xs text-muted-foreground">{t('compareTarget')}</Label>
-              <select
-                className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-                value={compareTo ?? ''}
-                onChange={(e) => setCompareTo(Number(e.target.value))}
-              >
-                {versions.map((v) => (
-                  <option key={v.id} value={v.id}>{versionLabel(v)}</option>
-                ))}
-              </select>
+              <Label htmlFor="docCompareTo" className="text-xs text-muted-foreground">{t('compareTarget')}</Label>
+              <Select value={String(compareTo ?? '')} onValueChange={(v) => setCompareTo(Number(v))}>
+                <SelectTrigger id="docCompareTo" className="h-9 w-40 text-sm">
+                  <SelectValue placeholder={t('compareTarget')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {versions.map((v) => (
+                    <SelectItem key={v.id} value={String(v.id)}>{versionLabel(v)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -287,16 +310,23 @@ export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored
               {renderFieldDiff(t('tags'), fromVersion.tags, toVersion.tags)}
               <div className="rounded-md border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900/60">
                 <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{t('docContent')}</p>
-                {renderDiff(fromVersion.content_markdown || '', toVersion.content_markdown || '')}
+                {renderDiff(diffParts)}
               </div>
             </div>
           )}
         </div>
       )}
 
-      {loading ? (
-        <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+      {loading && versions.length === 0 ? (
+        <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground" role="status">
           <Loader2 className="h-4 w-4 animate-spin" /> {t('loading')}
+        </div>
+      ) : loadError ? (
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <p className="text-sm text-muted-foreground">{t('versionsLoadFailed')}</p>
+          <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
+            <RotateCcw className={`h-3.5 w-3.5 ${isRTL ? 'ml-1' : 'mr-1'}`} /> {t('retry')}
+          </Button>
         </div>
       ) : versions.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">{t('noVersionsYet')}</p>
@@ -333,8 +363,8 @@ export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored
                     {isLatest && <Badge variant="outline">{t('current')}</Badge>}
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Clock className="h-3 w-3" />
-                      <time dateTime={version.created_at} title={formatServerDateTime(version.created_at)}>
-                        {formatServerDateTime(version.created_at)} · {formatRelativeTime(version.created_at)}
+                      <time dateTime={version.created_at} title={formatServerDateTime(version.created_at, language)}>
+                        {formatServerDateTime(version.created_at, language)} · {formatRelativeTime(version.created_at)}
                       </time>
                     </span>
                     {version.author && (
@@ -377,6 +407,21 @@ export function DocVersionHistory({ docId, canEdit, canClear = false, onRestored
             );
           })}
         </ol>
+      )}
+
+      {versions.length < total && (
+        <div className="mt-4 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={() => void load({ append: true })}
+          >
+            {loading && <Loader2 className={`h-3.5 w-3.5 animate-spin ${isRTL ? 'ml-1' : 'mr-1'}`} />}
+            {t('loadMore')}
+          </Button>
+        </div>
       )}
 
       <Dialog open={createOpen} onOpenChange={(open) => { if (!open) setCreateOpen(false); }}>

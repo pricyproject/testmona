@@ -399,9 +399,12 @@ export const docsAPI = {
   },
 
   // Versions
-  listVersions: async (id: number): Promise<DocVersion[]> => {
-    const response = await api.get(`/docs/${id}/versions`);
-    return response.data;
+  listVersions: async (id: number, params?: { skip?: number; limit?: number }): Promise<{ items: DocVersion[]; total: number }> => {
+    const response = await api.get(`/docs/${id}/versions`, { params });
+    return {
+      items: response.data ?? [],
+      total: Number(response.headers?.['x-total-count'] ?? response.data?.length ?? 0),
+    };
   },
   createVersion: async (id: number, payload: { name?: string | null; change_note?: string | null }): Promise<DocVersion> => {
     const response = await api.post(`/docs/${id}/versions`, {
