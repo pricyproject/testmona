@@ -44,6 +44,8 @@ import { markdownToHtml } from '@/components/ui/content-editor';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
+import { formatNumber } from '@/utils/datetime';
+import { copyToClipboard } from '@/utils/clipboard';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { DateField } from '@/components/ui/DateField';
@@ -95,6 +97,9 @@ export function ReleaseNotes() {
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // First Cancel arms the discard prompt; the second one within the edit view acts.
+  const [discardArmed, setDiscardArmed] = useState(false);
   const [genOpen, setGenOpen] = useState(false);
 
   // Abort an in-flight (paid AI) generation when the component unmounts or the
@@ -109,16 +114,24 @@ export function ReleaseNotes() {
     return () => { mountedRef.current = false; genControllerRef.current?.abort(); };
   }, []);
 
+  const notesTokenRef = useRef(0);
+
   const loadNotes = useCallback(async () => {
-    if (!projectId) return;
+    // `loading` starts true, so returning early without clearing it left the sidebar
+    // spinning forever on a malformed project URL.
+    const token = ++notesTokenRef.current;
+    if (!projectId) { setLoading(false); setNotes([]); return; }
     setLoading(true);
     try {
       const data = await docsAPI.listReleaseNotes(projectId);
+      // Rapid navigation between two projects must not cross-render the lists.
+      if (token !== notesTokenRef.current) return;
       setNotes(data);
     } catch {
+      if (token !== notesTokenRef.current) return;
       toast({ title: t('error'), description: t('releaseNotesLoadError'), variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (token === notesTokenRef.current) setLoading(false);
     }
   }, [projectId, t, toast]);
 
@@ -182,10 +195,9 @@ export function ReleaseNotes() {
 
   const handleCopy = async () => {
     if (!draft) return;
-    try {
-      await navigator.clipboard.writeText(draft.content_markdown);
+    if (await copyToClipboard(draft.content_markdown)) {
       toast({ title: t('releaseNotesCopied') });
-    } catch {
+    } else {
       toast({ title: t('error'), description: t('releaseNotesCopyFailed'), variant: 'destructive' });
     }
   };
@@ -279,8 +291,9 @@ export function ReleaseNotes() {
   };
 
   const confirmDelete = async () => {
-    if (!canWrite || deleteId == null) return;
+    if (!canWrite || deleteId == null || deleting) return;
     try {
+      setDeleting(true);
       await docsAPI.deleteReleaseNote(deleteId);
       if (draft?.id === deleteId) { setDraft(null); setMode('list'); }
       await loadNotes();
@@ -288,11 +301,32 @@ export function ReleaseNotes() {
     } catch {
       toast({ title: t('error'), description: t('releaseNotesDeleteError'), variant: 'destructive' });
     } finally {
+      setDeleting(false);
       setDeleteId(null);
     }
   };
 
-  const backToList = () => { setMode('list'); setDraft(null); };
+  const backToList = () => {
+    // A draft can hold a whole generated release note, so leaving the editor is not
+    // silently reversible — the user can re-generate, but the wording is theirs.
+    if (mode === 'edit' && !discardArmed) { setDiscardArmed(true); return; }
+    setDiscardArmed(false);
+    setMode('list');
+    setDraft(null);
+  };
+
+  // Confirming a discard leaves edit mode, so the prompt must not re-arm there.
+  useEffect(() => {
+    if (mode !== 'edit') setDiscardArmed(false);
+  }, [mode]);
+
+  // Warn before a reload/close with an unsaved draft (in-page Cancel is handled above).
+  useEffect(() => {
+    if (mode !== 'edit' || draft == null) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [mode, draft]);
 
   return (
     <div className="px-4 py-6" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -405,7 +439,9 @@ export function ReleaseNotes() {
                   </>
                 ) : (
                   <>
-                    <Button variant="ghost" size="sm" onClick={backToList}>{t('cancel')}</Button>
+                    <Button variant="ghost" size="sm" onClick={backToList}>
+                      {discardArmed ? t('releaseNotesDiscardConfirm') : t('cancel')}
+                    </Button>
                     {draft.id != null && canWrite && (
                       <Button variant="outline" size="sm" className="text-rose-600" onClick={() => setDeleteId(draft.id)}>
                         <Trash2 className="h-4 w-4" />
@@ -433,7 +469,7 @@ export function ReleaseNotes() {
                 <ReadView draft={draft} previewHtml={previewHtml} t={t} />
               )}
 
-              {draft.source && <SourcePanel source={draft.source} t={t} />}
+              {draft.source && <SourcePanel source={draft.source} t={t} language={language} />}
             </div>
           )}
         </section>
@@ -447,7 +483,12 @@ export function ReleaseNotes() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
-            <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={confirmDelete}>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700"
+              disabled={deleting}
+              onClick={(e) => { e.preventDefault(); void confirmDelete(); }}
+            >
+              {deleting && <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} />}
               {t('delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -635,27 +676,28 @@ function ReadView({ draft, previewHtml, t }: { draft: Draft; previewHtml: string
   );
 }
 
-function SourcePanel({ source, t }: { source: ReleaseNotesSource; t: (k: string) => string }) {
+function SourcePanel({ source, t, language }: { source: ReleaseNotesSource; t: (k: string, p?: Record<string, string | number>) => string; language: string }) {
   const cov = source.coverage;
+  const n = (value: number) => formatNumber(value, language);
   return (
     <div className="rounded-lg border border-slate-200 dark:border-slate-800">
       <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
         <h3 className="text-sm font-semibold">{t('releaseNotesSources')}</h3>
       </div>
       <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4 dark:bg-slate-800">
-        <SourceStat icon={FileText} label={t('releaseNotesChangedDocs')} value={source.changed_docs.length} />
-        <SourceStat icon={FileText} label={t('releaseNotesRequirements')} value={source.requirements.length} />
-        <SourceStat icon={CheckCircle2} label={t('releaseNotesFixedDefects')} value={source.resolved_defects.length} />
-        <SourceStat icon={Bug} label={t('releaseNotesKnownIssues')} value={source.open_defects.length} alert={source.open_defects.length > 0} />
+        <SourceStat icon={FileText} label={t('releaseNotesChangedDocs')} value={n(source.changed_docs.length)} />
+        <SourceStat icon={FileText} label={t('releaseNotesRequirements')} value={n(source.requirements.length)} />
+        <SourceStat icon={CheckCircle2} label={t('releaseNotesFixedDefects')} value={n(source.resolved_defects.length)} />
+        <SourceStat icon={Bug} label={t('releaseNotesKnownIssues')} value={n(source.open_defects.length)} alert={source.open_defects.length > 0} />
       </div>
       {cov.requirements_total > 0 && (
         <div className="flex items-center gap-3 border-t border-slate-100 px-4 py-2.5 text-xs text-muted-foreground dark:border-slate-800">
           <FlaskConical className="h-4 w-4" />
           <span>
-            {t('releaseNotesCoverage')}: {cov.requirements_covered}/{cov.requirements_total} ({cov.coverage_pct}%) · {cov.test_cases} {t('releaseNotesTestCases')}
+            {t('releaseNotesCoverage')}: {n(cov.requirements_covered)}/{n(cov.requirements_total)} ({n(cov.coverage_pct)}%) · {n(cov.test_cases)} {t('releaseNotesTestCases')}
           </span>
           {cov.requirements_uncovered > 0 && (
-            <Badge variant="outline" className="text-rose-600">{cov.requirements_uncovered} {t('releaseNotesUncovered')}</Badge>
+            <Badge variant="outline" className="text-rose-600">{n(cov.requirements_uncovered)} {t('releaseNotesUncovered')}</Badge>
           )}
         </div>
       )}
@@ -668,7 +710,8 @@ function SourceStat({
 }: {
   icon: typeof FileText;
   label: string;
-  value: number;
+  /** Pre-localized by the caller. */
+  value: string;
   alert?: boolean;
 }) {
   return (
