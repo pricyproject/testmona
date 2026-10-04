@@ -3,7 +3,6 @@ User management routes for user profiles, CRUD operations, and invitations.
 """
 
 from fastapi import Depends, HTTPException, UploadFile
-from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List
@@ -19,38 +18,10 @@ from ..security_utils import validate_file_size, validate_file_type, MAX_AVATAR_
 logger = logging.getLogger(__name__)
 
 
-def _cleanup_user_foreign_keys(db: Session, user_id: int) -> None:
-    """Nullify nullable FK columns and delete non-nullable dependent rows
-    that reference ``users.id``, so the user row can be safely deleted."""
-    bind = db.get_bind()
-    inspector = sa_inspect(bind)
-    quote = bind.dialect.identifier_preparer.quote
-    for table_name in inspector.get_table_names():
-        if table_name == "users":
-            continue
-        fks = inspector.get_foreign_keys(table_name)
-        col_meta = {c["name"]: c for c in inspector.get_columns(table_name)}
-        for fk in fks:
-            if fk["referred_table"] != "users":
-                continue
-            constrained_cols = fk.get("constrained_columns", [])
-            if len(constrained_cols) != 1:
-                continue
-            col_name = constrained_cols[0]
-            nullable = col_meta.get(col_name, {}).get("nullable", True)
-            quoted_table = quote(table_name)
-            quoted_col = quote(col_name)
-            if nullable:
-                db.execute(
-                    text(f'UPDATE {quoted_table} SET {quoted_col} = NULL WHERE {quoted_col} = :uid'),
-                    {"uid": user_id},
-                )
-            else:
-                db.execute(
-                    text(f'DELETE FROM {quoted_table} WHERE {quoted_col} = :uid'),
-                    {"uid": user_id},
-                )
-    db.flush()
+_DELETE_BLOCKED_DETAIL = (
+    "Cannot delete user: the user has associated records that cannot be removed. "
+    "Deactivate the user instead."
+)
 
 
 def _revoke_user_sessions(db: Session, user: models.User) -> None:
@@ -361,8 +332,17 @@ def register_user_routes(app):
         user_id_val = current_user.id
         user_identifier = current_user.username or current_user.email
         
-        # Delete user (this will cascade delete related data)
-        crud.delete_user(db, current_user.id)
+        # Delete the account. Rows the user still owns block the delete; report
+        # that instead of tearing down their history.
+        try:
+            crud.delete_user(db, current_user.id)
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail=_DELETE_BLOCKED_DETAIL)
+        except Exception as e:
+            db.rollback()
+            logger.error("Failed to delete account %s: %s", user_id_val, e)
+            raise HTTPException(status_code=500, detail="Failed to delete account")
         
         # Create audit trail
         try:
@@ -684,14 +664,12 @@ def register_user_routes(app):
         user_identifier = db_user.username or db_user.email
 
         try:
-            _cleanup_user_foreign_keys(db, user_id)
             db_user = crud.delete_user(db, user_id=user_id)
         except IntegrityError:
+            # Records owned by the user (defects, audit trails, results, ...) still
+            # reference them. Refuse rather than cascade-delete real history.
             db.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot delete user: the user has associated records that cannot be automatically removed. Deactivate the user instead."
-            )
+            raise HTTPException(status_code=409, detail=_DELETE_BLOCKED_DETAIL)
 
         # Create audit trail
         try:
