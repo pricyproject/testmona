@@ -8,11 +8,29 @@ from typing import List, Optional
 
 from .. import crud, models, schemas, auth, rbac
 from ..feature_guard import require_project_feature
+from ..features import is_feature_enabled
 from ..database import get_db
 from ..auth import get_current_active_user
 
 
 _ENTITY_TYPES = ("test_case", "test_run", "defect", "requirement")
+
+
+def _ensure_feature_enabled(db: Session, project_id: Optional[int]) -> None:
+    """403 when the project's plan excludes custom fields.
+
+    ``require_project_feature`` cannot resolve a project from routes keyed by
+    field/value id, so those handlers check explicitly once they know the
+    owning project.
+    """
+    if project_id is None:
+        return
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if project is not None and not is_feature_enabled(project, "custom_fields"):
+        raise HTTPException(
+            status_code=403,
+            detail="The 'custom_fields' feature is disabled for this project",
+        )
 
 
 def _resolve_entity_project(db: Session, entity_type: str, entity_id: int) -> Optional[int]:
@@ -37,6 +55,18 @@ def _resolve_entity_project(db: Session, entity_type: str, entity_id: int) -> Op
         req = db.query(models.Requirement).filter(models.Requirement.id == entity_id).first()
         return req.project_id if req else None
     return None
+
+
+def _resolve_value_project(db: Session, value) -> Optional[int]:
+    """Project that owns a custom field value row.
+
+    The legacy ``/custom-field-values`` endpoints are reachable for all four
+    entity types, so ownership is resolved from the value itself rather than
+    assuming a test case.
+    """
+    if value is None or not value.entity_type:
+        return None
+    return _resolve_entity_project(db, value.entity_type, value.entity_id)
 
 
 def _ensure_value_payload_matches(payload: schemas.CustomFieldValueCreate, entity_type: str, entity_id: int) -> None:
@@ -71,13 +101,20 @@ def register_custom_fields_routes(app):
         """
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
         if entity_type is not None and entity_type not in _ENTITY_TYPES:
             raise HTTPException(status_code=400, detail=f"Unsupported entity_type: {entity_type}")
 
-        rows = crud.get_custom_field_definitions(db, project_id=project_id, skip=skip, limit=limit)
         if entity_type is not None:
-            rows = [row for row in rows if crud.field_definition_applies_to(row, entity_type)]
-        return rows
+            # Filtered in Python (NULL entity_types means legacy test-case-only),
+            # so the page has to be cut after filtering or pages come back short.
+            rows = [
+                row
+                for row in crud.get_custom_field_definitions(db, project_id=project_id)
+                if crud.field_definition_applies_to(row, entity_type)
+            ]
+            return rows[skip : skip + limit]
+        return crud.get_custom_field_definitions(db, project_id=project_id, skip=skip, limit=limit)
 
     @app.post("/custom-fields/definitions", response_model=schemas.CustomFieldDefinition,
               dependencies=[Depends(require_project_feature("custom_fields"))])
@@ -89,8 +126,12 @@ def register_custom_fields_routes(app):
         """Create custom field definition - endpoint to match frontend expectations"""
         if not rbac.has_permission(current_user, "write", field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.create_custom_field_definition(db=db, field=field, user_id=current_user.id)
+        _ensure_feature_enabled(db, field.project_id)
+
+        try:
+            return crud.create_custom_field_definition(db=db, field=field, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.get("/custom-fields/definitions/{field_id}", response_model=schemas.CustomFieldDefinition)
     def get_custom_fields_definition(
@@ -105,7 +146,8 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "read", field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        _ensure_feature_enabled(db, field.project_id)
+
         return field
 
     @app.put("/custom-fields/definitions/{field_id}", response_model=schemas.CustomFieldDefinition)
@@ -123,9 +165,13 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "write", existing_field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        _ensure_feature_enabled(db, existing_field.project_id)
+
         # Reuse existing CRUD function
-        return crud.update_custom_field_definition(db, field_id=field_id, field=field, user_id=current_user.id)
+        try:
+            return crud.update_custom_field_definition(db, field_id=field_id, field=field, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.delete("/custom-fields/definitions/{field_id}", response_model=schemas.MessageResponse)
     def delete_custom_fields_definition(
@@ -141,7 +187,8 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "manage_projects", existing_field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        _ensure_feature_enabled(db, existing_field.project_id)
+
         # Reuse existing CRUD function
         crud.delete_custom_field_definition(db, field_id=field_id, user_id=current_user.id)
         return {"message": "Custom field definition deleted successfully"}
@@ -160,6 +207,7 @@ def register_custom_fields_routes(app):
         test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
         if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, test_suite.project_id)
 
         return crud.get_test_case_with_custom_fields(db, test_case_id=test_case_id)
 
@@ -185,6 +233,7 @@ def register_custom_fields_routes(app):
             raise HTTPException(status_code=404, detail=f"{entity_type} not found")
         if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
         return crud.get_custom_field_values(db, entity_type=entity_type, entity_id=entity_id)
 
     @app.post(
@@ -208,6 +257,7 @@ def register_custom_fields_routes(app):
             raise HTTPException(status_code=404, detail=f"{entity_type} not found")
         if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
         try:
             return crud.create_custom_field_value(db=db, value=payload, user_id=current_user.id)
@@ -240,6 +290,8 @@ def register_custom_fields_routes(app):
             raise HTTPException(status_code=404, detail=f"{entity_type} not found")
         if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
         try:
             return crud.update_custom_field_value(db, value_id=value_id, value=payload, user_id=current_user.id)
@@ -267,8 +319,12 @@ def register_custom_fields_routes(app):
             raise HTTPException(status_code=404, detail=f"{entity_type} not found")
         if not rbac.has_permission(current_user, "delete", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
-        crud.delete_custom_field_value(db, value_id=value_id, user_id=current_user.id)
+        try:
+            crud.delete_custom_field_value(db, value_id=value_id, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         return
 
     # Custom Field Definition Endpoints (original path)
@@ -280,8 +336,12 @@ def register_custom_fields_routes(app):
     ):
         if not rbac.has_permission(current_user, "write", field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.create_custom_field_definition(db=db, field=field, user_id=current_user.id)
+        _ensure_feature_enabled(db, field.project_id)
+
+        try:
+            return crud.create_custom_field_definition(db=db, field=field, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.get("/custom-field-definitions")
     def read_custom_field_definitions_original(
@@ -293,6 +353,8 @@ def register_custom_fields_routes(app):
     ):
         if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
         
         if not project_id:
             return []
@@ -311,7 +373,8 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "read", field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+        _ensure_feature_enabled(db, field.project_id)
+
         return field
 
     @app.put("/custom-field-definitions/{field_id}", response_model=schemas.CustomFieldDefinition)
@@ -327,8 +390,13 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "write", db_field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud.update_custom_field_definition(db, field_id=field_id, field=field, user_id=current_user.id)
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, db_field.project_id)
+
+        try:
+            return crud.update_custom_field_definition(db, field_id=field_id, field=field, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.delete("/custom-field-definitions/{field_id}", response_model=schemas.MessageResponse)
     def delete_custom_field_definition_original(
@@ -342,6 +410,8 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "manage_projects", db_field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, db_field.project_id)
         
         crud.delete_custom_field_definition(db, field_id=field_id, user_id=current_user.id)
         return {"message": "Custom field definition deleted successfully"}
@@ -358,6 +428,8 @@ def register_custom_fields_routes(app):
         
         if not rbac.has_permission(current_user, "read", field.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, field.project_id)
         
         # Get values for this field
         values = crud.get_custom_field_values(db, field_definition_id=field_id)
@@ -374,17 +446,24 @@ def register_custom_fields_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        test_case = crud.get_test_case(db, test_case_id=value.test_case_id)
-        if not test_case or getattr(test_case, "is_deleted", False):
-            raise HTTPException(status_code=404, detail="Test case not found")
+        entity_type = next(
+            (t for t in _ENTITY_TYPES if getattr(value, f"{t}_id", None) is not None), None
+        )
+        owner_id = getattr(value, f"{entity_type}_id", None) if entity_type else None
+        if entity_type is None or owner_id is None:
+            raise HTTPException(status_code=400, detail="A test_case_id, test_run_id, defect_id or requirement_id is required")
 
-        test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
-        if not test_suite:
-            raise HTTPException(status_code=404, detail="Test suite not found for this test case")
-        if not rbac.has_permission(current_user, "write", test_suite.project_id, db):
+        project_id = _resolve_entity_project(db, entity_type, owner_id)
+        if project_id is None:
+            raise HTTPException(status_code=404, detail=f"{entity_type} not found")
+        if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
-        return crud.create_custom_field_value(db=db, value=value, user_id=current_user.id)
+        try:
+            return crud.create_custom_field_value(db=db, value=value, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.get("/custom-field-values/", response_model=List[schemas.CustomFieldValue])
     def read_custom_field_values(
@@ -395,12 +474,9 @@ def register_custom_fields_routes(app):
     ):
         project_id = None
         if test_case_id is not None:
-            test_case = crud.get_test_case(db, test_case_id=test_case_id)
-            if not test_case or getattr(test_case, "is_deleted", False):
+            project_id = _resolve_entity_project(db, "test_case", test_case_id)
+            if project_id is None:
                 raise HTTPException(status_code=404, detail="Test case not found")
-            test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
-            if test_suite:
-                project_id = test_suite.project_id
         elif field_definition_id is not None:
             field_def = crud.get_custom_field_definition(db, field_id=field_definition_id)
             if field_def is None:
@@ -411,6 +487,7 @@ def register_custom_fields_routes(app):
 
         if project_id is not None and not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
         return crud.get_custom_field_values(db, test_case_id=test_case_id, field_definition_id=field_definition_id)
 
@@ -424,14 +501,15 @@ def register_custom_fields_routes(app):
         if value is None:
             raise HTTPException(status_code=404, detail="Custom field value not found")
 
-        test_case = crud.get_test_case(db, test_case_id=value.test_case_id)
-        if not test_case or getattr(test_case, "is_deleted", False):
-            raise HTTPException(status_code=404, detail="Test case not found")
-        test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
-        if not test_suite:
-            raise HTTPException(status_code=404, detail="Test suite not found for this test case")
-        if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
+        project_id = _resolve_value_project(db, value)
+        if project_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail="The entity that owns this custom field value no longer exists",
+            )
+        if not rbac.has_permission(current_user, "read", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
         return value
 
@@ -446,16 +524,20 @@ def register_custom_fields_routes(app):
         if db_value is None:
             raise HTTPException(status_code=404, detail="Custom field value not found")
 
-        test_case = crud.get_test_case(db, test_case_id=db_value.test_case_id)
-        if not test_case or getattr(test_case, "is_deleted", False):
-            raise HTTPException(status_code=404, detail="Test case not found")
-        test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
-        if not test_suite:
-            raise HTTPException(status_code=404, detail="Test suite not found for this test case")
-        if not rbac.has_permission(current_user, "write", test_suite.project_id, db):
+        project_id = _resolve_value_project(db, db_value)
+        if project_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail="The entity that owns this custom field value no longer exists",
+            )
+        if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
-        return crud.update_custom_field_value(db, value_id=value_id, value=value, user_id=current_user.id)
+        try:
+            return crud.update_custom_field_value(db, value_id=value_id, value=value, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.delete("/custom-field-values/{value_id}", response_model=schemas.MessageResponse)
     def delete_custom_field_value(
@@ -467,14 +549,18 @@ def register_custom_fields_routes(app):
         if db_value is None:
             raise HTTPException(status_code=404, detail="Custom field value not found")
 
-        test_case = crud.get_test_case(db, test_case_id=db_value.test_case_id)
-        if not test_case or getattr(test_case, "is_deleted", False):
-            raise HTTPException(status_code=404, detail="Test case not found")
-        test_suite = crud.get_test_suite(db, test_suite_id=test_case.test_suite_id)
-        if not test_suite:
-            raise HTTPException(status_code=404, detail="Test suite not found for this test case")
-        if not rbac.has_permission(current_user, "delete", test_suite.project_id, db):
+        project_id = _resolve_value_project(db, db_value)
+        if project_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail="The entity that owns this custom field value no longer exists",
+            )
+        if not rbac.has_permission(current_user, "delete", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+        _ensure_feature_enabled(db, project_id)
 
-        crud.delete_custom_field_value(db, value_id=value_id, user_id=current_user.id)
+        try:
+            crud.delete_custom_field_value(db, value_id=value_id, user_id=current_user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         return {"message": "Custom field value deleted successfully"}
