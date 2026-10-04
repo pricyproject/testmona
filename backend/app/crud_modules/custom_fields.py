@@ -63,12 +63,39 @@ def get_custom_field_definition(db: Session, field_id: int):
 
 
 def get_custom_field_definitions(db: Session, project_id: int, skip: int = 0, limit: int = 100):
-    return db.query(CustomFieldDefinition).filter(CustomFieldDefinition.project_id == project_id).offset(skip).limit(limit).all()
+    return (
+        db.query(CustomFieldDefinition)
+        .filter(CustomFieldDefinition.project_id == project_id)
+        .order_by(CustomFieldDefinition.id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+
+def _assert_definition_unique(
+    db: Session,
+    project_id: int,
+    name: str,
+    slug: Optional[str],
+    exclude_id: Optional[int] = None,
+) -> None:
+    """Reject a duplicate field name or slug inside the same project."""
+    query = db.query(CustomFieldDefinition).filter(CustomFieldDefinition.project_id == project_id)
+    if exclude_id is not None:
+        query = query.filter(CustomFieldDefinition.id != exclude_id)
+    lowered_name = (name or "").strip().lower()
+    lowered_slug = (slug or "").strip().lower()
+    for other in query.all():
+        if lowered_name and other.name.strip().lower() == lowered_name:
+            raise ValueError(f"A custom field named '{name}' already exists in this project")
+        if lowered_slug and (other.slug or "").strip().lower() == lowered_slug:
+            raise ValueError(f"A custom field with slug '{slug}' already exists in this project")
 
 
 def create_custom_field_definition(db: Session, field: CustomFieldDefinitionCreate, user_id: Optional[int] = None):
     field_dict = field.model_dump()
-    
+
     # Generate slug if not provided
     if not field_dict.get('slug'):
         import re
@@ -76,8 +103,15 @@ def create_custom_field_definition(db: Session, field: CustomFieldDefinitionCrea
         slug = re.sub(r'[^a-z0-9]+', '_', slug)
         slug = slug.strip('_')
         field_dict['slug'] = slug
-    
+
+    _assert_definition_unique(db, field_dict['project_id'], field_dict['name'], field_dict.get('slug'))
+
     db_field = CustomFieldDefinition(**field_dict)
+    # A default that would fail its own rules would break every new entity.
+    if db_field.default_value is not None:
+        error = validate_custom_field_value(db_field.default_value, db_field)
+        if error:
+            raise ValueError(error)
     db.add(db_field)
     safe_commit(db)
     db.refresh(db_field)
@@ -108,40 +142,56 @@ def update_custom_field_definition(db: Session, field_id: int, field: CustomFiel
     db_field = db.query(CustomFieldDefinition).filter(CustomFieldDefinition.id == field_id).first()
     if db_field:
         update_data = field.model_dump(exclude_unset=True)
-        
+
+        # Re-validate the *merged* state: a partial payload may carry rules or
+        # options without a field_type, which the schema cannot check on its own.
+        merged_type = update_data.get('field_type', db_field.field_type)
+        merged_rules = update_data.get('validation_rules', db_field.validation_rules)
+        merged_options = update_data.get('options', db_field.options)
+        schemas.validate_rules_for_field_type(merged_type, merged_rules)
+        merged_options = schemas.normalize_options(merged_type, merged_options)
+
+        new_name = update_data.get('name', db_field.name)
+        new_slug = update_data.get('slug', db_field.slug)
+        _assert_definition_unique(db, db_field.project_id, new_name, new_slug, exclude_id=field_id)
+
         # Check if is_required is being changed from False to True
         if 'is_required' in update_data and update_data['is_required'] == True and db_field.is_required == False:
-            # Validate that all test cases in the project have values for this field
-            from ..models import TestCase
-            test_cases = db.query(TestCase).filter(TestCase.project_id == db_field.project_id).all()
-            
-            # If there are no test cases, allow the change
-            if test_cases:
-                # Get all test case IDs that have values for this field
-                test_case_ids_with_values = db.query(CustomFieldValue.test_case_id).filter(
-                    CustomFieldValue.field_definition_id == field_id
-                ).all()
-                test_case_ids_with_values = set([tc_id[0] for tc_id in test_case_ids_with_values])
-                
-                # Find test cases without values
-                test_cases_without_values = [tc for tc in test_cases if tc.id not in test_case_ids_with_values]
-                
-                if test_cases_without_values:
-                    raise ValueError(
-                        f"Cannot make field required. {len(test_cases_without_values)} test case(s) lack values for this field. "
-                        f"Please provide values for all test cases before making the field required."
-                    )
-        
-        # If name is being updated but slug is not provided, regenerate slug
-        if 'name' in update_data and 'slug' not in update_data:
-            import re
-            slug = update_data['name'].lower()
-            slug = re.sub(r'[^a-z0-9]+', '_', slug)
-            slug = slug.strip('_')
-            update_data['slug'] = slug
-        
+            # Every entity this field targets must already carry a value.
+            missing = _missing_required_owners(db, db_field)
+            if missing:
+                detail = ", ".join(f"{count} {entity_type}(s)" for entity_type, count in sorted(missing.items()))
+                raise ValueError(
+                    f"Cannot make field required. {detail} lack values for this field. "
+                    f"Please provide values for all of them before making the field required."
+                )
+
+        # Narrowing entity_types would orphan values that are already stored.
+        if 'entity_types' in update_data:
+            _assert_no_orphaned_values(db, db_field, update_data['entity_types'])
+
+        # Changing the type, the rules or the option list invalidates values
+        # that are already stored.
+        if (
+            merged_type != db_field.field_type
+            or merged_options != db_field.options
+            or merged_rules != db_field.validation_rules
+        ):
+            _assert_existing_values_valid(db, db_field, merged_type, merged_options, merged_rules)
+
+        # The slug is an external identifier (import mappings, URLs) — a rename
+        # must not silently repoint it.
+        if 'options' in update_data:
+            update_data['options'] = merged_options
+
         for key, value in update_data.items():
             setattr(db_field, key, value)
+
+        if db_field.default_value is not None:
+            error = validate_custom_field_value(db_field.default_value, db_field)
+            if error:
+                raise ValueError(error)
+
         safe_commit(db)
         db.refresh(db_field)
         
@@ -209,6 +259,147 @@ _CUSTOM_FIELD_ENTITY_COLUMNS = {
     "defect": "defect_id",
     "requirement": "requirement_id",
 }
+
+# Owner models per entity type, used to count the entities a required field
+# would have to cover. Test cases are the odd one out: the project comes from
+# the suite and soft-deleted rows must not count.
+_CUSTOM_FIELD_OWNER_MODELS = {
+    "test_run": TestRun,
+    "defect": Defect,
+    "requirement": Requirement,
+}
+
+
+def _applied_entity_types(field_definition: CustomFieldDefinition) -> List[str]:
+    """Entity types a definition targets; legacy NULL means test cases only."""
+    if not field_definition.entity_types:
+        return ["test_case"]
+    return [entity_type for entity_type in field_definition.entity_types if entity_type in _CUSTOM_FIELD_ENTITY_COLUMNS]
+
+
+def _entity_owner_ids(db: Session, entity_type: str, project_id: int) -> set:
+    if entity_type == "test_case":
+        rows = (
+            db.query(TestCase.id)
+            .join(TestSuite, TestCase.test_suite_id == TestSuite.id)
+            .filter(
+                TestSuite.project_id == project_id,
+                (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
+            )
+            .all()
+        )
+    else:
+        model = _CUSTOM_FIELD_OWNER_MODELS.get(entity_type)
+        if model is None:
+            return set()
+        rows = db.query(model.id).filter(model.project_id == project_id).all()
+    return {row[0] for row in rows}
+
+
+def _valued_owner_ids(db: Session, field_definition_id: int) -> dict:
+    """Map entity type -> set of owner ids that already hold a value."""
+    entity_types = list(_CUSTOM_FIELD_ENTITY_COLUMNS)
+    columns = [getattr(CustomFieldValue, _CUSTOM_FIELD_ENTITY_COLUMNS[t]) for t in entity_types]
+    rows = db.query(*columns).filter(
+        CustomFieldValue.field_definition_id == field_definition_id
+    ).all()
+    return {
+        entity_type: {row[index] for row in rows if row[index] is not None}
+        for index, entity_type in enumerate(entity_types)
+    }
+
+
+def _missing_required_owners(db: Session, field_definition: CustomFieldDefinition) -> dict:
+    """Per entity type, how many targeted entities still lack a value."""
+    valued = _valued_owner_ids(db, field_definition.id)
+    missing = {}
+    for entity_type in _applied_entity_types(field_definition):
+        gap = len(_entity_owner_ids(db, entity_type, field_definition.project_id) - valued.get(entity_type, set()))
+        if gap:
+            missing[entity_type] = gap
+    return missing
+
+
+def _assert_no_orphaned_values(db: Session, field_definition: CustomFieldDefinition, new_entity_types: List[str]) -> None:
+    """Refuse to drop an entity type that still has stored values."""
+    kept = set(new_entity_types or [])
+    valued = _valued_owner_ids(db, field_definition.id)
+    orphaned = sorted(t for t, ids in valued.items() if ids and t not in kept)
+    if orphaned:
+        raise ValueError(
+            f"Custom field '{field_definition.name}' still has values on: {', '.join(orphaned)}. "
+            "Clear those values before removing them from entity_types."
+        )
+
+
+def _assert_existing_values_valid(
+    db: Session,
+    field_definition: CustomFieldDefinition,
+    field_type,
+    options,
+    validation_rules,
+) -> None:
+    """Refuse a type/options change that would leave stored values invalid."""
+    candidate = CustomFieldDefinition(
+        id=field_definition.id,
+        name=field_definition.name,
+        slug=field_definition.slug,
+        field_type=field_type,
+        description=field_definition.description,
+        project_id=field_definition.project_id,
+        is_required=field_definition.is_required,
+        default_value=field_definition.default_value,
+        options=options,
+        validation_rules=validation_rules,
+        entity_types=field_definition.entity_types,
+    )
+    invalid = 0
+    for value in db.query(CustomFieldValue).filter(
+        CustomFieldValue.field_definition_id == field_definition.id
+    ):
+        if not field_definition_applies_to(field_definition, value.entity_type):
+            continue
+        if validate_custom_field_value(value.value, candidate):
+            invalid += 1
+    if invalid:
+        raise ValueError(
+            f"{invalid} existing value(s) would no longer be valid for custom field "
+            f"'{field_definition.name}' under the new type/options. Clear them first."
+        )
+
+
+def get_custom_field_values(
+    db: Session,
+    test_case_id: Optional[int] = None,
+    field_definition_id: Optional[int] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    test_run_id: Optional[int] = None,
+    defect_id: Optional[int] = None,
+    requirement_id: Optional[int] = None,
+):
+    """Fetch custom field values, filterable by any of the four entity owners.
+
+    Callers can use either the legacy keyword (``test_case_id``) or the
+    polymorphic pair (``entity_type``, ``entity_id``).
+    """
+    query = db.query(CustomFieldValue)
+    if test_case_id is not None:
+        query = query.filter(CustomFieldValue.test_case_id == test_case_id)
+    if test_run_id is not None:
+        query = query.filter(CustomFieldValue.test_run_id == test_run_id)
+    if defect_id is not None:
+        query = query.filter(CustomFieldValue.defect_id == defect_id)
+    if requirement_id is not None:
+        query = query.filter(CustomFieldValue.requirement_id == requirement_id)
+    if entity_type and entity_id is not None:
+        column_name = _CUSTOM_FIELD_ENTITY_COLUMNS.get(entity_type)
+        if column_name:
+            query = query.filter(getattr(CustomFieldValue, column_name) == entity_id)
+    if field_definition_id:
+        query = query.filter(CustomFieldValue.field_definition_id == field_definition_id)
+    return query.all()
+
 
 def _resolve_custom_field_owner(db: Session, value):
     """Return ``(entity_type, project_id)`` for whichever entity owns the
