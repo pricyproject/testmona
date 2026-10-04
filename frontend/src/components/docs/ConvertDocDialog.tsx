@@ -35,7 +35,7 @@ import {
 import { sanitizeHtml } from '@/lib/sanitize';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
-import { docsAPI, projectsAPI } from '@/lib/api';
+import { docsAPI, getApiErrorMessage, projectsAPI } from '@/lib/api';
 import type {
   Doc,
   DocConvertEnhanceItem,
@@ -91,12 +91,26 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
   const [extraSelected, setExtraSelected] = useState<Set<number>>(new Set());
 
   // Load projects for the target picker when converting a global doc.
+  const projectsTokenRef = useRef(0);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState(false);
+
   useEffect(() => {
     if (!open || !isGlobal) return;
+    const token = ++projectsTokenRef.current;
+    setProjectsLoading(true);
+    setProjectsError(false);
     projectsAPI.getAll().then((data: any) => {
+      if (token !== projectsTokenRef.current) return;
       const list: Project[] = Array.isArray(data) ? data : data?.items ?? [];
       setProjects(list);
-    }).catch(() => undefined);
+      setProjectsLoading(false);
+    }).catch(() => {
+      if (token !== projectsTokenRef.current) return;
+      setProjects([]);
+      setProjectsError(true);
+      setProjectsLoading(false);
+    });
   }, [open, isGlobal]);
 
   const resetAi = useCallback(() => {
@@ -110,17 +124,25 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
 
   const previewKeyRef = useRef<string | null>(null);
 
+  // Section indices are keyed per mode/level, so a preview that resolves after the
+  // user switched mode would install another mode's titles against these indices —
+  // producing requirements with the wrong titles. A token drops stale responses.
+  const previewTokenRef = useRef(0);
+
   const loadPreview = useCallback(async () => {
     if (!open) return;
+    const token = ++previewTokenRef.current;
     try {
       setPreviewing(true);
       const preview = await docsAPI.previewConvert(doc.id, { mode, heading_level: headingLevel });
+      if (token !== previewTokenRef.current) return;
       setItems(preview.items);
       setTitles(Object.fromEntries(preview.items.map((i) => [i.index, i.title])));
       setExcluded(new Set());
       // Section indices change with mode/level, so any prior AI mapping is stale.
       resetAi();
     } catch {
+      if (token !== previewTokenRef.current) return;
       setItems([]);
       setTitles({});
       setExcluded(new Set());
@@ -130,7 +152,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       previewKeyRef.current = null;
       toast({ title: t('error'), description: t('docConvertPreviewFailed'), variant: 'destructive' });
     } finally {
-      setPreviewing(false);
+      if (token === previewTokenRef.current) setPreviewing(false);
     }
   }, [open, doc.id, mode, headingLevel, t, toast, resetAi]);
 
@@ -271,7 +293,13 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
     return includedItems.some((item) => !(titles[item.index] ?? item.title).trim());
   }, [excluded, items, mode, titles]);
 
+  // Single source of truth for "can this be submitted" — the button and the
+  // Ctrl/Cmd+Enter shortcut both consult it, so the keyboard path can't fire a
+  // conversion the button would have blocked.
+  const canSubmit = !submitting && !previewing && totalCount > 0 && !hasBlankIncludedTitle;
+
   const handleConvert = async () => {
+    if (!canSubmit) return;
     if (isGlobal && targetProjectId == null) {
       toast({ title: t('error'), description: t('docConvertPickProject'), variant: 'destructive' });
       return;
@@ -311,8 +339,8 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
       toast({ title: t('success'), description: t('docConvertedCount', { n: result.created.length }) });
       onConverted?.(result.created.length, (targetProjectId ?? doc.project_id) as number);
       onOpenChange(false);
-    } catch (e: any) {
-      toast({ title: t('error'), description: e?.response?.data?.detail || t('docConvertFailed'), variant: 'destructive' });
+    } catch (e: unknown) {
+      toast({ title: t('error'), description: getApiErrorMessage(e, t('docConvertFailed')), variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -321,7 +349,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      handleConvert();
+      if (canSubmit) void handleConvert();
     }
   };
 
@@ -385,15 +413,22 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
             )}
             {isGlobal && (
               <div className="space-y-1">
-                <Label className="text-xs">{t('docConvertTargetProject')}</Label>
-                <Select value={targetProjectId ? String(targetProjectId) : ''} onValueChange={(v) => setTargetProjectId(Number(v))}>
-                  <SelectTrigger><SelectValue placeholder={t('selectProject')} /></SelectTrigger>
+                <Label htmlFor="docConvertTargetProject" className="text-xs">{t('docConvertTargetProject')}</Label>
+                <Select
+                  value={targetProjectId ? String(targetProjectId) : ''}
+                  onValueChange={(v) => setTargetProjectId(Number(v))}
+                  disabled={projectsLoading || projectsError}
+                >
+                  <SelectTrigger id="docConvertTargetProject"><SelectValue placeholder={t('selectProject')} /></SelectTrigger>
                   <SelectContent>
                     {projects.map((p) => (
                       <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {projectsError && (
+                  <p className="text-xs text-destructive">{t('docConvertPickProject')}</p>
+                )}
               </div>
             )}
             <div className="space-y-1">
@@ -629,7 +664,7 @@ export function ConvertDocDialog({ doc, open, onOpenChange, onConverted }: Props
 
         <DialogFooter className="border-t border-slate-100 px-4 py-3 dark:border-slate-800 sm:px-6">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>{t('cancel')}</Button>
-          <Button type="button" onClick={handleConvert} disabled={submitting || previewing || totalCount === 0 || hasBlankIncludedTitle}>
+          <Button type="button" onClick={() => void handleConvert()} disabled={!canSubmit}>
             {submitting ? <Loader2 className={`h-4 w-4 animate-spin ${isRTL ? 'ml-2' : 'mr-2'}`} /> : <ArrowRightLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />}
             {t('docConvertAction', { n: totalCount })}
           </Button>
