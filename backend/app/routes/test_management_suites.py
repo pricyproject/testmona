@@ -7,17 +7,50 @@ import logging
 import re
 
 from .. import crud, schemas, auth, rbac, models
-from ..feature_guard import require_project_feature
+from ..feature_guard import require_any_project_feature, require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user, get_current_user
-from ..models import TestCase, TestResult, TestRun, User, TestCaseRevision, ResultStatus, canonical_result_status
+from ..models import (
+    AuditAction,
+    EntityType,
+    ResultStatus,
+    TestCase,
+    TestCaseRevision,
+    TestResult,
+    TestRun,
+    User,
+    canonical_result_status,
+)
 from .test_management_helpers import *
 
 logger = logging.getLogger(__name__)
 
+# test_suites.name is String(255); a clone of a max-length name still has to fit.
+MAX_SUITE_NAME_LENGTH = 255
+
+
+def _record_suite_audit(db, current_user, action, suite_id, project_id, description):
+    """Best-effort audit entry: never fail the request because auditing did."""
+    try:
+        from ..services.audit_service import get_audit_service
+        from ..schemas_audit import AuditTrailCreate
+        get_audit_service(db).create_audit_trail(
+            AuditTrailCreate(
+                user_id=current_user.id if current_user else None,
+                action=action,
+                entity_type=EntityType.TEST_SUITE.value,
+                entity_id=suite_id,
+                project_id=project_id,
+                description=description,
+            )
+        )
+    except Exception:
+        logger.exception("Failed to create audit trail for test suite %s", action)
+
 
 def register_suite_routes(app):
-    @app.post("/test-suites", response_model=schemas.TestSuite)
+    @app.post("/test-suites", response_model=schemas.TestSuite,
+              dependencies=[Depends(require_project_feature("test_suites"))])
     def create_test_suite(
         test_suite: schemas.TestSuiteCreate,
         db: Session = Depends(get_db),
@@ -39,26 +72,19 @@ def register_suite_routes(app):
         counts = crud.get_test_case_counts_by_suite(db, [db_test_suite.id])
         db_test_suite.test_case_count = counts.get(db_test_suite.id, 0)
 
-        try:
-            from ..services.audit_service import get_audit_service
-            from ..schemas_audit import AuditTrailCreate
-            from ..models import AuditAction, EntityType
-            audit_service = get_audit_service(db)
-            audit_data = AuditTrailCreate(
-                user_id=current_user.id if current_user else None,
-                action=AuditAction.CREATE.value,
-                entity_type=EntityType.TEST_SUITE.value,
-                entity_id=db_test_suite.id,
-                project_id=db_test_suite.project_id,
-                description=f"Test suite created: {db_test_suite.name or 'Untitled'}",
-            )
-            audit_service.create_audit_trail(audit_data)
-        except Exception:
-            logger.exception("Failed to create audit trail for test suite creation")
+        _record_suite_audit(
+            db,
+            current_user,
+            AuditAction.CREATE.value,
+            db_test_suite.id,
+            db_test_suite.project_id,
+            f"Test suite created: {db_test_suite.name or 'Untitled'}",
+        )
 
         return db_test_suite
 
-    @app.get("/test-suites", response_model=List[schemas.TestSuite])
+    @app.get("/test-suites", response_model=List[schemas.TestSuite],
+             dependencies=[Depends(require_project_feature("test_suites"))])
     def read_test_suites(
         project_id: Optional[int] = Query(None, ge=1),
         skip: int = Query(0, ge=0),
@@ -69,16 +95,22 @@ def register_suite_routes(app):
         if project_id is not None:
             if not rbac.has_permission(current_user, "read", project_id, db):
                 raise HTTPException(status_code=403, detail="Not authorized to access this project")
-
-        test_suites = crud.get_test_suites(db, project_id=project_id, skip=skip, limit=limit)
-
-        # Project-less listings still have to be filtered per user, but at least the
-        # earlier path now hits the DB once with proper scoping.
-        if project_id is None:
-            test_suites = [
-                suite for suite in test_suites
-                if rbac.has_permission(current_user, "read", suite.project_id, db)
+            test_suites = crud.get_test_suites(db, project_id=project_id, skip=skip, limit=limit)
+        else:
+            # Scope in SQL rather than filtering the page afterwards: post-filtering
+            # both hands restricted users short/empty pages and costs two permission
+            # queries per suite on every request.
+            accessible_project_ids = [
+                project.id for project in rbac.get_accessible_projects(current_user, db)
             ]
+            if not accessible_project_ids:
+                return []
+            test_suites = crud.get_test_suites(
+                db,
+                skip=skip,
+                limit=limit,
+                project_ids=accessible_project_ids,
+            )
 
         suite_ids = [suite.id for suite in test_suites]
         counts = crud.get_test_case_counts_by_suite(db, suite_ids)
@@ -87,7 +119,8 @@ def register_suite_routes(app):
 
         return test_suites
 
-    @app.get("/test-suites/{test_suite_id}", response_model=schemas.TestSuite)
+    @app.get("/test-suites/{test_suite_id}", response_model=schemas.TestSuite,
+             dependencies=[Depends(require_project_feature("test_suites"))])
     def read_test_suite(
         test_suite_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -104,7 +137,10 @@ def register_suite_routes(app):
         db_test_suite.test_case_count = counts.get(db_test_suite.id, 0)
         return db_test_suite
 
-    @app.post("/test-suites/{test_suite_id}/test-runs", response_model=schemas.TestSuiteRun)
+    # Runs are owned by the test_runs module but always launched from a suite, so
+    # either module being on keeps this route available.
+    @app.post("/test-suites/{test_suite_id}/test-runs", response_model=schemas.TestSuiteRun,
+              dependencies=[Depends(require_any_project_feature("test_suites", "test_runs"))])
     def create_test_run_from_suite(
         run_data: schemas.TestSuiteRunCreate,
         test_suite_id: int = Path(..., ge=1),
@@ -164,23 +200,23 @@ def register_suite_routes(app):
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
-            from ..models import AuditAction, EntityType
-            audit_service = get_audit_service(db)
-            audit_data = AuditTrailCreate(
-                user_id=current_user.id if current_user else None,
-                action=AuditAction.CREATE.value,
-                entity_type=EntityType.TEST_RUN.value,
-                entity_id=db_test_run.id,
-                project_id=db_test_suite.project_id,
-                description=f"Test run created from suite: {db_test_suite.name or 'Untitled'}",
+            get_audit_service(db).create_audit_trail(
+                AuditTrailCreate(
+                    user_id=current_user.id if current_user else None,
+                    action=AuditAction.CREATE.value,
+                    entity_type=EntityType.TEST_RUN.value,
+                    entity_id=db_test_run.id,
+                    project_id=db_test_suite.project_id,
+                    description=f"Test run created from suite: {db_test_suite.name or 'Untitled'}",
+                )
             )
-            audit_service.create_audit_trail(audit_data)
         except Exception:
             logger.exception("Failed to create audit trail for suite test run creation")
 
         return db_test_run
 
-    @app.put("/test-suites/{test_suite_id}", response_model=schemas.TestSuite)
+    @app.put("/test-suites/{test_suite_id}", response_model=schemas.TestSuite,
+             dependencies=[Depends(require_project_feature("test_suites"))])
     def update_test_suite(
         test_suite: schemas.TestSuiteUpdate,
         test_suite_id: int = Path(..., ge=1),
@@ -202,23 +238,23 @@ def register_suite_routes(app):
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
-            from ..models import AuditAction, EntityType
-            audit_service = get_audit_service(db)
-            audit_data = AuditTrailCreate(
-                user_id=current_user.id if current_user else None,
-                action=AuditAction.UPDATE.value,
-                entity_type=EntityType.TEST_SUITE.value,
-                entity_id=db_test_suite.id,
-                project_id=db_test_suite.project_id,
-                description=f"Test suite updated: {db_test_suite.name or 'Untitled'}",
+            get_audit_service(db).create_audit_trail(
+                AuditTrailCreate(
+                    user_id=current_user.id if current_user else None,
+                    action=AuditAction.UPDATE.value,
+                    entity_type=EntityType.TEST_SUITE.value,
+                    entity_id=db_test_suite.id,
+                    project_id=db_test_suite.project_id,
+                    description=f"Test suite updated: {db_test_suite.name or 'Untitled'}",
+                )
             )
-            audit_service.create_audit_trail(audit_data)
         except Exception:
             logger.exception("Failed to create audit trail for test suite update")
 
         return db_test_suite
 
-    @app.delete("/test-suites/{test_suite_id}", response_model=schemas.MessageResponse)
+    @app.delete("/test-suites/{test_suite_id}", response_model=schemas.MessageResponse,
+             dependencies=[Depends(require_project_feature("test_suites"))])
     def delete_test_suite(
         test_suite_id: int = Path(..., ge=1),
         db: Session = Depends(get_db),
@@ -265,17 +301,16 @@ def register_suite_routes(app):
         try:
             from ..services.audit_service import get_audit_service
             from ..schemas_audit import AuditTrailCreate
-            from ..models import AuditAction, EntityType
-            audit_service = get_audit_service(db)
-            audit_data = AuditTrailCreate(
-                user_id=current_user.id if current_user else None,
-                action=AuditAction.DELETE.value,
-                entity_type=EntityType.TEST_SUITE.value,
-                entity_id=suite_id,
-                project_id=project_id,
-                description=f"Test suite deleted: {suite_name or 'Untitled'}",
+            get_audit_service(db).create_audit_trail(
+                AuditTrailCreate(
+                    user_id=current_user.id if current_user else None,
+                    action=AuditAction.DELETE.value,
+                    entity_type=EntityType.TEST_SUITE.value,
+                    entity_id=suite_id,
+                    project_id=project_id,
+                    description=f"Test suite deleted: {suite_name or 'Untitled'}",
+                )
             )
-            audit_service.create_audit_trail(audit_data)
         except Exception:
             logger.exception("Failed to create audit trail for test suite deletion")
 
