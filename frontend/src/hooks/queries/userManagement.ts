@@ -73,10 +73,25 @@ export function useResetUserTwoFactor() {
   });
 }
 
+export interface ManagedInvitation {
+  id: number;
+  email: string;
+  role: string;
+  expires_at: string;
+  is_used: boolean;
+  created_at: string;
+}
+
+/** Create-invitation response: same as the listed row plus the single-use token. */
+export interface CreatedInvitation extends ManagedInvitation {
+  token: string;
+}
+
 export function useInviteUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: any) => (await api.post('/invitations', payload)).data,
+    mutationFn: async (payload: any): Promise<CreatedInvitation> =>
+      (await api.post('/invitations', payload)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: userManagementKeys.invitations }),
   });
 }

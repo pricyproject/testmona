@@ -97,6 +97,18 @@ const apiErrorDetail = (error: unknown): string | undefined => {
   return undefined;
 };
 
+const buildInviteLink = (token: string) =>
+  `${window.location.origin}/accept-invite/${token}`;
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function UserManagement() {
   const { t, isRTL, language } = useTranslation();
   const { toast } = useToast();
@@ -122,6 +134,7 @@ export function UserManagement() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<string>(USER_ROLES.TESTER);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
+  const [inviteLink, setInviteLink] = useState<string>('');
   
   // Create user dialog state
   const [createUserDialogOpen, setCreateUserDialogOpen] = useState(false);
@@ -227,27 +240,34 @@ export function UserManagement() {
     }
 
     try {
-      await inviteUser.mutateAsync({
+      const created = await inviteUser.mutateAsync({
         email: inviteEmail,
         role: normalizeRole(inviteRole),
         project_ids: selectedProjects,
       });
 
+      // The token is only ever returned here — nothing emails it — so surface the
+      // link and copy it, otherwise the invitee can never accept.
+      const link = buildInviteLink(created.token);
+      setInviteLink(link);
+      const copied = await copyToClipboard(link);
+
       toast({
         title: t('success'),
-        description: t('invitationSentCopyLink', { email: inviteEmail }),
+        description: copied
+          ? t('invitationLinkCopied', { email: inviteEmail })
+          : t('invitationLinkReady', { email: inviteEmail }),
       });
-      
-      // Reset form
+
+      // Reset form (keep the dialog open so the link stays visible/copyable)
       setInviteEmail('');
       setInviteRole(USER_ROLES.TESTER);
       setSelectedProjects([]);
-      setInviteDialogOpen(false);
     } catch (error: any) {
       console.error('Failed to invite user:', error);
       toast({
         title: t('error'),
-        description: error.message || t('failedToSendInvitation'),
+        description: apiErrorDetail(error) || t('failedToSendInvitation'),
         variant: "destructive",
       });
     }
@@ -653,7 +673,7 @@ export function UserManagement() {
       </Dialog>
 
       {/* Invite User Dialog */}
-      <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+      <Dialog open={inviteDialogOpen} onOpenChange={(open) => { setInviteDialogOpen(open); if (!open) setInviteLink(''); }}>
         <DialogContent isRTL={isRTL} className="sm:max-w-[500px]" onKeyDown={submitOnCtrlEnter(handleInviteUser)}>
           <DialogHeader>
             <DialogTitle>{t('inviteUser')}</DialogTitle>
@@ -711,11 +731,35 @@ export function UserManagement() {
               </div>
             </div>
           </div>
+          {inviteLink && (
+            <div className="grid gap-2 rounded-md border border-dashed p-3">
+              <Label htmlFor="invite-link">{t('invitationLinkLabel')}</Label>
+              <div className="flex items-center gap-2">
+                <Input id="invite-link" readOnly value={inviteLink} className="font-mono text-xs" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const copied = await copyToClipboard(inviteLink);
+                    toast({
+                      title: copied ? t('success') : t('error'),
+                      description: copied ? t('invitationLinkCopiedToClipboard') : t('copyFailed'),
+                      variant: copied ? undefined : 'destructive',
+                    });
+                  }}
+                >
+                  {t('copy')}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">{t('invitationLinkHint')}</p>
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteDialogOpen(false)}>
-              {t('cancel')}
+              {t('close')}
             </Button>
-            <Button onClick={handleInviteUser}>
+            <Button onClick={handleInviteUser} disabled={inviteUser.isPending}>
               <Mail className="h-4 w-4 mr-2 rtl:mr-0 rtl:ml-2" />
               {t('sendInvitation')}
             </Button>
@@ -744,7 +788,11 @@ export function UserManagement() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-role">{t('role')}</Label>
-              <Select value={editRole} onValueChange={setEditRole} disabled={isEditingSelf}>
+              <Select
+                value={editRole}
+                onValueChange={setEditRole}
+                disabled={isEditingSelf}
+              >
                 <SelectTrigger id="edit-role">
                   <SelectValue />
                 </SelectTrigger>
