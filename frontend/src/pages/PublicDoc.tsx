@@ -5,7 +5,7 @@ import { markdownToHtml } from '@/components/ui/content-editor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { sanitizeHtml } from '@/lib/sanitize';
-import { docsAPI } from '@/lib/api';
+import { docsAPI, getApiErrorMessage } from '@/lib/api';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuthStore } from '@/stores/authStore';
 import type { DocPublicView } from '@/types';
@@ -17,6 +17,7 @@ export function PublicDoc() {
   const [doc, setDoc] = useState<DocPublicView | null>(null);
   const [loading, setLoading] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   const signIn = () => {
     window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
@@ -31,10 +32,11 @@ export function PublicDoc() {
       }
       try {
         setLoading(true);
+        setError(null);
         const data = await docsAPI.getPublic(publicId);
         if (!cancelled) setDoc(data);
-      } catch {
-        if (!cancelled) setDoc(null);
+      } catch (e: unknown) {
+        if (!cancelled) { setDoc(null); setError(getApiErrorMessage(e, '')); }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -42,11 +44,20 @@ export function PublicDoc() {
     return () => { cancelled = true; };
   }, [publicId, retryCount]);
 
+  useEffect(() => {
+    if (doc?.title) document.title = doc.title;
+  }, [doc?.title]);
+
   const html = useMemo(() => sanitizeHtml(markdownToHtml(doc?.content_markdown || '')), [doc]);
   const tags = useMemo(() => doc?.tags?.split(',').map((tag) => tag.trim()).filter(Boolean) || [], [doc]);
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center" role="status" aria-busy="true">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <span className="sr-only">{t('loading')}</span>
+      </div>
+    );
   }
 
   if (!doc) {
@@ -54,7 +65,11 @@ export function PublicDoc() {
       <div className="flex min-h-screen items-center justify-center p-6" dir={isRTL ? 'rtl' : 'ltr'}>
         <div className="flex max-w-md flex-col items-center py-10 text-center">
           <AlertCircle className="mb-3 h-10 w-10 text-red-500" />
-          <p className="text-gray-700 dark:text-gray-200">{t('docNotFound')}</p>
+          {/* A revoked or expired link reported as "not found" (with a Sign in button)
+              tells the visitor nothing about why the share stopped working. */}
+          <p className="text-gray-700 dark:text-gray-200">
+            {error || t('docNotFound')}
+          </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {publicId && (
               <Button variant="outline" onClick={() => setRetryCount((c) => c + 1)}>
