@@ -46,7 +46,7 @@ import { DocImpactDialog } from '@/components/docs/DocImpactDialog';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import { docsAPI, projectAssignmentsAPI } from '@/lib/api';
+import { docsAPI, getApiErrorMessage, projectAssignmentsAPI } from '@/lib/api';
 import { useResolvedEntityId } from '@/hooks/useResolvedEntityId';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -55,6 +55,14 @@ import { cn } from '@/lib/utils';
 import type { Doc, DocDir, DocFolder, DocListItem, DocSpace, DocStatus } from '@/types';
 
 const STATUSES: DocStatus[] = ['draft', 'published', 'archived'];
+// Mirrors backend/app/schema_modules/docs.py (DOC_TITLE_MAX / DOC_TAGS_MAX) so an
+// over-long field is caught while typing instead of 422-ing on every autosave.
+const TITLE_MAX = 255;
+const TAGS_MAX = 500;
+// `in_review` is reachable (request-review moves the doc there), so it has to render as
+// the selected state — otherwise the segmented control highlights nothing and the next
+// click silently pulls the doc out of the review workflow.
+const IN_REVIEW_STATUS: DocStatus = 'in_review';
 const DIRECTIONS: DocDir[] = ['auto', 'ltr', 'rtl'];
 // Mirrors the doc status tones used in DocHub/DocDetail so the editor's status pill
 // reads the same everywhere.
@@ -128,9 +136,19 @@ export function DocEditor() {
 
   // Snapshot of the last successfully-saved values to detect real changes.
   const savedRef = useRef<string>('');
+  // True while a PUT is in flight — the autosave tick, the unmount flush and the Save
+  // button all funnel through save(), and two overlapping writes would race.
+  const savingRef = useRef(false);
+  // Snapshot the server last refused, so autosave stays quiet for *that* write but
+  // resumes as soon as the author edits again — otherwise one rejected save either
+  // spams a toast every 4 minutes or blocks autosave forever.
+  const failedSnapshotRef = useRef<string | null>(null);
   // Title is an auto-growing textarea (multi-line titles read better than a
   // horizontally-scrolling single-line input).
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  // The mobile metadata drawer is a modal surface, so focus has to start inside it
+  // rather than staying on the toggle button behind the overlay.
+  const metaDrawerRef = useRef<HTMLElement>(null);
 
   const currentSnapshot = useMemo(
     () => JSON.stringify({ title, content, status, classification, tags, dir, folderId }),
@@ -235,8 +253,18 @@ export function DocEditor() {
     if (snapshot === savedRef.current) return;
     // An empty title is a validation gap, not a save failure. Manual Save is already
     // disabled in this state; autosave/unmount-flush silently skip so we don't surprise
-    // the user with a red "Save failed" while they're mid-edit.
-    if (!title.trim()) return;
+    // the user with a red "Save failed" while they're mid-edit. The dirty flag is
+    // cleared so the editor doesn't sit on "Unsaved changes" (and keep re-arming the
+    // beforeunload prompt) for something that will never be submitted.
+    if (!title.trim()) {
+      savedRef.current = snapshot;
+      setSaveState('saved');
+      return;
+    }
+    // The 4-minute tick, the unmount flush and the Save button can all fire while a
+    // save is still in flight; without this they race and the later response wins.
+    if (savingRef.current) return;
+    savingRef.current = true;
     try {
       setSaveState('saving');
       const note = changeNote?.trim();
@@ -254,11 +282,24 @@ export function DocEditor() {
       });
       setDoc(updated);
       savedRef.current = snapshot;
+      failedSnapshotRef.current = null;
       setLastSavedAt(Date.now());
       setSaveState('saved');
-    } catch {
+    } catch (e: unknown) {
+      // Leave `savedRef` untouched so the edit stays dirty and is retried, but roll
+      // the status back to the last server-confirmed value — otherwise the badge
+      // claims "Published" while the doc is still in review, and every autosave tick
+      // re-fires the PUT the server just rejected.
+      setStatus(doc.status);
+      failedSnapshotRef.current = snapshot;
       setSaveState('error');
-      toast({ title: t('error'), description: t('docSaveFailed'), variant: 'destructive' });
+      toast({
+        title: t('error'),
+        description: getApiErrorMessage(e, t('docSaveFailed')),
+        variant: 'destructive',
+      });
+    } finally {
+      savingRef.current = false;
     }
   }, [doc, currentSnapshot, title, content, status, classification, tags, dir, folderId, t, toast, canWrite]);
 
@@ -274,6 +315,14 @@ export function DocEditor() {
     if (!isDirty) return;
     setSaveState((prev) => (prev === 'saving' ? prev : 'dirty'));
   }, [currentSnapshot, isDirty]);
+
+  // Move focus into the drawer when it opens on mobile; on lg+ the panel is inline
+  // and stealing focus would jump the user away from what they were editing.
+  useEffect(() => {
+    if (!showMeta) return;
+    if (typeof window === 'undefined' || window.innerWidth >= 1024) return;
+    metaDrawerRef.current?.focus();
+  }, [showMeta]);
 
   // Grow the title textarea to fit its content so long titles wrap instead of
   // scrolling horizontally.
@@ -296,9 +345,14 @@ export function DocEditor() {
   // no-op when nothing changed, so an idle tick costs nothing.
   useEffect(() => {
     if (loading || !doc) return;
-    const id = setInterval(() => { void saveFnRef.current(); }, AUTOSAVE_MS);
+    const id = setInterval(() => {
+      // Don't hammer a write the server is already rejecting; the manual Save button
+      // (and any edit) picks it back up.
+      if (failedSnapshotRef.current === currentSnapshot) return;
+      void saveFnRef.current();
+    }, AUTOSAVE_MS);
     return () => clearInterval(id);
-  }, [loading, doc]);
+  }, [loading, doc, currentSnapshot]);
 
   // Best-effort flush on unmount only (not on every keystroke).
   useEffect(() => () => { void saveFnRef.current(); }, []);
@@ -382,9 +436,12 @@ export function DocEditor() {
         <div className="min-w-0">
           <Textarea
             ref={titleRef}
+            id="docTitle"
+            aria-label={t('title')}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             readOnly={!canWrite}
+            maxLength={TITLE_MAX}
             placeholder={t('docTitlePlaceholder')}
             dir="auto"
             rows={1}
@@ -422,6 +479,14 @@ export function DocEditor() {
               aria-hidden
             />
             <aside
+              // On mobile this is a modal slide-over, so it needs dialog semantics,
+              // Escape-to-close and an initial focus target; on lg+ it is just an
+              // inline column and must not be announced as a dialog.
+              role="dialog"
+              aria-modal="true"
+              aria-label={t('docMetadata')}
+              ref={metaDrawerRef}
+              onKeyDown={(e) => { if (e.key === 'Escape') setShowMeta(false); }}
               className={cn(
                 'fixed inset-y-0 z-50 flex w-80 max-w-[85vw] flex-col overflow-y-auto bg-background shadow-2xl',
                 'lg:static lg:z-auto lg:w-auto lg:max-w-none lg:self-start lg:overflow-visible lg:bg-transparent lg:shadow-none',
@@ -459,10 +524,12 @@ export function DocEditor() {
                         {t('status')}
                       </Label>
                       <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800/60">
-                        {STATUSES.map((s) => (
+                        {(status === IN_REVIEW_STATUS ? [IN_REVIEW_STATUS, ...STATUSES] : STATUSES).map((s) => (
                           <button
                             key={s}
                             type="button"
+                            disabled={!canWrite}
+                            aria-pressed={status === s}
                             onClick={() => setStatus(s)}
                             className={cn(
                               'flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-all',
@@ -501,6 +568,8 @@ export function DocEditor() {
                         {t('docClassification')}
                       </Label>
                       <Input
+                        id="docClassification"
+                        aria-label={t('docClassification')}
                         value={classification}
                         onChange={(e) => setClassification(e.target.value)}
                         disabled={!canWrite}
@@ -517,9 +586,12 @@ export function DocEditor() {
                         {t('tags')}
                       </Label>
                       <Input
+                        id="docTags"
+                        aria-label={t('tags')}
                         value={tags}
                         onChange={(e) => setTags(e.target.value)}
                         disabled={!canWrite}
+                        maxLength={TAGS_MAX}
                         placeholder={t('docTagsPlaceholder')}
                         dir="auto"
                         className="h-9 rounded-lg"
@@ -551,6 +623,8 @@ export function DocEditor() {
                           <button
                             key={d}
                             type="button"
+                            disabled={!canWrite}
+                            aria-pressed={dir === d}
                             onClick={() => setDir(d)}
                             className={cn(
                               'flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-all',
