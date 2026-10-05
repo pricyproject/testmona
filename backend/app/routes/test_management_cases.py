@@ -514,7 +514,9 @@ def register_case_routes(app):
             if not rbac.has_permission(current_user, "write", new_test_suite.project_id, db):
                 raise HTTPException(status_code=403, detail="Not authorized to move test case to this project")
 
-        if "section_id" in update_fields and update_fields["section_id"] is not None:
+        section_id_provided = "section_id" in update_fields
+
+        if section_id_provided and update_fields["section_id"] is not None:
             section = crud.get_test_case_section(db, section_id=update_fields["section_id"])
             if not section:
                 raise HTTPException(status_code=404, detail="Section not found")
@@ -527,6 +529,10 @@ def register_case_routes(app):
             "test_suite_id" in update_fields
             and update_fields["test_suite_id"] != original_test_case.test_suite_id
             and original_test_case.section_id is not None
+            # An explicit null means the caller cleared it, which is a valid move
+            # across suites. Only a payload that omits section_id entirely is
+            # ambiguous and gets rejected.
+            and not section_id_provided
         ):
             raise HTTPException(
                 status_code=400,
