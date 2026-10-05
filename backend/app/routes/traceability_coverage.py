@@ -921,29 +921,6 @@ def register_traceability_coverage_routes(app):
         return db_issue
 
     # Additional traceability endpoints
-    @app.get("/traceability-matrix/{project_id}")
-    def get_project_traceability_matrix(
-        project_id: int,
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        if not rbac.has_permission(current_user, "read", project_id, db):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-        return get_traceability_matrix(db, project_id=project_id)
-
-    @app.get("/traceability-matrix-entries/", response_model=List[schemas.TraceabilityMatrix])
-    def read_all_traceability_entries(
-        skip: int = 0,
-        limit: int = 100,
-        db: Session = Depends(get_db),
-        current_user: schemas.User = Depends(get_current_active_user)
-    ):
-        if not rbac.has_permission(current_user, "read"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-        return get_traceability_matrix_entries(db, skip=skip, limit=limit)
-
     @app.post("/traceability-matrix-entries/", response_model=schemas.TraceabilityMatrix)
     def create_traceability_entry_v2(
         entry: schemas.TraceabilityMatrixCreate,
@@ -968,6 +945,16 @@ def register_traceability_coverage_routes(app):
             )
 
         return create_traceability_matrix_entry(db=db, entry=entry)
+
+    # ponytail: /traceability-matrix/{project_id} and GET
+    # /traceability-matrix-entries/ were removed here. Both called the CRUD with
+    # keyword arguments the functions do not accept (get_traceability_matrix
+    # takes matrix_id, get_traceability_matrix_entries takes no skip/limit), so
+    # every request raised TypeError and returned 500. Nothing called them: the
+    # frontend and Postman collections only use GET
+    # /analytics/traceability-matrix, which has its own filtering and
+    # pagination and works. Re-add from that implementation if a caller needs
+    # the unscoped listing.
 
     @app.post("/coverage-reports/generate")
     def generate_coverage_report(
