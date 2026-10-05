@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     auth_cookie_samesite: str = "lax"
     test_database_url: str = "sqlite:///./test_test.db"
     webhook_allow_private_urls: bool = False
+    # Comma-separated CIDR/IP list of reverse proxies whose ``X-Forwarded-For``
+    # may be trusted. Empty means forwarded headers are client-controlled and are
+    # ignored for rate-limit bucketing.
+    trusted_proxy_ips: str = ""
     test_asset_stale_days: int = 180
     test_asset_always_pass_min_results: int = 5
     test_asset_duplicate_grace_days: int = 14
