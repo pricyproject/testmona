@@ -282,7 +282,13 @@ def delete_defect_management(
     
     if not has_permission(current_user, "delete", project_id, db):
         raise HTTPException(status_code=403, detail="Delete permission required")
-    
+
+    # The permission above is for the URL's project, but the delete acts on a
+    # global defect_id. Resolve the defect first so a caller cannot delete a
+    # defect belonging to another project (and take its comments, attachments
+    # and history with it) by pairing their own project with a guessed id.
+    _get_project_defect_or_404(db, project_id, defect_id)
+
     success = crud_defect_management.delete_defect_management(db, defect_id=defect_id)
     if not success:
         raise HTTPException(status_code=404, detail="Defect not found")
