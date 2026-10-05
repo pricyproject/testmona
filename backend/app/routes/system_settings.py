@@ -298,6 +298,11 @@ def register_system_settings_routes(app):
 
     @app.get("/system/settings/{key}", response_model=schemas.SystemSettings)
     def get_system_setting(key: str, db: Session = Depends(get_db), current_user: schemas.User = Depends(get_current_active_user)):
+        # Reads carry the same secret-bearing payloads as writes (AI provider
+        # key ciphertext, webhook config, system prompt), so they are admin-only
+        # like every mutator in this module.
+        rbac.require_admin(current_user, 'Not authorized to read system settings')
+
         setting = crud.get_system_setting(db, key=key)
         if setting is None:
             raise HTTPException(status_code=404, detail="Setting not found")
