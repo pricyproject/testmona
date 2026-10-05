@@ -110,6 +110,12 @@ def register_user_routes(app):
         # Clear force_password_change flag when password is changed (only after successful validation)
         current_user.force_password_change = False
         db.commit()
+
+        # Changing the password must end every other session: this is what a user
+        # does after suspecting a compromise, so any token issued beforehand is
+        # exactly what needs to stop working. Bumping session_version invalidates
+        # outstanding JWTs and revoking refresh tokens covers the rest.
+        _revoke_user_sessions(db, current_user)
         
         # Create audit trail
         try:
