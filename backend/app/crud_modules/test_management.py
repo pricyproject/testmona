@@ -54,6 +54,7 @@ from ..schemas import (
 )
 
 from .deletion_helpers import delete_test_run_dependents as _delete_test_run_dependents
+from .deletion_helpers import delete_rows_with_dependents
 from .projects import *
 
 logger = logging.getLogger(__name__)
@@ -237,9 +238,33 @@ def delete_test_suite(db: Session, test_suite_id: int):
     db_test_suite = db.query(TestSuite).filter(TestSuite.id == test_suite_id).first()
     if not db_test_suite:
         return None
-    # Bare delete fails with an integrity error when test_cases/sections still
-    # reference this suite — the route is expected to enforce the "must be empty"
-    # rule via a 409 before we reach this point.
+    # The route's "must be empty" check ignores soft-deleted cases, but
+    # TestCase.test_suite_id is NOT NULL, so those rows would still block the
+    # hard delete and surface as a 500. They are invisible everywhere else, so
+    # they are purged here along with their own dependents instead.
+    soft_deleted_case_ids = [
+        row[0]
+        for row in db.query(TestCase.id)
+        .filter(TestCase.test_suite_id == test_suite_id, TestCase.is_deleted.is_(True))
+        .all()
+    ]
+    if soft_deleted_case_ids:
+        # Drop the rows from the session as well as the table: leaving them in
+        # the identity map keeps the suite->test_cases relationship loaded, and
+        # the flush below would then try to NULL their NOT NULL suite FK.
+        for stale_case in (
+            db.query(TestCase)
+            .filter(TestCase.id.in_(soft_deleted_case_ids))
+            .all()
+        ):
+            db.expunge(stale_case)
+
+        delete_rows_with_dependents(db, "test_cases", soft_deleted_case_ids)
+        db.expire(db_test_suite)
+
+    # Bare delete fails with an integrity error when live test_cases/sections
+    # still reference this suite — the route is expected to enforce the
+    # "must be empty" rule via a 409 before we reach this point.
     db.delete(db_test_suite)
     safe_commit(db)
     return db_test_suite

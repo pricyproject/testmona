@@ -27,8 +27,13 @@ def _single_primary_key_column(table: Table) -> Column | None:
     return primary_key_columns[0]
 
 
-def _collect_dependent_row_ids(db: Session, project_id: int) -> dict[str, set[Any]]:
-    row_ids_by_table: dict[str, set[Any]] = {"projects": {project_id}}
+def _collect_dependent_row_ids(
+    db: Session,
+    parent_table_name: str,
+    parent_ids: Iterable[Any],
+) -> dict[str, set[Any]]:
+    """Every row reachable from ``parent_ids`` by foreign key, table by table."""
+    row_ids_by_table: dict[str, set[Any]] = {parent_table_name: set(parent_ids)}
     tables = list(Base.metadata.sorted_tables)
     changed = True
 
@@ -99,10 +104,35 @@ def _clear_self_references(
 
 
 def delete_project_dependents(db: Session, project_id: int) -> None:
-    row_ids_by_table = _collect_dependent_row_ids(db, project_id)
+    row_ids_by_table = _collect_dependent_row_ids(db, "projects", [project_id])
 
     for table in reversed(Base.metadata.sorted_tables):
         if table.name == "projects":
+            continue
+
+        _clear_self_references(db, table, row_ids_by_table)
+        condition = _dependent_delete_condition(table, row_ids_by_table)
+        if condition is not None:
+            db.execute(delete(table).where(condition))
+
+
+def delete_rows_with_dependents(
+    db: Session,
+    parent_table_name: str,
+    parent_ids: Iterable[Any],
+    skip_table_names: Iterable[str] = (),
+) -> None:
+    """Hard-delete rows of ``parent_table_name`` along with everything hanging
+    off them.
+
+    Used where a soft-deleted parent still blocks a hard delete through a
+    non-nullable child FK.
+    """
+    row_ids_by_table = _collect_dependent_row_ids(db, parent_table_name, parent_ids)
+    skipped = set(skip_table_names)
+
+    for table in reversed(Base.metadata.sorted_tables):
+        if table.name in skipped:
             continue
 
         _clear_self_references(db, table, row_ids_by_table)
