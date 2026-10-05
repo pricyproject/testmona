@@ -403,10 +403,21 @@ def register_traceability_coverage_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        # Scoped to the projects the caller can read: a global ``has_permission``
+        # would hand every requirement<->test-case link in the instance to any
+        # authenticated user.
+        accessible_project_ids = [
+            project.id for project in rbac.get_accessible_projects(current_user, db)
+        ]
+        if not accessible_project_ids:
+            return []
 
-        return get_traceability_matrix_entries(db, requirement_id=requirement_id, test_case_id=test_case_id)
+        return get_traceability_matrix_entries(
+            db,
+            requirement_id=requirement_id,
+            test_case_id=test_case_id,
+            allowed_project_ids=accessible_project_ids,
+        )
 
     @app.put("/traceability-matrix/{entry_id}", response_model=schemas.TraceabilityMatrix)
     def update_traceability_entry(

@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import logging
-from .models import ProjectAssignment, TestSchedule, TestExecution, User
+from .models import ProjectAssignment, TestSchedule, TestExecution, TestRun, User
 from .schemas import (
     ProjectAssignmentCreate, ProjectAssignmentUpdate,
     TestScheduleCreate, TestScheduleUpdate,
@@ -71,12 +71,23 @@ def get_test_schedule(db: Session, schedule_id: int):
     return db.query(TestSchedule).filter(TestSchedule.id == schedule_id).first()
 
 
-def get_test_schedules(db: Session, project_id: int = None, test_suite_id: int = None, skip: int = 0, limit: int = 100):
+def get_test_schedules(
+    db: Session,
+    project_id: int = None,
+    test_suite_id: int = None,
+    skip: int = 0,
+    limit: int = 100,
+    allowed_project_ids: Optional[List[int]] = None,
+):
     query = db.query(TestSchedule)
     if project_id:
         query = query.filter(TestSchedule.project_id == project_id)
     if test_suite_id:
         query = query.filter(TestSchedule.test_suite_id == test_suite_id)
+    # Caller-supplied filters must never widen access: when the caller passes
+    # the set of projects the user may see, an unscoped request is narrowed to it.
+    if allowed_project_ids is not None:
+        query = query.filter(TestSchedule.project_id.in_(allowed_project_ids))
     return query.offset(skip).limit(limit).all()
 
 
@@ -125,12 +136,25 @@ def get_test_execution(db: Session, execution_id: int):
     return db.query(TestExecution).filter(TestExecution.id == execution_id).first()
 
 
-def get_test_executions(db: Session, test_run_id: int = None, test_case_id: int = None, skip: int = 0, limit: int = 100):
+def get_test_executions(
+    db: Session,
+    test_run_id: int = None,
+    test_case_id: int = None,
+    skip: int = 0,
+    limit: int = 100,
+    allowed_project_ids: Optional[List[int]] = None,
+):
     query = db.query(TestExecution)
     if test_run_id:
         query = query.filter(TestExecution.test_run_id == test_run_id)
     if test_case_id:
         query = query.filter(TestExecution.test_case_id == test_case_id)
+    # TestExecution has no project column; its project is the run's, so the
+    # access filter has to join through TestRun.
+    if allowed_project_ids is not None:
+        query = query.join(
+            TestRun, TestExecution.test_run_id == TestRun.id
+        ).filter(TestRun.project_id.in_(allowed_project_ids))
     return query.offset(skip).limit(limit).all()
 
 

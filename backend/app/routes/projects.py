@@ -606,25 +606,38 @@ def register_project_routes(app):
         return rbac.get_user_projects(current_user, db)
 
     # Test Schedule and Execution Endpoints
+    #
+    # These are project-scoped entities but their payloads only carry foreign
+    # keys, so the project is resolved from the referenced row and authorized
+    # there. A bare global ``has_permission`` check here would let any tester
+    # write into, or read from, a project they are not assigned to.
     @app.post("/test-schedules", response_model=schemas.TestSchedule)
     def create_test_schedule(
         schedule: schemas.TestScheduleCreate,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "execute"):
+        from .. import crud
+
+        project_id = schedule.project_id
+        if schedule.test_suite_id is not None:
+            test_suite = crud.get_test_suite(db, test_suite_id=schedule.test_suite_id)
+            if test_suite is None:
+                raise HTTPException(status_code=404, detail="Test suite not found")
+            if test_suite.project_id != project_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Test suite does not belong to this project",
+                )
+
+        if not rbac.has_permission(current_user, "execute", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
+        # The creator is the caller; never a client-supplied id.
+        schedule.created_by = current_user.id
+
         db_schedule = crud_rbac.create_test_schedule(db=db, schedule=schedule)
-        
-        # Get project_id for audit trail
-        project_id = None
-        if db_schedule.test_suite_id:
-            from .. import crud
-            test_suite = crud.get_test_suite(db, test_suite_id=db_schedule.test_suite_id)
-            if test_suite:
-                project_id = test_suite.project_id
-        
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
@@ -654,10 +667,22 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "read"):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        accessible_ids = [project.id for project in rbac.get_accessible_projects(current_user, db)]
+        if project_id is not None:
+            if project_id not in accessible_ids:
+                raise HTTPException(status_code=403, detail="Not authorized for this project")
+            accessible_ids = [project_id]
+        elif not accessible_ids:
+            return []
 
-        return crud_rbac.get_test_schedules(db, project_id=project_id, test_suite_id=test_suite_id, skip=skip, limit=limit)
+        return crud_rbac.get_test_schedules(
+            db,
+            project_id=project_id,
+            test_suite_id=test_suite_id,
+            skip=skip,
+            limit=limit,
+            allowed_project_ids=accessible_ids,
+        )
 
     @app.post("/test-executions", response_model=schemas.TestExecution)
     def create_test_execution(
@@ -665,19 +690,28 @@ def register_project_routes(app):
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
-        if not rbac.has_permission(current_user, "execute"):
+        from .. import crud
+
+        test_run = crud.get_test_run(db, test_run_id=execution.test_run_id)
+        if not test_run:
+            raise HTTPException(status_code=404, detail="Test run not found")
+
+        test_case = crud.get_test_case(db, test_case_id=execution.test_case_id)
+        if not test_case or getattr(test_case, "is_deleted", False):
+            raise HTTPException(status_code=404, detail="Test case not found")
+
+        case_project_id = test_case.test_suite.project_id if test_case.test_suite else None
+        if case_project_id != test_run.project_id:
+            raise HTTPException(status_code=400, detail="Test case does not belong to the test run project")
+
+        if not rbac.has_permission(current_user, "execute", test_run.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
+        # The executor is the caller; never a client-supplied id.
+        execution.executor_id = current_user.id
+
         db_execution = crud_rbac.create_test_execution(db=db, execution=execution)
-        
-        # Get project_id for audit trail
-        project_id = None
-        if db_execution.test_run_id:
-            from .. import crud
-            test_run = crud.get_test_run(db, test_run_id=db_execution.test_run_id)
-            if test_run:
-                project_id = test_run.project_id
-        
+
         # Create audit trail
         try:
             from ..services.audit_service import get_audit_service
@@ -689,7 +723,7 @@ def register_project_routes(app):
                 action=AuditAction.CREATE.value,
                 entity_type=EntityType.TEST_EXECUTION.value,
                 entity_id=db_execution.id,
-                project_id=project_id,
+                project_id=test_run.project_id,
                 description=f"Test execution created for test run {db_execution.test_run_id}",
             )
             audit_service.create_audit_trail(audit_data)
@@ -709,8 +743,15 @@ def register_project_routes(app):
     ):
         if not rbac.has_permission(current_user, "read"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
-        return crud_rbac.get_test_executions(db, test_run_id=test_run_id, test_case_id=test_case_id, skip=skip, limit=limit)
+
+        return crud_rbac.get_test_executions(
+            db,
+            test_run_id=test_run_id,
+            test_case_id=test_case_id,
+            skip=skip,
+            limit=limit,
+            allowed_project_ids=[project.id for project in rbac.get_accessible_projects(current_user, db)],
+        )
 
     # Test Execution Settings Endpoints
     @app.get("/test-execution-settings", response_model=schemas.TestExecutionSettings)

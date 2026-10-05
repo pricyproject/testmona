@@ -83,6 +83,11 @@ def register_notifications_routes(app):
         if not rbac.has_permission(current_user, "write"):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+        # A notification is only ever addressed to the caller: an arbitrary
+        # ``user_id`` would let any tester inject attacker-authored text into
+        # someone else's bell.
+        notification.user_id = current_user.id
+
         return crud.create_notification(db=db, notification=notification)
 
     @app.get("/notifications/{notification_id}", response_model=schemas.Notification)

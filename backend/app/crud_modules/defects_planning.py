@@ -484,12 +484,28 @@ def get_traceability_matrix(db: Session, matrix_id: int):
     return db.query(TraceabilityMatrix).filter(TraceabilityMatrix.id == matrix_id).first()
 
 
-def get_traceability_matrix_entries(db: Session, requirement_id: int = None, test_case_id: int = None):
+def get_traceability_matrix_entries(
+    db: Session,
+    requirement_id: int = None,
+    test_case_id: int = None,
+    allowed_project_ids: Optional[List[int]] = None,
+):
     query = db.query(TraceabilityMatrix)
     if requirement_id:
         query = query.filter(TraceabilityMatrix.requirement_id == requirement_id)
     if test_case_id:
         query = query.filter(TraceabilityMatrix.test_case_id == test_case_id)
+    # Entries are cross-entity, so the project comes from the requirement side;
+    # both the requirement and the test case must belong to it.
+    if allowed_project_ids is not None:
+        query = (
+            query.join(Requirement, TraceabilityMatrix.requirement_id == Requirement.id)
+            .join(TestCase, TraceabilityMatrix.test_case_id == TestCase.id)
+            .filter(
+                Requirement.project_id.in_(allowed_project_ids),
+                TestCase.project_id.in_(allowed_project_ids),
+            )
+        )
     return query.all()
 
 
