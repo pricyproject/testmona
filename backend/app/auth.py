@@ -79,7 +79,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
         expire = datetime.now(UTC) + expires_delta
     else:
         expire = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
-    to_encode.update({"exp": expire})
+    # The claim is what separates the two token types. Without it a refresh
+    # token verifies as an ordinary bearer and stays usable after rotation,
+    # revocation or logout, since only /refresh checks the RefreshToken row.
+    to_encode.update({"exp": expire, "type": "access"})
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
 
@@ -155,6 +158,12 @@ async def get_current_user(
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         username: str = payload.get("sub")
         if username is None:
+            raise credentials_exception
+        # Reject refresh tokens presented as bearer credentials. They carry the
+        # same subject and session version as an access token, so signature and
+        # session checks alone would accept one — including a token that has
+        # already been rotated away or revoked at /refresh or logout.
+        if payload.get("type") != "access":
             raise credentials_exception
     except JWTError:
         raise credentials_exception
