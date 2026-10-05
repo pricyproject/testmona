@@ -93,7 +93,19 @@ def _deliver_once(url: str, secret: str, event: str, body: bytes, delivery_id: i
         "X-Webhook-Timestamp": timestamp,
         "X-Webhook-Signature": f"sha256={signature}",
     }
-    return requests.post(url, data=body, headers=headers, timeout=_REQUEST_TIMEOUT_SECONDS)
+    # Redirects are never followed: the target is validated once, so a 302 to
+    # 169.254.169.254 or an RFC1918 host would otherwise be fetched with the
+    # signature headers attached, turning the delivery into an SSRF proxy.
+    # ponytail: DNS rebinding between normalize_webhook_url() and the connect is
+    # still theoretically possible; close it by pinning the validated IP with a
+    # custom requests adapter if this ever runs outside a trusted network.
+    return requests.post(
+        url,
+        data=body,
+        headers=headers,
+        timeout=_REQUEST_TIMEOUT_SECONDS,
+        allow_redirects=False,
+    )
 
 
 def _run_delivery(delivery_id: int) -> None:
