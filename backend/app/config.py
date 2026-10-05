@@ -1,7 +1,28 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import ValidationInfo, field_validator
 from typing import Optional
+import logging
+import os
 import secrets
+
+logger = logging.getLogger(__name__)
+
+
+def positive_int_env(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back to ``default``.
+
+    Used for upload/import ceilings that must be tunable per deployment without
+    turning every call site into a settings field.
+    """
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        logger.warning("Invalid %s value; using default %s", name, default)
+        return default
+    if value <= 0:
+        logger.warning("Non-positive %s value; using default %s", name, default)
+        return default
+    return value
 
 
 # Values of ``ENVIRONMENT`` that mean "this is a real deployment, fail fast on

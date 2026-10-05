@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from .. import crud, crud_docs, models, rbac, schemas
+from ..config import positive_int_env
 from ..feature_guard import require_project_feature
 from ..schema_modules.docs import DOC_CLASSIFICATION_MAX, DOC_TAGS_MAX, DOC_TITLE_MAX
 from ..features import is_feature_enabled
@@ -53,23 +54,11 @@ from ..services.mentions import project_member_users, resolve_mentions
 
 logger = logging.getLogger(__name__)
 
-def _positive_int_env(name: str, default: int) -> int:
-    try:
-        value = int(os.getenv(name, str(default)))
-    except ValueError:
-        logger.warning("Invalid %s value; using default %s", name, default)
-        return default
-    if value <= 0:
-        logger.warning("Non-positive %s value; using default %s", name, default)
-        return default
-    return value
-
-
-DOC_IMPORT_MAX_BYTES = _positive_int_env("DOC_IMPORT_MAX_BYTES", 10 * 1024 * 1024)
-DOC_IMPORT_MAX_FILES = _positive_int_env("DOC_IMPORT_MAX_FILES", 200)
+DOC_IMPORT_MAX_BYTES = positive_int_env("DOC_IMPORT_MAX_BYTES", 10 * 1024 * 1024)
+DOC_IMPORT_MAX_FILES = positive_int_env("DOC_IMPORT_MAX_FILES", 200)
 # Each path segment creates a folder row, so an archive of N files at depth D would
 # otherwise fan out to ~N*D rows in a single request.
-DOC_IMPORT_MAX_FOLDER_DEPTH = _positive_int_env("DOC_IMPORT_MAX_FOLDER_DEPTH", 10)
+DOC_IMPORT_MAX_FOLDER_DEPTH = positive_int_env("DOC_IMPORT_MAX_FOLDER_DEPTH", 10)
 # Export pages through the space in chunks rather than capping the whole export.
 DOC_EXPORT_PAGE_SIZE = 200
 _MARKDOWN_EXTENSIONS = (".md", ".markdown")

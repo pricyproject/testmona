@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 
 from .. import crud, schemas, auth, rbac, models
+from ..config import positive_int_env
 from ..feature_guard import require_project_feature
 from ..database import get_db
 from ..auth import get_current_active_user
@@ -36,6 +37,13 @@ logger = logging.getLogger(__name__)
 
 
 FAILED_RESULT_STATUSES = {"fail", "failed"}
+
+# Caps for the Gherkin ``.feature`` upload. The request body is already limited,
+# but a zip member inflates far beyond its compressed size, so the decompressed
+# total and the entry count are bounded separately.
+FEATURE_UPLOAD_MAX_BYTES = positive_int_env("FEATURE_UPLOAD_MAX_BYTES", 5 * 1024 * 1024)
+FEATURE_IMPORT_MAX_BYTES = positive_int_env("FEATURE_IMPORT_MAX_BYTES", 50 * 1024 * 1024)
+FEATURE_IMPORT_MAX_FILES = positive_int_env("FEATURE_IMPORT_MAX_FILES", 200)
 
 
 def _explain_defect_integrity_error(error: IntegrityError) -> str:
@@ -1187,7 +1195,7 @@ def register_requirements_defects_plans_routes(app):
     ):
         """Create requirements from uploaded Gherkin ``.feature`` files (a single
         file or a ``.zip`` bundle). Each ``Feature:`` becomes one requirement."""
-        max_bytes = 5 * 1024 * 1024
+        max_bytes = FEATURE_UPLOAD_MAX_BYTES
         if not rbac.has_permission(current_user, "write", project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         if folder_id is not None:
@@ -1197,7 +1205,7 @@ def register_requirements_defects_plans_routes(app):
 
         raw = await file.read()
         if len(raw) > max_bytes:
-            raise HTTPException(status_code=413, detail="File is too large (max 5 MB)")
+            raise HTTPException(status_code=413, detail="File is too large")
         filename = file.filename or "import.feature"
 
         # Collect (source_name, text) documents from a .feature file or zip bundle.
@@ -1205,9 +1213,29 @@ def register_requirements_defects_plans_routes(app):
         if filename.lower().endswith(".zip"):
             try:
                 with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    # Size/count come from the central directory *before* anything
+                    # is inflated: a member can be orders of magnitude larger than
+                    # the archive it arrived in, so reading first is how a small
+                    # upload exhausts memory.
+                    total_size = 0
+                    feature_entries = []
                     for info in zf.infolist():
                         if info.is_dir() or not info.filename.lower().endswith(".feature"):
                             continue
+                        total_size += info.file_size
+                        if total_size > FEATURE_IMPORT_MAX_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="Zip expands to more content than the import limit allows",
+                            )
+                        feature_entries.append(info)
+                        if len(feature_entries) > FEATURE_IMPORT_MAX_FILES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="Zip contains too many .feature files",
+                            )
+
+                    for info in feature_entries:
                         documents.append((info.filename, zf.read(info).decode("utf-8", "replace")))
             except zipfile.BadZipFile:
                 raise HTTPException(status_code=400, detail="The uploaded zip archive is invalid")
