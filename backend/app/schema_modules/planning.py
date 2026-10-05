@@ -291,6 +291,17 @@ class TraceabilityMatrixCreate(TraceabilityMatrixBase):
     pass
 
 
+class TraceabilityMatrixUpdate(BaseModel):
+    """Only the descriptive fields are mutable.
+
+    ``requirement_id``/``test_case_id`` are excluded on purpose: an update that
+    could repoint an entry would have to re-authorize the *new* pair, and a link
+    whose two ends live in different projects cannot be authorized at all.
+    """
+    coverage_type: Optional[str] = None
+    coverage_percentage: Optional[float] = None
+
+
 class TraceabilityMatrix(TraceabilityMatrixBase):
     id: int
     created_at: datetime

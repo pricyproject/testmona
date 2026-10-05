@@ -368,11 +368,21 @@ def register_traceability_coverage_routes(app):
         requirement = crud.get_requirement(db, entry.requirement_id)
         test_case = crud.get_test_case(db, entry.test_case_id)
 
-        if not requirement or not test_case:
+        if not requirement or not test_case or getattr(test_case, "is_deleted", False):
             raise HTTPException(status_code=404, detail="Requirement or test case not found")
 
         if not rbac.has_permission(current_user, "write", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        # A link joins two entities, so both ends must live in the project the
+        # caller was just authorized for; otherwise it injects a foreign
+        # project's test case into this requirement's coverage view.
+        test_case_project_id = test_case.test_suite.project_id if test_case.test_suite else None
+        if test_case_project_id != requirement.project_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Test case does not belong to the requirement project",
+            )
 
         db_entry = create_traceability_matrix_entry(db=db, entry=entry)
         
@@ -422,7 +432,7 @@ def register_traceability_coverage_routes(app):
     @app.put("/traceability-matrix/{entry_id}", response_model=schemas.TraceabilityMatrix)
     def update_traceability_entry(
         entry_id: int,
-        entry: dict,
+        entry: schemas.TraceabilityMatrixUpdate,
         db: Session = Depends(get_db),
         current_user: schemas.User = Depends(get_current_active_user)
     ):
@@ -434,7 +444,9 @@ def register_traceability_coverage_routes(app):
         if not rbac.has_permission(current_user, "write", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        db_entry = update_traceability_matrix_entry(db, entry_id=entry_id, entry=entry)
+        db_entry = update_traceability_matrix_entry(
+            db, entry_id=entry_id, entry=entry.model_dump(exclude_unset=True)
+        )
         
         # Create audit trail
         try:
@@ -942,11 +954,18 @@ def register_traceability_coverage_routes(app):
         requirement = crud.get_requirement(db, entry.requirement_id)
         test_case = crud.get_test_case(db, entry.test_case_id)
 
-        if not requirement or not test_case:
+        if not requirement or not test_case or getattr(test_case, "is_deleted", False):
             raise HTTPException(status_code=404, detail="Requirement or test case not found")
 
         if not rbac.has_permission(current_user, "write", requirement.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        test_case_project_id = test_case.test_suite.project_id if test_case.test_suite else None
+        if test_case_project_id != requirement.project_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Test case does not belong to the requirement project",
+            )
 
         return create_traceability_matrix_entry(db=db, entry=entry)
 
