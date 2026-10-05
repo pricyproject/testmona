@@ -26,6 +26,9 @@ interface ProjectState {
   updateProject: (project: Project) => void;
   removeProject: (projectId: number) => void;
   removeProjects: (projectIds: number[]) => void;
+  /** Drop every cached project. Called on logout so the next user on this
+   *  browser does not inherit the previous one's project list. */
+  clearProjects: () => void;
   getSelectedProjectId: () => number | null;
 }
 
@@ -85,6 +88,10 @@ export const useProjectStore = create<ProjectState>()(
           projects: get().projects.filter((p) => !removed.has(p.id)),
           selectedProject: selectedProject && removed.has(selectedProject.id) ? null : selectedProject,
         });
+      },
+
+      clearProjects: () => {
+        set({ projects: [], selectedProject: null });
       },
 
       getSelectedProjectId: () => {

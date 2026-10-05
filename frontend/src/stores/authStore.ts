@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { authAPI } from '@/lib/api';
+import { queryClient } from '@/lib/queryClient';
+import { useProjectStore } from '@/stores/projectStore';
 import axios from 'axios';
 
 // Auto-login for development
@@ -191,7 +193,14 @@ export const useAuthStore = create<AuthState>()(
         // Clear legacy localStorage tokens if they exist from older sessions.
         localStorage.removeItem('token');
         removeRefreshTokenCookie();
-        
+
+        // Query keys are not user-scoped and entries outlive a logout, so the
+        // next user to sign in on this browser would briefly render the previous
+        // user's cached lists. The project list is persisted to localStorage for
+        // the same reason and has to be dropped explicitly.
+        queryClient.clear();
+        useProjectStore.getState().clearProjects();
+
         set({
           user: null,
           token: null,
@@ -333,6 +342,10 @@ export const initializeAuthFromLocalStorage = async () => {
       user: null,
       isAuthenticated: false,
     });
+    // Same reason as logout: a failed revalidation ends the session, so nothing
+    // from the previous identity may survive into whoever signs in next.
+    queryClient.clear();
+    useProjectStore.getState().clearProjects();
   }
   })();
 
