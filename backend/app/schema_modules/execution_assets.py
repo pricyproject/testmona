@@ -291,11 +291,18 @@ class GlobalParameterCreate(GlobalParameterBase):
 
 
 class GlobalParameterUpdate(BaseModel):
+    """Mutable fields of an existing parameter.
+
+    ``project_id`` is intentionally absent. Permission is checked against the
+    *stored* project, so accepting it here would let a project-scoped writer
+    promote their parameter into the admin-only global scope (``null``) or plant
+    one inside a project they cannot access. Scope is chosen at creation time and
+    never changes afterwards.
+    """
     name: Optional[str] = None
     value: Optional[str] = None
     description: Optional[str] = None
     parameter_type: Optional[str] = None
-    project_id: Optional[int] = None
     is_active: Optional[bool] = None
     is_encrypted: Optional[bool] = None
 
