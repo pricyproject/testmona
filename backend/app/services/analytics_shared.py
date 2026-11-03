@@ -41,19 +41,25 @@ def get_reference_tokens(value: str | None) -> list[str]:
 
 
 def add_legacy_reference_links(linked_test_case_ids: dict[int, set[int]], requirements: list, test_cases: list) -> None:
+    # Index every test case token once. The previous nested loop re-tokenised
+    # each test case for every requirement, which is O(requirements * cases)
+    # and ran on every dashboard load.
+    test_case_ids_by_token: dict[str, set[int]] = {}
+    for test_case in test_cases:
+        test_case_id = getattr(test_case, "id", None)
+        if test_case_id is None:
+            continue
+        for token in get_reference_tokens(getattr(test_case, "reference", None)):
+            test_case_ids_by_token.setdefault(token, set()).add(test_case_id)
+
     for requirement in requirements:
         requirement_id = getattr(requirement, "id", None)
         requirement_key = str(getattr(requirement, "requirement_id", None) or "").lower()
-        if requirement_id is None:
+        if requirement_id is None or not requirement_key:
             continue
-        if not requirement_key:
-            continue
-        for test_case in test_cases:
-            test_case_id = getattr(test_case, "id", None)
-            if test_case_id is None:
-                continue
-            if requirement_key in get_reference_tokens(getattr(test_case, "reference", None)):
-                linked_test_case_ids.setdefault(requirement_id, set()).add(test_case_id)
+        matching_ids = test_case_ids_by_token.get(requirement_key)
+        if matching_ids:
+            linked_test_case_ids.setdefault(requirement_id, set()).update(matching_ids)
 
 
 def _unique_ids(ids: Iterable[int | None]) -> list[int]:
