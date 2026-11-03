@@ -284,7 +284,9 @@ function AppWithRouter() {
         } />
         <Route path="/projects/:projectId/test-suites/:id" element={
           <ProjectGuard>
-            <TestSuiteDetail />
+            <FeatureGuard feature="test_suites">
+              <TestSuiteDetail />
+            </FeatureGuard>
           </ProjectGuard>
         } />
         <Route path="/projects/:projectId/test-cases" element={

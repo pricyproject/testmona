@@ -33,6 +33,8 @@ export interface TestSuite {
   status: 'active' | 'inactive' | 'archived';
   // Backend-supplied number of non-deleted test cases that belong to this suite.
   test_case_count?: number;
+  // Backend-supplied number of sections in this suite (delete is blocked while > 0).
+  section_count?: number;
   created_at: string;
   updated_at?: string;
 }

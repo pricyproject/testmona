@@ -40,8 +40,8 @@ export function useTestSuiteSelectionData(projectId: number | null, enabled: boo
     queryKey: testSuiteKeys.selection(projectId),
     queryFn: async () => {
       const [testCasesData, hierarchyData] = await Promise.all([
-        testCasesAPI.getAllPages(projectId as number).catch(() => []),
-        sectionsAPI.getProjectSectionHierarchy(projectId as number).catch(() => null),
+        testCasesAPI.getAllPages(projectId as number),
+        sectionsAPI.getProjectSectionHierarchy(projectId as number),
       ]);
       const flatSections: any[] = [];
       const walk = (nodes: any[], suiteId: number) => {

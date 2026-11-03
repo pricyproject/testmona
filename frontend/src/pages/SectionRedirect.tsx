@@ -24,10 +24,11 @@ export function SectionRedirect() {
       .getSectionDetails(numericSectionId)
       .then((data) => {
         if (cancelled) return;
+        const suiteSeq = data?.test_suite?.project_seq;
         const suiteId = data?.test_suite?.id;
         if (suiteId && projectId) {
           setTarget(
-            `/projects/${projectId}/test-suites/${suiteId}?section=${numericSectionId}`,
+            `/projects/${projectId}/test-suites/${suiteSeq ?? suiteId}?section=${numericSectionId}`,
           );
         } else {
           setErrored(true);

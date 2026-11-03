@@ -63,7 +63,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import { usePermissions } from '@/hooks/usePermissions';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 
 interface SectionNode {
   id: number;
@@ -73,21 +73,12 @@ interface SectionNode {
   subsections?: SectionNode[];
 }
 
-const collectSectionIds = (node: SectionNode): number[] => {
-  const ids: number[] = [node.id];
-  (node.subsections || []).forEach((child) => {
-    ids.push(...collectSectionIds(child));
-  });
-  return ids;
-};
-
 export function TestSuites() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
   const { formatDate } = useDateFormat();
-  const { canWrite } = usePermissions();
   
   // Dialog states
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -107,6 +98,9 @@ export function TestSuites() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [error, setError] = useState<string | null>(null);
+  // Kept separate from `error` so a failed create doesn't replace the suite list
+  // (which renders `error` as a full-page failure state) while the dialog is open.
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Pagination for test cases
   const [testCasePage, setTestCasePage] = useState(1);
@@ -119,6 +113,10 @@ export function TestSuites() {
     const parsedProjectId = Number(projectId);
     return projectId && Number.isInteger(parsedProjectId) && parsedProjectId > 0 ? parsedProjectId : null;
   }, [projectId]);
+
+  // Project-scoped write permission: a user's effective role can differ per
+  // project, so the global role is wrong for deciding create/delete affordances.
+  const { canWrite } = useProjectPermissions(currentProjectId);
 
   const testSuitesQuery = useTestSuites(currentProjectId);
   const testSuites: TestSuite[] = testSuitesQuery.data ?? [];
@@ -310,10 +308,13 @@ export function TestSuites() {
 
   const hasActiveSuiteFilters = suiteSearchQuery.trim() !== '' || statusFilter !== 'all';
   const suitesLabel = testSuites.length === 1 ? t('suiteLabel') : t('suitesLabel');
+  const deleteTargetHasCases = (deleteTarget?.test_case_count ?? 0) > 0;
+  const deleteTargetHasSections = (deleteTarget?.section_count ?? 0) > 0;
 
   const handleCreateTestSuite = async () => {
+    if (isCreating) return;
     if (!currentProjectId) {
-      setError(t('noProjectSelected'));
+      setCreateError(t('noProjectSelected'));
       toast({
         title: t('error'),
         description: t('noProjectSelected'),
@@ -323,7 +324,7 @@ export function TestSuites() {
     }
 
     if (!suiteName.trim()) {
-      setError(t('pleaseEnterASuiteName'));
+      setCreateError(t('pleaseEnterASuiteName'));
       toast({
         title: t('validationError'),
         description: t('pleaseEnterASuiteName'),
@@ -333,7 +334,7 @@ export function TestSuites() {
     }
 
     try {
-      setError(null);
+      setCreateError(null);
 
       const trimmedName = suiteName.trim();
       const trimmedDescription = suiteDescription.trim();
@@ -353,6 +354,7 @@ export function TestSuites() {
       setPriorityFilter('all');
       setTestCasePage(1);
       setHasUnsavedChanges(false);
+      setCreateError(null);
       setIsDialogOpen(false);
 
       toast({
@@ -372,7 +374,7 @@ export function TestSuites() {
           : status === 400 || status === 422
           ? apiMessage || t('invalidDataProvided')
           : apiMessage || t('failedToCreateTestSuiteRetryError');
-      setError(message);
+      setCreateError(message);
       toast({ title: t('error'), description: message, variant: 'destructive' });
     }
   };
@@ -423,6 +425,7 @@ export function TestSuites() {
       setShowUnsavedDialog(true);
     } else {
       setIsDialogOpen(open);
+      if (open) setCreateError(null);
       if (!open) {
         setSuiteName('');
         setSuiteDescription('');
@@ -431,6 +434,7 @@ export function TestSuites() {
         setPriorityFilter('all');
         setTestCasePage(1);
         setHasUnsavedChanges(false);
+        setCreateError(null);
       }
     }
   };
@@ -445,12 +449,13 @@ export function TestSuites() {
       setPriorityFilter('all');
       setTestCasePage(1);
       setHasUnsavedChanges(false);
+      setCreateError(null);
       setIsDialogOpen(false);
     }
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.ctrlKey && e.key === 'Enter') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       handleCreateTestSuite();
     }
@@ -730,10 +735,12 @@ export function TestSuites() {
 
                                 {sections.map((section) => {
                                   const sectionKey = String(section.id);
-                                  // Include cases in this section AND in any of its descendants
-                                  const idsInScope = new Set(collectSectionIds(section));
+                                  // `sections` is a flat list (the hook pushes parents
+                                  // and children as separate rows), so match cases by
+                                  // their own section only. Including descendants here
+                                  // would list every nested case once per ancestor.
                                   const sectionTestCases = filteredTestCases.filter(
-                                    (tc) => tc.section_id != null && idsInScope.has(tc.section_id),
+                                    (tc) => tc.section_id === section.id,
                                   );
 
                                   if (sectionTestCases.length === 0) return null;
@@ -844,9 +851,9 @@ export function TestSuites() {
                       </Card>
                     </div>
 
-                    {error && (
+                    {createError && (
                       <div className="mx-6 mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-                        {error}
+                        {createError}
                       </div>
                     )}
 
@@ -1142,8 +1149,10 @@ export function TestSuites() {
                 {t('delete')}
               </DialogTitle>
               <DialogDescription className="pt-1">
-                {(deleteTarget?.test_case_count ?? 0) > 0
+                {deleteTargetHasCases
                   ? t('deleteSuiteNotEmptyWarning', { count: deleteTarget?.test_case_count ?? 0 })
+                  : deleteTargetHasSections
+                  ? t('deleteSuiteHasSectionsWarning', { count: deleteTarget?.section_count ?? 0 })
                   : t('areYouSureToDeleteSuite', { name: deleteTarget?.name || '' })}
               </DialogDescription>
             </DialogHeader>
@@ -1154,7 +1163,7 @@ export function TestSuites() {
               <Button
                 variant="destructive"
                 onClick={confirmDelete}
-                disabled={isDeleting || (deleteTarget?.test_case_count ?? 0) > 0}
+                disabled={isDeleting || deleteTargetHasCases || deleteTargetHasSections}
               >
                 {isDeleting ? (
                   <>
