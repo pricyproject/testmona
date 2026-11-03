@@ -553,7 +553,7 @@ export function Dashboard() {
           value={stats.totalTests}
           icon={FileText}
           color="text-blue-600"
-          trend={t('active')}
+          trend={t('totalTestCasesHint')}
           onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects')}
         />
         <StatCard
@@ -569,7 +569,7 @@ export function Dashboard() {
           value={stats.totalTestRuns}
           icon={PlayCircle}
           color="text-yellow-600"
-          trend={t('completedExecutions')}
+          trend={t('totalTestRunsHint')}
           onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects')}
         />
         <StatCard
@@ -597,7 +597,7 @@ export function Dashboard() {
           value={stats.totalDefects}
           icon={AlertTriangle}
           color="text-red-600"
-          trend={t('openDefects')}
+          trend={t('totalDefectsHint')}
           onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects')}
         />
         <StatCard
@@ -605,7 +605,7 @@ export function Dashboard() {
           value={stats.totalMilestones}
           icon={Flag}
           color="text-orange-600"
-          trend={t('activeMilestones')}
+          trend={t('totalMilestonesHint')}
           onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/milestones` : '/projects')}
         />
         <StatCard
@@ -613,7 +613,7 @@ export function Dashboard() {
           value={stats.totalTestPlans}
           icon={Calendar}
           color="text-teal-600"
-          trend={t('plannedExecutions')}
+          trend={t('totalTestPlansHint')}
           onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-plans` : '/projects')}
         />
       </div>
