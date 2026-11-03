@@ -332,6 +332,13 @@ export function Dashboard() {
         break;
     }
   };
+  const handleActivityKeyDown = (event: KeyboardEvent<HTMLDivElement>, activity: AuditTrail) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleActivityClick(activity);
+    }
+  };
+
   const stats = useMemo(() => {
     if (!dashboardStats) {
       // Return empty stats while loading
@@ -785,8 +792,11 @@ export function Dashboard() {
                 {stats.recentActivity.map((activity, index) => (
                   <div
                     key={activity.id || index}
-                    className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-all duration-150 group"
+                    role="button"
+                    tabIndex={0}
+                    className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-all duration-150 group focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => handleActivityClick(activity)}
+                    onKeyDown={(event) => handleActivityKeyDown(event, activity)}
                   >
                     <div className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-gray-800 group-hover:scale-105 transition-transform">
                       <ActivityIcon activity={activity} />
