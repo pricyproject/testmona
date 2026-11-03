@@ -262,32 +262,29 @@ export function Dashboard() {
   }, [selectedProject?.id, t]);
 
   const handleActivityClick = (activity: AuditTrail) => {
-    // Only navigate if the activity belongs to the selected project or if no project is selected
-    // This prevents users from being navigated to projects they don't have access to
-    const targetProjectId = activity.project_id;
-    const shouldNavigate = !selectedProject || selectedProject.id === targetProjectId;
-
-    if (!shouldNavigate) {
-      // If activity belongs to a different project, show message or do nothing
-      // This prevents confusing context switching
-      return;
-    }
-
+    // Account-level activities don't need a project context.
     if (activity.entity_type === 'user') {
       navigate('/settings');
       return;
     }
 
+    // There is no project-detail route; the projects list is the hub.
     if (activity.entity_type === 'project') {
-      navigate(activity.entity_id ? `/projects/${activity.entity_id}` : '/projects');
+      navigate('/projects');
       return;
     }
 
-    // Use the activity's project_id if available, otherwise use selected project
-    const projectId = targetProjectId || selectedProject?.id;
+    // Never context-switch into a different project while one is selected.
+    if (selectedProject && activity.project_id != null && selectedProject.id !== activity.project_id) {
+      return;
+    }
+
+    // Fall back to the selected project for activities without one (system
+    // events), otherwise send the user somewhere useful instead of a dead click.
+    const projectId = activity.project_id ?? selectedProject?.id;
 
     if (!projectId) {
-      // If no project context, don't navigate
+      navigate('/activity-management');
       return;
     }
 
@@ -318,13 +315,13 @@ export function Dashboard() {
         navigate(`/projects/${projectId}/requirements${activity.entity_id ? `/${activity.entity_id}` : ''}`);
         break;
       case 'defect':
-        navigate(`/projects/${projectId}/defects`);
+        navigate(`/projects/${projectId}/defects${activity.entity_id ? `/${activity.entity_id}` : ''}`);
         break;
       case 'test_plan':
-        navigate(`/projects/${projectId}/test-plans`);
+        navigate(`/projects/${projectId}/test-plans${activity.entity_id ? `/${activity.entity_id}` : ''}`);
         break;
       case 'milestone':
-        navigate(`/projects/${projectId}/milestones`);
+        navigate(`/projects/${projectId}/milestones${activity.entity_id ? `/${activity.entity_id}` : ''}`);
         break;
       default:
         // For other entity types, navigate to activity management
