@@ -1222,18 +1222,27 @@ def register_analytics_dashboard_routes(app):
                 total_passed = total_failed = total_blocked = total_skipped = total_not_started = 0
                 latest_status_by_test_case = {}
                 if all_test_case_ids:
-                    latest_id_subq = (
+                    # Rank by execution time (not row id) so imported/backfilled
+                    # results agree with the coverage and execution-status reports.
+                    ranked_results = (
                         db.query(
-                            models.TestResult.test_case_id,
-                            _func.max(models.TestResult.id).label("max_id"),
+                            models.TestResult.test_case_id.label("test_case_id"),
+                            models.TestResult.status.label("status"),
+                            _func.row_number().over(
+                                partition_by=models.TestResult.test_case_id,
+                                order_by=(
+                                    models.TestResult.executed_at.desc(),
+                                    models.TestResult.created_at.desc(),
+                                    models.TestResult.id.desc(),
+                                ),
+                            ).label("result_rank"),
                         )
                         .filter(models.TestResult.test_case_id.in_(all_test_case_ids))
-                        .group_by(models.TestResult.test_case_id)
                         .subquery()
                     )
                     latest_statuses = (
-                        db.query(models.TestResult.test_case_id, models.TestResult.status)
-                        .join(latest_id_subq, models.TestResult.id == latest_id_subq.c.max_id)
+                        db.query(ranked_results.c.test_case_id, ranked_results.c.status)
+                        .filter(ranked_results.c.result_rank == 1)
                         .all()
                     )
                     for test_case_id, status in latest_statuses:
