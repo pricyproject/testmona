@@ -537,6 +537,11 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Metrics are only meaningful once the statistics request succeeds; while
+          loading or after an error, showing zeroed cards and an empty readiness
+          state reads as real data. */}
+      {dashboardStats && (
+        <>
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -737,6 +742,8 @@ export function Dashboard() {
           </div>
         </CardContent>
       </Card>
+        </>
+      )}
 
       {/* Recent Activity + Quick Actions */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
