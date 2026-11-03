@@ -1107,10 +1107,11 @@ def register_analytics_dashboard_routes(app):
                     raise HTTPException(status_code=403, detail="Insufficient permissions")
                 projects = [project]
             else:
-                # Cap to 500 projects to prevent unbounded scans
-                projects = db.query(models.Project).limit(500).all()
+                # Fetch exactly the projects the user may read instead of taking
+                # an arbitrary first-500 slice and re-checking each one.
+                projects = rbac.get_accessible_projects(current_user, db)
 
-            projects = [p for p in projects if p and rbac.has_permission(current_user, "read", p.id, db)]
+            projects = [p for p in projects if p is not None]
             total_projects = len(projects)
             project_ids = [p.id for p in projects]
 
