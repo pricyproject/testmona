@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useTranslation } from '@/hooks/useTranslation';
 
 export interface SectionTreeNode {
   id: number;
@@ -103,6 +104,7 @@ export function SectionTree({
   onInvalidMove,
   readOnly = false,
 }: SectionTreeProps) {
+  const { t } = useTranslation();
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor),
@@ -138,12 +140,12 @@ export function SectionTree({
       const target = findNode(sections, targetSectionId);
       if (!target) return;
       if (target.test_suite_id !== dragged.test_suite_id) {
-        onInvalidMove?.(invalidMoveMessage || 'Cannot move between test suites.');
+        onInvalidMove?.(invalidMoveMessage || t('sectionCannotMoveBetweenSuites'));
         return;
       }
       const blocked = collectDescendantIds(dragged);
       if (blocked.has(targetSectionId)) {
-        onInvalidMove?.(cycleMoveMessage || 'Cannot move into a descendant.');
+        onInvalidMove?.(cycleMoveMessage || t('sectionCannotMoveIntoDescendant'));
         return;
       }
       newParentId = targetSectionId;
@@ -198,7 +200,7 @@ export function SectionTree({
             <Folder className="h-4 w-4 text-blue-600" />
             <span className="font-medium">{draggedNode.name}</span>
             <Badge variant="secondary" className="text-xs">
-              {draggedNode.test_case_count} TCs
+              {t('testCasesCountSimple', { count: draggedNode.test_case_count })}
             </Badge>
           </div>
         ) : null}
@@ -222,6 +224,7 @@ function SuiteRootDropZone({
   emptyLabel?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const { setNodeRef, isOver } = useDroppable({
     id: `root-of-suite-${suiteId}`,
     data: { type: 'suite-root', suiteId },
@@ -242,7 +245,7 @@ function SuiteRootDropZone({
       )}
       {isEmpty && !isDragging ? (
         <p className="px-3 py-3 text-center text-xs text-muted-foreground">
-          {emptyLabel || 'No sections yet.'}
+          {emptyLabel || t('noSectionsYetForSuite')}
         </p>
       ) : (
         children
@@ -278,6 +281,7 @@ function SectionTreeNodeView({
   onAddChild: (section: SectionTreeNode) => void;
   readOnly?: boolean;
 }) {
+  const { t } = useTranslation();
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: `section-${section.id}`,
     data: { type: 'section', sectionId: section.id },
@@ -314,13 +318,13 @@ function SectionTreeNodeView({
         ref={setDraggableRef}
         style={{ ...transformStyle, paddingInlineStart: `${level * 20 + 8}px` }}
         className={`group flex items-center gap-2 rounded-md py-1.5 pe-2 transition-colors ${
-          isSelected ? 'bg-accent border-l-4 border-blue-500' : 'hover:bg-accent/60'
+          isSelected ? 'bg-accent border-s-4 border-blue-500' : 'hover:bg-accent/60'
         } ${isOver && isDragging ? 'bg-blue-50/70 ring-1 ring-blue-400 dark:bg-blue-900/30' : ''}`}
       >
         {!readOnly && (
         <button
           type="button"
-          aria-label="Drag handle"
+          aria-label={t('dragSectionToMove')}
           className="cursor-grab text-muted-foreground active:cursor-grabbing"
           {...attributes}
           {...listeners}
@@ -358,19 +362,19 @@ function SectionTreeNodeView({
 
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 text-start"
           onClick={() => onSelect(isSelected ? null : section.id)}
         >
           <span className="truncate font-medium">{section.name}</span>
           <Badge variant="secondary" className="text-xs">
-            {section.test_case_count} TCs
+            {section.test_case_count} {t('cases')}
           </Badge>
           {totalCounts && totalCounts[section.id] > section.test_case_count && (
             <span
               className="text-xs text-muted-foreground tabular-nums"
-              title={`${totalCounts[section.id]} test cases including subsections`}
+              title={t('sectionTotalTooltip', { count: totalCounts[section.id] })}
             >
-              ({totalCounts[section.id]} total)
+              ({totalCounts[section.id]} {t('total')})
             </span>
           )}
           {section.description && (
@@ -392,8 +396,8 @@ function SectionTreeNodeView({
               e.stopPropagation();
               onAddChild(section);
             }}
-            aria-label="Add subsection"
-            title="Add subsection"
+            aria-label={t('addSubsection')}
+            title={t('addSubsection')}
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
@@ -406,8 +410,8 @@ function SectionTreeNodeView({
               e.stopPropagation();
               onEdit(section);
             }}
-            aria-label="Edit section"
-            title="Edit section"
+            aria-label={t('editSection')}
+            title={t('editSection')}
           >
             <Edit className="h-3.5 w-3.5" />
           </Button>
@@ -420,8 +424,8 @@ function SectionTreeNodeView({
               e.stopPropagation();
               onDelete(section);
             }}
-            aria-label="Delete section"
-            title="Delete section"
+            aria-label={t('deleteSection')}
+            title={t('deleteSection')}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>

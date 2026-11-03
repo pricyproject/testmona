@@ -58,6 +58,8 @@ import { TestCase, TestSuite } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { useProjectStore } from '@/stores/projectStore';
+import { isFeatureEnabled } from '@/lib/projectFeatures';
 import { SectionTree, SectionTreeNode } from '@/components/SectionTree';
 
 const TEST_CASES_PER_PAGE = 10;
@@ -216,6 +218,17 @@ export function TestSuiteDetail() {
   const { id: numericSuiteId, loading: suiteIdLoading } = useResolvedEntityId(projectId, 'test-suites', id);
   const { canWrite } = useProjectPermissions(projectId != null ? Number(projectId) : null);
 
+  // Runs live in their own module. The API lets a suite create a run while either
+  // module is on, but the run page is guarded by `test_runs`, so hide the action
+  // when that module is off rather than sending the user to a disabled page.
+  const { projects, selectedProject } = useProjectStore();
+  const testRunsEnabled = useMemo(() => {
+    const pid = Number(projectId);
+    const project = projects.find((p) => p.id === pid)
+      ?? (selectedProject?.id === pid ? selectedProject : null);
+    return isFeatureEnabled(project?.features, 'test_runs');
+  }, [projectId, projects, selectedProject]);
+
   const [testSuite, setTestSuite] = useState<TestSuite | null>(null);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -347,7 +360,10 @@ export function TestSuiteDetail() {
     }
   }, [suiteIdLoading, numericSuiteId, numericProjectId, detailQuery.status, detailQuery.isError, detailQuery.isSuccess, detailQuery.error, t]);
 
-  const loading = (detailEnabled && detailQuery.isLoading) || (suiteIdLoading && !!numericSuiteId);
+  // While the URL sequence is still being resolved the suite id is NaN, so the
+  // detail query is not enabled yet — count the resolver itself as loading,
+  // otherwise the page flashes "not found" on every deep link.
+  const loading = suiteIdLoading || (detailEnabled && detailQuery.isLoading);
 
   const [sectionsError, setSectionsError] = useState<string | null>(null);
   const sectionsLoading = sectionsQuery.isFetching;
@@ -486,7 +502,8 @@ export function TestSuiteDetail() {
         (tc) =>
           tc.title.toLowerCase().includes(trimmed) ||
           (tc.description && tc.description.toLowerCase().includes(trimmed)) ||
-          (tc.preconditions && tc.preconditions.toLowerCase().includes(trimmed)),
+          (tc.preconditions && tc.preconditions.toLowerCase().includes(trimmed)) ||
+          (tc.tags || []).some((tag) => tag.name.toLowerCase().includes(trimmed)),
       );
     }
     if (statusFilter !== 'all') {
@@ -636,7 +653,7 @@ export function TestSuiteDetail() {
         name: t('testRunName', { name: testSuite.name, date: formatDate(new Date()) }),
         description: t('automatedTestRunDescription', { name: testSuite.name }),
       });
-      navigate(`/projects/${numericProjectId}/test-runs/${newTestRun.id}`);
+      navigate(`/projects/${numericProjectId}/test-runs/${newTestRun.project_seq ?? newTestRun.id}`);
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
       const apiMsg = typeof detail === 'string' ? detail : null;
@@ -902,11 +919,18 @@ export function TestSuiteDetail() {
     }
     setIsBulkActionLoading(true);
     const targets = [...selectedTestCases];
-    // Sequential settlement so a partial failure leaves the UI in a consistent state
-    // (we know exactly which ids were actually deleted before updating).
-    const results = await Promise.allSettled(targets.map((tcId) => testCasesAPI.delete(tcId)));
-    const successIds = targets.filter((_, idx) => results[idx].status === 'fulfilled');
-    const failureCount = results.length - successIds.length;
+    // Sequential so a partial failure leaves the UI in a consistent state and a
+    // large selection can't fire thousands of DELETEs at the database at once.
+    const successIds: number[] = [];
+    for (const tcId of targets) {
+      try {
+        await testCasesAPI.delete(tcId);
+        successIds.push(tcId);
+      } catch {
+        // Keep deleting the rest; the summary below reports the failures.
+      }
+    }
+    const failureCount = targets.length - successIds.length;
 
     if (successIds.length > 0) {
       setTestCases((prev) => prev.filter((tc) => !successIds.includes(tc.id)));
@@ -935,7 +959,10 @@ export function TestSuiteDetail() {
     } else {
       toast({
         title: t('error'),
-        description: `${successIds.length} succeeded, ${failureCount} failed.`,
+        description: t('testCasesBulkDeletePartial', {
+          success: successIds.length,
+          failed: failureCount,
+        }),
         variant: 'destructive',
       });
     }
@@ -1001,7 +1028,7 @@ export function TestSuiteDetail() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <Button variant="outline" size="sm" onClick={() => navigate(`/projects/${numericProjectId}/test-suites`)}>
-            <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2' : 'mr-2'}`} />
+            <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
             {t('back')}
           </Button>
           <div className="min-w-0">
@@ -1059,7 +1086,7 @@ export function TestSuiteDetail() {
               {t('editTestSuite')}
             </Button>
             )}
-            {canWrite && (
+            {canWrite && testRunsEnabled && (
             <Button
               className="w-full"
               variant="outline"
@@ -1144,7 +1171,7 @@ export function TestSuiteDetail() {
             <div className="mb-3 flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-800 dark:bg-blue-950/40">
               {selectedBreadcrumb.length > 1 && (
                 <nav
-                  aria-label="section breadcrumb"
+                  aria-label={t('sectionBreadcrumb')}
                   className="flex flex-wrap items-center gap-1 text-xs text-blue-900/80 dark:text-blue-100/80"
                 >
                   {selectedBreadcrumb.map((node, idx) => {
@@ -1412,7 +1439,7 @@ export function TestSuiteDetail() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => navigate(`/projects/${numericProjectId}/test-cases/${testCase.id}`)}
+                        onClick={() => navigate(`/projects/${numericProjectId}/test-cases/${testCase.project_seq ?? testCase.id}`)}
                       >
                         {t('viewDetails')}
                       </Button>
@@ -1437,7 +1464,7 @@ export function TestSuiteDetail() {
                       onClick={() => handlePageChange(paginationInfo.safePage - 1)}
                       disabled={paginationInfo.safePage === 1}
                       className="h-8 w-8 p-0"
-                      aria-label="Previous page"
+                      aria-label={t('previousPage')}
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
@@ -1472,7 +1499,7 @@ export function TestSuiteDetail() {
                       onClick={() => handlePageChange(paginationInfo.safePage + 1)}
                       disabled={paginationInfo.safePage === paginationInfo.totalPages}
                       className="h-8 w-8 p-0"
-                      aria-label="Next page"
+                      aria-label={t('nextPage')}
                     >
                       <ChevronRight className="h-4 w-4" />
                     </Button>
