@@ -1121,7 +1121,7 @@ def register_analytics_dashboard_routes(app):
                 total_requirements = total_defects = total_milestones = total_test_plans = 0
                 total_passed = total_failed = total_blocked = total_skipped = total_not_started = 0
                 open_critical_defects = untested_requirements = stale_tests = 0
-                readiness_pass_rate = readiness_executed = 0
+                readiness_pass_rate = readiness_executed = readiness_failed = 0
                 readiness_requirement_ids = readiness_test_case_ids = []
             else:
                 # Batch-fetch all active test case IDs across all projects in one query
@@ -1273,8 +1273,14 @@ def register_analytics_dashboard_routes(app):
                     test_case_id for test_case_id in readiness_test_case_ids
                     if latest_status_by_test_case.get(test_case_id) == "passed"
                 ])
+                readiness_failed = len([
+                    test_case_id for test_case_id in readiness_test_case_ids
+                    if latest_status_by_test_case.get(test_case_id) == "failed"
+                ])
                 readiness_executed = len(executed_test_case_ids)
-                readiness_pass_rate = round((readiness_passed / readiness_executed) * 100) if readiness_executed > 0 else 0
+                # Keep a decimal: rounding to a whole number can turn 99.5% into
+                # 100% and make the release gate pass with failing tests.
+                readiness_pass_rate = round((readiness_passed / readiness_executed) * 100, 1) if readiness_executed > 0 else 0
                 untested_requirements = len([
                     requirement for requirement in readiness_requirements
                     if not linked_test_case_ids.get(requirement.id, set()).intersection(executed_test_case_ids)
@@ -1311,6 +1317,7 @@ def register_analytics_dashboard_routes(app):
                     "activeRequirements": len(readiness_requirement_ids),
                     "activeTestCases": len(readiness_test_case_ids),
                     "executedTestCases": readiness_executed,
+                    "failedTestCases": readiness_failed,
                 }
             }
         except HTTPException:

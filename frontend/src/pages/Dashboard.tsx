@@ -58,6 +58,7 @@ interface DashboardStatistics {
     activeRequirements?: number;
     activeTestCases?: number;
     executedTestCases?: number;
+    failedTestCases?: number;
   };
 }
 
@@ -354,6 +355,7 @@ export function Dashboard() {
         activeRequirements: 0,
         activeTestCases: 0,
         executedTestCases: 0,
+        failedTestCases: 0,
       },
       recentActivity: recentActivities
     };
@@ -384,16 +386,29 @@ export function Dashboard() {
         activeRequirements: dashboardStats.releaseReadiness?.activeRequirements || 0,
         activeTestCases: dashboardStats.releaseReadiness?.activeTestCases || 0,
         executedTestCases: dashboardStats.releaseReadiness?.executedTestCases || 0,
+        failedTestCases: dashboardStats.releaseReadiness?.failedTestCases || 0,
       },
       recentActivity: recentActivities
     };
   }, [dashboardStats, recentActivities]);
 
   const readinessPassRate = Math.max(0, Math.min(100, stats.releaseReadiness.passRate));
-  const readinessBlockers = stats.releaseReadiness.openCriticalDefects + stats.releaseReadiness.untestedRequirements + stats.releaseReadiness.staleTests;
+  // Failed and not-yet-executed cases are release blockers too. Without them a
+  // scope with one passing execution could be declared ready to ship.
+  const readinessFailedTests = stats.releaseReadiness.failedTestCases;
+  const readinessUnexecutedTests = Math.max(
+    stats.releaseReadiness.activeTestCases - stats.releaseReadiness.executedTestCases,
+    0,
+  );
+  const readinessBlockers =
+    stats.releaseReadiness.openCriticalDefects +
+    stats.releaseReadiness.untestedRequirements +
+    stats.releaseReadiness.staleTests +
+    readinessFailedTests +
+    readinessUnexecutedTests;
   const hasReadinessScope = stats.releaseReadiness.activeRequirements > 0 || stats.releaseReadiness.activeTestCases > 0;
   const hasReadinessExecutions = stats.releaseReadiness.executedTestCases > 0;
-  const isReleaseReady = hasReadinessScope && hasReadinessExecutions && readinessPassRate === 100 && readinessBlockers === 0;
+  const isReleaseReady = hasReadinessScope && hasReadinessExecutions && readinessBlockers === 0;
   // Share of active test cases that have at least one execution — fills the
   // signal panel and gives the pass rate context (a high pass rate over few
   // executions is weaker evidence than over the full scope).
