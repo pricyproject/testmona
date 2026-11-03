@@ -348,7 +348,9 @@ def register_case_routes(app):
         return db_test_case
 
     @app.get("/test-cases", response_model=List[schemas.TestCaseWithRelations],
-             dependencies=[Depends(require_project_feature("test_cases"))])
+             # The suite detail page lists its suite's cases, so reading cases must
+             # stay available while the test_suites module is on.
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def read_test_cases(
         project_id: Optional[int] = Query(None, ge=1),
         test_suite_id: Optional[int] = Query(None, ge=1),
@@ -647,7 +649,7 @@ def register_case_routes(app):
         return db_test_case
 
     @app.delete("/test-cases/{test_case_id}", response_model=schemas.MessageResponse,
-             dependencies=[Depends(require_project_feature("test_cases"))])
+             dependencies=[Depends(require_any_project_feature("test_cases", "test_suites"))])
     def delete_test_case(
         test_case_id: int,
         db: Session = Depends(get_db),

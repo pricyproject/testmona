@@ -312,7 +312,11 @@ def register_section_step_routes(app):
             if root_section.test_suite_id
             else None
         )
-        if test_suite and not rbac.has_permission(current_user, "read", test_suite.project_id, db):
+        # A section without a resolvable suite can't be authorised against a
+        # project; treat it as gone rather than returning it unchecked.
+        if test_suite is None:
+            raise HTTPException(status_code=404, detail="Test suite not found")
+        if not rbac.has_permission(current_user, "read", test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         
         def build_section_tree(section, parent_id=None):
@@ -335,7 +339,8 @@ def register_section_step_routes(app):
             # Add test cases if requested
             if include_test_cases:
                 test_cases = db.query(models.TestCase).filter(
-                    models.TestCase.section_id == section.id
+                    models.TestCase.section_id == section.id,
+                    ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
                 ).all()
                 section_data["test_cases"] = [
                     {
@@ -401,7 +406,10 @@ def register_section_step_routes(app):
         if subsection_ids:
             rows = (
                 db.query(models.TestCase.section_id, func.count(models.TestCase.id))
-                .filter(models.TestCase.section_id.in_(subsection_ids))
+                .filter(
+                    models.TestCase.section_id.in_(subsection_ids),
+                    ((models.TestCase.is_deleted.is_(None)) | (models.TestCase.is_deleted.is_(False))),
+                )
                 .group_by(models.TestCase.section_id)
                 .all()
             )
@@ -487,6 +495,7 @@ def register_section_step_routes(app):
             },
             "test_suite": {
                 "id": test_suite.id,
+                "project_seq": test_suite.project_seq,
                 "name": test_suite.name,
                 "description": test_suite.description,
             },

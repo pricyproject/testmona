@@ -48,6 +48,16 @@ def _record_suite_audit(db, current_user, action, suite_id, project_id, descript
         logger.exception("Failed to create audit trail for test suite %s", action)
 
 
+def _attach_suite_counts(db, suites):
+    """Populate the route-computed test-case and section counts on each suite."""
+    suite_ids = [suite.id for suite in suites]
+    case_counts = crud.get_test_case_counts_by_suite(db, suite_ids)
+    section_counts = crud.get_section_counts_by_suite(db, suite_ids)
+    for suite in suites:
+        suite.test_case_count = case_counts.get(suite.id, 0)
+        suite.section_count = section_counts.get(suite.id, 0)
+
+
 def register_suite_routes(app):
     @app.post("/test-suites", response_model=schemas.TestSuite,
               dependencies=[Depends(require_project_feature("test_suites"))])
@@ -68,9 +78,8 @@ def register_suite_routes(app):
 
         db_test_suite = crud.create_test_suite(db=db, test_suite=test_suite)
 
-        # Attach count so the response is consistent with list/detail responses.
-        counts = crud.get_test_case_counts_by_suite(db, [db_test_suite.id])
-        db_test_suite.test_case_count = counts.get(db_test_suite.id, 0)
+        # Attach counts so the response is consistent with list/detail responses.
+        _attach_suite_counts(db, [db_test_suite])
 
         _record_suite_audit(
             db,
@@ -112,10 +121,7 @@ def register_suite_routes(app):
                 project_ids=accessible_project_ids,
             )
 
-        suite_ids = [suite.id for suite in test_suites]
-        counts = crud.get_test_case_counts_by_suite(db, suite_ids)
-        for suite in test_suites:
-            suite.test_case_count = counts.get(suite.id, 0)
+        _attach_suite_counts(db, test_suites)
 
         return test_suites
 
@@ -133,8 +139,7 @@ def register_suite_routes(app):
         if not rbac.has_permission(current_user, "read", db_test_suite.project_id, db):
             raise HTTPException(status_code=403, detail="Not authorized to access this test suite")
 
-        counts = crud.get_test_case_counts_by_suite(db, [db_test_suite.id])
-        db_test_suite.test_case_count = counts.get(db_test_suite.id, 0)
+        _attach_suite_counts(db, [db_test_suite])
         return db_test_suite
 
     # Runs are owned by the test_runs module but always launched from a suite, so
@@ -232,8 +237,7 @@ def register_suite_routes(app):
 
         db_test_suite = crud.update_test_suite(db, test_suite_id=test_suite_id, test_suite=test_suite)
 
-        counts = crud.get_test_case_counts_by_suite(db, [db_test_suite.id])
-        db_test_suite.test_case_count = counts.get(db_test_suite.id, 0)
+        _attach_suite_counts(db, [db_test_suite])
 
         try:
             from ..services.audit_service import get_audit_service
@@ -280,8 +284,7 @@ def register_suite_routes(app):
             db.rollback()
             raise
 
-        counts = crud.get_test_case_counts_by_suite(db, [db_new_suite.id])
-        db_new_suite.test_case_count = counts.get(db_new_suite.id, 0)
+        _attach_suite_counts(db, [db_new_suite])
 
         _record_suite_audit(
             db,

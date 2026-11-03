@@ -146,11 +146,15 @@ class TestSuiteBase(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape first so re-saving an already-stored value is idempotent — a
+        plain ``html.escape`` compounds ``&amp;`` on every update.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['status']:
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 
@@ -186,11 +190,14 @@ class TestSuiteUpdate(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape first so re-saving an already-stored value is idempotent.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str) and key not in ['status']:
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 
@@ -203,6 +210,7 @@ class TestSuite(TestSuiteBase):
     # Populated by the routes for list/detail responses; the model attribute is set in
     # the route handler so SQLAlchemy doesn't need an additional column.
     test_case_count: int = 0
+    section_count: int = 0
 
     class Config:
         from_attributes = True

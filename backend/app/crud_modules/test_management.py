@@ -137,7 +137,10 @@ def clone_test_suite(db: Session, source: TestSuite, new_name: str, created_by: 
     safe_commit(db)
     db.refresh(new_suite)
 
-    # Parents first (lower order_index wins) so a child's mapped parent always exists.
+    # Clone parents before children regardless of how order_index/id happen to
+    # sort (a section moved under a newer parent would otherwise be copied as a
+    # root). Repeat until every section whose parent is in this suite has been
+    # mapped; any leftover cycle is copied as roots so the loop always ends.
     section_id_map: dict = {}
     source_sections = (
         db.query(TestCaseSection)
@@ -145,9 +148,11 @@ def clone_test_suite(db: Session, source: TestSuite, new_name: str, created_by: 
         .order_by(TestCaseSection.order_index, TestCaseSection.id)
         .all()
     )
-    for section in source_sections:
-        # An unmapped parent means it lives in another suite (data drift) — clone as root.
-        parent_clone_id = section_id_map.get(section.parent_section_id) if section.parent_section_id else None
+    pending = {section.id: section for section in source_sections}
+
+    def _clone_section(section: TestCaseSection) -> None:
+        parent_id = section.parent_section_id
+        parent_clone_id = section_id_map.get(parent_id) if parent_id else None
         new_section = TestCaseSection(
             name=section.name,
             description=section.description,
@@ -160,6 +165,19 @@ def clone_test_suite(db: Session, source: TestSuite, new_name: str, created_by: 
         safe_commit(db)
         db.refresh(new_section)
         section_id_map[section.id] = new_section.id
+
+    while pending:
+        ready = [
+            section
+            for section in pending.values()
+            if not section.parent_section_id or section.parent_section_id not in pending
+        ]
+        if not ready:
+            # Pre-existing cycle/self-parent data: clone the rest as roots.
+            ready = list(pending.values())
+        for section in ready:
+            _clone_section(section)
+            pending.pop(section.id, None)
 
     source_cases = (
         db.query(TestCase)
@@ -219,6 +237,19 @@ def get_test_case_counts_by_suite(db: Session, suite_ids: List[int]) -> dict:
             ((TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False))),
         )
         .group_by(TestCase.test_suite_id)
+        .all()
+    )
+    return {sid: int(cnt or 0) for sid, cnt in rows}
+
+
+def get_section_counts_by_suite(db: Session, suite_ids: List[int]) -> dict:
+    """Return {suite_id: section_count} so delete affordances can match the API."""
+    if not suite_ids:
+        return {}
+    rows = (
+        db.query(TestCaseSection.test_suite_id, func.count(TestCaseSection.id))
+        .filter(TestCaseSection.test_suite_id.in_(suite_ids))
+        .group_by(TestCaseSection.test_suite_id)
         .all()
     )
     return {sid: int(cnt or 0) for sid, cnt in rows}

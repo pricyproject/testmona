@@ -483,11 +483,14 @@ class TestCaseSectionBase(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape first so re-saving an already-stored value is idempotent.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str):
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 
@@ -505,11 +508,14 @@ class TestCaseSectionUpdate(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def sanitize_html(cls, data):
-        """Sanitize HTML in string fields to prevent XSS attacks"""
+        """Sanitize HTML in string fields to prevent XSS attacks.
+
+        Unescape first so re-saving an already-stored value is idempotent.
+        """
         if isinstance(data, dict):
             for key, value in data.items():
                 if isinstance(value, str):
-                    data[key] = html.escape(value)
+                    data[key] = html.escape(html.unescape(value))
         return data
 
 
