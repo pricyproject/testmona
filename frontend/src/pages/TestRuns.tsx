@@ -46,7 +46,7 @@ import {
   Grid3X3,
   Trash2,
 } from 'lucide-react';
-import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, testResultsAPI, environmentsAPI, enumsAPI, getApiErrorMessage } from '@/lib/api';
+import { testRunsAPI, testCasesAPI, sectionsAPI, usersAPI, testSuitesAPI, environmentsAPI, enumsAPI, testPlansAPI, getApiErrorMessage, type TestPlanTestCaseScope } from '@/lib/api';
 import { TestRun, TestCase } from '@/types';
 import { entityKey } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -117,6 +117,10 @@ export function TestRuns() {
   const [selectedTestCases, setSelectedTestCases] = useState<number[]>([]);
   const [selectedTestSuites, setSelectedTestSuites] = useState<number[]>([]);
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
+  const [planScope, setPlanScope] = useState<TestPlanTestCaseScope | null>(null);
+  const [isPlanScopeLoading, setIsPlanScopeLoading] = useState(false);
+  const [planScopeError, setPlanScopeError] = useState<string | null>(null);
+  const planScopeAppliedRef = useRef(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [testRunSearchQuery, setTestRunSearchQuery] = useState('');
@@ -359,6 +363,58 @@ export function TestRuns() {
     }
   }, [createFromQuery, linkedEnvironmentId]);
 
+  useEffect(() => {
+    // A different plan means a different scope can be applied on next open.
+    planScopeAppliedRef.current = false;
+  }, [linkedTestPlanId]);
+
+  // A plan's scope is the union of its linked requirements' test cases. Fetch
+  // the whole projection once so the create dialog can preselect and preview it.
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!linkedTestPlanId) {
+      setPlanScope(null);
+      setPlanScopeError(null);
+      setIsPlanScopeLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    setIsPlanScopeLoading(true);
+    setPlanScopeError(null);
+    testPlansAPI.getAllTestCaseScope(linkedTestPlanId)
+      .then((scope) => {
+        if (!cancelled) setPlanScope(scope);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to load test plan scope:', err);
+          setPlanScope(null);
+          setPlanScopeError(getApiErrorMessage(err, t('planScopeLoadFailed')));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsPlanScopeLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [linkedTestPlanId, t]);
+
+  // Apply the plan scope when the create dialog opens. Runs once per opening so
+  // a user's later manual deselection is never overwritten.
+  useEffect(() => {
+    if (!isCreateDialogOpen) {
+      planScopeAppliedRef.current = false;
+      return;
+    }
+    if (!linkedTestPlanId || !planScope || planScopeAppliedRef.current) return;
+
+    planScopeAppliedRef.current = true;
+    setSelectedTestCases(planScope.items.map((testCase) => testCase.id));
+    setSelectedTestSuites([]);
+    setSelectedSections([]);
+  }, [isCreateDialogOpen, linkedTestPlanId, planScope]);
+
   // Track unsaved changes
   useEffect(() => {
     setHasUnsavedChanges(
@@ -454,23 +510,11 @@ export function TestRuns() {
         assigned_to: getSelectedAssigneeId(),
         estimated_duration: estimatedDuration ? parseInt(estimatedDuration) : undefined,
         priority: priority || undefined,
+        // The API seeds one not-started result per case, so the run snapshots
+        // the selected (or plan-preselected) scope atomically.
+        test_case_ids: selectedTestCases,
       });
-      
-      // Create test results for each selected test case
-      const testResultsPromises = selectedTestCases.map(testCaseId =>
-        testResultsAPI.create({
-          test_run_id: newTestRun.id,
-          test_case_id: testCaseId,
-          status: 'not_started',
-          actual_result: undefined,
-          comments: undefined,
-          execution_time: undefined,
-          executed_by: undefined,
-        })
-      );
-      
-      await Promise.all(testResultsPromises);
-      
+
       setTestRuns([newTestRun, ...testRuns]);
       // Reset form
       setRunName('');
@@ -1079,6 +1123,54 @@ export function TestRuns() {
                     </div>
                   )}
                 </div>
+
+                {linkedTestPlanId && (
+                  <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4 dark:border-violet-900/40 dark:bg-violet-950/30">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-violet-900 dark:text-violet-100">
+                        <Target className="h-4 w-4" />
+                        {t('planScopeLabel')}
+                      </div>
+                      {isPlanScopeLoading ? (
+                        <span className="flex items-center gap-2 text-xs font-medium text-violet-700 dark:text-violet-200">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          {t('planScopeLoading')}
+                        </span>
+                      ) : planScope ? (
+                        <span className="text-xs font-medium text-violet-700 dark:text-violet-200">
+                          {t('planScopeSummary', {
+                            cases: planScope.total,
+                            requirements: planScope.requirement_count,
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
+                    {planScopeError ? (
+                      <p className="mt-2 text-xs text-red-600 dark:text-red-400">{planScopeError}</p>
+                    ) : planScope && planScope.total === 0 ? (
+                      <p className="mt-2 text-xs text-violet-700 dark:text-violet-300">{t('planScopeEmpty')}</p>
+                    ) : planScope ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="border-violet-300 bg-white/70 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
+                          {planScope.test_plan_title}
+                        </Badge>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                          onClick={() => {
+                            setSelectedTestCases(planScope.items.map((testCase) => testCase.id));
+                            setSelectedTestSuites([]);
+                            setSelectedSections([]);
+                          }}
+                        >
+                          {t('planScopeApply')}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
 
                 {/* Hierarchical Selection with improved height and scrolling */}
                 <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">

@@ -659,6 +659,39 @@ class TestPlanLinkedRequirementBulkResponse(BaseModel):
     items: List[TestPlanLinkedRequirement]
 
 
+class TestPlanTestCase(BaseModel):
+    """A test case in a plan's execution scope.
+
+    The scope is the de-duplicated union of every test case linked to the
+    requirements linked to the plan, so the same case can belong to several
+    requirements but appears here exactly once.
+    """
+
+    id: int
+    project_seq: Optional[int] = None
+    title: str
+    priority: str
+    status: str
+    test_suite_id: int
+    section_id: Optional[int] = None
+    reference: Optional[str] = None
+    tags: Optional[str] = None
+    suite_name: Optional[str] = None
+    section_name: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class TestPlanTestCaseScope(BaseModel):
+    test_plan_id: int
+    test_plan_title: str
+    items: List[TestPlanTestCase]
+    total: int
+    skip: int
+    limit: int
+    requirement_count: int
+
+
 class RequirementRelationshipCount(BaseModel):
     total: int = 0
     items: List[Dict[str, Any]] = Field(default_factory=list)

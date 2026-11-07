@@ -184,7 +184,82 @@ export const testPlansAPI = {
     const response = await api.post(`/test-plans/${id}/requirements/bulk`, payload);
     return response.data;
   },
+  getTestCaseScope: async (
+    id: number,
+    filters: { search?: string; skip?: number; limit?: number } = {},
+  ): Promise<TestPlanTestCaseScope> => {
+    const params = new URLSearchParams({
+      skip: String(filters.skip ?? 0),
+      limit: String(filters.limit ?? 100),
+    });
+    if (filters.search) params.append('search', filters.search);
+    const response = await api.get(`/test-plans/${id}/test-cases?${params}`);
+    return response.data;
+  },
+  /** Every test case in a plan's linked-requirement scope, not just one page. */
+  getAllTestCaseScope: async (
+    id: number,
+    options: { pageSize?: number; maxPages?: number } = {},
+  ): Promise<TestPlanTestCaseScope> => {
+    const pageSize = Math.min(Math.max(options.pageSize ?? 500, 1), 500); // backend caps at 500
+    const maxPages = options.maxPages ?? 40; // hard stop so a paging bug can't loop forever
+    const items: TestPlanTestCaseScopeItem[] = [];
+    let total = 0;
+    let requirementCount = 0;
+    let planTitle = '';
+
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const page = await testPlansAPI.getTestCaseScope(id, {
+        skip: pageIndex * pageSize,
+        limit: pageSize,
+      });
+      if (pageIndex === 0) {
+        total = page.total;
+        requirementCount = page.requirement_count;
+        planTitle = page.test_plan_title;
+      }
+      if (!Array.isArray(page.items) || page.items.length === 0) break;
+      items.push(...page.items);
+      if (page.items.length < pageSize || items.length >= total) break;
+    }
+
+    return {
+      test_plan_id: id,
+      test_plan_title: planTitle,
+      items,
+      total,
+      skip: 0,
+      limit: items.length,
+      requirement_count: requirementCount,
+    };
+  },
 };
+
+export interface TestPlanTestCaseScopeItem {
+  id: number;
+  project_seq?: number | null;
+  title: string;
+  priority: string;
+  status: string;
+  test_suite_id: number;
+  section_id?: number | null;
+  reference?: string | null;
+  tags?: string | null;
+  suite_name?: string | null;
+  section_name?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface TestPlanTestCaseScope {
+  test_plan_id: number;
+  test_plan_title: string;
+  items: TestPlanTestCaseScopeItem[];
+  total: number;
+  skip: number;
+  limit: number;
+  requirement_count: number;
+}
 
 // --- Advanced Search (TQL across entities) ---------------------------------
 

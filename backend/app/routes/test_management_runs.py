@@ -39,7 +39,41 @@ def register_run_routes(app):
             environment_id=test_run.environment_id,
         )
         assignee = _validate_test_run_assignee(db, test_run.assigned_to, test_run.project_id)
+
+        # Snapshot the requested execution scope up front. Validate every case
+        # before creating the run so a bad id cannot leave a half-built run.
+        requested_case_ids = list(dict.fromkeys(test_run.test_case_ids or []))
+        if requested_case_ids:
+            valid_case_ids = {
+                row[0]
+                for row in db.query(TestCase.id).filter(
+                    TestCase.id.in_(requested_case_ids),
+                    TestCase.project_id == test_run.project_id,
+                    (TestCase.is_deleted.is_(None)) | (TestCase.is_deleted.is_(False)),
+                ).all()
+            }
+            missing_cases = [case_id for case_id in requested_case_ids if case_id not in valid_case_ids]
+            if missing_cases:
+                raise HTTPException(status_code=404, detail=f"Test case(s) not found in this project: {missing_cases}")
+
         db_test_run = crud.create_test_run(db=db, test_run=test_run)
+        if requested_case_ids:
+            db.add_all([
+                models.TestResult(
+                    test_run_id=db_test_run.id,
+                    test_case_id=case_id,
+                    status="not_started",
+                )
+                for case_id in requested_case_ids
+            ])
+            crud.safe_commit(db)
+            db.refresh(db_test_run)
+            if test_run.milestone_id or test_run.test_plan_id:
+                try:
+                    from ..services.milestone_service import recompute_milestones_for_test_run
+                    recompute_milestones_for_test_run(db, db_test_run)
+                except Exception as exc:
+                    logger.warning(f"Failed to recompute milestones for new test run: {exc}")
         _attach_test_run_progress(db, [db_test_run])
         _notify_test_run_assignee(db, db_test_run, current_user, assignee)
         

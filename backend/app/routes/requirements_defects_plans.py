@@ -3414,6 +3414,103 @@ def register_requirements_defects_plans_routes(app):
             ],
         )
 
+    @app.get("/test-plans/{test_plan_id}/test-cases", response_model=schemas.TestPlanTestCaseScope)
+    def read_test_plan_test_case_scope(
+        test_plan_id: int = Path(..., ge=1),
+        search: Optional[str] = Query(None, max_length=100),
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
+        db: Session = Depends(get_db),
+        current_user: schemas.User = Depends(get_current_active_user),
+    ):
+        """Project the test cases a plan actually covers.
+
+        A plan links requirements, and requirements link test cases. Nothing on
+        the plan itself lists cases, so run creation used to be blind. This
+        endpoint resolves that join once, de-duplicated, and reports how many
+        linked requirements feed the scope.
+        """
+        test_plan = _get_test_plan_or_404(db, test_plan_id)
+        if not rbac.has_permission(current_user, "read", test_plan.project_id, db):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+        requirement_count = db.query(
+            func.count(func.distinct(models.requirement_test_plan_links.c.requirement_id))
+        ).filter(
+            models.requirement_test_plan_links.c.test_plan_id == test_plan.id,
+        ).scalar() or 0
+        if not requirement_count:
+            return schemas.TestPlanTestCaseScope(
+                test_plan_id=test_plan.id,
+                test_plan_title=test_plan.title,
+                items=[],
+                total=0,
+                skip=skip,
+                limit=limit,
+                requirement_count=0,
+            )
+
+        # Resolve the plan -> requirement -> test-case join in the database. The
+        # DISTINCT collapses a case linked through several requirements.
+        linked_case_ids = db.query(
+            models.requirement_test_case_links.c.test_case_id
+        ).join(
+            models.requirement_test_plan_links,
+            models.requirement_test_plan_links.c.requirement_id
+            == models.requirement_test_case_links.c.requirement_id,
+        ).filter(
+            models.requirement_test_plan_links.c.test_plan_id == test_plan.id,
+        ).distinct()
+
+        query = _project_test_case_query(db, test_plan.project_id).filter(
+            models.TestCase.id.in_(linked_case_ids),
+        ).options(
+            joinedload(models.TestCase.test_suite),
+            joinedload(models.TestCase.section),
+        )
+
+        if search and search.strip():
+            search_value = search.strip()
+            search_filters = [
+                models.TestCase.title.ilike(f"%{search_value}%"),
+                models.TestCase.reference.ilike(f"%{search_value}%"),
+                models.TestCase.tags_cache.ilike(f"%{search_value}%"),
+                cast(models.TestCase.id, String).ilike(f"%{search_value}%"),
+            ]
+            numeric_search = search_value.upper().replace("TC-", "")
+            if numeric_search.isdigit():
+                search_filters.append(models.TestCase.id == int(numeric_search))
+            query = query.filter(or_(*search_filters))
+
+        total = query.count()
+        test_cases = query.order_by(models.TestCase.id.asc()).offset(skip).limit(limit).all()
+        return schemas.TestPlanTestCaseScope(
+            test_plan_id=test_plan.id,
+            test_plan_title=test_plan.title,
+            items=[
+                schemas.TestPlanTestCase(
+                    id=test_case.id,
+                    project_seq=test_case.project_seq,
+                    title=test_case.title,
+                    priority=test_case.priority,
+                    status=test_case.status,
+                    test_suite_id=test_case.test_suite_id,
+                    section_id=test_case.section_id,
+                    reference=test_case.reference,
+                    tags=test_case.tags_cache,
+                    suite_name=test_case.test_suite.name if test_case.test_suite else None,
+                    section_name=test_case.section.name if test_case.section else None,
+                    created_at=test_case.created_at,
+                    updated_at=test_case.updated_at,
+                )
+                for test_case in test_cases
+            ],
+            total=total,
+            skip=skip,
+            limit=limit,
+            requirement_count=requirement_count,
+        )
+
     # Milestones Endpoints
     @app.post("/milestones", response_model=schemas.Milestone,
               dependencies=[Depends(require_project_feature("milestones"))])

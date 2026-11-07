@@ -480,6 +480,19 @@ class TestRunBase(BaseModel):
 
 class TestRunCreate(TestRunBase):
     project_id: int
+    # Optional execution scope to snapshot atomically with the run. When given,
+    # the API seeds one not-started result per case, so a run started from a
+    # plan carries the plan's requirement-linked cases from the first moment.
+    test_case_ids: Optional[List[int]] = Field(default=None, max_length=5000)
+
+    @field_validator("test_case_ids")
+    @classmethod
+    def validate_test_case_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        if v is None:
+            return v
+        if any(test_case_id <= 0 for test_case_id in v):
+            raise ValueError("test_case_ids must contain positive integers")
+        return v
 
 
 class TestRunUpdate(BaseModel):
