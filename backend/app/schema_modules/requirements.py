@@ -671,3 +671,4 @@ class RequirementRelationshipSummary(BaseModel):
     milestones: RequirementRelationshipCount
     test_runs: RequirementRelationshipCount
     coverage_reports: RequirementRelationshipCount
+    docs: RequirementRelationshipCount = Field(default_factory=RequirementRelationshipCount)

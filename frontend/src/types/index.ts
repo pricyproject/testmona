@@ -823,6 +823,7 @@ export interface RequirementRelationshipSummary {
   milestones: RequirementRelationshipCount;
   test_runs: RequirementRelationshipCount;
   coverage_reports: RequirementRelationshipCount;
+  docs: RequirementRelationshipCount;
 }
 
 // Milestone Types

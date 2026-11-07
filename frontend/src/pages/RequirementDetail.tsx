@@ -32,6 +32,7 @@ import { CustomFieldsPanel } from '@/components/CustomFieldsPanel';
 import { RequirementVersionHistory } from '@/components/requirements/RequirementVersionHistory';
 import { WatchButton } from '@/components/WatchButton';
 import { RequirementComments } from '@/components/requirements/RequirementComments';
+import { Requirement360Panel } from '@/components/requirements/Requirement360Panel';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { entityKey, entitySeq } from '@/lib/utils';
@@ -1404,8 +1405,21 @@ export function RequirementDetail() {
               </section>
             )}
 
+            <Requirement360Panel
+              projectId={Number(projectId)}
+              requirementId={requirement.id}
+              relationships={relationships}
+              linkedTestCases={linkedTestCases}
+              linkedTestCasesTotal={traceabilitySummary.linked_count}
+              canWrite={canWrite}
+              loading={!relationships && !relationshipError}
+              error={relationshipError || null}
+              onChanged={refreshRequirementLinks}
+              onViewLinkedTestCases={() => setShowLinkedTestCases(true)}
+            />
+
             {showLinkedTestCases && (
-              <section className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+              <section id="linked-test-cases" className="rounded-md border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white">
@@ -1424,23 +1438,6 @@ export function RequirementDetail() {
                   </Button>
                   )}
                 </div>
-
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                  {t('traceabilitySnapshot')}
-                </p>
-                <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
-                  <SummaryTile label={t('linkedCount')} value={traceabilitySummary.linked_count} />
-                  <SummaryTile label={t('activeCount')} value={traceabilitySummary.active_count} />
-                  <SummaryTile label={t('failedResults')} value={traceabilitySummary.failed_related_runs} tone="danger" />
-                  <SummaryTile label={t('blockedResults')} value={traceabilitySummary.blocked_related_runs} tone="warning" />
-                  <SummaryTile label={t('relatedDefects')} value={relationships?.defects.total ?? 0} />
-                  <SummaryTile label={t('relatedTestRuns')} value={relationships?.test_runs.total ?? 0} />
-                </div>
-                {relationshipError && (
-                  <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300">
-                    {relationshipError}
-                  </p>
-                )}
 
                 <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/50">
                   <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">
@@ -2518,29 +2515,6 @@ function EmptyState({ label }: { label: string }) {
     <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
       {label}
     </p>
-  );
-}
-
-function SummaryTile({ label, value, tone = 'default' }: { label: string; value: string | number; tone?: 'default' | 'danger' | 'warning' }) {
-  const numericValue = typeof value === 'number' ? value : Number(value);
-  const isAlert = (tone === 'danger' || tone === 'warning') && Number.isFinite(numericValue) && numericValue > 0;
-
-  const containerTone = !isAlert
-    ? 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/50'
-    : tone === 'danger'
-      ? 'border-rose-200 bg-rose-50 dark:border-rose-900/60 dark:bg-rose-950/30'
-      : 'border-amber-200 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30';
-  const valueTone = !isAlert
-    ? 'text-slate-950 dark:text-white'
-    : tone === 'danger'
-      ? 'text-rose-700 dark:text-rose-300'
-      : 'text-amber-700 dark:text-amber-300';
-
-  return (
-    <div className={`flex min-w-0 flex-col rounded-md border p-3 ${containerTone}`}>
-      <p className="text-xs font-medium leading-tight text-slate-500 dark:text-slate-400">{label}</p>
-      <p className={`mt-auto pt-1 text-2xl font-semibold leading-none ${valueTone}`}>{value}</p>
-    </div>
   );
 }
 

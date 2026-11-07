@@ -1781,6 +1781,7 @@ def register_requirements_defects_plans_routes(app):
                 seen_milestones.add(test_plan.milestone.id)
                 milestone_items.append({
                     "id": test_plan.milestone.id,
+                    "project_seq": test_plan.milestone.project_seq,
                     "title": test_plan.milestone.title,
                     "status": _enum_value(test_plan.milestone.status),
                     "target_date": test_plan.milestone.target_date,
@@ -1793,6 +1794,15 @@ def register_requirements_defects_plans_routes(app):
                 models.CoverageReport.test_run_id.is_(None),
             ))
 
+        # Documents that reference this requirement (docs -> requirements is the
+        # only direction the Doc Hub stores, so join through the link table).
+        doc_link_query = db.query(models.DocRequirementLink).join(
+            models.Doc, models.Doc.id == models.DocRequirementLink.doc_id,
+        ).options(
+            joinedload(models.DocRequirementLink.doc),
+        ).filter(models.DocRequirementLink.requirement_id == requirement.id)
+        doc_links = doc_link_query.order_by(models.DocRequirementLink.id.desc()).limit(10).all()
+
         return schemas.RequirementRelationshipSummary(
             test_cases=_requirement_traceability_summary(db, requirement),
             defects=schemas.RequirementRelationshipCount(
@@ -1800,6 +1810,7 @@ def register_requirements_defects_plans_routes(app):
                 items=[
                     {
                         "id": defect.id,
+                        "project_seq": defect.project_seq,
                         "defect_id": defect.defect_id,
                         "title": defect.title,
                         "status": _enum_value(defect.status),
@@ -1814,6 +1825,7 @@ def register_requirements_defects_plans_routes(app):
                 items=[
                     {
                         "id": test_plan.id,
+                        "project_seq": test_plan.project_seq,
                         "title": test_plan.title,
                         "status": _enum_value(test_plan.status),
                         "milestone_id": test_plan.milestone_id,
@@ -1831,6 +1843,7 @@ def register_requirements_defects_plans_routes(app):
                 items=[
                     {
                         "id": test_run.id,
+                        "project_seq": test_run.project_seq,
                         "name": test_run.name,
                         "status": test_run.status,
                         "test_plan_id": test_run.test_plan_id,
@@ -1847,8 +1860,23 @@ def register_requirements_defects_plans_routes(app):
                         "report_type": report.report_type,
                         "coverage_percentage": report.coverage_percentage,
                         "test_run_id": report.test_run_id,
+                        "generated_at": report.generated_at,
                     }
                     for report in coverage_query.order_by(models.CoverageReport.generated_at.desc()).limit(10).all()
+                ],
+            ),
+            docs=schemas.RequirementRelationshipCount(
+                total=doc_link_query.count(),
+                items=[
+                    {
+                        "id": link.doc.id,
+                        "project_seq": link.doc.project_seq,
+                        "title": link.doc.title,
+                        "status": _enum_value(link.doc.status),
+                        "classification": link.doc.classification,
+                    }
+                    for link in doc_links
+                    if link.doc is not None
                 ],
             ),
         )
