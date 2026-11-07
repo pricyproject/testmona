@@ -91,7 +91,7 @@ interface PriorityOption {
 export function TestRuns() {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t, isRTL } = useTranslation();
   const { formatDateTime: fmtDateTime } = useDateFormat();
   const { canWrite } = usePermissions();
@@ -136,7 +136,9 @@ export function TestRuns() {
   
   // Validate projectId from URL params
   const currentProjectId = projectId ? parseInt(projectId) : null;
-  const linkedTestPlanId = parsePositiveQueryNumber(searchParams.get('test_plan_id'));
+  // `plan_id` is the shared contract name; keep `test_plan_id` as a legacy alias
+  // for links created before the contract was documented.
+  const linkedTestPlanId = parsePositiveQueryNumber(searchParams.get('plan_id') ?? searchParams.get('test_plan_id'));
   const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
   const createFromQuery = searchParams.get('create') === '1';
   const linkedEnvironmentId = parsePositiveQueryNumber(
@@ -361,7 +363,12 @@ export function TestRuns() {
     if (linkedEnvironmentId) {
       setEnvironment(linkedEnvironmentId.toString());
     }
-  }, [createFromQuery, linkedEnvironmentId]);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('create');
+      return next;
+    }, { replace: true });
+  }, [createFromQuery, linkedEnvironmentId, setSearchParams]);
 
   useEffect(() => {
     // A different plan means a different scope can be applied on next open.

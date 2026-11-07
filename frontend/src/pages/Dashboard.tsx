@@ -11,6 +11,7 @@ import { auditAPI, analyticsAPI, getApiErrorMessage } from '@/lib/api';
 import { useProjectStore } from '@/stores/projectStore';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 import { AuditAction, AuditTrail, EntityType } from '@/types';
+import { buildListUrl } from '@/lib/urlState';
 
 // Calm, cohesive icon-chip tones shared across stat cards and quick actions.
 // Soft tint in light mode, low-opacity fill in dark mode — reads modern and
@@ -445,7 +446,13 @@ export function Dashboard() {
       detail: t('openCriticalDefectsHelp'),
       icon: AlertTriangle,
       tone: 'rose',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/defects`, {
+          status: 'open',
+          severity: 'critical',
+          source: 'dashboard',
+        })
+        : '/projects'),
     },
     {
       id: 'untested-requirements',
@@ -454,7 +461,12 @@ export function Dashboard() {
       detail: t('untestedRequirementsHelp'),
       icon: FileCheck,
       tone: 'indigo',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/requirements` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/requirements`, {
+          attention: 'untested',
+          source: 'dashboard',
+        })
+        : '/projects'),
     },
     {
       id: 'stale-tests',
@@ -463,7 +475,9 @@ export function Dashboard() {
       detail: t('staleTestsHelp'),
       icon: TestTube,
       tone: 'amber',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-asset-health` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/test-asset-health`, { source: 'dashboard' })
+        : '/projects'),
     },
   ];
 
@@ -474,7 +488,9 @@ export function Dashboard() {
       description: t('addNewTestCase'),
       icon: FileText,
       tone: 'blue',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/test-cases`, { create: true, source: 'dashboard' })
+        : '/projects'),
       write: true,
     },
     {
@@ -483,7 +499,9 @@ export function Dashboard() {
       description: t('executeTests'),
       icon: PlayCircle,
       tone: 'emerald',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/test-runs`, { create: true, source: 'dashboard' })
+        : '/projects'),
       write: true,
     },
     {
@@ -492,7 +510,9 @@ export function Dashboard() {
       description: t('logNewIssue'),
       icon: Bug,
       tone: 'rose',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/defects`, { create: true, source: 'dashboard' })
+        : '/projects'),
       write: true,
     },
     {
@@ -501,7 +521,9 @@ export function Dashboard() {
       description: t('checkAnalytics'),
       icon: FileCheck,
       tone: 'violet',
-      onClick: () => navigate(selectedProject ? `/projects/${selectedProject.id}/reports` : '/projects'),
+      onClick: () => navigate(selectedProject
+        ? buildListUrl(`/projects/${selectedProject.id}/reports`, { source: 'dashboard' })
+        : '/projects'),
       write: false,
     },
   ];
@@ -554,7 +576,7 @@ export function Dashboard() {
           icon={FileText}
           color="text-blue-600"
           trend={t('totalTestCasesHint')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/test-cases`, { source: 'dashboard' }) : '/projects')}
         />
         <StatCard
           title={t('testSuites')}
@@ -562,7 +584,7 @@ export function Dashboard() {
           icon={TestTube}
           color="text-green-600"
           trend={t('organizedTestSuites')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-suites` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/test-suites`, { source: 'dashboard' }) : '/projects')}
         />
         <StatCard
           title={t('testRuns')}
@@ -570,7 +592,7 @@ export function Dashboard() {
           icon={PlayCircle}
           color="text-yellow-600"
           trend={t('totalTestRunsHint')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/test-runs`, { source: 'dashboard' }) : '/projects')}
         />
         <StatCard
           title={t('passRate')}
@@ -578,7 +600,7 @@ export function Dashboard() {
           icon={TrendingUp}
           color="text-purple-600"
           trend={t('overallSuccessRate')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-runs` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/test-runs`, { source: 'dashboard' }) : '/projects')}
         />
       </div>
 
@@ -590,7 +612,7 @@ export function Dashboard() {
           icon={FileCheck}
           color="text-indigo-600"
           trend={t('trackedRequirements')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/requirements` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/requirements`, { source: 'dashboard' }) : '/projects')}
         />
         <StatCard
           title={t('defects')}
@@ -598,7 +620,7 @@ export function Dashboard() {
           icon={AlertTriangle}
           color="text-red-600"
           trend={t('totalDefectsHint')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/defects` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/defects`, { source: 'dashboard' }) : '/projects')}
         />
         <StatCard
           title={t('milestones')}
@@ -606,7 +628,7 @@ export function Dashboard() {
           icon={Flag}
           color="text-orange-600"
           trend={t('totalMilestonesHint')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/milestones` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/milestones`, { source: 'dashboard' }) : '/projects')}
         />
         <StatCard
           title={t('testPlans')}
@@ -614,7 +636,7 @@ export function Dashboard() {
           icon={Calendar}
           color="text-teal-600"
           trend={t('totalTestPlansHint')}
-          onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-plans` : '/projects')}
+          onClick={() => navigate(selectedProject ? buildListUrl(`/projects/${selectedProject.id}/test-plans`, { source: 'dashboard' }) : '/projects')}
         />
       </div>
 
@@ -656,7 +678,9 @@ export function Dashboard() {
                         variant="outline"
                         size="sm"
                         className="mt-5"
-                        onClick={() => navigate(selectedProject ? `/projects/${selectedProject.id}/test-cases` : '/projects')}
+                        onClick={() => navigate(selectedProject
+                          ? buildListUrl(`/projects/${selectedProject.id}/test-cases`, { source: 'dashboard' })
+                          : '/projects')}
                       >
                         {t('releaseReadinessEmptyAction')}
                       </Button>

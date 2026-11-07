@@ -192,7 +192,7 @@ export function TestPlans() {
   // Test plans are project planning artifacts: testers can create/edit but
   // deletion is a manager+ action.
   const { canManageProject, canWrite: canWriteProject } = useProjectPermissions(numericProjectId);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fromMilestoneIdParam = searchParams.get('milestone_id');
   const createFromQuery = searchParams.get('create') === '1';
   const editIdFromQuery = searchParams.get('edit');
@@ -545,7 +545,12 @@ export function TestPlans() {
     if (fromMilestoneIdParam && milestones.length === 0) return;
     deepLinkCreateHandled.current = true;
     openCreateDialog();
-  }, [createFromQuery, fromMilestoneIdParam, isLoading, milestones.length, numericProjectId]);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('create');
+      return next;
+    }, { replace: true });
+  }, [createFromQuery, fromMilestoneIdParam, isLoading, milestones.length, numericProjectId, setSearchParams]);
 
   // Deep-link edit: ?edit=<id> opens the editor for that plan once data has loaded
   // (used by the "Edit" action on the test plan detail page). The plan may be
@@ -1564,7 +1569,7 @@ export function TestPlans() {
                     {/* Primary action is driven by run state, not the manual status. */}
                     <Button
                       size="sm"
-                      onClick={() => navigate(`/projects/${projectId}/test-runs?test_plan_id=${plan.id}${plan.milestone_id ? `&milestone_id=${plan.milestone_id}` : ''}${plan.test_run_count === 0 ? '&create=1' : ''}`)}
+                      onClick={() => navigate(`/projects/${projectId}/test-runs?plan_id=${plan.id}${plan.milestone_id ? `&milestone_id=${plan.milestone_id}` : ''}${plan.test_run_count === 0 ? '&create=1' : ''}&source=test-plan`)}
                     >
                       {plan.test_run_count === 0 ? (
                         <CirclePlus className="mr-1.5 h-3.5 w-3.5" />

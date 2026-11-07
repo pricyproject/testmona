@@ -464,21 +464,21 @@ export function MilestoneDetail() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-            <Button size="sm" onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}`)} className="gap-1">
+            <Button size="sm" onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&source=milestone`)} className="gap-1">
               <ClipboardList className="h-3.5 w-3.5" />
               {t('viewTestPlans')}
               <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&create=1`)} className="gap-1">
+            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&source=milestone&create=1`)} className="gap-1">
               <Plus className="h-3.5 w-3.5" />
               {t('createTestPlan')}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/test-runs?milestone_id=${milestone.id}`)} className="gap-1">
+            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/test-runs?milestone_id=${milestone.id}&source=milestone`)} className="gap-1">
               <PlayCircle className="h-3.5 w-3.5" />
               {t('viewTestRuns')}
               <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
-            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/defects?milestone_id=${milestone.id}`)} className="gap-1">
+            <Button size="sm" variant="outline" onClick={() => navigate(`/projects/${projectId}/defects?milestone_id=${milestone.id}&source=milestone`)} className="gap-1">
               <Bug className="h-3.5 w-3.5" />
               {t('viewDefects')}
             </Button>
@@ -558,7 +558,7 @@ export function MilestoneDetail() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => navigate(`/projects/${projectId}/test-runs?test_plan_id=${row.planId}`)}
+                              onClick={() => navigate(`/projects/${projectId}/test-runs?plan_id=${row.planId}&source=milestone`)}
                               className="gap-1"
                             >
                               {t('viewTestRuns')}

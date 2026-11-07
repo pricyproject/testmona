@@ -726,23 +726,23 @@ function MilestoneActionsMenu({ milestone, t, projectId, navigate, onEdit, onDel
           {t('openMilestoneDetail')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&create=1`)}>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&source=milestone&create=1`)}>
           <Plus className="mr-2 h-3.5 w-3.5" />
           {t('createTestPlan')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}`)}>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&source=milestone`)}>
           <ClipboardList className="mr-2 h-3.5 w-3.5" />
           {t('viewTestPlans')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-runs?milestone_id=${milestone.id}`)}>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/test-runs?milestone_id=${milestone.id}&source=milestone`)}>
           <PlayCircle className="mr-2 h-3.5 w-3.5" />
           {t('viewTestRuns')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/defects?milestone_id=${milestone.id}`)}>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/defects?milestone_id=${milestone.id}&source=milestone`)}>
           <Bug className="mr-2 h-3.5 w-3.5" />
           {t('viewDefects')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/requirements?milestone_id=${milestone.id}`)}>
+        <DropdownMenuItem onClick={() => navigate(`/projects/${projectId}/requirements?milestone_id=${milestone.id}&source=milestone`)}>
           <FileCheck2 className="mr-2 h-3.5 w-3.5" />
           {t('viewRequirements')}
         </DropdownMenuItem>
@@ -852,7 +852,7 @@ function MilestoneCard(props: CardProps) {
               size="sm"
               variant="outline"
               className="gap-1.5"
-              onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&create=1`)}
+              onClick={() => navigate(`/projects/${projectId}/test-plans?milestone_id=${milestone.id}&source=milestone&create=1`)}
             >
               <Plus className="h-3.5 w-3.5" />
               {t('createTestPlan')}

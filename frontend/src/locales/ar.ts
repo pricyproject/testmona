@@ -1697,6 +1697,7 @@ export const ar = {
     mondayItem: 'عنصر Monday',
 
     // Coverage badges
+    allCoverage: 'كل التغطية',
     covCovered: 'مغطى',
     covPartial: 'جزئي',
     covFailing: 'فاشل',

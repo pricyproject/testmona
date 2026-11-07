@@ -50,6 +50,7 @@ import { useDateFormat } from '@/hooks/useDateFormat';
 import { requirementsAPI, bulkAPI, savedFiltersAPI, SavedFilter, requirementFoldersAPI } from '@/lib/api';
 import { useRequirementsList, useRequirementFolders } from '@/hooks/queries/requirements';
 import { entitySeq } from '@/lib/utils';
+import { parseListUrlState, pickAllowedFilter, writeListUrlState } from '@/lib/urlState';
 import { Requirement, RequirementCreate, RequirementUpdate, RequirementCoverageItem, RequirementCoverageStatus, RequirementFolder } from '@/types';
 import { RequirementChatPanel } from '@/components/requirements/RequirementChatPanel';
 import { TestCaseSearchBar, SearchSuggestionGroup } from '@/components/TestCases/TestCaseSearchBar';
@@ -64,21 +65,42 @@ import { decodeEntitiesDeep, htmlToReadableText, isHtmlMarkup, richTextToMarkdow
 import { diffWords } from 'diff';
 import { sanitizeHtml } from '@/lib/sanitize';
 
-const parsePositiveQueryNumber = (value: string | null): number | undefined => {
-  if (!value || !/^\d+$/.test(value)) return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
-};
+const REQUIREMENT_STATUS_OPTIONS = ['draft', 'reviewed', 'approved', 'implemented', 'verified', 'deprecated'];
+const REQUIREMENT_PRIORITY_OPTIONS = ['low', 'medium', 'high', 'critical'];
+const REQUIREMENT_COVERAGE_OPTIONS = ['covered', 'partial', 'failing', 'blocked', 'uncovered'];
+const REQUIREMENT_ATTENTION_OPTIONS = ['untested', ...REQUIREMENT_COVERAGE_OPTIONS];
 
 export function Requirements() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { t, isRTL } = useTranslation();
   const { formatDate: fmtDate, formatDateTime } = useDateFormat();
   const { user } = useAuthStore();
-  const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
+  const urlState = useMemo(() => parseListUrlState(searchParams), [searchParams]);
+  // Tracks the URL this page last produced, so browser back/forward changes can
+  // be adopted instead of being overwritten by the current local filters.
+  const lastUrlWritten = useRef<string | null>(null);
+  // A deep link with explicit context must win over the user's default saved
+  // view, which otherwise loads asynchronously and replaces the CTA filters.
+  const initialUrlHasState = useRef(
+    urlState.status !== 'all'
+    || urlState.priority !== 'all'
+    || urlState.attention !== 'all'
+    || urlState.coverage !== 'all'
+    || urlState.requirementId != null
+    || urlState.milestoneId != null
+    || urlState.planId != null
+    || urlState.q !== '',
+  ).current;
+  const linkedMilestoneId = urlState.milestoneId;
+  const initialCoverageFilter = pickAllowedFilter(urlState.coverage, REQUIREMENT_COVERAGE_OPTIONS);
+  // Coverage is the more specific filter; don't stack the convenience
+  // `attention` rollup on top of an explicit coverage choice from the URL.
+  const initialAttentionFilter = initialCoverageFilter === 'all'
+    ? pickAllowedFilter(urlState.attention, REQUIREMENT_ATTENTION_OPTIONS)
+    : 'all';
   const numericProjectId = projectId ? parseInt(projectId) : null;
   // Requirements/folders are project planning artifacts: testers can create/edit
   // (write) but deletion is a manager+ action.
@@ -100,10 +122,15 @@ export function Requirements() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState(() => urlState.q);
+  const [statusFilter, setStatusFilter] = useState<string>(() => pickAllowedFilter(urlState.status, REQUIREMENT_STATUS_OPTIONS));
+  const [priorityFilter, setPriorityFilter] = useState<string>(() => pickAllowedFilter(urlState.priority, REQUIREMENT_PRIORITY_OPTIONS));
+  const [coverageFilter, setCoverageFilter] = useState<string>(() => initialCoverageFilter);
+  // `attention` is a convenience rollup over coverage: untested -> no linked
+  // tests, failing/blocked -> the matching execution health.
+  const [attentionFilter, setAttentionFilter] = useState<string>(() => initialAttentionFilter);
+  const [requirementFilter, setRequirementFilter] = useState<number | undefined>(() => urlState.requirementId);
+  const [currentPage, setCurrentPage] = useState(() => urlState.page);
   const [selectedRequirement, setSelectedRequirement] = useState<Requirement | null>(null);
   const [requirementToDelete, setRequirementToDelete] = useState<Requirement | null>(null);
   const [deleteConfirmationName, setDeleteConfirmationName] = useState('');
@@ -147,8 +174,13 @@ export function Requirements() {
   const [reqFolderId, setReqFolderId] = useState<string>('none');
 
   // Sorting
-  const [sortBy, setSortBy] = useState<'requirement_id' | 'title' | 'status' | 'priority' | 'created_at' | 'coverage'>('requirement_id');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const requirementSortKeys = ['requirement_id', 'title', 'status', 'priority', 'created_at', 'coverage'] as const;
+  const [sortBy, setSortBy] = useState<'requirement_id' | 'title' | 'status' | 'priority' | 'created_at' | 'coverage'>(() => (
+    requirementSortKeys.includes(urlState.sort as (typeof requirementSortKeys)[number])
+      ? urlState.sort as (typeof requirementSortKeys)[number]
+      : 'requirement_id'
+  ));
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(() => urlState.dir || 'asc');
   // Gherkin .feature import
   const featureFileInputRef = useRef<HTMLInputElement>(null);
   const [isImportingFeatures, setIsImportingFeatures] = useState(false);
@@ -539,6 +571,12 @@ export function Requirements() {
 
     const matchesStatus = statusFilter === 'all' || req.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
+    const coverageStatus = coverageMap[req.id]?.status || 'uncovered';
+    const matchesCoverage = coverageFilter === 'all' || coverageStatus === coverageFilter;
+    const matchesAttention = attentionFilter === 'all'
+      || (attentionFilter === 'untested' && coverageStatus === 'uncovered')
+      || attentionFilter === coverageStatus;
+    const matchesRequirement = requirementFilter == null || req.id === requirementFilter;
 
     const matchesFolder =
       selectedFolder === 'all'
@@ -547,7 +585,7 @@ export function Requirements() {
           ? req.folder_id == null
           : req.folder_id != null && folderDescendantIds(selectedFolder).has(req.folder_id);
 
-    return matchesStatus && matchesPriority && matchesFolder;
+    return matchesStatus && matchesPriority && matchesCoverage && matchesAttention && matchesRequirement && matchesFolder;
   });
 
   // Workflow / severity orderings so status & priority sort meaningfully
@@ -614,10 +652,27 @@ export function Requirements() {
   };
   const clearSelection = () => setSelectedIds(new Set());
 
-  // Reset to the first page whenever the active filters or sort change.
+  // Reset to the first page whenever the active filters or sort change. A page
+  // supplied in the URL must survive the initial render. Comparing signatures
+  // (instead of a mounted flag) is StrictMode-safe.
+  const filterSignature = JSON.stringify([
+    searchQuery,
+    statusFilter,
+    priorityFilter,
+    coverageFilter,
+    attentionFilter,
+    requirementFilter,
+    sortBy,
+    sortDir,
+    itemsPerPage,
+    selectedFolder,
+  ]);
+  const previousFilterSignature = useRef(filterSignature);
   useEffect(() => {
+    if (previousFilterSignature.current === filterSignature) return;
+    previousFilterSignature.current = filterSignature;
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, sortBy, sortDir, itemsPerPage, selectedFolder]);
+  }, [filterSignature]);
 
   // Drop selections that are no longer present (e.g. after delete/filter).
   useEffect(() => {
@@ -680,8 +735,9 @@ export function Requirements() {
     try {
       const views = await savedFiltersAPI.list(parseInt(projectId), 'requirements');
       setSavedViews(views);
-      // Auto-apply the user's default view on first load only.
-      const def = views.find((v) => v.is_default);
+      // Auto-apply the user's default view on first load only, and never on top
+      // of an explicit deep link from a dashboard/report/milestone.
+      const def = initialUrlHasState ? undefined : views.find((v) => v.is_default);
       if (def) {
         setActiveViewId((current) => {
           if (current !== null) return current;
@@ -727,6 +783,77 @@ export function Requirements() {
     sortBy,
     sortDir,
   });
+
+  // Mirror the shared URL-state contract so the view is shareable and can be
+  // reproduced by dashboard/report/milestone links.
+  useEffect(() => {
+    const currentUrl = searchParams.toString();
+    const current = parseListUrlState(searchParams);
+    const next = writeListUrlState(searchParams, {
+      status: statusFilter,
+      priority: priorityFilter,
+      coverage: coverageFilter,
+      attention: attentionFilter,
+      requirementId: requirementFilter,
+      milestoneId: linkedMilestoneId,
+      planId: current.planId,
+      create: current.create,
+      source: current.source,
+      q: searchQuery,
+      page: currentPage,
+      sort: sortBy === 'requirement_id' && sortDir === 'asc' ? undefined : sortBy,
+      dir: sortBy === 'requirement_id' && sortDir === 'asc' ? undefined : sortDir,
+    });
+    const nextUrl = next.toString();
+    if (nextUrl === currentUrl) {
+      lastUrlWritten.current = currentUrl;
+      return;
+    }
+    // An external URL change (back/forward) is handled by the adoption effect
+    // below; writing here would immediately undo the navigation.
+    if (lastUrlWritten.current !== currentUrl) return;
+    lastUrlWritten.current = nextUrl;
+    setSearchParams(next, { replace: true });
+  }, [statusFilter, priorityFilter, coverageFilter, attentionFilter, requirementFilter, linkedMilestoneId, searchQuery, currentPage, sortBy, sortDir, searchParams, setSearchParams]);
+
+  // Adopt browser back/forward (and any other external) URL changes.
+  useEffect(() => {
+    const currentUrl = searchParams.toString();
+    if (lastUrlWritten.current === currentUrl) return;
+    const next = parseListUrlState(searchParams);
+    const nextStatus = pickAllowedFilter(next.status, REQUIREMENT_STATUS_OPTIONS);
+    const nextPriority = pickAllowedFilter(next.priority, REQUIREMENT_PRIORITY_OPTIONS);
+    const nextCoverage = pickAllowedFilter(next.coverage, REQUIREMENT_COVERAGE_OPTIONS);
+    const nextAttention = nextCoverage === 'all'
+      ? pickAllowedFilter(next.attention, REQUIREMENT_ATTENTION_OPTIONS)
+      : 'all';
+    const nextSort = requirementSortKeys.includes(next.sort as (typeof requirementSortKeys)[number])
+      ? next.sort as (typeof requirementSortKeys)[number]
+      : 'requirement_id';
+    const nextDir = next.dir || 'asc';
+    previousFilterSignature.current = JSON.stringify([
+      next.q,
+      nextStatus,
+      nextPriority,
+      nextCoverage,
+      nextAttention,
+      next.requirementId,
+      nextSort,
+      nextDir,
+      itemsPerPage,
+      selectedFolder,
+    ]);
+    setStatusFilter(nextStatus);
+    setPriorityFilter(nextPriority);
+    setCoverageFilter(nextCoverage);
+    setAttentionFilter(nextAttention);
+    setRequirementFilter(next.requirementId);
+    setSearchQuery(next.q);
+    setCurrentPage(next.page);
+    setSortBy(nextSort);
+    setSortDir(nextDir);
+    lastUrlWritten.current = currentUrl;
+  }, [searchParams, itemsPerPage, selectedFolder]);
 
   const applyView = (view: SavedFilter) => {
     const d = view.definition || {};
@@ -1387,6 +1514,19 @@ export function Requirements() {
     setTimeout(() => titleInputRef.current?.focus(), 100);
   };
 
+  // `?create=1` opens the create dialog once for dashboard/report quick actions.
+  const createFromQueryHandled = useRef(false);
+  useEffect(() => {
+    if (!urlState.create || createFromQueryHandled.current || numericProjectId == null) return;
+    createFromQueryHandled.current = true;
+    handleOpenCreateDialog();
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('create');
+      return next;
+    }, { replace: true });
+  }, [urlState.create, numericProjectId, setSearchParams]);
+
   useEffect(() => {
     if (!isCreateDialogOpen || !projectId) return;
     if (draftSaveTimeoutRef.current) {
@@ -1637,8 +1777,8 @@ export function Requirements() {
     </div>
   );
 
-  const requirementStatusOptions = ['draft', 'reviewed', 'approved', 'implemented', 'verified', 'deprecated'];
-  const requirementPriorityOptions = ['low', 'medium', 'high', 'critical'];
+  const requirementStatusOptions = REQUIREMENT_STATUS_OPTIONS;
+  const requirementPriorityOptions = REQUIREMENT_PRIORITY_OPTIONS;
   const isRequirementIdValid = /^REQ-\d{3,}$/.test(reqId.trim());
   const estimatedEffortValue = reqEstimatedEffort ? parseFloat(reqEstimatedEffort) : undefined;
   const hasInvalidEstimatedEffort = estimatedEffortValue !== undefined && (!Number.isFinite(estimatedEffortValue) || estimatedEffortValue < 0);
@@ -1884,12 +2024,20 @@ export function Requirements() {
     try { localStorage.setItem('requirements-view-mode', mode); } catch { /* ignore */ }
   };
 
-  const hasActiveFilters = searchQuery.trim() !== '' || statusFilter !== 'all' || priorityFilter !== 'all';
+  const hasActiveFilters = searchQuery.trim() !== ''
+    || statusFilter !== 'all'
+    || priorityFilter !== 'all'
+    || coverageFilter !== 'all'
+    || attentionFilter !== 'all'
+    || requirementFilter != null;
 
   const clearAllFilters = () => {
     setSearchQuery('');
     setStatusFilter('all');
     setPriorityFilter('all');
+    setCoverageFilter('all');
+    setAttentionFilter('all');
+    setRequirementFilter(undefined);
     setActiveViewId(null);
   };
 
@@ -1934,6 +2082,10 @@ export function Requirements() {
 
   const statusFilterOptions = ['all', ...requirementStatusOptions];
   const priorityFilterOptions = ['all', ...requirementPriorityOptions];
+  const coverageFilterOptions: Array<{ value: string; label: string }> = [
+    { value: 'all', label: t('allCoverage') },
+    ...Object.entries(coverageMeta).map(([value, meta]) => ({ value, label: meta.label })),
+  ];
   const activeViewName = activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name : undefined;
 
   // Suggestion catalog for the "/" advanced-search palette — built from the
@@ -2173,6 +2325,22 @@ export function Requirements() {
               ))}
             </SelectContent>
           </Select>
+          <Select
+            value={coverageFilter}
+            onValueChange={(value) => {
+              setCoverageFilter(value);
+              // The convenience attention rollup would otherwise contradict a
+              // coverage choice made directly in the UI.
+              if (value !== 'all') setAttentionFilter('all');
+            }}
+          >
+            <SelectTrigger className="h-10 w-[calc(50%-0.25rem)] shrink-0 sm:w-36"><SelectValue placeholder={t('coverage')} /></SelectTrigger>
+            <SelectContent>
+              {coverageFilterOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Sort */}
           <DropdownMenu>
@@ -2299,6 +2467,20 @@ export function Requirements() {
           {searchQuery.trim() && <FilterChip label={`"${searchQuery.trim()}"`} icon={Search} onClear={() => setSearchQuery('')} />}
           {statusFilter !== 'all' && <FilterChip label={t(statusFilter as any)} onClear={() => setStatusFilter('all')} />}
           {priorityFilter !== 'all' && <FilterChip label={t(priorityFilter as any)} onClear={() => setPriorityFilter('all')} />}
+          {coverageFilter !== 'all' && (
+            <FilterChip label={coverageMeta[coverageFilter as RequirementCoverageStatus]?.label || coverageFilter} onClear={() => setCoverageFilter('all')} />
+          )}
+          {attentionFilter !== 'all' && (
+            <FilterChip
+              label={attentionFilter === 'untested'
+                ? t('covUncovered')
+                : coverageMeta[attentionFilter as RequirementCoverageStatus]?.label || attentionFilter}
+              onClear={() => setAttentionFilter('all')}
+            />
+          )}
+          {requirementFilter != null && (
+            <FilterChip label={`${t('requirement')} #${requirementFilter}`} onClear={() => setRequirementFilter(undefined)} />
+          )}
           <button type="button" onClick={clearAllFilters} className="font-medium text-primary hover:underline">
             {t('clearFilters')}
           </button>

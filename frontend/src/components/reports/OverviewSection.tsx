@@ -15,6 +15,7 @@ import {
   Area, Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { cn } from '@/lib/utils';
+import { buildListUrl } from '@/lib/urlState';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent,
 } from '@dnd-kit/core';
@@ -125,10 +126,18 @@ export function OverviewSection({ ctx }: { ctx: ReportsData }) {
   const widgetMeta: Record<string, WidgetMeta> = {
     coverage: { def: t('reports_widgetDefCoverage'), goodOnUp: true, drill: { section: 'coverage-risk' } },
     passRate: { def: t('reports_widgetDefPassRate'), goodOnUp: true, drill: { section: 'coverage-risk' } },
-    failureTrends: { def: t('reports_widgetDefFailureTrends'), goodOnUp: false, drill: { href: `/projects/${selectedProject}/defects` } },
+    failureTrends: {
+      def: t('reports_widgetDefFailureTrends'),
+      goodOnUp: false,
+      drill: { href: buildListUrl(`/projects/${selectedProject}/defects`, { source: 'reports' }) },
+    },
     flakiness: { def: t('reports_widgetDefFlakiness'), goodOnUp: false, drill: { section: 'coverage-risk' } },
     cycleTime: { def: t('reports_widgetDefCycleTime'), goodOnUp: false, drill: { section: 'activity' } },
-    defectDensity: { def: t('reports_widgetDefDefectDensity'), goodOnUp: false, drill: { href: `/projects/${selectedProject}/defects` } },
+    defectDensity: {
+      def: t('reports_widgetDefDefectDensity'),
+      goodOnUp: false,
+      drill: { href: buildListUrl(`/projects/${selectedProject}/defects`, { source: 'reports' }) },
+    },
   };
 
   const renderKPIWidget = (widget: any) => {

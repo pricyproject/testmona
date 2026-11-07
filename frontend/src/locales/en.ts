@@ -1492,6 +1492,7 @@ export const en = {
   mondayItem: 'Monday item',
 
   // Coverage badges
+  allCoverage: 'All Coverage',
   covCovered: 'Covered',
   covPartial: 'Partial',
   covFailing: 'Failing',

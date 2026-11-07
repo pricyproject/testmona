@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ReportsData } from '@/hooks/useReportsData';
 import { normalizeStatus, getStatusIcon } from '@/components/reports/reportsUtils';
+import { buildListUrl } from '@/lib/urlState';
 
 export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
   const { t, isRTL } = useTranslation();
@@ -467,7 +468,11 @@ export function TraceabilityMatrixPanel({ ctx }: { ctx: ReportsData }) {
                 </p>
                 <div className="mt-4 flex justify-center gap-2">
                   <Link
-                    to={`/projects/${selectedProject}/requirements`}
+                    to={buildListUrl(`/projects/${selectedProject}/requirements`, {
+                      priority: traceabilityFilters.priority,
+                      coverage: traceabilityFilters.coverage_status,
+                      source: 'reports',
+                    })}
                     className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
                   >
                     <Plus className="h-4 w-4 me-1" />

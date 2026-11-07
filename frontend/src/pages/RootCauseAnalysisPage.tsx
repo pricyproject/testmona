@@ -29,7 +29,7 @@ export function RootCauseAnalysisPage() {
   return (
     <div className="space-y-6 px-4 py-6 lg:px-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <Link
-        to={`/projects/${numericProjectId}/defects`}
+        to={`/projects/${numericProjectId}/defects?source=root-cause-analysis`}
         className="inline-flex items-center gap-1 rounded-sm text-sm text-gray-500 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-gray-300"
       >
         <ChevronLeft className={isRTL ? 'h-4 w-4 rotate-180' : 'h-4 w-4'} />

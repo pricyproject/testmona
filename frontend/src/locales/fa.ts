@@ -1728,6 +1728,7 @@ export const fa = {
     mondayItem: 'آیتم Monday',
 
     // Coverage badges
+    allCoverage: 'همه پوشش‌ها',
     covCovered: 'پوشش‌داده‌شده',
     covPartial: 'جزئی',
     covFailing: 'ناموفق',

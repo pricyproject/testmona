@@ -719,7 +719,9 @@ export function RequirementDetail() {
   ), [aiDrafts, dupFindings]);
   const creatableSelectedCount = allowDuplicates ? selectedAIDraftsCount : selectedAIDraftsCount - selectedDuplicateCount;
 
-  const backPath = projectId ? `/projects/${projectId}/requirements` : '/projects';
+  const backPath = projectId
+    ? `/projects/${projectId}/requirements?source=requirement-detail`
+    : '/projects';
   const BackIcon = isRTL ? ArrowRight : ArrowLeft;
   const ToggleRightSidebarIcon = showRightSidebar
     ? (isRTL ? PanelLeftClose : PanelRightClose)

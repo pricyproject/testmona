@@ -148,8 +148,9 @@ export function TestCases() {
   const { canWrite } = usePermissions();
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId?: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const urlSectionId = searchParams.get('section');
+  const createFromQuery = searchParams.get('create') === '1';
   const { toast } = useToast();
   const currentProjectId = useMemo(() => {
     const parsedProjectId = Number(projectId);
@@ -613,6 +614,19 @@ export function TestCases() {
       setIsModalOpening(false);
     });
   };
+
+  // `?create=1` opens the create dialog once for dashboard quick actions.
+  const createFromQueryHandled = useRef(false);
+  useEffect(() => {
+    if (!createFromQuery || createFromQueryHandled.current || currentProjectId == null) return;
+    createFromQueryHandled.current = true;
+    handleOpenModal();
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('create');
+      return next;
+    }, { replace: true });
+  }, [createFromQuery, currentProjectId, setSearchParams]);
 
   // Focus management
   useEffect(() => {

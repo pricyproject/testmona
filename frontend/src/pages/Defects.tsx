@@ -57,6 +57,7 @@ import {
 } from '@/components/ui/table';
 import { TestCaseSearchBar, SearchSuggestionGroup } from '@/components/TestCases/TestCaseSearchBar';
 import { parseDefectQuery, defectMatchesQuery } from '@/components/Defects/defectsSearchQuery';
+import { parseListUrlState, pickAllowedFilter, writeListUrlState } from '@/lib/urlState';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -109,6 +110,8 @@ type PriorityColorOption = {
 
 const DEFECT_SEVERITY_OPTIONS = ['low', 'medium', 'high', 'critical'];
 const DEFECT_PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
+const DEFECT_STATUS_FILTER_OPTIONS = BOARD_COLUMNS.map((column) => column.status);
+const DEFECT_SORT_MODES = ['newest', 'oldest', 'updated_desc', 'severity_desc', 'priority_desc', 'title_asc'];
 
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
@@ -166,12 +169,6 @@ const loadAllProjectRequirements = async (numericProjectId: number) => {
     if (rows.length < LINKED_ENTITY_PAGE_SIZE) break;
   }
   return allRequirements;
-};
-
-const parsePositiveQueryNumber = (value: string | null): number | undefined => {
-  if (!value || !/^\d+$/.test(value)) return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 };
 
 function SectionHeader({
@@ -316,13 +313,30 @@ function SummaryStat({
 export function Defects() {
   const navigate = useNavigate();
   const { projectId } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { t, isRTL, language } = useTranslation();
   const { formatDate, formatDateTime } = useDateFormat();
   const formatSnapshotDate = (value?: string | null): string => (value ? formatDateTime(value) || '-' : '-');
   const { appName } = useAppName(false);
-  const linkedMilestoneId = parsePositiveQueryNumber(searchParams.get('milestone_id'));
+  const urlState = useMemo(() => parseListUrlState(searchParams), [searchParams]);
+  // Tracks the URL this page last produced, so browser back/forward changes can
+  // be adopted instead of being overwritten by the current local filters.
+  const lastUrlWritten = useRef<string | null>(null);
+  // A deep link with explicit context must win over the user's default saved
+  // filter, which otherwise loads asynchronously and replaces the CTA filters.
+  const initialUrlHasState = useRef(
+    urlState.status !== 'all'
+    || urlState.severity !== 'all'
+    || urlState.priority !== 'all'
+    || urlState.attention !== 'all'
+    || urlState.coverage !== 'all'
+    || urlState.requirementId != null
+    || urlState.milestoneId != null
+    || urlState.planId != null
+    || urlState.q !== '',
+  ).current;
+  const linkedMilestoneId = urlState.milestoneId;
 
   const numericProjectId = projectId && /^\d+$/.test(projectId) ? parseInt(projectId, 10) : null;
   // Project-scoped, so a global viewer elevated to tester/manager in this
@@ -391,15 +405,18 @@ export function Defects() {
   const projectMembers = formDataQuery.data?.members ?? [];
   const priorityColorOptions = formDataQuery.data?.priorityColors ?? [];
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState(() => urlState.q);
+  const [currentPage, setCurrentPage] = useState(() => urlState.page);
   const [itemsPerPage] = useState(10);
 
-  // Filter/sort + per-row expansion state for the redesigned list view.
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [severityFilter, setSeverityFilter] = useState<string>('all');
-  const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [sortMode, setSortMode] = useState<string>('newest');
+  // Filter/sort + per-row expansion state for the redesigned list view. The
+  // initial values come from the shared list URL contract, so dashboard/report
+  // CTAs land on an already-filtered view.
+  const [statusFilter, setStatusFilter] = useState<string>(() => pickAllowedFilter(urlState.status, DEFECT_STATUS_FILTER_OPTIONS));
+  const [severityFilter, setSeverityFilter] = useState<string>(() => pickAllowedFilter(urlState.severity, DEFECT_SEVERITY_OPTIONS));
+  const [priorityFilter, setPriorityFilter] = useState<string>(() => pickAllowedFilter(urlState.priority, DEFECT_PRIORITY_OPTIONS));
+  const [requirementFilter, setRequirementFilter] = useState<number | undefined>(() => urlState.requirementId);
+  const [sortMode, setSortMode] = useState<string>(() => pickAllowedFilter(urlState.sort || 'newest', DEFECT_SORT_MODES, 'newest'));
   const [viewMode, setViewMode] = useState<DefectViewMode>(() => {
     if (typeof window === 'undefined') return 'list';
     try {
@@ -417,6 +434,82 @@ export function Defects() {
       // ignore persistence failures (private mode, etc.)
     }
   };
+
+  // A URL-supplied page must survive the first render; only an actual filter or
+  // sort change sends the user back to page 1. Comparing signatures (instead of
+  // a mounted flag) is StrictMode-safe.
+  const filterSignature = JSON.stringify([
+    searchQuery,
+    statusFilter,
+    severityFilter,
+    priorityFilter,
+    requirementFilter,
+    sortMode,
+  ]);
+  const previousFilterSignature = useRef(filterSignature);
+  useEffect(() => {
+    if (previousFilterSignature.current === filterSignature) return;
+    previousFilterSignature.current = filterSignature;
+    setCurrentPage(1);
+  }, [filterSignature]);
+
+  // Keep the list state in the URL using the shared contract (shareable,
+  // reload-safe, and the target of dashboard/report CTAs).
+  useEffect(() => {
+    const currentUrl = searchParams.toString();
+    const current = parseListUrlState(searchParams);
+    const next = writeListUrlState(searchParams, {
+      status: statusFilter,
+      severity: severityFilter,
+      priority: priorityFilter,
+      requirementId: requirementFilter,
+      milestoneId: linkedMilestoneId,
+      planId: current.planId,
+      create: current.create,
+      source: current.source,
+      q: searchQuery,
+      page: currentPage,
+      sort: sortMode === 'newest' ? undefined : sortMode,
+    });
+    const nextUrl = next.toString();
+    if (nextUrl === currentUrl) {
+      lastUrlWritten.current = currentUrl;
+      return;
+    }
+    // An external URL change (back/forward) is handled by the adoption effect
+    // below; writing here would immediately undo the navigation.
+    if (lastUrlWritten.current !== currentUrl) return;
+    lastUrlWritten.current = nextUrl;
+    setSearchParams(next, { replace: true });
+  }, [statusFilter, severityFilter, priorityFilter, requirementFilter, linkedMilestoneId, searchQuery, currentPage, sortMode, searchParams, setSearchParams]);
+
+  // Adopt browser back/forward (and any other external) URL changes.
+  useEffect(() => {
+    const currentUrl = searchParams.toString();
+    if (lastUrlWritten.current === currentUrl) return;
+    const next = parseListUrlState(searchParams);
+    const nextStatus = pickAllowedFilter(next.status, DEFECT_STATUS_FILTER_OPTIONS);
+    const nextSeverity = pickAllowedFilter(next.severity, DEFECT_SEVERITY_OPTIONS);
+    const nextPriority = pickAllowedFilter(next.priority, DEFECT_PRIORITY_OPTIONS);
+    const nextSort = pickAllowedFilter(next.sort || 'newest', DEFECT_SORT_MODES, 'newest');
+    previousFilterSignature.current = JSON.stringify([
+      next.q,
+      nextStatus,
+      nextSeverity,
+      nextPriority,
+      next.requirementId,
+      nextSort,
+    ]);
+    setStatusFilter(nextStatus);
+    setSeverityFilter(nextSeverity);
+    setPriorityFilter(nextPriority);
+    setRequirementFilter(next.requirementId);
+    setSearchQuery(next.q);
+    setCurrentPage(next.page);
+    setSortMode(nextSort);
+    lastUrlWritten.current = currentUrl;
+  }, [searchParams]);
+
   const [expandedDefectIds, setExpandedDefectIds] = useState<Set<number>>(new Set());
   const [defectResultLinks, setDefectResultLinks] = useState<Record<number, any[]>>({});
   const [loadingDefectResultLinks, setLoadingDefectResultLinks] = useState<Set<number>>(new Set());
@@ -688,6 +781,21 @@ export function Defects() {
     setDefectResolution('');
     setDefectTouchedFields({});
   };
+
+  // `?create=1` opens the report-defect dialog once, so dashboard quick actions
+  // land directly in the form instead of on a list the user must act on.
+  const createFromQueryHandled = useRef(false);
+  useEffect(() => {
+    if (!urlState.create || createFromQueryHandled.current || numericProjectId == null) return;
+    createFromQueryHandled.current = true;
+    resetDefectForm();
+    setIsCreateDialogOpen(true);
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('create');
+      return next;
+    }, { replace: true });
+  }, [urlState.create, numericProjectId, setSearchParams]);
 
   const fetchIntegrations = useCallback(async () => {
     if (!projectId) return;
@@ -1010,9 +1118,10 @@ export function Defects() {
         if (statusFilter !== 'all' && normalize(defect.status) !== statusFilter) return false;
         if (severityFilter !== 'all' && normalize(defect.severity) !== severityFilter) return false;
         if (priorityFilter !== 'all' && normalize(defect.priority) !== priorityFilter) return false;
+        if (requirementFilter != null && Number(defect.requirement_id) !== requirementFilter) return false;
         return true;
       }),
-    [defects, parsedSearchQuery, statusFilter, severityFilter, priorityFilter],
+    [defects, parsedSearchQuery, statusFilter, severityFilter, priorityFilter, requirementFilter],
   );
 
   const sortedDefects = useMemo(
@@ -1093,13 +1202,15 @@ export function Defects() {
   const hasActiveFilters = searchQuery.trim() !== ''
     || statusFilter !== 'all'
     || severityFilter !== 'all'
-    || priorityFilter !== 'all';
+    || priorityFilter !== 'all'
+    || requirementFilter != null;
 
   const resetFilters = () => {
     setSearchQuery('');
     setStatusFilter('all');
     setSeverityFilter('all');
     setPriorityFilter('all');
+    setRequirementFilter(undefined);
     setCurrentPage(1);
   };
 
@@ -2360,6 +2471,7 @@ export function Defects() {
               <SavedFilters
                 projectId={parseInt(projectId)}
                 scope="defects"
+                applyDefaultOnMount={!initialUrlHasState}
                 hasActiveFilters={hasActiveFilters || sortMode !== 'newest'}
                 currentDefinition={{
                   searchQuery,
@@ -2463,6 +2575,12 @@ export function Defects() {
                 <SelectItem value="title_asc">{t('defectsSortTitle')}</SelectItem>
               </SelectContent>
             </Select>
+            {requirementFilter != null && (
+              <Button variant="outline" size="sm" onClick={() => setRequirementFilter(undefined)}>
+                <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />
+                {t('requirement')} #{requirementFilter}
+              </Button>
+            )}
             {hasActiveFilters && (
               <Button variant="outline" size="sm" onClick={resetFilters}>
                 <X className={`h-4 w-4 ${isRTL ? 'ml-1' : 'mr-1'}`} />

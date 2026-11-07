@@ -392,7 +392,7 @@ export function DefectDetail() {
       // navigate back to.
       queryClient.invalidateQueries({ queryKey: ['defects'] });
       toast({ title: t('success'), description: t('defectDeletedSuccessfully') });
-      navigate(`/projects/${projectId}/defects`);
+      navigate(`/projects/${projectId}/defects?source=defect-detail`);
     } catch (err) {
       console.error('Failed to delete defect:', err);
       toast({
@@ -457,7 +457,7 @@ export function DefectDetail() {
   if (error || !detail || !defect) {
     return (
       <div className="space-y-4" dir={isRTL ? 'rtl' : 'ltr'}>
-        <Button variant="ghost" onClick={() => navigate(`/projects/${projectId}/defects`)}>
+        <Button variant="ghost" onClick={() => navigate(`/projects/${projectId}/defects?source=defect-detail`)}>
           <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
           {t('backToDefects')}
         </Button>
@@ -476,7 +476,7 @@ export function DefectDetail() {
     <div className="space-y-6" dir={isRTL ? 'rtl' : 'ltr'}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <Button variant="ghost" className="mb-2 px-0" onClick={() => navigate(`/projects/${projectId}/defects`)}>
+          <Button variant="ghost" className="mb-2 px-0" onClick={() => navigate(`/projects/${projectId}/defects?source=defect-detail`)}>
             <ArrowLeft className={`h-4 w-4 ${isRTL ? 'ml-2 rotate-180' : 'mr-2'}`} />
             {t('backToDefects')}
           </Button>
